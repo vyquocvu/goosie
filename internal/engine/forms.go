@@ -544,3 +544,50 @@ func FindForm(control *dom.Node) *dom.Node {
 	}
 	return nil
 }
+
+// formForControl resolves a control's form, honouring the form attribute
+// before the ancestor chain.
+func formForControl(n *dom.Node) *dom.Node {
+	if n == nil {
+		return nil
+	}
+	if id := n.GetAttribute("form"); id != "" && n.Doc != nil {
+		if owner := n.Doc.ElementByID(id); owner != nil && owner.Data == "form" {
+			return owner
+		}
+	}
+	return FindForm(n)
+}
+
+// noteControlBlur records that the user left a form control. Constraint
+// validation exposes :user-invalid/:user-valid once focus moves away, so a
+// required field reveals its error by tabbing out even without a submission.
+func (s *Session) noteControlBlur(n *dom.Node) {
+	if n == nil || !n.Element() {
+		return
+	}
+	switch n.Data {
+	case "input":
+		switch strings.ToLower(n.GetAttribute("type")) {
+		case "hidden", "button", "reset", "submit", "image":
+			return
+		}
+	case "textarea", "select":
+	default:
+		return
+	}
+	n.UserInteracted = true
+	form := formForControl(n)
+	if form == nil {
+		return
+	}
+	// Promote the form only when the control that lost focus is itself
+	// invalid; leaving a valid field must not light up an untouched error in
+	// the same form.
+	for _, invalid := range s.validateForm(form) {
+		if invalid == n {
+			form.UserInteracted = true
+			return
+		}
+	}
+}

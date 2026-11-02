@@ -1479,6 +1479,7 @@
       "cmd/goosie/journey_p1_form_validation_test.go:TestJourneyFormValidationBlocksRequestUntilValid",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneySubmitterNoValidateSkipsValidation",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyUserInvalidFollowsBlockedSubmit",
+      "cmd/goosie/journey_p2_forms_test.go:TestJourneyUserInvalidOnTabAway",
       "test/engine/form_submission_test.go:TestFormCheckboxRequiredValidation",
       "test/engine/form_submission_test.go:TestFormNovalidateBypass",
       "test/engine/form_submission_test.go:TestFormRadioRequiredValidation",
@@ -1486,9 +1487,15 @@
       "test/engine/form_submission_test.go:TestFormTextareaSelectAndDialogValidation",
       "test/engine/form_submission_test.go:TestFormValidationTypes",
       "test/engine/form_submitter_override_test.go:TestSubmitterNoValidateSkipsConstraintValidation",
+      "test/engine/user_invalid_test.go:TestBlurMarksOnlyTheBlurredControlsForm",
+      "test/engine/user_invalid_test.go:TestBlurOfValidControlDoesNotMarkUntouchedErrorInSameForm",
       "test/engine/user_invalid_test.go:TestFormNoValidateSubmissionDoesNotMarkUserInvalid",
+      "test/engine/user_invalid_test.go:TestShiftTabNavigationMarksUserInvalidOnBlur",
+      "test/engine/user_invalid_test.go:TestTabNavigationMarksUserInvalidOnBlur",
+      "test/engine/user_invalid_test.go:TestUserInvalidFollowsBlur",
       "test/engine/user_invalid_test.go:TestUserInvalidStaysScopedToTheAttemptedForm",
-      "test/engine/user_invalid_test.go:TestUserInvalidWaitsForFailedSubmission"
+      "test/engine/user_invalid_test.go:TestUserInvalidWaitsForFailedSubmission",
+      "test/engine/user_invalid_test.go:TestUserValidFollowsBlur"
     ],
     "enforced": false
   },

@@ -419,6 +419,7 @@ func (s *Session) setFocusedNodeLocked(n *dom.Node) bool {
 	prev := s.focus
 	// Fire blur and change on the old control.
 	if prev != nil {
+		s.noteControlBlur(prev)
 		previousHost := s.delegatesFocusHost(prev)
 		css.SetFocus(prev, false)
 		css.SetFocusVisible(prev, false)
@@ -1233,6 +1234,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.marked = ""
 			s.markedHasNode = false
 			s.imeComposing = false
+			s.noteControlBlur(prev)
 			css.SetFocus(prev, false)
 			css.SetFocusVisible(prev, false)
 			dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
@@ -2953,6 +2955,7 @@ func (s *Session) FocusFrom(from *dom.Node, backwards bool) {
 	s.clearKeyboardActiveLocked()
 	// Fire blur/change on old focus.
 	if s.focus != nil {
+		s.noteControlBlur(s.focus)
 		css.SetFocus(s.focus, false)
 		css.SetFocusVisible(s.focus, false)
 		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
@@ -3030,6 +3033,7 @@ func (s *Session) FocusPrev() {
 	s.clearKeyboardActiveLocked()
 	// Fire blur/change on old focus.
 	if s.focus != nil {
+		s.noteControlBlur(s.focus)
 		css.SetFocus(s.focus, false)
 		css.SetFocusVisible(s.focus, false)
 		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
