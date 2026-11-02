@@ -66,6 +66,7 @@ func TestPublicPageCannotFetchLocalNetworkImage(t *testing.T) {
 	}
 }
 
+// qc:BR-159
 func TestPublicPageCannotFetchLocalNetworkStylesheet(t *testing.T) {
 	for _, authority := range localAuthorities {
 		t.Run(authority, func(t *testing.T) {
@@ -84,6 +85,27 @@ func TestPublicPageCannotFetchLocalNetworkStylesheet(t *testing.T) {
 				t.Fatalf("a public page fetched the local stylesheet %s %d times, want 0", authority, n)
 			}
 			_ = sess
+		})
+	}
+}
+
+// qc:BR-159
+func TestPublicPageCannotFetchLocalNetworkScript(t *testing.T) {
+	for _, authority := range localAuthorities {
+		t.Run(authority, func(t *testing.T) {
+			var fetched int64
+			fetcher := func(base, url string) ([]byte, error) {
+				atomic.AddInt64(&fetched, 1)
+				return []byte(`window.__localScriptRan = true;`), nil
+			}
+			html := `<script src="http://` + authority + `/evil.js"></script>`
+			if _, err := engine.NewSession(html, nil, 400,
+				engine.WithScripts("http://public.example.com/page", fetcher)); err != nil {
+				t.Fatal(err)
+			}
+			if n := atomic.LoadInt64(&fetched); n != 0 {
+				t.Fatalf("a public page fetched the local script %s %d times, want 0", authority, n)
+			}
 		})
 	}
 }

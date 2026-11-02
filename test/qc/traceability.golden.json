@@ -3078,9 +3078,11 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "test/engine/private_network_test.go:TestPublicPageCannotFetchLocalNetworkImage"
+      "test/engine/private_network_test.go:TestPublicPageCannotFetchLocalNetworkImage",
+      "test/engine/private_network_test.go:TestPublicPageCannotFetchLocalNetworkScript",
+      "test/engine/private_network_test.go:TestPublicPageCannotFetchLocalNetworkStylesheet"
     ],
     "enforced": true
   },
