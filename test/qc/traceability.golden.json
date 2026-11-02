@@ -2426,6 +2426,30 @@
     "enforced": false
   },
   {
+    "id": "BR-262",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/element_interfaces_test.go:TestNamedElementInterfacesReflectTheirAttributes"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-263",
+    "priority": "P1",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/node_tree_test.go:TestOuterHTMLReadsSerializesAndRecoversMalformedFragments"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

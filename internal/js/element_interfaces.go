@@ -1051,6 +1051,19 @@ func (r *Runtime) installInterface(iface string, p *goja.Object) {
 	case "HTMLCanvasElement":
 		r.installUnsignedReflection(p, "width", "width", 300, nil)
 		r.installUnsignedReflection(p, "height", "height", 150, nil)
+	case "HTMLLinkElement":
+		r.installURLReflection(p, "href", "href")
+		r.installStringReflection(p, "rel", "rel")
+		r.installStringReflection(p, "as", "as")
+		r.installStringReflection(p, "media", "media")
+		r.installStringReflection(p, "hreflang", "hreflang")
+		r.installStringReflection(p, "type", "type")
+		r.installStringReflection(p, "sizes", "sizes")
+		r.installStringReflection(p, "integrity", "integrity")
+		r.installStringReflection(p, "imageSrcset", "imagesrcset")
+		r.installStringReflection(p, "imageSizes", "imagesizes")
+		r.installCrossOriginReflection(p)
+		r.installBoolReflection(p, "disabled", "disabled")
 	case "HTMLStyleElement":
 		r.installStringReflection(p, "media", "media")
 		r.installStringReflection(p, "type", "type")
@@ -1446,6 +1459,34 @@ func (r *Runtime) installButtonInterface(p *goja.Object) {
 		"application/x-www-form-urlencoded", "multipart/form-data", "text/plain",
 	})
 	r.installEnumReflection(p, "formMethod", "formmethod", "get", []string{"get", "post", "dialog"})
+}
+
+// installCrossOriginReflection installs the nullable-enum crossOrigin IDL
+// attribute shared by image and link. Absent reads null, an unknown value
+// reads "anonymous" (measured in Chromium), and assigning null removes the
+// attribute.
+func (r *Runtime) installCrossOriginReflection(p *goja.Object) {
+	_ = p.DefineAccessorProperty("crossOrigin", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil || !node.HasAttribute("crossorigin") {
+			return goja.Null()
+		}
+		if strings.EqualFold(node.GetAttribute("crossorigin"), "use-credentials") {
+			return r.vm.ToValue("use-credentials")
+		}
+		return r.vm.ToValue("anonymous")
+	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil {
+			return goja.Undefined()
+		}
+		if v := call.Argument(0); goja.IsNull(v) || goja.IsUndefined(v) {
+			r.setReflectedAttribute(node, "crossorigin", "", false)
+		} else {
+			r.setReflectedAttribute(node, "crossorigin", v.String(), true)
+		}
+		return goja.Undefined()
+	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
 func (r *Runtime) installNullableStringReflection(p *goja.Object, prop, attr string) {
@@ -3927,29 +3968,7 @@ func (r *Runtime) installImageInterface(p *goja.Object) {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
 
-	// crossOrigin is a nullable enum: absent reads null, an unknown value
-	// reads "anonymous" (measured), and assigning null removes the attribute.
-	_ = p.DefineAccessorProperty("crossOrigin", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		node := r.getNode(call.This)
-		if node == nil || !node.HasAttribute("crossorigin") {
-			return goja.Null()
-		}
-		if strings.EqualFold(node.GetAttribute("crossorigin"), "use-credentials") {
-			return r.vm.ToValue("use-credentials")
-		}
-		return r.vm.ToValue("anonymous")
-	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		node := r.getNode(call.This)
-		if node == nil {
-			return goja.Undefined()
-		}
-		if v := call.Argument(0); goja.IsNull(v) || goja.IsUndefined(v) {
-			r.setReflectedAttribute(node, "crossorigin", "", false)
-		} else {
-			r.setReflectedAttribute(node, "crossorigin", v.String(), true)
-		}
-		return goja.Undefined()
-	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	r.installCrossOriginReflection(p)
 
 	_ = p.Set("decode", func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)

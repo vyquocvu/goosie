@@ -800,6 +800,44 @@ func TestImageButtonDimensionsAndLoadState(t *testing.T) {
 	})
 }
 
+// qc:BR-262
+func TestNamedElementInterfacesReflectTheirAttributes(t *testing.T) {
+	doc := domtest.Parse(`<!DOCTYPE html><html><head>
+		<link id="l" href="/s.css" rel="stylesheet" as="style" media="screen" hreflang="vi" type="text/css" sizes="16x16" crossorigin="anonymous" disabled>
+	</head><body>
+		<form id="f" action="/go" method="post"></form>
+		<button id="b" type="submit" value="v"></button>
+		<iframe id="fr" src="/frame.html"></iframe>
+		<script id="s" src="/app.js" async defer></script>
+		<canvas id="c" width="10" height="20"></canvas>
+	</body></html>`)
+	rt := newRuntime(t, js.Options{URL: "https://example.test/docs/page.html", DOM: doc})
+	// Expectations measured in Chromium 153 over the same fixture at the same URL.
+	runJSCases(t, rt, []jsCase{
+		{"link is an HTMLLinkElement", `document.getElementById('l') instanceof HTMLLinkElement`, "true"},
+		{"link href resolves against the document", `document.getElementById('l').href`, "https://example.test/s.css"},
+		{"link href writes the raw attribute", `(function(){var l=document.getElementById('l');l.href='/other.css';return l.getAttribute('href')})()`, "/other.css"},
+		{"link rel", `document.getElementById('l').rel`, "stylesheet"},
+		{"link as", `document.getElementById('l').as`, "style"},
+		{"link media", `document.getElementById('l').media`, "screen"},
+		{"link hreflang", `document.getElementById('l').hreflang`, "vi"},
+		{"link type", `document.getElementById('l').type`, "text/css"},
+		{"link sizes", `document.getElementById('l').sizes`, "16x16"},
+		{"link crossOrigin known value", `document.getElementById('l').crossOrigin`, "anonymous"},
+		{"link crossOrigin write lowercases on read", `(function(){var l=document.getElementById('l');l.crossOrigin='USE-CREDENTIALS';return l.getAttribute('crossorigin')+'|'+l.crossOrigin})()`, "USE-CREDENTIALS|use-credentials"},
+		{"link disabled reflects presence", `document.getElementById('l').disabled`, "true"},
+		{"link empty reflections", `(function(){var l=document.createElement('link');return [l.href,l.rel,l.as,l.media,l.hreflang,l.type,l.sizes,String(l.crossOrigin),l.disabled].join('|')})()`, "|||||||null|false"},
+		{"form action resolves against the document", `document.getElementById('f').action`, "https://example.test/go"},
+		{"form method", `document.getElementById('f').method`, "post"},
+		{"button type and value", `document.getElementById('b').type+'|'+document.getElementById('b').value`, "submit|v"},
+		{"button disabled defaults false", `document.getElementById('b').disabled`, "false"},
+		{"iframe src resolves against the document", `document.getElementById('fr').src`, "https://example.test/frame.html"},
+		{"script src resolves against the document", `document.getElementById('s').src`, "https://example.test/app.js"},
+		{"script async and defer reflect presence", `document.getElementById('s').async+'|'+document.getElementById('s').defer`, "true|true"},
+		{"canvas dimensions", `document.getElementById('c').width+'|'+document.getElementById('c').height`, "10|20"},
+	})
+}
+
 func TestInputShowPickerActivationAndMutability(t *testing.T) {
 	rt := interfacesRuntime(t)
 	runJSCases(t, rt, []jsCase{

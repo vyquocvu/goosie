@@ -661,6 +661,23 @@ func TestOuterHTMLRejectsDocumentChildAndReplacesUnderFragment(t *testing.T) {
 	}
 }
 
+// qc:BR-263
+func TestOuterHTMLReadsSerializesAndRecoversMalformedFragments(t *testing.T) {
+	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="d" class="c">x</div></body></html>`)
+	out := evalString(t, rt, `
+	var d = document.getElementById("d");
+	var before = d.outerHTML;
+	var thrown = "no-throw";
+	try { d.outerHTML = "<p><b>unclosed"; } catch (error) { thrown = error.name; }
+	[before, thrown, d.parentNode === null, document.body.innerHTML].join("|");`)
+	// Chromium parses the replacement fragment with HTML error recovery rather
+	// than rejecting it; the node is detached and the recovered subtree lands
+	// where the old node was.
+	if out != `<div id="d" class="c">x</div>|no-throw|true|<p><b>unclosed</b></p>` {
+		t.Fatalf("outerHTML read/write round trip = %q", out)
+	}
+}
+
 func TestEmptyInnerHTMLOnHTMLElementKeepsBodyChild(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body></body></html>`)
 	out := evalString(t, rt, `
