@@ -2980,9 +2980,11 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "test/download/download_test.go:TestFileNameFallbackAndSanitize"
+      "test/download/download_test.go:TestFileNameFallbackAndSanitize",
+      "test/download/download_test.go:TestSaveCannotEscapeDownloadDirectory",
+      "test/download/download_test.go:TestSaveStreamCannotEscapeDownloadDirectory"
     ],
     "enforced": true
   },

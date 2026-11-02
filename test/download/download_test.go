@@ -65,6 +65,14 @@ func TestFileNameFallbackAndSanitize(t *testing.T) {
 	if got := download.FileName("", "https://x.com/a/b%2Fc.txt"); got != "c.txt" || filepath.Base(got) != got {
 		t.Fatalf("FileName = %q, want a single sanitized component", got)
 	}
+	if got := download.FileName("attachment; filename=\"bad\x7fname.txt\"", "https://x.com/"); got != "badname.txt" {
+		t.Fatalf("FileName control = %q, want badname.txt", got)
+	}
+	for _, name := range []string{".", ".."} {
+		if got := download.FileName(`attachment; filename="`+name+`"`, "https://x.com/"); got != "download" {
+			t.Fatalf("FileName(%q) = %q, want download", name, got)
+		}
+	}
 }
 
 func TestSaveWritesFile(t *testing.T) {
@@ -82,6 +90,75 @@ func TestSaveWritesFile(t *testing.T) {
 	}
 	if string(b) != "hello" {
 		t.Fatalf("content = %q, want hello", b)
+	}
+}
+
+// qc:BR-151
+func TestSaveCannotEscapeDownloadDirectory(t *testing.T) {
+	cases := []struct{ name, want string }{
+		{"../escape.txt", "escape.txt"},
+		{`..\..\escape.txt`, "escape.txt"},
+		{"sub/dir/file.txt", "file.txt"},
+		{"bad\x01name.txt", "badname.txt"},
+		{"bad\x7fname.txt", "badname.txt"},
+		{"", "download"},
+		{".", "download"},
+		{"..", "download"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "downloads")
+			path, err := download.Save(dir, tc.name, []byte("x"))
+			if err != nil {
+				t.Fatalf("Save(%q) = %v", tc.name, err)
+			}
+			if got := filepath.Dir(path); got != dir {
+				t.Fatalf("Save(%q) wrote %q outside %q", tc.name, path, dir)
+			}
+			if base := filepath.Base(path); base != tc.want {
+				t.Fatalf("Save(%q) base = %q, want %q", tc.name, base, tc.want)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("Save(%q) reported %q but nothing was written: %v", tc.name, path, err)
+			}
+			if _, err := os.Stat(filepath.Join(root, "escape.txt")); err == nil {
+				t.Fatalf("Save(%q) wrote escape.txt beside the download directory", tc.name)
+			}
+		})
+	}
+}
+
+// qc:BR-151
+func TestSaveStreamCannotEscapeDownloadDirectory(t *testing.T) {
+	for _, tc := range []struct{ name, want string }{
+		{"../escape.txt", "escape.txt"},
+		{`..\..\escape.txt`, "escape.txt"},
+		{"sub/dir/file.txt", "file.txt"},
+		{"bad\x7fname.txt", "badname.txt"},
+		{".", "download"},
+		{"..", "download"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "downloads")
+			path, n, _, err := download.SaveStream(context.Background(), dir, tc.name, bytes.NewReader([]byte("x")), nil)
+			if err != nil {
+				t.Fatalf("SaveStream(%q) = %v", tc.name, err)
+			}
+			if n != 1 {
+				t.Fatalf("SaveStream(%q) wrote %d bytes, want 1", tc.name, n)
+			}
+			if got := filepath.Dir(path); got != dir {
+				t.Fatalf("SaveStream(%q) wrote %q outside %q", tc.name, path, dir)
+			}
+			if base := filepath.Base(path); base != tc.want {
+				t.Fatalf("SaveStream(%q) base = %q, want %q", tc.name, base, tc.want)
+			}
+			if _, err := os.Stat(filepath.Join(root, "escape.txt")); err == nil {
+				t.Fatalf("SaveStream(%q) wrote escape.txt beside the download directory", tc.name)
+			}
+		})
 	}
 }
 

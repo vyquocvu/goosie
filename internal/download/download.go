@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Digest is the SHA-256 of a download's bytes. It is computed as the stream is
@@ -82,9 +83,11 @@ func dispositionParam(disposition string) string {
 }
 
 // sanitize strips control characters and keeps only the last path segment.
+// Both separators are treated as path boundaries regardless of host OS, and
+// the only names that reduce to a directory are discarded rather than joined.
 func sanitize(name string) string {
 	name = strings.Map(func(r rune) rune {
-		if r < 32 {
+		if unicode.IsControl(r) {
 			return -1
 		}
 		return r
@@ -93,12 +96,19 @@ func sanitize(name string) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	return fields[len(fields)-1]
+	last := fields[len(fields)-1]
+	if last == "." || last == ".." {
+		return ""
+	}
+	return last
 }
 
 // Save writes body under dir with the given name, appending (1), (2), ... to
-// the base when the name is taken. It returns the written path.
+// the base when the name is taken. It returns the written path. The name is
+// reduced to a single component here as well as in FileName: an exported
+// writer must not be the one call that trusts its caller with a path.
 func Save(dir, name string, body []byte) (string, error) {
+	name = sanitize(name)
 	if name == "" {
 		name = "download"
 	}
