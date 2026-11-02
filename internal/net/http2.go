@@ -65,13 +65,14 @@ func DefaultClientWithHTTP2Config(cfg HTTP2Config) HTTP {
 	t := clientTransport()
 	_ = configureHTTP2(t, cfg)
 
-	return &httpClient{
-		client: &http.Client{
-			Timeout:       30 * time.Second,
-			Transport:     t,
-			CheckRedirect: checkRedirect,
-		},
+	c := &httpClient{
 		jar:   NewCookieJar(),
 		cache: newResponseCache(),
 	}
+	c.client = &http.Client{
+		Timeout:       30 * time.Second,
+		Transport:     t,
+		CheckRedirect: c.checkRedirect,
+	}
+	return c
 }

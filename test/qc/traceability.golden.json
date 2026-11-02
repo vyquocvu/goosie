@@ -60,8 +60,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/idn_test.go:TestNormalizeURLConvertsIDNToTheHostDNSCanResolve",
+      "test/net/idn_test.go:TestNormalizeURLRejectsAnInvalidIDN"
+    ],
     "enforced": false
   },
   {
@@ -71,8 +74,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_omnibox_test.go:TestJourneyAddressBarEncodesWithoutDialingASurprisingHost"
+    ],
     "enforced": false
   },
   {
@@ -2952,8 +2957,13 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/redirect_cookie_test.go:TestCookieAlreadyInTheJarReachesAnInScopeRedirectTarget",
+      "test/net/redirect_cookie_test.go:TestCookieSetOnRedirectReachesTheRedirectTarget",
+      "test/net/redirect_cookie_test.go:TestRedirectToAnotherOriginDoesNotCarryCookies",
+      "test/net/redirect_cookie_test.go:TestSecureCookieSetOnTLSRedirectReachesTheTarget"
+    ],
     "enforced": false
   },
   {
@@ -2962,8 +2972,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/cookie_test.go:TestCookieIsScopedToItsOriginForSendingAndScriptReads",
+      "test/net/cookie_test.go:TestPrivateClientIsolatesAndClears",
+      "test/net/redirect_cookie_test.go:TestRedirectToAnotherOriginDoesNotCarryCookies"
+    ],
     "enforced": false
   },
   {
@@ -2986,8 +3000,10 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/address_guard_test.go:TestAddressGuardChecksTheRedirectDestination"
+    ],
     "enforced": false
   },
   {
@@ -3095,8 +3111,10 @@
       "INT",
       "SEC"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_omnibox_test.go:TestJourneyNonAllowlistedLinkSchemesSearchInsteadOfHandingOff"
+    ],
     "enforced": false
   },
   {

@@ -22,6 +22,7 @@ import (
 	"unicode"
 
 	htmlcharset "golang.org/x/net/html/charset"
+	"golang.org/x/net/idna"
 )
 
 // MaxResponseBytes bounds each decoded HTTP response or local file.
@@ -285,6 +286,19 @@ func NormalizeURL(raw string) (string, error) {
 	if u.User != nil || u.Opaque != "" {
 		return "", errors.New("net: credentials and opaque URLs are not supported")
 	}
+	if u.Scheme == "http" || u.Scheme == "https" {
+		asciiHost, err := idnaHost(u.Hostname())
+		if err != nil {
+			return "", err
+		}
+		if asciiHost != u.Hostname() {
+			if port := u.Port(); port != "" {
+				u.Host = stdnet.JoinHostPort(asciiHost, port)
+			} else {
+				u.Host = asciiHost
+			}
+		}
+	}
 	switch u.Scheme {
 	case "http", "https":
 		if err := validateHTTPHost(u); err != nil {
@@ -333,6 +347,30 @@ func RedactURL(raw string) string {
 
 func hasControl(s string) bool {
 	return strings.ContainsFunc(s, unicode.IsControl)
+}
+
+// idnaHost converts a Unicode DNS name to the ASCII form the resolver can ask
+// for. The address bar keeps the name the user typed; the request has to carry
+// the one DNS will answer, and a browser that skipped this step would either
+// reject the host after accepting it or resolve a different one.
+func idnaHost(host string) (string, error) {
+	if host == "" || isASCII(host) {
+		return host, nil
+	}
+	ascii, err := idna.Lookup.ToASCII(host)
+	if err != nil {
+		return "", fmt.Errorf("net: invalid international hostname: %w", err)
+	}
+	return ascii, nil
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func validateHTTPHost(u *url.URL) error {
@@ -396,34 +434,36 @@ func clientTransport() *http.Transport {
 // verification and at most ten validated HTTP(S) redirects. Its cookie jar
 // lives in memory for the life of the client.
 func DefaultClient() HTTP {
-	return &httpClient{
-		client: &http.Client{
-			Timeout:       30 * time.Second,
-			Transport:     clientTransport(),
-			CheckRedirect: checkRedirect,
-		},
+	c := &httpClient{
 		jar:    NewCookieJar(),
 		cache:  newResponseCache(),
 		filter: NewFilterEngine(),
 		netLog: NewNetworkLog(200),
 	}
+	c.client = &http.Client{
+		Timeout:       30 * time.Second,
+		Transport:     clientTransport(),
+		CheckRedirect: c.checkRedirect,
+	}
+	return c
 }
 
 // DefaultPrivateClient is DefaultClient with an ephemeral cookie jar that is
 // wiped on Close: nothing a private-mode session learns survives it.
 func DefaultPrivateClient() HTTP {
-	return &httpClient{
-		client: &http.Client{
-			Timeout:       30 * time.Second,
-			Transport:     clientTransport(),
-			CheckRedirect: checkRedirect,
-		},
+	c := &httpClient{
 		jar:     NewCookieJar(),
 		cache:   newResponseCache(),
 		filter:  NewFilterEngine(),
 		netLog:  NewNetworkLog(200),
 		private: true,
 	}
+	c.client = &http.Client{
+		Timeout:       30 * time.Second,
+		Transport:     clientTransport(),
+		CheckRedirect: c.checkRedirect,
+	}
+	return c
 }
 
 // DefaultClientWithTLS returns an HTTP client identical to DefaultClient but
@@ -432,17 +472,18 @@ func DefaultPrivateClient() HTTP {
 func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
 	t := clientTransport()
 	t.TLSClientConfig = tlsConfig
-	return &httpClient{
-		client: &http.Client{
-			Timeout:       30 * time.Second,
-			Transport:     t,
-			CheckRedirect: checkRedirect,
-		},
+	c := &httpClient{
 		jar:    NewCookieJar(),
 		cache:  newResponseCache(),
 		filter: NewFilterEngine(),
 		netLog: NewNetworkLog(200),
 	}
+	c.client = &http.Client{
+		Timeout:       30 * time.Second,
+		Transport:     t,
+		CheckRedirect: c.checkRedirect,
+	}
+	return c
 }
 
 // DefaultClientWithCookies returns DefaultClient whose jar persists to
@@ -459,7 +500,7 @@ func DefaultClientWithCookies(cookiesPath string) (HTTP, error) {
 	return c, nil
 }
 
-func checkRedirect(req *http.Request, via []*http.Request) error {
+func (c *httpClient) checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) > 10 {
 		return errors.New("net: too many redirects")
 	}
@@ -470,6 +511,26 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	// bounces through http exposes the session to the network it just left.
 	if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme == "http" {
 		return errors.New("net: refusing HTTPS-to-HTTP downgrade redirect")
+	}
+	// The response that caused this hop is the only place an intermediate
+	// Set-Cookie is visible; net/http would otherwise hand it to nobody. A
+	// cookie set by a redirect applies to the request the redirect caused,
+	// exactly as it would to the next independently issued request.
+	if req.Response != nil && req.Response.Request != nil && c.jar != nil {
+		if values := req.Response.Header.Values("Set-Cookie"); len(values) > 0 {
+			c.jar.Store(req.Response.Request.URL, values)
+		}
+	}
+	// Rebuild the Cookie header from the jar for this hop rather than letting
+	// the first hop's header stand. Forwarding it would omit a cookie set by
+	// the redirect itself and would carry cookies scoped to an origin this
+	// request is not going to; the jar's matching rules are what decide.
+	if c.jar != nil && req.Header != nil {
+		if cookie := c.jar.HeaderFor(req.URL); cookie != "" {
+			req.Header.Set("Cookie", cookie)
+		} else {
+			req.Header.Del("Cookie")
+		}
 	}
 	_, err := NormalizeURL(req.URL.String())
 	return err

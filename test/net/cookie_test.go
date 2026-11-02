@@ -181,6 +181,7 @@ func TestPerHostCookieLimit(t *testing.T) {
 	}
 }
 
+// qc:BR-158
 func TestPrivateClientIsolatesAndClears(t *testing.T) {
 	srv, _ := captureServer(t, "sess=xyz; Path=/")
 	ctx := context.Background()
@@ -211,6 +212,41 @@ func TestPrivateClientIsolatesAndClears(t *testing.T) {
 	}
 	if (*got2)[0] != "" {
 		t.Fatalf("private client still sent a cookie after Close: %q", (*got2)[0])
+	}
+}
+
+// TestCookieIsScopedToItsOriginForSendingAndScriptReads pins both halves of
+// "outside its scope": the network header and the string document.cookie is
+// built from. A host-only cookie belongs to the exact host that received it,
+// so neither a sibling domain nor a lookalike suffix may see it.
+// qc:BR-158
+func TestCookieIsScopedToItsOriginForSendingAndScriptReads(t *testing.T) {
+	jar := net.NewCookieJar()
+	origin := mustURL(t, "https://example.test/app")
+	jar.Store(origin, []string{"session=abc; Path=/"})
+
+	for _, raw := range []string{
+		"https://other.test/",
+		"https://notexample.test/",
+		"https://example.test.evil/",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			u := mustURL(t, raw)
+			if got := jar.HeaderFor(u); got != "" {
+				t.Errorf("cookie sent to an unrelated origin: %q", got)
+			}
+			if got := jar.CookiesForDocument(raw); got != "" {
+				t.Errorf("script read a cookie from an unrelated origin: %q", got)
+			}
+		})
+	}
+
+	// The control: the origin itself still receives and reads what it set.
+	if got := jar.HeaderFor(mustURL(t, "https://example.test/page")); got != "session=abc" {
+		t.Errorf("cookie missing on its own origin: %q", got)
+	}
+	if got := jar.CookiesForDocument("https://example.test/page"); got != "session=abc" {
+		t.Errorf("script cannot read its own origin's cookie: %q", got)
 	}
 }
 

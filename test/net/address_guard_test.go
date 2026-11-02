@@ -244,6 +244,95 @@ func TestAddressGuardRefusesANameThatResolvesToNothing(t *testing.T) {
 	}
 }
 
+// TestAddressGuardChecksTheRedirectDestination is the redirect half of the
+// public-page rule. The first hop is allowed, so anything that refuses the
+// destination is judging the hop that the user never typed: a public server
+// answering "go to 10.0.0.5" must not become a way to reach it. The control
+// proves the refusal is the destination's doing, not a guard that rejects
+// every redirect.
+// qc:BR-160
+func TestAddressGuardChecksTheRedirectDestination(t *testing.T) {
+	guard := transport.AddressGuard{
+		Blocked: func(ip net.IP) bool { return ip.IsPrivate() },
+	}
+
+	t.Run("destination blocked", func(t *testing.T) {
+		var publicHits atomic.Int64
+		public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			publicHits.Add(1)
+			http.Redirect(w, r, "http://private.example:8080/secret", http.StatusFound)
+		}))
+		defer public.Close()
+
+		lookup, lookups := lookupFor(map[string][]net.IP{
+			"public.example":  {net.ParseIP("127.0.0.1")},
+			"private.example": {net.ParseIP("10.0.0.5")},
+		})
+		guard.Lookup = lookup
+		ctx := transport.WithAddressGuard(context.Background(), guard)
+		client := transport.DefaultClient()
+		defer client.Close()
+
+		u, err := url.Parse(public.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.Get(ctx, "http://public.example:"+u.Port()+"/start")
+		if err == nil {
+			t.Fatal("a redirect to a private address was followed")
+		}
+		if !errors.Is(err, transport.ErrBlockedAddress) {
+			t.Errorf("err = %v, want a blocked-address error at the destination", err)
+		}
+		if got := publicHits.Load(); got != 1 {
+			t.Errorf("the public server served %d requests, want 1", got)
+		}
+		if got := lookups.Load(); got != 2 {
+			t.Errorf("resolved %d names, want 2: both hops have to be judged", got)
+		}
+	})
+
+	t.Run("allowed destination", func(t *testing.T) {
+		target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("allowed"))
+		}))
+		defer target.Close()
+		tu, err := url.Parse(target.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "http://allowed.example:"+tu.Port()+"/secret", http.StatusFound)
+		}))
+		defer public.Close()
+		pu, err := url.Parse(public.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		lookup, lookups := lookupFor(map[string][]net.IP{
+			"public.example":  {net.ParseIP("127.0.0.1")},
+			"allowed.example": {net.ParseIP("127.0.0.1")},
+		})
+		guard.Lookup = lookup
+		ctx := transport.WithAddressGuard(context.Background(), guard)
+		client := transport.DefaultClient()
+		defer client.Close()
+
+		resp, err := client.Get(ctx, "http://public.example:"+pu.Port()+"/start")
+		if err != nil {
+			t.Fatalf("an allowed redirect was refused: %v", err)
+		}
+		if string(resp.Body) != "allowed" {
+			t.Errorf("body = %q, want the destination's body", resp.Body)
+		}
+		if got := lookups.Load(); got != 2 {
+			t.Errorf("resolved %d names, want 2", got)
+		}
+	})
+}
+
 // TestAddressGuardKeepsTheNameForTLS: pinning the validated address moves the
 // connection, and it must move nothing else. HTTPS needs the name twice - as the
 // server name indication and as the certificate's expected identity - so a guard
