@@ -1790,8 +1790,13 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/canvas_resize_test.go:TestCanvasResizeDropsOldFrameFromLayout",
+      "test/js/canvas_resize_test.go:TestCanvasAttributeResizeAlsoResets",
+      "test/js/canvas_resize_test.go:TestCanvasResizeClearsRecordedFrameAndFollowsNewSize",
+      "test/js/canvas_resize_test.go:TestCanvasResizeToSameValueStillClears"
+    ],
     "enforced": false
   },
   {

@@ -1682,6 +1682,10 @@ func (r *Runtime) setReflectedAttribute(node *dom.Node, attr, value string, pres
 	} else {
 		node.RemoveAttribute(attr)
 	}
+	canvasResized := isCanvasDimensionAttribute(node, attr)
+	if canvasResized {
+		r.resetCanvasForAttribute(node)
+	}
 	r.RefreshInputPatternMismatch(node)
 	newValue, hasNew := node.GetAttribute(attr), node.HasAttribute(attr)
 	if node.Data == "details" && attr == "open" && beforeDetailsOpen != hasNew {
@@ -1700,7 +1704,7 @@ func (r *Runtime) setReflectedAttribute(node *dom.Node, attr, value string, pres
 	} else if hadOld {
 		r.notifyAttributeMutation(node, "", attr, old)
 	}
-	if hadOld != hasNew || oldValue != newValue {
+	if hadOld != hasNew || oldValue != newValue || canvasResized {
 		r.notifyMutation()
 	}
 }

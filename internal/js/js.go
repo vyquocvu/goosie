@@ -5413,6 +5413,10 @@ func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
 	beforeDetailsOpen := node.Data == "details" && strings.EqualFold(name, "open") && node.HasAttribute("open")
 	r.preparePopoverAttributeChange(node, name, value, true)
 	node.SetAttribute(name, value)
+	canvasResized := isCanvasDimensionAttribute(node, name)
+	if canvasResized {
+		r.resetCanvasForAttribute(node)
+	}
 	if node.Data == "details" && strings.EqualFold(name, "open") {
 		r.detailsOpenChanged(node, beforeDetailsOpen, node.HasAttribute("open"), nil)
 	} else if node.Data == "details" && strings.EqualFold(name, "name") {
@@ -5435,7 +5439,7 @@ func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
 	if strings.EqualFold(name, "id") && value != "" {
 		r.installWindowNamedProperty(value)
 	}
-	if !hadValue || before != value || node.Data == "details" && strings.EqualFold(name, "open") {
+	if !hadValue || before != value || canvasResized || node.Data == "details" && strings.EqualFold(name, "open") {
 		r.notifyMutation()
 	}
 	var old *string
@@ -5470,6 +5474,10 @@ func (r *Runtime) jsSetAttributeNS(call goja.FunctionCall) goja.Value {
 	beforeOpen := node.HasAttribute(name) && node.GetAttribute(name) != ""
 	beforeDetailsOpen := ns == "" && node.Data == "details" && strings.EqualFold(name, "open") && node.HasAttribute("open")
 	changed := node.SetAttributeNS(ns, name, value)
+	canvasResized := ns == "" && isCanvasDimensionAttribute(node, name)
+	if canvasResized {
+		r.resetCanvasForAttribute(node)
+	}
 	if ns == "" && node.Data == "details" && strings.EqualFold(name, "open") {
 		r.detailsOpenChanged(node, beforeDetailsOpen, node.HasAttribute("open"), nil)
 	} else if ns == "" && node.Data == "details" && strings.EqualFold(name, "name") {
@@ -5494,7 +5502,7 @@ func (r *Runtime) jsSetAttributeNS(call goja.FunctionCall) goja.Value {
 		old = &before
 	}
 	r.notifyAttributeMutation(node, ns, domAttributeLocalName(name), old)
-	if changed {
+	if changed || canvasResized {
 		r.notifyMutation()
 	}
 	return goja.Undefined()
@@ -5516,6 +5524,9 @@ func (r *Runtime) jsRemoveAttribute(call goja.FunctionCall) goja.Value {
 	beforeDetailsOpen := node.Data == "details" && strings.EqualFold(name, "open") && node.HasAttribute("open")
 	r.preparePopoverAttributeChange(node, name, "", false)
 	node.RemoveAttribute(name)
+	if isCanvasDimensionAttribute(node, name) {
+		r.resetCanvasForAttribute(node)
+	}
 	if node.Data == "details" && strings.EqualFold(name, "open") {
 		r.detailsOpenChanged(node, beforeDetailsOpen, node.HasAttribute("open"), nil)
 	} else if node.Data == "details" && strings.EqualFold(name, "name") {
@@ -5555,6 +5566,9 @@ func (r *Runtime) jsRemoveAttributeNS(call goja.FunctionCall) goja.Value {
 		}
 	}
 	if node.RemoveAttributeNS(namespace, localName) {
+		if namespace == "" && isCanvasDimensionAttribute(node, localName) {
+			r.resetCanvasForAttribute(node)
+		}
 		if namespace == "" && node.Data == "details" && strings.EqualFold(localName, "open") {
 			r.detailsOpenChanged(node, beforeDetailsOpen, node.HasAttribute("open"), nil)
 		} else if namespace == "" && node.Data == "details" && strings.EqualFold(localName, "name") {
@@ -5604,6 +5618,9 @@ func (r *Runtime) jsToggleAttribute(call goja.FunctionCall) goja.Value {
 		r.detailsOpenChanged(node, beforeDetailsOpen, node.HasAttribute("open"), nil)
 	} else if node.Data == "details" && strings.EqualFold(name, "name") {
 		r.detailsNameChanged(node)
+	}
+	if isCanvasDimensionAttribute(node, name) {
+		r.resetCanvasForAttribute(node)
 	}
 	r.RefreshInputPatternMismatch(node)
 	r.notifyMutation()

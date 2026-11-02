@@ -220,9 +220,16 @@ func (r *Runtime) jsSetAttributeNode(call goja.FunctionCall) goja.Value {
 	if hadOld && oldValue == attribute.value && strings.EqualFold(node.GetAttribute(attribute.name), attribute.value) {
 		attribute.owner = node
 		attribute.document = node.Doc
+		if attribute.namespace == "" && isCanvasDimensionAttribute(node, attribute.name) {
+			r.resetCanvasForAttribute(node)
+			r.notifyMutation()
+		}
 		return goja.Null()
 	}
 	node.SetAttributeNS(attribute.namespace, attribute.name, attribute.value)
+	if attribute.namespace == "" && isCanvasDimensionAttribute(node, attribute.name) {
+		r.resetCanvasForAttribute(node)
+	}
 	r.RefreshInputPatternMismatch(node)
 	attribute.owner = node
 	attribute.document = node.Doc
@@ -262,6 +269,9 @@ func (r *Runtime) jsRemoveAttributeNode(call goja.FunctionCall) goja.Value {
 	}
 	if !node.RemoveAttributeNS(attribute.namespace, domAttributeLocalName(attribute.name)) {
 		panic(r.domError("NotFoundError", "The attribute is not attached to this element"))
+	}
+	if attribute.namespace == "" && isCanvasDimensionAttribute(node, attribute.name) {
+		r.resetCanvasForAttribute(node)
 	}
 	r.RefreshInputPatternMismatch(node)
 	attribute.owner = nil

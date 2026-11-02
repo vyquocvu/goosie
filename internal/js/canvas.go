@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/dom"
 )
 
 // Canvas 2D API implementation.
@@ -259,6 +260,67 @@ func (r *Runtime) SetCanvasBitmap(nodeID int, rgba []byte, w, h int) {
 	ctx.bitmapH = h
 }
 
+const (
+	defaultCanvasWidth  = 300
+	defaultCanvasHeight = 150
+)
+
+// canvasNodeDimension resolves a canvas width/height attribute to its
+// backing-store size. A missing, negative, or non-numeric value falls back to
+// def.
+func canvasNodeDimension(node *dom.Node, attr string, def int) int {
+	if v, ok := parseHTMLUnsigned(node.GetAttribute(attr)); ok {
+		return int(v)
+	}
+	return def
+}
+
+// isCanvasDimensionAttribute reports whether name names one of the two canvas
+// dimension attributes. Only the local name matters, so a differently cased
+// attribute routes through the same reset.
+func isCanvasDimensionAttribute(node *dom.Node, name string) bool {
+	if node == nil || node.Data != "canvas" {
+		return false
+	}
+	local := domAttributeLocalName(name)
+	return strings.EqualFold(local, "width") || strings.EqualFold(local, "height")
+}
+
+// resetCanvasForAttribute retargets the bound 2D context to the element's
+// current width/height attributes and clears its bitmap and drawing state.
+// HTML resets a canvas whenever either dimension attribute is set, changed, or
+// removed - even to the same value. Keeping the recorded ops would replay the
+// old frame into the new size.
+func (r *Runtime) resetCanvasForAttribute(node *dom.Node) {
+	if node == nil || node.Data != "canvas" {
+		return
+	}
+	width := canvasNodeDimension(node, "width", defaultCanvasWidth)
+	height := canvasNodeDimension(node, "height", defaultCanvasHeight)
+
+	r.mu.Lock()
+	var ctx *canvasContext2D
+	if r.canvasContexts != nil {
+		for _, candidate := range r.canvasContexts {
+			if candidate != nil && candidate.nodeID == int(node.ID) {
+				ctx = candidate
+				break
+			}
+		}
+	}
+	r.mu.Unlock()
+	if ctx == nil {
+		return
+	}
+
+	ctx.mu.Lock()
+	ctx.width, ctx.height = width, height
+	ctx.ops = nil
+	ctx.bitmap = nil
+	ctx.bitmapW, ctx.bitmapH = 0, 0
+	ctx.mu.Unlock()
+}
+
 // jsGetContext implements getContext(contextType) on DOM elements. For canvas
 // elements with contextType="2d", it creates and returns a CanvasRenderingContext2D.
 func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
@@ -312,18 +374,8 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	r.mu.Unlock()
 
 	// Create a new context
-	width := 300
-	height := 150
-	if w := node.GetAttribute("width"); w != "" {
-		if n, err := strconv.Atoi(w); err == nil && n > 0 {
-			width = n
-		}
-	}
-	if h := node.GetAttribute("height"); h != "" {
-		if n, err := strconv.Atoi(h); err == nil && n > 0 {
-			height = n
-		}
-	}
+	width := canvasNodeDimension(node, "width", defaultCanvasWidth)
+	height := canvasNodeDimension(node, "height", defaultCanvasHeight)
 
 	ctx := &canvasContext2D{
 		width:        width,
