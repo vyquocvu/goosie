@@ -698,10 +698,19 @@
     "id": "BR-058",
     "priority": "P2",
     "methods": [
-      "GAP"
+      "INT"
     ],
-    "status": "DEFERRED",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_privacy_test.go:TestJourneyClearCookiesForOneSite",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearDataRemovesSelectedDataOnly",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearDataWaitsForConfirmation",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearSiteCookiesRejectsUnknownSite",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearSiteCookiesRemovesOnlyThatSite",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsClearSiteCookiesWaitsForConfirmation",
+      "cmd/goosie/privacy_settings_test.go:TestSettingsPrivacyCardListsCookiesBySite",
+      "test/net/cookie_inspector_test.go:TestCookieJarRemoveForDomainDeletesOnlyThatSite"
+    ],
     "enforced": false
   },
   {

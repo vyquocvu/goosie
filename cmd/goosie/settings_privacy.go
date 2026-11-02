@@ -5,6 +5,7 @@ import (
 	"html"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -102,6 +103,30 @@ func (f *framePath) buildPrivacySettingsCard(values url.Values) string {
 		}
 	}
 
+	if values.Get("action") == "clear-site-cookies" {
+		site := strings.TrimSpace(values.Get("site"))
+		switch {
+		case site == "":
+			b.WriteString(mgmtNoticeHTML("err", "No site was selected."))
+		case values.Get("confirm") == "1":
+			removed, problem := f.clearSiteCookies(site)
+			switch {
+			case problem != "":
+				b.WriteString(mgmtNoticeHTML("err", problem))
+			case removed == 0:
+				b.WriteString(mgmtNoticeHTML("err", "No cookies were found for "+site+"."))
+			default:
+				b.WriteString(mgmtNoticeHTML("ok", fmt.Sprintf("Cleared %d cookie(s) for %s.", removed, site)))
+			}
+		default:
+			if count := siteCookieCount(f.client, site); count == 0 {
+				b.WriteString(mgmtNoticeHTML("err", "No cookies were found for "+site+"."))
+			} else {
+				b.WriteString(siteCookieConfirmHTML(site, count))
+			}
+		}
+	}
+
 	b.WriteString(`<form method="GET" action="goosie://settings" style="max-width:640px;margin-top:16px;">
       <input type="hidden" name="action" value="clear-data">
       <div style="margin-bottom:12px;">
@@ -119,8 +144,106 @@ func (f *framePath) buildPrivacySettingsCard(values url.Values) string {
       <p style="color:#5f6368;font-size:13px;">Selected data is removed from memory and from this profile's files. Bookmarks and settings are kept.</p>
       <button id="clear-browsing-data" class="btn-action danger" type="submit">Clear selected data</button>
     </form>`)
+	b.WriteString(f.buildCookieSitesHTML())
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// cookieSite is one domain that currently holds cookies, as listed by the
+// per-site clear control. Counts are exact-domain, matching RemoveForDomain.
+type cookieSite struct {
+	domain string
+	count  int
+}
+
+func siteCookieCount(client net.HTTP, site string) int {
+	if client == nil || client.Jar() == nil {
+		return 0
+	}
+	count := 0
+	for _, c := range client.Jar().AllCookies() {
+		if strings.EqualFold(c.Domain, strings.TrimSpace(site)) {
+			count++
+		}
+	}
+	return count
+}
+
+func cookieSites(client net.HTTP) []cookieSite {
+	if client == nil || client.Jar() == nil {
+		return nil
+	}
+	counts := make(map[string]int)
+	for _, c := range client.Jar().AllCookies() {
+		if c.Domain == "" {
+			continue
+		}
+		counts[strings.ToLower(c.Domain)]++
+	}
+	sites := make([]cookieSite, 0, len(counts))
+	for domain, count := range counts {
+		sites = append(sites, cookieSite{domain: domain, count: count})
+	}
+	sort.Slice(sites, func(i, j int) bool { return sites[i].domain < sites[j].domain })
+	return sites
+}
+
+func (f *framePath) buildCookieSitesHTML() string {
+	sites := cookieSites(f.client)
+	if len(sites) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<h2 style="font-size:16px;margin-top:24px;">Cookies by site</h2>
+      <p style="color:#5f6368;font-size:13px;">Clear one site without touching cookies stored by the others.</p>
+      <table><thead><tr><th>Site</th><th>Cookies</th><th>Action</th></tr></thead><tbody>`)
+	for _, site := range sites {
+		link := "goosie://settings?action=clear-site-cookies&site=" + url.QueryEscape(site.domain)
+		b.WriteString(fmt.Sprintf(`<tr><td style="font-family:monospace;word-break:break-all;">%s</td><td>%d</td><td><a id="clear-site-%s" class="btn-action danger" href="%s">Clear</a></td></tr>`,
+			html.EscapeString(site.domain), site.count, html.EscapeString(site.domain), html.EscapeString(link)))
+	}
+	b.WriteString(`</tbody></table>`)
+	return b.String()
+}
+
+func siteCookieConfirmHTML(site string, count int) string {
+	var b strings.Builder
+	b.WriteString(`<div role="alertdialog" aria-label="Confirm clearing site cookies" style="background:#fef7e0;border:1px solid #f9ab00;border-radius:6px;padding:12px 16px;margin:16px 0;font-size:13px;color:#b06000;">
+      <b>Clear cookies for <code>`)
+	b.WriteString(html.EscapeString(site))
+	b.WriteString(`</code>?</b> This permanently removes `)
+	b.WriteString(fmt.Sprintf("%d cookie(s)", count))
+	b.WriteString(` from memory and this profile. Cookies for other sites are kept.
+      <form method="GET" action="goosie://settings" style="margin-top:10px;">
+        <input type="hidden" name="action" value="clear-site-cookies">
+        <input type="hidden" name="site" value="`)
+	b.WriteString(html.EscapeString(site))
+	b.WriteString(`">
+        <input type="hidden" name="confirm" value="1">
+        <button id="confirm-clear-site-cookies" class="btn-action danger" type="submit">Yes, clear cookies for this site</button>
+        <a class="btn-action secondary" href="goosie://settings">Cancel</a>
+      </form>
+    </div>`)
+	return b.String()
+}
+
+// clearSiteCookies removes one exact domain's cookies and rewrites the profile
+// file so the deletion survives a restart. Other sites stay in memory and on
+// disk; a failed save is reported instead of being hidden.
+func (f *framePath) clearSiteCookies(site string) (removed int, problem string) {
+	if f.client == nil || f.client.Jar() == nil {
+		return 0, "cookies are unavailable in this session"
+	}
+	removed = f.client.Jar().RemoveForDomain(site)
+	if removed == 0 {
+		return 0, ""
+	}
+	if !f.config.private && f.config.cookieFile != "" {
+		if err := f.client.Jar().Save(f.config.cookieFile); err != nil {
+			return removed, fmt.Sprintf("cookies for %s were cleared in memory but the profile file could not be updated (%v)", site, err)
+		}
+	}
+	return removed, ""
 }
 
 // privacyConfirmHTML carries the requested scopes into a second GET request so

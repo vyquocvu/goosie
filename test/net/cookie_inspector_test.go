@@ -54,6 +54,47 @@ func TestCookieJarInspection(t *testing.T) {
 	}
 }
 
+// qc:BR-058
+//
+// Deleting one site's cookies must not take a subdomain's own cookies with it:
+// the settings page lists exact domains, so the jar removes by exact domain.
+func TestCookieJarRemoveForDomainDeletesOnlyThatSite(t *testing.T) {
+	jar := transport.NewCookieJar()
+	example, _ := url.Parse("https://example.com/")
+	jar.Store(example, []string{
+		"a=1; Path=/; Max-Age=3600",
+		"b=2; Path=/app; Max-Age=3600",
+	})
+	other, _ := url.Parse("https://other.org/")
+	jar.Store(other, []string{"c=3; Path=/; Max-Age=3600"})
+	sub, _ := url.Parse("https://sub.example.com/")
+	jar.Store(sub, []string{"d=4; Path=/; Max-Age=3600"})
+
+	if got := jar.RemoveForDomain("example.com"); got != 2 {
+		t.Fatalf("RemoveForDomain(example.com) = %d, want 2", got)
+	}
+	remaining := jar.AllCookies()
+	if len(remaining) != 2 {
+		t.Fatalf("cookies after removing example.com = %+v, want other.org and sub.example.com", remaining)
+	}
+	domains := map[string]bool{}
+	for _, c := range remaining {
+		domains[c.Domain] = true
+	}
+	if !domains["other.org"] || !domains["sub.example.com"] || domains["example.com"] {
+		t.Fatalf("remaining cookie domains = %v, want other.org and sub.example.com only", domains)
+	}
+	if got := jar.RemoveForDomain("example.com"); got != 0 {
+		t.Fatalf("second RemoveForDomain(example.com) = %d, want 0", got)
+	}
+	if got := jar.RemoveForDomain(""); got != 0 {
+		t.Fatalf("RemoveForDomain(\"\") = %d, want 0", got)
+	}
+	if got := jar.RemoveForDomain("other.org"); got != 1 {
+		t.Fatalf("RemoveForDomain(other.org) = %d, want 1", got)
+	}
+}
+
 func TestCookieJarExpiryExclusion(t *testing.T) {
 	jar := transport.NewCookieJar()
 	u, _ := url.Parse("https://example.com/")

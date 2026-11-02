@@ -561,6 +561,29 @@ func (j *CookieJar) AllCookies() []Cookie {
 	return out
 }
 
+// RemoveForDomain deletes every cookie whose Domain exactly matches domain and
+// returns how many were removed. Matching is exact so clearing one site cannot
+// take a parent domain's shared cookie, or a subdomain's own cookie, with it.
+func (j *CookieJar) RemoveForDomain(domain string) int {
+	if j == nil {
+		return 0
+	}
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if domain == "" {
+		return 0
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	removed := 0
+	for key, c := range j.entries {
+		if strings.EqualFold(c.Domain, domain) {
+			delete(j.entries, key)
+			removed++
+		}
+	}
+	return removed
+}
+
 // CookiesForHost returns all active cookies matching the given hostname.
 func (j *CookieJar) CookiesForHost(host string) []Cookie {
 	if j == nil {

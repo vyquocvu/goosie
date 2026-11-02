@@ -67,6 +67,7 @@ func TestSettingsPrivacyCardListsSupportedScopes(t *testing.T) {
 	}
 }
 
+// qc:BR-058
 func TestSettingsClearDataWaitsForConfirmation(t *testing.T) {
 	f, _ := newPrivacyTestPath(t)
 	writeHistoryFile(t, f.config.historyFile, []history.Entry{
@@ -87,6 +88,7 @@ func TestSettingsClearDataWaitsForConfirmation(t *testing.T) {
 	}
 }
 
+// qc:BR-058
 func TestSettingsClearDataRemovesSelectedDataOnly(t *testing.T) {
 	f, _ := newPrivacyTestPath(t)
 	now := time.Now()
@@ -176,6 +178,104 @@ func TestSettingsClearDataRemovesSelectedDataOnly(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&hits); got != 2 {
 		t.Fatalf("server hits after cache clear = %d, want 2", got)
+	}
+}
+
+func storePrivacyCookies(t *testing.T, f *framePath) {
+	t.Helper()
+	for _, raw := range []string{
+		"https://example.com/",
+		"https://example.com/app",
+		"https://other.org/",
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.client.Jar().Store(u, []string{"sid=abc; Path=/; Max-Age=3600"})
+	}
+}
+
+// qc:BR-058
+//
+// The clear card must name each site that holds cookies, with a control that
+// targets that site alone - "all sites" is not enough for a user clearing one.
+func TestSettingsPrivacyCardListsCookiesBySite(t *testing.T) {
+	f, _ := newPrivacyTestPath(t)
+	storePrivacyCookies(t, f)
+	_, body := f.buildInternalPageHTML("goosie://settings")
+
+	for _, want := range []string{
+		"Cookies by site",
+		"example.com",
+		"other.org",
+		"action=clear-site-cookies",
+		"site=example.com",
+		"site=other.org",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("settings page missing %q", want)
+		}
+	}
+}
+
+// qc:BR-058
+func TestSettingsClearSiteCookiesWaitsForConfirmation(t *testing.T) {
+	f, _ := newPrivacyTestPath(t)
+	storePrivacyCookies(t, f)
+	before := len(f.client.Jar().AllCookies())
+
+	_, body := f.buildInternalPageHTML("goosie://settings?action=clear-site-cookies&site=example.com")
+	if !strings.Contains(body, "Clear cookies for") {
+		t.Fatalf("per-site clear did not ask for confirmation:\n%s", body)
+	}
+	if got := len(f.client.Jar().AllCookies()); got != before {
+		t.Fatalf("cookies after unconfirmed site clear = %d, want %d", got, before)
+	}
+}
+
+// qc:BR-058
+//
+// Confirming removes only that domain's cookies, keeps the rest, and rewrites
+// the profile file so the deletion survives a restart.
+func TestSettingsClearSiteCookiesRemovesOnlyThatSite(t *testing.T) {
+	f, _ := newPrivacyTestPath(t)
+	storePrivacyCookies(t, f)
+
+	_, body := f.buildInternalPageHTML("goosie://settings?action=clear-site-cookies&site=example.com&confirm=1")
+	if !strings.Contains(body, "Cleared") || !strings.Contains(body, "example.com") {
+		t.Fatalf("per-site clear did not report the deletion:\n%s", body)
+	}
+
+	remaining := f.client.Jar().AllCookies()
+	if len(remaining) != 1 || remaining[0].Domain != "other.org" {
+		t.Fatalf("cookies after clearing example.com = %+v, want only other.org", remaining)
+	}
+	if _, err := os.Stat(f.config.cookieFile); err != nil {
+		t.Fatalf("per-site clear did not rewrite the cookie file: %v", err)
+	}
+	reloaded := gonet.NewCookieJar()
+	if err := reloaded.Load(f.config.cookieFile); err != nil {
+		t.Fatal(err)
+	}
+	persisted := reloaded.AllCookies()
+	if len(persisted) != 1 || persisted[0].Domain != "other.org" {
+		t.Fatalf("persisted cookies = %+v, want only other.org", persisted)
+	}
+}
+
+// qc:BR-058
+func TestSettingsClearSiteCookiesRejectsUnknownSite(t *testing.T) {
+	f, _ := newPrivacyTestPath(t)
+	storePrivacyCookies(t, f)
+	before := len(f.client.Jar().AllCookies())
+
+	_, body := f.buildInternalPageHTML("goosie://settings?action=clear-site-cookies&site=missing.example&confirm=1")
+	if !strings.Contains(body, "No cookies were found") {
+		t.Fatalf("unknown site clear did not report the miss:\n%s", body)
+	}
+	if got := len(f.client.Jar().AllCookies()); got != before {
+		t.Fatalf("unknown site clear removed cookies: %d, want %d", got, before)
 	}
 }
 
