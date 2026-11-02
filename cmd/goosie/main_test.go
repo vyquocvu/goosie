@@ -932,23 +932,48 @@ func tallNavTestPath(t *testing.T) *framePath {
 	return f
 }
 
-// TestApplyNavResultTraverseKeepsScroll pins the other half: back/forward
-// and reload success leave the viewport offset alone.
-func TestApplyNavResultTraverseKeepsScroll(t *testing.T) {
+// TestApplyNavResultTraverseRestoresEntryScroll pins the traversal half: a
+// successful Back restores the offset the target entry was left at instead of
+// inheriting the departing page's position.
+func TestApplyNavResultTraverseRestoresEntryScroll(t *testing.T) {
 	f := tallNavTestPath(t)
 	tab := f.tabMgr.Active()
 	tab.History().Push("https://a/")
 	tab.History().Push("https://b/")
 	tab.Nav.Serial = 6
-	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: 120}, Size: frame.Size{W: 256, H: 256}})
+	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: 900}, Size: frame.Size{W: 256, H: 256}})
 
 	f.applyNavResult(navResult{
 		tabID: tab.ID(), serial: 6, url: "https://a/",
-		noHistory: true, traverse: -1, traverseBase: 1,
+		noHistory: true, traverse: -1, traverseBase: 1, traverseScroll: 120,
 	})
 
 	if y := f.sched.Viewport().Offset.Y; y != 120 {
-		t.Errorf("viewport offset = %d, want 120 (traversal preserves offset)", y)
+		t.Errorf("viewport offset = %d, want 120 (the entry's own offset)", y)
+	}
+	if got := tab.ScrollY(); got != 120 {
+		t.Errorf("tab scroll = %d, want 120", got)
+	}
+}
+
+// TestApplyNavResultTraverseToTopClearsOffset covers the other direction: an
+// entry left at the top returns to the top even when the page it replaced was
+// scrolled far down.
+func TestApplyNavResultTraverseToTopClearsOffset(t *testing.T) {
+	f := tallNavTestPath(t)
+	tab := f.tabMgr.Active()
+	tab.History().Push("https://a/")
+	tab.History().Push("https://b/")
+	tab.Nav.Serial = 6
+	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: 900}, Size: frame.Size{W: 256, H: 256}})
+
+	f.applyNavResult(navResult{
+		tabID: tab.ID(), serial: 6, url: "https://a/",
+		noHistory: true, traverse: -1, traverseBase: 1, traverseScroll: 0,
+	})
+
+	if y := f.sched.Viewport().Offset.Y; y != 0 {
+		t.Errorf("viewport offset = %d, want 0 (entry was left at the top)", y)
 	}
 }
 

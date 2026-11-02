@@ -41,6 +41,9 @@ type navResult struct {
 	// where it was instead of stranding it on a page that never loaded.
 	traverse     int
 	traverseBase int
+	// traverseScroll is the offset the target entry was left at. A committed
+	// traversal restores it so Back returns the reader to where they were.
+	traverseScroll int32
 	// transition labels the visit this navigation records in global history.
 	transition history.Transition
 	// request is what the load sent, and requestedURL is the address it was
@@ -147,6 +150,11 @@ func (f *framePath) navigateTabRequest(rawURL string, transition history.Transit
 	if action, ok := resubmitAction(rawURL); ok {
 		f.resolveResubmitAction(tab, action)
 		return
+	}
+	// Remember where this page was left before the load replaces it, so a Back
+	// to this history entry can return to the same offset.
+	if f.sched != nil {
+		tab.History().SetCurrentScroll(f.sched.Viewport().Offset.Y)
 	}
 	f.dropResubmit(tab.ID())
 	f.closeFind()
@@ -409,11 +417,13 @@ func (f *framePath) applyNavResult(result navResult) {
 		}
 		tab.History().PushRequest(result.url, req)
 	}
+	traversed := false
 	if result.traverse != 0 {
 		// The peeked back/forward step commits only now that its page
 		// displayed; a stale commit (another navigation landed first) drops.
 		// A redirect rewrites the entry it landed on with the final URL.
 		if tab.History().Step(result.traverse, result.traverseBase) {
+			traversed = true
 			tab.History().ReplaceCurrent(result.url)
 			if result.request.IsPost() && result.url != result.requestedURL {
 				tab.History().ClearCurrentRequest()
@@ -438,8 +448,8 @@ func (f *framePath) applyNavResult(result navResult) {
 		if !result.noHistory {
 			// A fresh navigation opens at the top: without the reset the
 			// new page inherited whatever offset the old one scrolled to.
-			// Reloads and traversals keep their offset (per-entry restore
-			// is a later feature, not silent loss).
+			// Reloads keep the current offset; traversals restore the target
+			// entry's own below.
 			tab.SetScrollY(0)
 			f.sched.SetViewport(frame.Viewport{
 				Offset: frame.Point{},
@@ -453,8 +463,15 @@ func (f *framePath) applyNavResult(result navResult) {
 			if href := result.url; strings.Contains(href, "#") {
 				f.scrollToAnchor(tab, href)
 			}
+		} else if traversed {
+			f.restoreTraversalScroll(tab, result)
 		}
 		f.publishAccessibility()
+	} else if traversed {
+		// A traversal that lands on a background tab still records where it
+		// opened; switching back to it must not show the departing page's
+		// offset. The viewport itself stays with the active tab.
+		f.restoreTraversalScroll(tab, result)
 	}
 
 	// The first frame is out with the document and CSS only; fonts and images
@@ -510,6 +527,36 @@ func (f *framePath) applyNavResult(result navResult) {
 	f.saveActiveSession()
 }
 
+// restoreTraversalScroll returns a committed Back/Forward landing to the
+// offset that history entry was left at. The offset is clamped to the displayed
+// document: a page that shrank since is shown from its top, not parked past its
+// end, because the scheduler would silently clamp the pixels but leave the
+// recorded offset pointing at nothing.
+func (f *framePath) restoreTraversalScroll(tab *tabs.Tab, result navResult) {
+	y := result.traverseScroll
+	if result.layer != nil {
+		if maxY := result.layer.Bounds.Y1 - f.devSize().H; y > maxY {
+			y = maxY
+		}
+	}
+	if y < 0 {
+		y = 0
+	}
+	tab.SetScrollY(y)
+	if f.sched == nil || f.tabMgr.Active() != tab {
+		return
+	}
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: y},
+		Size:   f.devSize(),
+	})
+	if sess := result.session; sess != nil {
+		// A restored page's script runtime must see the same offset the reader
+		// does, or window.scrollY disagrees with the pixels.
+		sess.SyncViewportScroll(0, float64(y))
+	}
+}
+
 // drainImageResults reads deferred-image completions and applies them.
 func (f *framePath) drainImageResults() {
 	for res := range f.imgResults {
@@ -559,39 +606,46 @@ func (f *framePath) traverseTab(delta int) {
 	if tab == nil {
 		return
 	}
+	// Remember where this page is being left, so a Forward back onto it lands
+	// at the same offset instead of the top.
+	if f.sched != nil {
+		tab.History().SetCurrentScroll(f.sched.Viewport().Offset.Y)
+	}
 	var url string
 	var req toolbar.Request
+	var scroll int32
 	var base int
 	var ok bool
 	if delta < 0 {
-		url, req, base, ok = tab.History().PeekBackRequest()
+		url, req, scroll, base, ok = tab.History().PeekBackState()
 	} else if delta > 0 {
-		url, req, base, ok = tab.History().PeekForwardRequest()
+		url, req, scroll, base, ok = tab.History().PeekForwardState()
 	}
 	if !ok || url == "" {
 		return
 	}
-	if req.IsPost() && f.promptResubmit(tab, url, req, delta, base, history.TransitionOther) {
+	if req.IsPost() && f.promptResubmit(tab, url, req, delta, base, history.TransitionOther, scroll) {
 		return
 	}
-	f.navigateTabNoHistoryTraverse(url, delta, base, history.TransitionOther)
+	f.navigateTabNoHistoryTraverse(url, delta, base, history.TransitionOther, scroll)
 }
 
 // navigateTabNoHistory loads a URL without pushing to history.
 func (f *framePath) navigateTabNoHistory(rawURL string) {
-	f.navigateTabNoHistoryTraverse(rawURL, 0, 0, history.TransitionOther)
+	f.navigateTabNoHistoryTraverse(rawURL, 0, 0, history.TransitionOther, 0)
 }
 
 // navigateTabNoHistoryTraverse is navigateTabNoHistory carrying a traversal
-// commit: on success the history cursor steps by delta from base.
-func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int, transition history.Transition) {
-	f.navigateTabNoHistoryTraverseRequest(rawURL, delta, base, transition, navRequest{})
+// commit: on success the history cursor steps by delta from base and the
+// viewport returns to restoreScroll, the offset that entry was left at.
+func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int, transition history.Transition, restoreScroll int32) {
+	f.navigateTabNoHistoryTraverseRequest(rawURL, delta, base, transition, restoreScroll, navRequest{})
 }
 
 // navigateTabNoHistoryTraverseRequest is navigateTabNoHistoryTraverse with the
 // request to replay. A POST entry in the trail needs the same method and body
 // the original submission sent, not a bare GET.
-func (f *framePath) navigateTabNoHistoryTraverseRequest(rawURL string, delta, base int, transition history.Transition, req navRequest) {
+func (f *framePath) navigateTabNoHistoryTraverseRequest(rawURL string, delta, base int, transition history.Transition, restoreScroll int32, req navRequest) {
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
@@ -626,7 +680,7 @@ func (f *framePath) navigateTabNoHistoryTraverseRequest(rawURL string, delta, ba
 	go func() {
 		defer f.navWg.Done()
 		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true, req)
-		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base, transition: transition, request: req, requestedURL: u}
+		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base, traverseScroll: restoreScroll, transition: transition, request: req, requestedURL: u}
 		if finalURL != "" {
 			res.url = finalURL
 		}
@@ -662,10 +716,10 @@ func (f *framePath) reloadTab() {
 	if url == "" {
 		return
 	}
-	if req.IsPost() && f.promptResubmit(tab, url, req, 0, 0, history.TransitionReload) {
+	if req.IsPost() && f.promptResubmit(tab, url, req, 0, 0, history.TransitionReload, 0) {
 		return
 	}
-	f.navigateTabNoHistoryTraverse(url, 0, 0, history.TransitionReload)
+	f.navigateTabNoHistoryTraverse(url, 0, 0, history.TransitionReload, 0)
 }
 
 // stopTab cancels only the active tab's in-flight navigation. Advancing the

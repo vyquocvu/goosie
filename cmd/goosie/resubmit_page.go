@@ -38,7 +38,10 @@ type pendingResubmit struct {
 	delta      int
 	base       int
 	transition history.Transition
-	previous   tabDisplay
+	// scroll is the offset the target history entry was left at, restored once
+	// the confirmed resubmit lands.
+	scroll   int32
+	previous tabDisplay
 }
 
 // resubmitAction recognises the prompt's own action links. It returns false for
@@ -124,7 +127,7 @@ func (f *framePath) buildResubmitPage(target string, req toolbar.Request) (*fram
 // promptResubmit replaces the active document with the confirmation. It reports
 // whether the prompt is showing; false means the caller should perform an
 // ordinary GET because there is nothing safe to keep behind a cancel.
-func (f *framePath) promptResubmit(tab *tabs.Tab, target string, req toolbar.Request, delta, base int, transition history.Transition) bool {
+func (f *framePath) promptResubmit(tab *tabs.Tab, target string, req toolbar.Request, delta, base int, transition history.Transition, scroll int32) bool {
 	if tab == nil {
 		return false
 	}
@@ -158,6 +161,7 @@ func (f *framePath) promptResubmit(tab *tabs.Tab, target string, req toolbar.Req
 		delta:      delta,
 		base:       base,
 		transition: transition,
+		scroll:     scroll,
 		previous:   previous,
 	}
 	f.resubmitMu.Unlock()
@@ -228,7 +232,7 @@ func (f *framePath) resolveResubmitAction(tab *tabs.Tab, action string) {
 		if pending.previous.session != nil {
 			pending.previous.session.Close()
 		}
-		f.navigateTabNoHistoryTraverseRequest(pending.target, pending.delta, pending.base, pending.transition, pending.request)
+		f.navigateTabNoHistoryTraverseRequest(pending.target, pending.delta, pending.base, pending.transition, pending.scroll, pending.request)
 	}
 }
 

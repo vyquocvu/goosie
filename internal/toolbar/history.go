@@ -24,6 +24,10 @@ func (r Request) IsPost() bool {
 type entry struct {
 	url     string
 	request Request
+	// scroll is the viewport offset this page was left at. A traversal
+	// restores it, so Back returns the reader to where they were reading
+	// instead of to the top.
+	scroll int32
 }
 
 // History is one tab's back/forward trail. The UI thread peeks and the
@@ -110,6 +114,34 @@ func (h *History) PeekForwardRequest() (url string, req Request, base int, ok bo
 	defer h.mu.Unlock()
 	e, ok := h.peekForwardLocked()
 	return e.url, e.request, h.index, ok
+}
+
+// SetCurrentScroll records where the reader left the page under the cursor.
+// Navigation captures it before leaving; traversals read the target entry's
+// value through PeekBackState / PeekForwardState.
+func (h *History) SetCurrentScroll(y int32) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.index >= 0 && h.index < len(h.entries) {
+		h.entries[h.index].scroll = y
+	}
+}
+
+// PeekBackState is PeekBackRequest plus the offset the target page was left
+// at: a Back that lands on the same URL must also land on the same scroll.
+func (h *History) PeekBackState() (url string, req Request, scroll int32, base int, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e, ok := h.peekBackLocked()
+	return e.url, e.request, e.scroll, h.index, ok
+}
+
+// PeekForwardState is the forward PeekBackState.
+func (h *History) PeekForwardState() (url string, req Request, scroll int32, base int, ok bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e, ok := h.peekForwardLocked()
+	return e.url, e.request, e.scroll, h.index, ok
 }
 
 // CurrentRequest reports the entry under the cursor and how it was produced.

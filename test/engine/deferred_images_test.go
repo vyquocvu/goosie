@@ -21,6 +21,7 @@ func pngOf(t *testing.T, w, h int) []byte {
 }
 
 // TestDeferredImagesPaintAfterLoad pins the progressive-paint contract: with
+// qc:BR-084
 // WithDeferredImages the session builds without calling the fetcher at all,
 // so the first frame can go out immediately; LoadDeferredImages then fetches
 // in the background and reports how many images landed, after which a reflow

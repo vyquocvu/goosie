@@ -87,6 +87,7 @@ func TestImageResultReflowsAndRepaints(t *testing.T) {
 	}
 }
 
+// qc:BR-084
 func TestImageResultIgnoredWhenNavMovedOn(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config.width, f.config.dpr, f.zoom = 800, 1, 1

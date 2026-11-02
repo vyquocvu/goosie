@@ -641,6 +641,65 @@ func TestScrollDamagesOnlyTheExposedBand(t *testing.T) {
 	}
 }
 
+// qc:BR-079
+//
+// Scrolling a page several screens tall exposes one new tile row per step. That
+// row must be the only thing rasterized: every tile already on screen stays in
+// the cache because the content under it did not change.
+func TestLongPageScrollRasterizesOnlyTheExposedRowAndReusesTheRest(t *testing.T) {
+	const (
+		cols, rows = 4, 24
+		vp         = cols * frame.TileSize
+		step       = frame.TileSize
+	)
+	h := newSched(t, cols, rows, int64(cols*rows), frame.Size{W: vp, H: vp}, raster.Pref{PrefetchRows: raster.PrefetchOff})
+	h.untilQuiet(t)
+
+	scrollOneRow := func(dy int32) surface.FrameWork {
+		t.Helper()
+		before := h.s.Stats().Rasterized
+		plan, needed := h.s.BeginFrame(vsync(dy))
+		if plan == nil {
+			t.Fatal("no plan")
+		}
+		h.c.Resize(plan.Viewport.Size)
+		w := h.s.Submit(needed)
+		h.s.ComposeInto(h.c.Backing, h.c, plan, needed)
+		if len(needed) != cols {
+			t.Fatalf("scroll of %d asked for %d tiles, want exactly the exposed row of %d", dy, len(needed), cols)
+		}
+		wantRow := (plan.Viewport.Offset.Y + vp - 1) / frame.TileSize
+		if dy < 0 {
+			wantRow = plan.Viewport.Offset.Y / frame.TileSize
+		}
+		for _, c := range needed {
+			if c.Row != wantRow {
+				t.Fatalf("scroll of %d rasterized tile row %d, want the exposed row %d", dy, c.Row, wantRow)
+			}
+		}
+		if w.Reused == 0 {
+			t.Fatalf("scroll of %d reused no warm tiles", dy)
+		}
+		h.untilQuiet(t)
+		if got := h.s.Stats().Rasterized - before; got != int64(cols) {
+			t.Fatalf("scroll of %d rasterized %d tiles, want only the %d exposed ones", dy, got, cols)
+		}
+		return w
+	}
+
+	lastY := int32(rows-cols) * frame.TileSize
+	for y := int32(0); y < lastY; y += step {
+		scrollOneRow(step)
+		// A tile now two rows above the bottom of the viewport is still the one
+		// drawn when it first appeared, so its pixels are the marker the cache
+		// has to have kept.
+		c := frame.CoordFor(frame.Point{X: 4, Y: h.s.Viewport().Offset.Y + step + 4}, frame.TileSize)
+		if px := h.l.Grid.Pixels(c); px == nil || px.At(3, 3) != schedColor(c, 1) {
+			t.Fatalf("tile %v lost its cached pixels at offset %d", c, h.s.Viewport().Offset.Y)
+		}
+	}
+}
+
 // The scheduler owns the scroll offset, because the tile offsets it hands the pool
 // and the buffer the composer presents have to agree with each other. A plan
 // therefore carries layers, not geometry, and a scroll past the end of the document

@@ -629,7 +629,20 @@ type inputTileHarness struct {
 	rt       *js.Runtime
 }
 
+const inputTileMarkup = `<html><head><style>
+	body { margin: 0; padding: 32px; width: 704px; height: 704px; background: white; }
+	input { display: block; margin: 0; width: 120px; height: 32px; }
+	#flow { width: 180px; }
+	#marker { width: 160px; height: 40px; background: #208040; }
+	#far { position: absolute; left: 520px; top: 600px; width: 180px; height: 48px; background: #e0c080; }
+</style></head><body><input id="q" value="a"><div id="flow">short</div><div id="marker"></div><div id="far">unchanged content</div></body></html>`
+
 func newInputTileHarness(t *testing.T, dpr int) *inputTileHarness {
+	t.Helper()
+	return newTileHarness(t, dpr, 768, 768, inputTileMarkup)
+}
+
+func newTileHarness(t *testing.T, dpr, contentW, contentH int, markup string) *inputTileHarness {
 	t.Helper()
 	fonts, err := raster.NewEmbeddedFonts()
 	if err != nil {
@@ -639,11 +652,11 @@ func newInputTileHarness(t *testing.T, dpr int) *inputTileHarness {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	pool.Start(ctx)
 	t.Cleanup(func() { cancel(); _ = pool.Close() })
-	size := frame.Size{W: 768 * int32(dpr), H: 768 * int32(dpr)}
+	size := frame.Size{W: int32(contentW * dpr), H: int32(contentH * dpr)}
 	w := headless.New(headless.Config{Size: size, Scale: float32(dpr), Clock: headless.NewManualClock(time.Time{})})
 	t.Cleanup(func() { _ = w.Close() })
 	f := &framePath{
-		config: config{width: 768, height: 768, dpr: float64(dpr)}, zoom: 1,
+		config: config{width: contentW, height: contentH, dpr: float64(dpr)}, zoom: 1,
 		pool: pool, window: w, tabMgr: tabs.NewManager(nil),
 		sched: raster.NewScheduler(nil, pool, frame.Viewport{Size: size}, float32(dpr), raster.Pref{PrefetchRows: raster.PrefetchOff}),
 	}
@@ -653,14 +666,8 @@ func newInputTileHarness(t *testing.T, dpr int) *inputTileHarness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = rt.Close() })
-	sess, err := engine.NewSession(`<html><head><style>
-		body { margin: 0; padding: 32px; width: 704px; height: 704px; background: white; }
-		input { display: block; margin: 0; width: 120px; height: 32px; }
-		#flow { width: 180px; }
-		#marker { width: 160px; height: 40px; background: #208040; }
-		#far { position: absolute; left: 520px; top: 600px; width: 180px; height: 48px; background: #e0c080; }
-	</style></head><body><input id="q" value="a"><div id="flow">short</div><div id="marker"></div><div id="far">unchanged content</div></body></html>`, nil, 768,
-		engine.WithMetrics(fonts), engine.WithViewportH(768), engine.WithJS(rt), engine.WithInvalidation(&engine.Invalidation{}))
+	sess, err := engine.NewSession(markup, nil, float32(contentW),
+		engine.WithMetrics(fonts), engine.WithViewportH(float32(contentH)), engine.WithJS(rt), engine.WithInvalidation(&engine.Invalidation{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -675,10 +682,15 @@ func newInputTileHarness(t *testing.T, dpr int) *inputTileHarness {
 
 func (h *inputTileHarness) bounds(t *testing.T, id string) frame.Rect {
 	t.Helper()
+	return h.boundsAtScale(t, id, float32(h.f.config.dpr))
+}
+
+func (h *inputTileHarness) boundsAtScale(t *testing.T, id string, scale float32) frame.Rect {
+	t.Helper()
 	for _, obj := range h.f.tabMgr.Active().Session().Arena.Objects {
 		if obj.Node != nil && obj.Node.GetAttribute("id") == id {
 			x0, y0, x1, y1 := obj.BorderRect()
-			return frame.RectF4(x0, y0, x1, y1).ToDevice(float32(h.f.config.dpr))
+			return frame.RectF4(x0, y0, x1, y1).ToDevice(scale)
 		}
 	}
 	t.Fatalf("missing box %q", id)
@@ -738,7 +750,7 @@ func (h *inputTileHarness) settle(t *testing.T) {
 	settleInputTiles(t, h.f.sched, h.f.tabMgr.Active().Layer(), h.composer, h.w)
 }
 
-// qc:BR-173
+// qc:BR-173 BR-081
 //
 // A static page that has already settled must not restyle, relayout, rebuild a
 // display list, or rasterize a tile just because vsyncs keep arriving. The
@@ -806,6 +818,247 @@ func TestStaticPageIdleFramesDoNoPipelineOrTileWork(t *testing.T) {
 	}
 	if tab.Layer() != layer {
 		t.Error("idle frames replaced the settled layer")
+	}
+}
+
+// qc:BR-082
+//
+// A page whose animation-frame and timer callbacks only read state reschedules
+// itself forever. The pump must run them without inventing pipeline work, so a
+// loop that never mutates anything cannot spin the scheduler or grow a counter
+// without bound.
+func TestStateOnlyRAFAndTimerLoopDoesNotAmplifyWork(t *testing.T) {
+	h := newTileHarness(t, 1, 512, 512, `<html><head><style>
+		html, body { margin: 0; padding: 0; }
+		#static { width: 120px; height: 80px; background: #3060a0; }
+	</style></head><body><div id="static"></div><script>
+		var ticks = 0;
+		function frame() { ticks++; requestAnimationFrame(frame); }
+		requestAnimationFrame(frame);
+		setInterval(function () { ticks++; }, 0);
+	</script></body></html>`)
+	tab := h.f.tabMgr.Active()
+	sess := tab.Session()
+	layer := tab.Layer()
+	baseWork := sess.WorkCounts()
+	base := h.f.sched.Stats()
+
+	const frames = 30
+	for i := 0; i < frames; i++ {
+		if h.f.pumpJS() {
+			t.Fatalf("frame %d repainted for callbacks that only read state", i)
+		}
+		plan, needed := h.f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+		if plan == nil {
+			t.Fatalf("frame %d produced no plan", i)
+		}
+		if len(needed) != 0 {
+			t.Fatalf("frame %d asked for %d tiles", i, len(needed))
+		}
+		work := h.f.sched.Submit(needed)
+		if work.Submitted != 0 {
+			t.Fatalf("frame %d submitted %d jobs", i, work.Submitted)
+		}
+		damage := h.f.sched.ComposeInto(h.composer.Backing, h.composer, plan, needed)
+		if len(damage) != 0 {
+			t.Fatalf("frame %d composed %d damaged bands", i, len(damage))
+		}
+	}
+	if got, err := h.rt.Evaluate("ticks"); err != nil {
+		t.Fatal(err)
+	} else if got == "0" {
+		t.Fatal("neither the animation frame nor the timer callback ran")
+	}
+	if got := sess.WorkCounts(); got != baseWork {
+		t.Fatalf("state-only callbacks changed pipeline work from %+v to %+v", baseWork, got)
+	}
+	after := h.f.sched.Stats()
+	for _, counter := range []struct {
+		name string
+		got  int64
+		was  int64
+	}{
+		{"Rasterized", after.Rasterized, base.Rasterized},
+		{"Submitted", after.Submitted, base.Submitted},
+		{"Deferred", after.Deferred, base.Deferred},
+		{"Failed", after.Failed, base.Failed},
+	} {
+		if counter.got != counter.was {
+			t.Errorf("%s grew from %d to %d across %d script frames", counter.name, counter.was, counter.got, frames)
+		}
+	}
+	if got := after.Frames - base.Frames; got != frames {
+		t.Errorf("scheduler drew %d frames, want %d", got, frames)
+	}
+	if tab.Layer() != layer {
+		t.Error("state-only callbacks replaced the layer")
+	}
+}
+
+// qc:BR-080
+//
+// A style change on one small box must damage only the tiles that box covers.
+// Everything else keeps the exact bitmap it had, and the pixels outside the
+// box - not just outside the tile - are byte-identical after the repaint.
+func TestSmallDOMChangeDamagesOnlyItsOwnTiles(t *testing.T) {
+	h := newInputTileHarness(t, 1)
+	tab := h.f.tabMgr.Active()
+	layer := tab.Layer()
+	marker := h.bounds(t, "marker")
+	coords := layer.VisibleCoords(h.f.sched.Viewport(), nil)
+	pixels := make(map[frame.TileCoord]*frame.Bitmap, len(coords))
+	for _, coord := range coords {
+		pixels[coord] = layer.Grid.Pixels(coord)
+	}
+	prior := append([]byte(nil), h.w.Presented().RGBA...)
+	beforeRasterized := h.f.sched.Stats().Rasterized
+
+	if err := h.rt.Run(`document.getElementById("marker").style.backgroundColor = "#c02020";`, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !h.f.pumpJS() {
+		t.Fatal("a background mutation did not request a repaint")
+	}
+	affected := map[frame.TileCoord]bool{}
+	for _, coord := range coords {
+		if coord.Rect(frame.TileSize).Intersects(marker) {
+			affected[coord] = true
+		}
+	}
+	if len(affected) == 0 {
+		t.Fatal("fixture marker covers no visible tile")
+	}
+
+	plan, needed := h.f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
+	if plan == nil {
+		t.Fatal("no plan after the mutation")
+	}
+	if len(needed) == 0 {
+		t.Fatal("the mutated tile was not rasterized")
+	}
+	for _, coord := range needed {
+		if !affected[coord] {
+			t.Fatalf("tile %v outside the changed box was invalidated", coord)
+		}
+	}
+	if work := h.f.sched.Submit(needed); work.Submitted == 0 {
+		t.Fatal("the damaged tiles were never submitted")
+	}
+	damage := h.f.sched.ComposeInto(h.composer.Backing, h.composer, plan, needed)
+	if err := h.w.Present(h.composer.Backing, damage); err != nil {
+		t.Fatal(err)
+	}
+	h.settle(t)
+
+	if got := h.f.sched.Stats().Rasterized - beforeRasterized; got == 0 || got > int64(len(affected)) {
+		t.Fatalf("rasterized %d tiles, want 1..%d covering the changed box", got, len(affected))
+	}
+	for _, coord := range coords {
+		if !affected[coord] && layer.Grid.Pixels(coord) != pixels[coord] {
+			t.Errorf("tile %v outside the damage was re-rasterized", coord)
+		}
+	}
+	after := h.w.Presented().RGBA
+	w := int(h.composer.Backing.W)
+	for y := 0; y < int(h.composer.Backing.H); y++ {
+		for x := 0; x < w; x++ {
+			inside := int32(x) >= marker.X0 && int32(x) < marker.X1 && int32(y) >= marker.Y0 && int32(y) < marker.Y1
+			i := 4 * (y*w + x)
+			if !inside && (prior[i] != after[i] || prior[i+1] != after[i+1] || prior[i+2] != after[i+2] || prior[i+3] != after[i+3]) {
+				t.Fatalf("pixel (%d,%d) outside the changed box changed after the repaint", x, y)
+			}
+		}
+	}
+	changed := false
+	for i := 0; i < len(prior); i += 4 {
+		if prior[i] != after[i] || prior[i+1] != after[i+1] || prior[i+2] != after[i+2] {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		t.Fatal("the repaint never painted the new background")
+	}
+}
+
+// qc:BR-078
+//
+// 100% -> 125% -> 100% scales the painted page, keeps pointer targets aligned
+// with what is on screen, and replaces the old layer when the factor returns so
+// no pixel of the previous scale survives.
+func TestZoomRoundTripScalesPaintKeepsClicksAndClearsOldImage(t *testing.T) {
+	h := newInputTileHarness(t, 1)
+	tab := h.f.tabMgr.Active()
+	sess := tab.Session()
+	click := func(r frame.Rect) {
+		t.Helper()
+		h.input(t, surface.Event{Kind: surface.EvPointer, Action: surface.PointerPress, Button: surface.ButtonLeft,
+			Pos: frame.Point{X: (r.X0 + r.X1) / 2, Y: (r.Y0+r.Y1)/2 + h.cw.chromeHeight()}})
+	}
+
+	baseLayer := tab.Layer()
+	baseBounds := baseLayer.Bounds
+	input100 := h.bounds(t, "q")
+	marker100 := h.bounds(t, "marker")
+	// A point that belongs to the marker at 125% but to the page background at
+	// 100%: whatever the zoom pass leaves there is detectable afterwards.
+	staleX, staleY := int32(220), int32(140)
+	if marker100.X0 <= staleX && staleX < marker100.X1 && marker100.Y0 <= staleY && staleY < marker100.Y1 {
+		t.Fatalf("fixture point (%d,%d) is already inside the 100%% marker %v", staleX, staleY, marker100)
+	}
+	baseline := append([]byte(nil), h.w.Presented().RGBA...)
+
+	h.f.handleZoom(0.25)
+	h.settle(t)
+	if got := h.f.zoom; got < 1.249 || got > 1.251 {
+		t.Fatalf("zoom = %v, want 1.25", got)
+	}
+	zoomedLayer := tab.Layer()
+	if zoomedLayer == baseLayer {
+		t.Fatal("125% kept the 100% layer; the old image was not cleared")
+	}
+	if zoomedLayer.Bounds.Y1 <= baseBounds.Y1 {
+		t.Fatalf("zoomed extent height = %d, want more than the %d at 100%%", zoomedLayer.Bounds.Y1, baseBounds.Y1)
+	}
+	marker125 := h.boundsAtScale(t, "marker", 1.25)
+	w100, h100 := marker100.X1-marker100.X0, marker100.Y1-marker100.Y0
+	if w125, h125 := marker125.X1-marker125.X0, marker125.Y1-marker125.Y0; w125 < w100*5/4-1 || w125 > w100*5/4+1 || h125 < h100*5/4-1 || h125 > h100*5/4+1 {
+		t.Fatalf("125%% marker = %v, want (%d, %d) at 5/4 scale", marker125, w100*5/4, h100*5/4)
+	}
+	if got := h.w.Presented().RGBA[4*(int(staleY)*int(h.composer.Backing.W)+int(staleX))]; got == baseline[4*(int(staleY)*int(h.composer.Backing.W)+int(staleX))] {
+		t.Fatalf("pixel (%d,%d) did not scale with the page", staleX, staleY)
+	}
+
+	input125 := h.boundsAtScale(t, "q", 1.25)
+	click(input125)
+	if !sess.FocusedEditable() {
+		t.Fatal("click at the 125% input center did not reach the control")
+	}
+	if err := h.rt.Run(`document.getElementById("q").blur();`, ""); err != nil {
+		t.Fatal(err)
+	}
+	if sess.FocusedEditable() {
+		t.Fatal("blur did not clear the control focus before the zoom reset")
+	}
+
+	h.f.handleZoom(0)
+	h.settle(t)
+	if got := h.f.zoom; got != 1 {
+		t.Fatalf("reset zoom = %v, want 1", got)
+	}
+	if tab.Layer() == zoomedLayer || tab.Layer().Bounds != baseBounds {
+		t.Fatalf("100%% return layer bounds = %v, want the %v the page started at", tab.Layer().Bounds, baseBounds)
+	}
+	i := 4 * (int(staleY)*int(h.composer.Backing.W) + int(staleX))
+	if got, want := h.w.Presented().RGBA[i], baseline[i]; got != want {
+		t.Fatalf("pixel (%d,%d) = %v after returning to 100%%, want the original %v: the 125%% image survived", staleX, staleY, got, want)
+	}
+	if marker100 != h.bounds(t, "marker") {
+		t.Fatalf("marker = %v after reset, want %v", h.bounds(t, "marker"), marker100)
+	}
+	click(input100)
+	if !sess.FocusedEditable() {
+		t.Fatal("click at the 100% input center stopped reaching the control after the zoom round trip")
 	}
 }
 

@@ -971,8 +971,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/refresh_test.go:TestRestyleAndReflowReusesArenaForColorOnlyChange"
+    ],
     "enforced": false
   },
   {
@@ -981,8 +983,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/qa_resize_acceptance_test.go:TestViewportResizeReflowsAndDropsOldWidthGeometry"
+    ],
     "enforced": false
   },
   {
@@ -992,8 +996,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/render_work_test.go:TestZoomRoundTripScalesPaintKeepsClicksAndClearsOldImage"
+    ],
     "enforced": false
   },
   {
@@ -1002,8 +1008,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/raster/scheduler_test.go:TestLongPageScrollRasterizesOnlyTheExposedRowAndReusesTheRest"
+    ],
     "enforced": false
   },
   {
@@ -1013,8 +1021,10 @@
       "INT",
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/render_work_test.go:TestSmallDOMChangeDamagesOnlyItsOwnTiles"
+    ],
     "enforced": false
   },
   {
@@ -1023,8 +1033,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/render_work_test.go:TestStaticPageIdleFramesDoNoPipelineOrTileWork"
+    ],
     "enforced": false
   },
   {
@@ -1033,8 +1045,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/render_work_test.go:TestStateOnlyRAFAndTimerLoopDoesNotAmplifyWork"
+    ],
     "enforced": false
   },
   {
@@ -1044,8 +1058,11 @@
       "INT",
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/custom_font_scoping_test.go:TestCustomFontResolutionIsPerSession",
+      "test/engine/custom_font_scoping_test.go:TestFontFailureKeepsFallbackAndPageVisible"
+    ],
     "enforced": false
   },
   {
@@ -1055,8 +1072,11 @@
       "INT",
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/progressive_images_test.go:TestImageResultIgnoredWhenNavMovedOn",
+      "test/engine/deferred_images_test.go:TestDeferredImagesPaintAfterLoad"
+    ],
     "enforced": false
   },
   {
@@ -1077,8 +1097,10 @@
       "INT",
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p1_scroll_test.go:TestJourneyBackForwardRestoresPerEntryScroll"
+    ],
     "enforced": false
   },
   {
