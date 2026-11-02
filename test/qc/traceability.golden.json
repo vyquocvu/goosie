@@ -694,7 +694,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_history_private_test.go:TestPrivateBuildDoesNotTouchProfileStores"
     ],
@@ -706,7 +706,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_history_private_test.go:TestJourneyRegularPrivateRegularCookieIsolation"
     ],
@@ -718,7 +718,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_history_private_test.go:TestPrivateRunDoesNotJournalOrRestorePrivateTabs"
     ],
