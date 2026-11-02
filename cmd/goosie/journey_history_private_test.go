@@ -107,9 +107,15 @@ func TestJourneyReloadDoesNotAddHistoryVisits(t *testing.T) {
 	b := newBrowserE2E(t)
 	a, bb := server.URL+"/a", server.URL+"/b"
 	b.navigateViaAddressBar(t, a)
-	b.waitFor(t, "page A", func() bool { return b.activeURL() == a && b.f.tabMgr.Active().Title() == "/a" })
+	// The title is set before the visit is recorded, so wait for the entry
+	// too or the comparison below can start one visit short.
+	b.waitFor(t, "page A", func() bool {
+		return b.activeURL() == a && b.f.tabMgr.Active().Title() == "/a" && len(b.f.history.Entries()) == 1
+	})
 	b.navigateViaAddressBar(t, bb)
-	b.waitFor(t, "page B", func() bool { return b.activeURL() == bb && b.f.tabMgr.Active().Title() == "/b" })
+	b.waitFor(t, "page B", func() bool {
+		return b.activeURL() == bb && b.f.tabMgr.Active().Title() == "/b" && len(b.f.history.Entries()) == 2
+	})
 	beforeReload := len(b.f.history.Entries())
 	requestsMu.Lock()
 	bRequestsBeforeReload := requests["/b"]
