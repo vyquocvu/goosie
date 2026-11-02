@@ -48,6 +48,33 @@ func TestTabScrollClampsToStripRange(t *testing.T) {
 	}
 }
 
+// TestMoveTabFourTabsReordersAndKeepsActive repeats the drag-reorder contract
+// on a full four-tab strip: the dragged tab lands at the final index, every
+// other tab shifts in order, and the selected tab is still the same tab.
+// qc:BR-032
+func TestMoveTabFourTabsReordersAndKeepsActive(t *testing.T) {
+	mgr := NewManager(nil)
+	a := mgr.NewTab()
+	b := mgr.NewTab()
+	c := mgr.NewTab()
+	d := mgr.NewTab()
+	mgr.SwitchTo(c.ID())
+
+	if !mgr.MoveTab(d.ID(), 0) {
+		t.Fatal("MoveTab(last, front) reported no move")
+	}
+	ids := tabIDs(mgr)
+	if len(ids) != 4 || ids[0] != d.ID() || ids[1] != a.ID() || ids[2] != b.ID() || ids[3] != c.ID() {
+		t.Fatalf("order = %v, want [d a b c]", ids)
+	}
+	if got := mgr.Active(); got != c {
+		t.Fatal("active tab changed across a four-tab reorder")
+	}
+	if got := mgr.ActiveIndex(); got != 3 {
+		t.Fatalf("active index = %d, want 3 after the move", got)
+	}
+}
+
 // TestMoveTabReordersAndKeepsActive pins drag-reorder ownership: moving a tab
 // reorders by final index, clamps out-of-range targets, ignores unknown IDs,
 // and keeps the ACTIVE tab (by identity, not position) across the move.

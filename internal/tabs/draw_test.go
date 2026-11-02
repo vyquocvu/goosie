@@ -82,6 +82,7 @@ func chevronMarkCount(t *testing.T, mgr *TabManager, width, offset int32) int {
 
 // TestDrawTabBarChevrons pins chevron visibility end to end: an overflowing
 // strip draws the controls, a fitting one leaves the zone clean background.
+// qc:BR-033
 func TestDrawTabBarChevrons(t *testing.T) {
 	full := NewManager(nil)
 	for i := 0; i < 40; i++ {

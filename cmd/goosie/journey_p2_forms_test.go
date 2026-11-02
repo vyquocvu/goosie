@@ -1023,7 +1023,7 @@ func TestJourneyMultipartFormCarriesSelectedFile(t *testing.T) {
 // it was. Treating _blank as _self silently replaces the page the user is
 // reading with the response they asked to open beside it.
 //
-// qc:BR-106
+// qc:BR-025 BR-106
 func TestJourneyFormTargetBlankOpensNewTab(t *testing.T) {
 	var reqMu sync.Mutex
 	var received url.Values

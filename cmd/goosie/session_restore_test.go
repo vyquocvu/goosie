@@ -160,6 +160,7 @@ func TestCrashRecovery_InternalPageRender(t *testing.T) {
 
 // TestCrashRecovery_ActionRestore verifies that clicking 'Restore' applies the crashed tabs,
 // clears the crashed state, and deletes session_active.json.
+// qc:BR-042
 func TestCrashRecovery_ActionRestore(t *testing.T) {
 	f, _ := newRestoreTestPath(t)
 	activeFile := f.config.sessionActiveFile
@@ -215,6 +216,14 @@ func TestCrashRecovery_ActionRestore(t *testing.T) {
 	}
 	if f.tabMgr.Active() != all[1] {
 		t.Errorf("active tab = %v, want tab 1", f.tabMgr.Active())
+	}
+	// Restore rebuilds tab metadata only. A fresh document for the active
+	// tab starts loading, and the background tab stays lazy; neither may
+	// carry the crashed process's in-flight response.
+	for i, tab := range all {
+		if tab.Session() != nil {
+			t.Errorf("restored tab %d already owns a document; restore must not replay an in-flight response", i)
+		}
 	}
 }
 

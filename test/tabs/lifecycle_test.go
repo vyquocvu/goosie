@@ -75,6 +75,41 @@ func TestCloseFirstTabKeepsIndexAtZero(t *testing.T) {
 	}
 }
 
+// TestCloseBackgroundTabKeepsActiveState verifies that closing a tab the
+// user is not looking at leaves the active tab's identity, URL and history
+// untouched, even when the closed tab sits before it in the strip.
+// qc:BR-029
+func TestCloseBackgroundTabKeepsActiveState(t *testing.T) {
+	mgr := tabs.NewManager(nil)
+	background := mgr.NewTab()
+	active := mgr.NewTab()
+	mgr.SwitchTo(active.ID())
+	if mgr.Active() != active {
+		t.Fatal("active tab should be the one switched to")
+	}
+
+	active.SetURL("https://active.example/keep")
+	active.History().Push("https://active.example/keep")
+	active.History().Push("https://active.example/deep")
+	background.SetURL("https://background.example/")
+	background.History().Push("https://background.example/")
+
+	mgr.CloseTab(background.ID())
+
+	if mgr.Count() != 1 {
+		t.Fatalf("count = %d after closing background tab, want 1", mgr.Count())
+	}
+	if mgr.Active() != active {
+		t.Fatalf("active = %v after closing background tab, want the same tab", mgr.Active())
+	}
+	if got := active.URL(); got != "https://active.example/keep" {
+		t.Fatalf("active URL = %q after closing background tab, want unchanged", got)
+	}
+	if got := active.History().Current(); got != "https://active.example/deep" {
+		t.Fatalf("active history current = %q after closing background tab, want unchanged", got)
+	}
+}
+
 // TestTabByIDReturnsCorrectTab verifies the lookup path the surface uses
 // to map a tab identifier back to its state.
 func TestTabByIDReturnsCorrectTab(t *testing.T) {
@@ -188,7 +223,9 @@ func TestSwitchToNonexistentTabIsNoop(t *testing.T) {
 
 // TestConcurrentTabOperations verifies that the manager is safe under
 // concurrent access. Run with -race: the value is in the report it does
-// not make.
+// not make. Every created tab is closed again, so the count returns to zero
+// and no tab state is left behind.
+// qc:BR-038
 func TestConcurrentTabOperations(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	const goroutines = 8

@@ -1,6 +1,7 @@
 package tabs_test
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -82,9 +83,18 @@ func TestCloseTabRemovesTab(t *testing.T) {
 	}
 }
 
+// TestCloseLastTabCallsOnCloseLast verifies that closing the final tab runs
+// the manager's close-last callback exactly once and leaves no dangling tab.
+// The browser wires that callback to closing the window, so the UI never stays
+// alive showing an empty tab strip.
+// qc:BR-031
 func TestCloseLastTabCallsOnCloseLast(t *testing.T) {
-	done := make(chan struct{})
-	mgr := tabs.NewManager(func() { close(done) })
+	var calls atomic.Int32
+	done := make(chan struct{}, 2)
+	mgr := tabs.NewManager(func() {
+		calls.Add(1)
+		done <- struct{}{}
+	})
 	t1 := mgr.NewTab()
 
 	mgr.CloseTab(t1.ID())
@@ -93,6 +103,9 @@ func TestCloseLastTabCallsOnCloseLast(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("onCloseLast should be called when last tab closes")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("onCloseLast calls = %d, want 1", got)
 	}
 	if mgr.Count() != 0 {
 		t.Fatal("tab count should be 0")

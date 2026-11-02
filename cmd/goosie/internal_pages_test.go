@@ -529,6 +529,60 @@ func TestToggleBookmarkPersistsActivePage(t *testing.T) {
 	}
 }
 
+// TestApplyNavResultForClosedTabDoesNotResurrect verifies that a load which
+// finishes after its tab was closed is dropped: the closed tab is not put
+// back, the active tab keeps its identity and document, and a stale serial
+// for a live tab cannot replace what the user is reading.
+// qc:BR-037
+func TestApplyNavResultForClosedTabDoesNotResurrect(t *testing.T) {
+	f := newNavTestPath(t)
+	keep := f.tabMgr.Active()
+	keepSess, err := engine.NewSession("<html><body>keep</body></html>", nil, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keepSess.Close()
+	keep.SetSession(keepSess)
+	keep.SetURL("https://keep.example/")
+
+	doomed := f.tabMgr.NewTab()
+	doomedID := doomed.ID()
+	f.tabMgr.SwitchTo(doomedID)
+	f.tabMgr.CloseTab(doomedID)
+
+	late, err := engine.NewSession("<html><body>late</body></html>", nil, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// applyNavResult owns the session for a vanished tab and must close it.
+	f.applyNavResult(navResult{tabID: doomedID, serial: 1, session: late, url: "https://late.example/"})
+
+	if got := f.tabMgr.Count(); got != 1 {
+		t.Fatalf("count = %d after a late result for a closed tab, want 1", got)
+	}
+	if got := f.tabMgr.Active(); got != keep {
+		t.Fatalf("active = %v after a late result for a closed tab, want the surviving tab", got)
+	}
+	if got := keep.URL(); got != "https://keep.example/" {
+		t.Fatalf("surviving tab URL = %q, want unchanged", got)
+	}
+	if got := keep.Session(); got != keepSess {
+		t.Fatal("surviving tab document was replaced by a late result")
+	}
+
+	stale, err := engine.NewSession("<html><body>stale</body></html>", nil, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.applyNavResult(navResult{tabID: keep.ID(), serial: 99, session: stale, url: "https://stale.example/"})
+	if got := keep.URL(); got != "https://keep.example/" {
+		t.Fatalf("live tab URL = %q after a superseded result, want unchanged", got)
+	}
+	if got := keep.Session(); got != keepSess {
+		t.Fatal("live tab document was replaced by a superseded result")
+	}
+}
+
 func TestInspectInternalPageNetworkActivity(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}

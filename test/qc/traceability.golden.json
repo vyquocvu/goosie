@@ -322,8 +322,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_p2_forms_test.go:TestJourneyFormTargetBlankOpensNewTab"
+    ],
     "enforced": false
   },
   {
@@ -371,8 +373,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/tabs/lifecycle_test.go:TestCloseBackgroundTabKeepsActiveState"
+    ],
     "enforced": false
   },
   {
@@ -396,8 +400,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/tabs/manager_test.go:TestCloseLastTabCallsOnCloseLast"
+    ],
     "enforced": false
   },
   {
@@ -406,8 +412,10 @@
     "methods": [
       "CUA"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "internal/tabs/manager_test.go:TestMoveTabFourTabsReordersAndKeepsActive"
+    ],
     "enforced": false
   },
   {
@@ -416,8 +424,15 @@
     "methods": [
       "CUA"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "internal/tabs/draw_test.go:TestDrawTabBarChevrons",
+      "test/tabs/layout_test.go:TestChevronRects",
+      "test/tabs/layout_test.go:TestEnsureTabVisible",
+      "test/tabs/layout_test.go:TestTabScrollPage",
+      "test/tabs/layout_test.go:TestTabStripMinWidthClamp",
+      "test/tabs/layout_test.go:TestTabStripShrinksToFit"
+    ],
     "enforced": false
   },
   {
@@ -465,8 +480,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/internal_pages_test.go:TestApplyNavResultForClosedTabDoesNotResurrect"
+    ],
     "enforced": false
   },
   {
@@ -475,8 +492,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/tabs/lifecycle_test.go:TestConcurrentTabOperations"
+    ],
     "enforced": false
   },
   {
@@ -520,8 +539,10 @@
       "INT",
       "CUA"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/session_restore_test.go:TestCrashRecovery_ActionRestore"
+    ],
     "enforced": false
   },
   {
