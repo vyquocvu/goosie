@@ -1530,11 +1530,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneyRadioGroupSelection"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-101",
@@ -1565,11 +1565,12 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormTabNavigationOrder"
+      "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormTabNavigationOrder",
+      "test/engine/focus_test.go:TestPaintKeyboardTabMovesRing"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-103",
@@ -1578,11 +1579,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormSubmitOnEnterKey"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-104",

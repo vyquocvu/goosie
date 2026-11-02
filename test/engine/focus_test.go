@@ -2456,6 +2456,7 @@ func ringBounds(dl *paint.LayerDL) (frame.Rect, bool) {
 // TestPaintKeyboardTabMovesRing is the GOO-04 visual verification: driving a
 // Tab keypress through PressKey must move the painted focus ring from the
 // first input to the second, proving keyboard → SetFocus → paint end to end.
+// qc:BR-102
 func TestPaintKeyboardTabMovesRing(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
 	if s.Focused() != nil {
