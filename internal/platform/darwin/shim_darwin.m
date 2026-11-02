@@ -29,6 +29,13 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreVideo/CoreVideo.h>
 #import <QuartzCore/QuartzCore.h>
+
+#if __has_include(<UniformTypeIdentifiers/UniformTypeIdentifiers.h>)
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#define GOOSIE_HAS_UNIFORM_TYPE_IDENTIFIERS 1
+#else
+#define GOOSIE_HAS_UNIFORM_TYPE_IDENTIFIERS 0
+#endif
 #include <stdint.h>
 #include <stdatomic.h>
 #import <pthread.h>
@@ -1546,8 +1553,8 @@ int GoosieChooseSavePath(GoosieWindow *gw, const char *directory,
 	return result;
 }
 
-int GoosieChooseFiles(GoosieWindow *gw, const char *accept, int multiple,
-	char **paths, int *count) {
+int GoosieChooseFiles(GoosieWindow *gw, const char *extensions,
+	const char *mimeTypes, int multiple, char **paths, int *count) {
 	if (paths) *paths = NULL;
 	if (count) *count = 0;
 	if (!gw || !paths || !count) return -1;
@@ -1562,20 +1569,63 @@ int GoosieChooseFiles(GoosieWindow *gw, const char *accept, int multiple,
 			[panel setCanChooseFiles:YES];
 			[panel setCanChooseDirectories:NO];
 			[panel setAllowsMultipleSelection:(multiple != 0)];
-			if (accept && accept[0] != '\0') {
-				NSMutableArray<NSString *> *types = [NSMutableArray array];
-				NSString *value = [NSString stringWithUTF8String:accept];
+			NSMutableArray<NSString *> *fileTypes = [NSMutableArray array];
+			NSMutableArray *contentTypes = [NSMutableArray array];
+			BOOL hasMIMETypes = NO;
+			if (extensions && extensions[0] != '\0') {
+				NSString *value = [NSString stringWithUTF8String:extensions];
 				for (NSString *token in [value componentsSeparatedByString:@","]) {
 					NSString *trimmed = [[token stringByTrimmingCharactersInSet:
 						[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
 					if (trimmed.length == 0) continue;
-					// A MIME type is not an extension. Skipping it leaves the panel
-					// unfiltered rather than hiding files the page meant to allow.
-					if ([trimmed containsString:@"/"]) continue;
-					if ([trimmed hasPrefix:@"."]) trimmed = [trimmed substringFromIndex:1];
-					if (trimmed.length > 0) [types addObject:trimmed];
+					[fileTypes addObject:trimmed];
+#if GOOSIE_HAS_UNIFORM_TYPE_IDENTIFIERS
+					if (@available(macOS 11.0, *)) {
+						UTType *type = [UTType typeWithFilenameExtension:trimmed];
+						if (type) [contentTypes addObject:type];
+					}
+#endif
 				}
-				if (types.count > 0) [panel setAllowedFileTypes:types];
+			}
+			if (mimeTypes && mimeTypes[0] != '\0') {
+				hasMIMETypes = YES;
+				NSString *value = [NSString stringWithUTF8String:mimeTypes];
+				for (NSString *token in [value componentsSeparatedByString:@","]) {
+					NSString *trimmed = [[token stringByTrimmingCharactersInSet:
+						[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+					if (trimmed.length == 0) continue;
+#if GOOSIE_HAS_UNIFORM_TYPE_IDENTIFIERS
+					if (@available(macOS 11.0, *)) {
+						UTType *type = nil;
+						// UTType has no wildcard MIME lookup, so map the groups a
+						// page is most likely to name onto their public root type.
+						if ([trimmed isEqualToString:@"image/*"]) {
+							type = [UTType typeWithIdentifier:@"public.image"];
+						} else if ([trimmed isEqualToString:@"audio/*"]) {
+							type = [UTType typeWithIdentifier:@"public.audio"];
+						} else if ([trimmed isEqualToString:@"video/*"]) {
+							type = [UTType typeWithIdentifier:@"public.movie"];
+						} else if ([trimmed isEqualToString:@"text/*"]) {
+							type = [UTType typeWithIdentifier:@"public.text"];
+						} else {
+							type = [UTType typeWithMIMEType:trimmed];
+						}
+						if (type) [contentTypes addObject:type];
+					}
+#endif
+				}
+			}
+#if GOOSIE_HAS_UNIFORM_TYPE_IDENTIFIERS
+			if (@available(macOS 11.0, *)) {
+				if (contentTypes.count > 0) [panel setAllowedContentTypes:contentTypes];
+			} else
+#endif
+			{
+				// The legacy extension list cannot express MIME types. Leave the
+				// panel unfiltered instead of hiding files the page allowed.
+				if (!hasMIMETypes && fileTypes.count > 0) {
+					[panel setAllowedFileTypes:fileTypes];
+				}
 			}
 			if ([panel runModal] != NSModalResponseOK) return;
 			NSArray<NSURL *> *urls = [panel URLs];

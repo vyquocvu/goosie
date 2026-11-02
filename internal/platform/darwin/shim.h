@@ -212,14 +212,15 @@ void GoosieClipboardWriteRich(const char *text, const char *html);
 int GoosieChooseSavePath(GoosieWindow *gw, const char *directory,
 	const char *filename, char **path);
 
-// GoosieChooseFiles presents an AppKit open panel on the main thread. A
-// non-empty accept string restricts the panel to the extensions it names. It
-// returns 1 and a caller-owned buffer of count NUL-terminated paths (back to
-// back, with a trailing NUL) on selection, 0 on user cancellation, and -1 when
-// the window or panel cannot provide a selection. The caller frees the buffer
-// with free().
-int GoosieChooseFiles(GoosieWindow *gw, const char *accept, int multiple,
-	char **paths, int *count);
+// GoosieChooseFiles presents an AppKit open panel on the main thread.
+// extensions is a comma-separated list without leading dots and mimeTypes is a
+// comma-separated list that may contain a wildcard subtype such as image/*.
+// Either may be empty to leave the selection unfiltered. It returns 1 and a
+// caller-owned buffer of count NUL-terminated paths (back to back, with a
+// trailing NUL) on selection, 0 on user cancellation, and -1 when the window or
+// panel cannot provide a selection. The caller frees the buffer with free().
+int GoosieChooseFiles(GoosieWindow *gw, const char *extensions,
+	const char *mimeTypes, int multiple, char **paths, int *count);
 
 // GoosieAxRole is a node's kind, mapped onto the AX tree's roles in Go rather
 // than shared numerically, for the same reason the event kinds are.

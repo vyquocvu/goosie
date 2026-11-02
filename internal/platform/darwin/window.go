@@ -7,7 +7,7 @@ package darwin
 // cmd/go - so this list is the frameworks the shim imports and nothing else.
 // AVFoundation and CoreMedia are here for media_darwin.m's player, which is the
 // same rule: a framework is linked because a file in this directory imports it.
-#cgo LDFLAGS: -framework AppKit -framework Foundation -framework CoreGraphics -framework CoreVideo -framework QuartzCore -framework AVFoundation -framework CoreMedia
+#cgo LDFLAGS: -framework AppKit -framework Foundation -framework CoreGraphics -framework CoreVideo -framework QuartzCore -framework AVFoundation -framework CoreMedia -framework UniformTypeIdentifiers
 #cgo CFLAGS: -I${SRCDIR} -Wno-deprecated-declarations
 #include "shim.h"
 #include <stdlib.h>

@@ -44,15 +44,21 @@ func (w *Window) ChooseFiles(accept string, multiple bool) ([]string, bool, erro
 	if w == nil || w.gw == nil {
 		return nil, false, ErrClosed
 	}
-	cAccept := C.CString(accept)
-	defer C.free(unsafe.Pointer(cAccept))
+	// The panel understands extensions directly and MIME types through UTType.
+	// An accept value it cannot represent leaves the selection unfiltered, as
+	// hiding files the page meant to allow is worse than showing all of them.
+	extensions, mimeTypes := parseFileAccept(accept).nativeFilter()
+	cExtensions := C.CString(extensions)
+	defer C.free(unsafe.Pointer(cExtensions))
+	cMIMETypes := C.CString(mimeTypes)
+	defer C.free(unsafe.Pointer(cMIMETypes))
 	multipleArg := C.int(0)
 	if multiple {
 		multipleArg = 1
 	}
 	var paths *C.char
 	var count C.int
-	switch result := C.GoosieChooseFiles(w.gw, cAccept, multipleArg, &paths, &count); result {
+	switch result := C.GoosieChooseFiles(w.gw, cExtensions, cMIMETypes, multipleArg, &paths, &count); result {
 	case 1:
 		if paths == nil || count <= 0 {
 			return nil, false, errors.New("platform/darwin: open panel returned no paths")
