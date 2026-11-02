@@ -168,7 +168,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneySlowPageStopKeepsDocument",
       "cmd/goosie/tab_lifecycle_test.go:TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument"
@@ -195,7 +195,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneyLinkNavigationInSameTab"
     ],
@@ -262,7 +262,7 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneyReloadPageWithQueryFragment"
     ],
@@ -473,9 +473,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "cmd/goosie/tab_lifecycle_test.go:TestIndependentTabNavigation"
+      "cmd/goosie/tab_lifecycle_test.go:TestIndependentTabNavigation",
+      "cmd/goosie/tab_lifecycle_test.go:TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument"
     ],
     "enforced": true
   },

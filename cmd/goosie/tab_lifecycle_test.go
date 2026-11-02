@@ -117,7 +117,7 @@ func TestCurrentNavResultIsApplied(t *testing.T) {
 	}
 }
 
-// qc:BR-013
+// qc:BR-013 BR-036
 func TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
