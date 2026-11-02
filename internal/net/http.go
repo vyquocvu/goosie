@@ -64,6 +64,12 @@ type RangeStreamingHTTP interface {
 	GetStreamRange(ctx context.Context, url string, start int64) (*StreamResponse, error)
 }
 
+// CacheClearingHTTP is optionally implemented by clients that keep responses
+// in memory and can drop them without being recreated.
+type CacheClearingHTTP interface {
+	ClearCache()
+}
+
 // StreamResponse exposes an HTTP response body as a cancelable stream.
 type StreamResponse struct {
 	StatusCode    int
@@ -493,6 +499,14 @@ func (c *httpClient) NetworkLog() *NetworkLog {
 // Jar returns the client's cookie jar.
 func (c *httpClient) Jar() *CookieJar {
 	return c.jar
+}
+
+// ClearCache drops every cached response. Fresh entries kept for back/forward
+// and repeat navigation are discarded so the next request reaches the network.
+func (c *httpClient) ClearCache() {
+	if c.cache != nil {
+		c.cache.clear()
+	}
 }
 
 // Filter returns the client's ad/tracker filter engine.

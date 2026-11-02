@@ -791,6 +791,10 @@ func buildSettingsPageHTML(f *framePath, rawURL string) (title, htmlContent stri
 	}
 	notice := ""
 	u, err := url.Parse(rawURL)
+	values := url.Values{}
+	if u != nil {
+		values = u.Query()
+	}
 	if err != nil {
 		notice = mgmtNoticeHTML("err", "The settings request could not be parsed.")
 	} else if u.Query().Get("save") == "1" {
@@ -853,6 +857,7 @@ func buildSettingsPageHTML(f *framePath, rawURL string) (title, htmlContent stri
 		b.WriteString(`</div><button id="save-search" class="btn-action" type="submit">Save</button></form>`)
 	}
 	b.WriteString(`<p style="color:#5f6368;font-size:13px;margin-top:12px;">Example: <code>https://www.google.com/search?q={query}</code></p></div>`)
+	b.WriteString(f.buildPrivacySettingsCard(values))
 	return "Settings", internalPageTemplate("settings", "Settings", b.String())
 }
 

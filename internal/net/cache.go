@@ -109,6 +109,15 @@ func (c *responseCache) dropOrderLocked(key string) {
 	}
 }
 
+// clear drops every entry, including responses that have not expired yet.
+func (c *responseCache) clear() {
+	c.mu.Lock()
+	c.entries = make(map[string]*cacheEntry)
+	c.order = nil
+	c.bytes = 0
+	c.mu.Unlock()
+}
+
 // freshnessLifetime computes how long a response may be served from cache. It
 // reads Cache-Control first (rejecting anything non-public or explicitly
 // uncacheable) and falls back to the Expires header. ok is false when the

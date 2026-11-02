@@ -110,6 +110,31 @@ func TestCacheEntryExpires(t *testing.T) {
 	}
 }
 
+func TestClearCacheForcesRevalidation(t *testing.T) {
+	srv, hits := hitCounter(t, map[string]string{"Cache-Control": "public, max-age=60"})
+	client := transport.DefaultClient()
+	defer client.Close()
+	clearer, ok := client.(transport.CacheClearingHTTP)
+	if !ok {
+		t.Fatal("default client does not expose cache clearing")
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := client.Get(context.Background(), srv.URL); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := atomic.LoadInt64(hits); n != 1 {
+		t.Fatalf("server hits before clear = %d, want 1 (second response should be cached)", n)
+	}
+	clearer.ClearCache()
+	if _, err := client.Get(context.Background(), srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if n := atomic.LoadInt64(hits); n != 2 {
+		t.Fatalf("server hits after clear = %d, want 2 (cache clear must force revalidation)", n)
+	}
+}
+
 func TestCachePostNotCached(t *testing.T) {
 	srv, hits := hitCounter(t, map[string]string{"Cache-Control": "public, max-age=60"})
 	client := transport.DefaultClient()

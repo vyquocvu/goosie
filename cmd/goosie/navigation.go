@@ -763,7 +763,7 @@ func (f *framePath) setCrashedSession(st *session.State) {
 // crash loses at most one interval rather than everything since the last
 // navigation. Private and paced runs never write the journal.
 func (f *framePath) runSessionSnapshots(ctx context.Context) {
-	if f == nil || ctx == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" {
+	if f == nil || ctx == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" || f.sessionDisabled.Load() {
 		return
 	}
 	every := f.sessionSnapshotEvery
@@ -787,7 +787,12 @@ func (f *framePath) runSessionSnapshots(ctx context.Context) {
 // process crashes or is killed, the file survives so the session can be
 // recovered on next launch.
 func (f *framePath) saveActiveSession() {
-	if f == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" {
+	if f == nil || f.config.private || f.config.paced() || f.config.sessionActiveFile == "" || f.sessionDisabled.Load() {
+		return
+	}
+	f.sessionMu.Lock()
+	defer f.sessionMu.Unlock()
+	if f.sessionDisabled.Load() {
 		return
 	}
 	if f.crashedSessionState() != nil {

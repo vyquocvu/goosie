@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -152,6 +153,12 @@ type framePath struct {
 	// production interval.
 	sessionSnapshotEvery time.Duration
 	crashedMu            sync.RWMutex
+	// sessionDisabled is set when the user clears browsing data. Without it the
+	// clean-exit save and the crash journal would recreate the session files the
+	// clear just removed. sessionMu serializes a snapshot write with that clear,
+	// so a journal already being written cannot land after the files are gone.
+	sessionDisabled atomic.Bool
+	sessionMu       sync.Mutex
 	// document and docHeight say what the run depicts: the page's URL or "" for a synthetic
 	// scene, and its laid-out height in device pixels. Both go into the artifact, which
 	// otherwise carries timings with no statement of what they were taken on.
@@ -1045,9 +1052,13 @@ func run(args []string) error {
 	}
 	<-stopped
 	if !c.paced() && !c.private {
-		if err := session.Save(c.sessionFile, sessionState(f)); err != nil {
-			fmt.Fprintf(os.Stderr, "goosie: save session: %v\n", err)
+		f.sessionMu.Lock()
+		if !f.sessionDisabled.Load() {
+			if err := session.Save(c.sessionFile, sessionState(f)); err != nil {
+				fmt.Fprintf(os.Stderr, "goosie: save session: %v\n", err)
+			}
 		}
+		f.sessionMu.Unlock()
 		if f.history != nil {
 			if err := f.history.Save(); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: save history: %v\n", err)
