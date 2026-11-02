@@ -54,7 +54,7 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 			return true
 		}
 		var err error
-		if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") {
+		if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") || sess.HasValidityClassRules() {
 			err = sess.RestyleAndReflow(float32(f.contentWidth()))
 		} else {
 			err = sess.Reflow(float32(f.contentWidth()))
@@ -362,7 +362,7 @@ func (f *framePath) reflowAfterControlEdit(tab *tabs.Tab) {
 		return
 	}
 	var err error
-	if sess.HasPseudoClassRule("placeholder-shown") {
+	if sess.HasPseudoClassRule("placeholder-shown") || sess.HasValidityClassRules() {
 		err = sess.RestyleAndReflow(float32(f.contentWidth()))
 	} else if sess.FocusedInputValueDoesNotAffectLayout() {
 		return
@@ -418,7 +418,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			}
 			if !sess.CanDeferControlEditReflow() {
 				var err error
-				if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") {
+				if sess.HasPseudoClassRule("checked") || sess.HasPseudoClassRule("focus") || sess.HasPseudoClassRule("focus-visible") || sess.HasPseudoClassRule("active") || sess.HasValidityClassRules() {
 					err = sess.RestyleAndReflow(float32(f.contentWidth()))
 				} else {
 					err = sess.Reflow(float32(f.contentWidth()))

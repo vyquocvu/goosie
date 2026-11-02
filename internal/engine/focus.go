@@ -1156,7 +1156,14 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 		// session lock because script event handlers can call back into Session.
 		s.opMu.Lock()
 		editable := dom.IsContentEditable(s.focus)
+		composing := s.imeComposing
 		s.opMu.Unlock()
+		// The input method owns Enter while a candidate is marked: it commits or
+		// cancels the composition. Letting it also insert a newline or submit the
+		// form would navigate away from a half-typed word.
+		if action == EditEnter && composing {
+			return false
+		}
 		if editable {
 			if action == EditLeft || action == EditRight || action == EditHome || action == EditEnd {
 				s.moveContentEditableCaret(action)

@@ -1507,6 +1507,7 @@
     ],
     "status": "NOT RUN",
     "tests": [
+      "cmd/goosie/journey_p2_forms_test.go:TestJourneyOnlyActivatedSubmitterIsSent",
       "test/engine/form_submission_test.go:TestFormButtonDefaultTypeSubmits",
       "test/engine/form_submission_test.go:TestFormSubmitterClickAndImplicit",
       "test/engine/form_submission_test.go:TestFormSubmitterWithoutNameOmitted"

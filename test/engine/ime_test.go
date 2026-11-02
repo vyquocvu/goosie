@@ -571,3 +571,42 @@ func TestPaintMarkedTextareaPreview(t *testing.T) {
 		t.Fatalf("textarea painted text = %q, want %q", string(runes), "hiか")
 	}
 }
+
+// Enter during an active composition belongs to the input method: it commits
+// or cancels the candidate, it does not submit the form under the control.
+// Chromium suppresses the implicit submission while isComposing is set, and the
+// same rule keeps a half-typed Vietnamese or Japanese word from navigation.
+func TestEnterDuringCompositionDoesNotSubmit(t *testing.T) {
+	s := newFocusSession(t, `<form id="f" action="/send" method="get">`+
+		`<input id="q" name="q"><button type="submit" name="go" value="1">Go</button></form>`)
+	x, y := clickPoint(t, s, "q")
+	if !s.FocusControl(x, y) {
+		t.Fatal("input should take focus")
+	}
+	if !s.SetMarked("に") {
+		t.Fatal("SetMarked should start a composition")
+	}
+	if s.Edit(engine.EditEnter, '\r') {
+		t.Fatal("Enter during composition must not edit or submit")
+	}
+	assertNoForm(t, s)
+	if got := s.Marked(); got != "に" {
+		t.Fatalf("Marked after suppressed Enter = %q, want the composition intact", got)
+	}
+	if got := s.FocusedText(); got != "に" {
+		t.Fatalf("value after suppressed Enter = %q, want the live composition %q", got, "に")
+	}
+
+	// Once the input method commits, Enter is an ordinary implicit submission
+	// again and carries the committed text.
+	if !s.CommitText("日") {
+		t.Fatal("CommitText should report change")
+	}
+	if !s.Edit(engine.EditEnter, '\r') {
+		t.Fatal("Enter after composition should submit")
+	}
+	sub := popForm(t, s)
+	if sub.Encoded != "q=%E6%97%A5&go=1" {
+		t.Fatalf("submitted data = %q, want the committed value and the implicit submitter", sub.Encoded)
+	}
+}

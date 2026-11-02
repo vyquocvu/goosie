@@ -711,18 +711,6 @@ func TestJourneyFormSubmitOnButtonClick(t *testing.T) {
 	})
 }
 
-// BR-105 stays open: engine gap, reproducer in docs/tasks/TASK-026-FORM-JOURNEYS.md
-// section 7.5. Deliberately untagged - the body skips, and a tag on a skipping
-// test is a coverage claim with no assertion behind it.
-func TestJourneyFormValidationRequired(t *testing.T) {
-	// Catalog BR-105: "Submit form thiếu required/value sai type → validation ngăn submit và giữ nội dung nhập."
-	// BLOCKED [AC-07]: Engine Session.SubmitForm không thực hiện kiểm tra tính hợp lệ (required/type)
-	// trước khi submit, mà dispatch thẳng event submit rồi gửi request GET lên server ngay cả khi
-	// control required rỗng.
-	// Xem chi tiết reproducer tối giản trong docs/tasks/TASK-026-FORM-JOURNEYS.md §Status.
-	t.Skip("BLOCKED by engine: engine lacks HTML5 required/type form validation, submitting anyway")
-}
-
 // qc:BR-106
 func TestJourneyFormMethodAndEncoding(t *testing.T) {
 	var reqMu sync.Mutex
@@ -804,16 +792,4 @@ func TestJourneyFormMethodAndEncoding(t *testing.T) {
 		last := browser.f.loop.Stats().Last
 		return last.Needed == 0 && last.PaintingBytes == 0
 	})
-}
-
-// BR-107 stays open: engine gap, reproducer in docs/tasks/TASK-026-FORM-JOURNEYS.md
-// section 7.5. Deliberately untagged - the body skips, and a tag on a skipping
-// test is a coverage claim with no assertion behind it.
-func TestJourneyFormSubmitterData(t *testing.T) {
-	// Catalog BR-107: "Form có button submit phụ với name/value riêng → chỉ submitter kích hoạt được gửi."
-	// BLOCKED [AC-07]: Engine CollectFormData và SubmitForm bỏ qua name/value của submitter button
-	// (forms.go:72, 88 return false // only successful if used to submit), khiến name/value của nút
-	// submit không bao giờ được gửi lên server.
-	// Xem chi tiết reproducer tối giản trong docs/tasks/TASK-026-FORM-JOURNEYS.md §Status.
-	t.Skip("BLOCKED by engine: engine CollectFormData omits submitter name/value pairs")
 }

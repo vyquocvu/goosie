@@ -3168,6 +3168,13 @@ func (s *Session) HasPseudoClassRule(pseudo string) bool {
 	return false
 }
 
+// HasValidityClassRules reports whether an author sheet styles :valid or
+// :invalid. Those states follow a control's value without changing its box, so
+// a value edit must re-resolve styles even where layout is known to be stable.
+func (s *Session) HasValidityClassRules() bool {
+	return s.HasPseudoClassRule("valid") || s.HasPseudoClassRule("invalid")
+}
+
 // JSMutationSink returns a function suitable for js.Options.OnMutation that
 // records DOM mutations in the session's invalidation batch. The caller passes
 // it to the JS runtime at construction time; when a script mutates the DOM
