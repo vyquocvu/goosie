@@ -12,6 +12,32 @@ import (
 	"testing"
 )
 
+// qc:BR-179
+func TestWPTSuiteIsOptIn(t *testing.T) {
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"", false},
+		{"0", false},
+		{"false", false},
+		{"no", false},
+		{"1", true},
+		{"true", true},
+		{" YES ", true},
+	} {
+		enabled := wptSuiteEnabled(func(key string) string {
+			if key == "WPT_RUN_SUITE" {
+				return tc.value
+			}
+			return ""
+		})
+		if enabled != tc.want {
+			t.Errorf("WPT_RUN_SUITE=%q enabled=%v, want %v", tc.value, enabled, tc.want)
+		}
+	}
+}
+
 // TestWPTSuite runs the configured WPT directories against goosie. With the
 // default config this is the curated set; a full conformance config can select
 // broader roots. It discovers tests, renders them, compares references, and
@@ -29,7 +55,15 @@ import (
 //   - WPT_DIRS: comma-separated list of WPT directories to test (overrides config)
 //   - WPT_INCLUDE: comma-separated WPT-relative paths or file-name patterns
 //   - WPT_SKIP_DOWNLOAD: if "1", skip the WPT download (requires WPT_DIR)
+//   - WPT_RUN_SUITE: if "1", run the conformance suite. Without it the test
+//     skips: the suite needs a checkout (possibly a network download), a built
+//     binary, and far longer than a unit run, so `go test ./...` must not start
+//     it. Use `WPT_RUN_SUITE=1 go test -run TestWPTSuite ./test/wpt/` or
+//     `make wpt` for the conformance run.
 func TestWPTSuite(t *testing.T) {
+	if !wptSuiteEnabled(os.Getenv) {
+		t.Skip("WPT conformance suite is opt-in: set WPT_RUN_SUITE=1 (or run make wpt)")
+	}
 	cfg := loadTestConfig(t)
 
 	// Ensure we have a WPT checkout.

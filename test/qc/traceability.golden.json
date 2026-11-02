@@ -3385,7 +3385,8 @@
     "status": "NOT RUN",
     "tests": [
       "test/gatecheck/release_gate_test.go:TestReleaseGateDefaultListIsTheQCGate",
-      "test/gatecheck/release_gate_test.go:TestReleaseGateFailsWhenOneCommandFails"
+      "test/gatecheck/release_gate_test.go:TestReleaseGateFailsWhenOneCommandFails",
+      "test/wpt/wpt_test.go:TestWPTSuiteIsOptIn"
     ],
     "enforced": true
   },

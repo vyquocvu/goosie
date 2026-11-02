@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // DefaultWPTCommit is the pinned WPT revision the harness tests against.
@@ -190,6 +191,17 @@ type Config struct {
 	// GenerateReferences renders references with goosie itself (for bootstrapping
 	// the golden set when no Chromium renders are available).
 	GenerateReferences bool `json:"generate_references"`
+}
+
+// wptSuiteEnabled reports whether the checkout-backed conformance suite may
+// run. It takes the environment accessor so the opt-in contract is testable
+// without mutating process state.
+func wptSuiteEnabled(getenv func(string) string) bool {
+	switch strings.ToLower(strings.TrimSpace(getenv("WPT_RUN_SUITE"))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 // DefaultConfig returns a Config with sensible defaults.
