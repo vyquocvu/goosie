@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/engine"
 	transport "github.com/vyquocvu/goosie/internal/net"
 )
 
@@ -192,6 +194,122 @@ func TestAddressGuardChecksALiteralAddressWithoutResolving(t *testing.T) {
 	if got := lookups.Load(); got != 0 {
 		t.Errorf("resolved %d times, want 0: an address literal is not a name", got)
 	}
+}
+
+// TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4 covers the spellings of a
+// destination, not just its canonical form. The same loopback endpoint can be
+// written [::1], [::ffff:127.0.0.1], 127.1, 2130706433, 0x7f000001 or
+// 0x7f.0.0.1, and a guard that parsed the URL text itself would have to
+// reimplement every form. This one judges resolved addresses instead, so the
+// spelling never reaches the policy: literals are classified in place, and
+// numeric forms the standard library does not parse as IP literals are resolved
+// (the resolver understands them) and then judged like any other answer.
+// qc:BR-161
+func TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4(t *testing.T) {
+	r := newRebindServer(t, "private")
+	u, err := url.Parse(r.srv.URL)
+	if err != nil {
+		t.Fatalf("httptest URL %q: %v", r.srv.URL, err)
+	}
+	_, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		t.Fatalf("httptest host %q has no port: %v", u.Host, err)
+	}
+
+	literals := []struct {
+		name string
+		url  string
+	}{
+		{"ipv6 loopback", "http://[::1]:" + port + "/"},
+		{"ipv4-mapped ipv6", "http://[::ffff:127.0.0.1]:" + port + "/"},
+		{"unique local ipv6", "http://[fd00::1]:" + port + "/"},
+		{"link-local ipv6", "http://[fe80::1]:" + port + "/"},
+	}
+	for _, tc := range literals {
+		t.Run(tc.name, func(t *testing.T) {
+			r.hits.Store(0)
+			lookup, lookups := lookupFor(map[string][]net.IP{})
+			ctx := transport.WithAddressGuard(context.Background(), transport.AddressGuard{
+				Blocked: engine.AddressBlocked,
+				Lookup:  lookup,
+			})
+			client := transport.DefaultClient()
+			defer client.Close()
+
+			_, err := client.Get(ctx, tc.url)
+			if err == nil {
+				t.Fatalf("%s passed a guard that refuses every non-public address", tc.url)
+			}
+			if !errors.Is(err, transport.ErrBlockedAddress) {
+				t.Errorf("err = %v, want a blocked-address error", err)
+			}
+			if got := lookups.Load(); got != 0 {
+				t.Errorf("resolved %d times, want 0: an address literal is not a name", got)
+			}
+			if got := r.hits.Load(); got != 0 {
+				t.Errorf("the private endpoint served %d requests, want 0", got)
+			}
+		})
+	}
+
+	// These are not IP literals to net.ParseIP, but the resolver accepts them as
+	// numeric IPv4 spellings. The guard must judge what resolution returned, not
+	// the characters in the URL, or each new spelling would be a new hole.
+	for _, host := range []string{"2130706433", "0x7f000001", "0x7f.0.0.1", "017700000001"} {
+		t.Run("encoded "+host, func(t *testing.T) {
+			r.hits.Store(0)
+			lookup, lookups := lookupFor(map[string][]net.IP{host: {net.ParseIP("127.0.0.1")}})
+			ctx := transport.WithAddressGuard(context.Background(), transport.AddressGuard{
+				Blocked: engine.AddressBlocked,
+				Lookup:  lookup,
+			})
+			client := transport.DefaultClient()
+			defer client.Close()
+
+			target := "http://" + host + ":" + port + "/"
+			_, err := client.Get(ctx, target)
+			if err == nil {
+				t.Fatalf("%s passed a guard that refuses the loopback address it resolves to", target)
+			}
+			if !errors.Is(err, transport.ErrBlockedAddress) {
+				t.Errorf("err = %v, want a blocked-address error", err)
+			}
+			if got := lookups.Load(); got != 1 {
+				t.Errorf("resolved %d times, want 1", got)
+			}
+			if got := r.hits.Load(); got != 0 {
+				t.Errorf("the private endpoint served %d requests, want 0", got)
+			}
+		})
+	}
+
+	// 127.1 is the legacy two-part spelling. This client refuses it during URL
+	// validation instead of handing it to the resolver, which is a different
+	// layer answering but the same outcome: no resolution and no connection.
+	t.Run("dotted shorthand rejected before dial", func(t *testing.T) {
+		r.hits.Store(0)
+		lookup, lookups := lookupFor(map[string][]net.IP{})
+		ctx := transport.WithAddressGuard(context.Background(), transport.AddressGuard{
+			Blocked: engine.AddressBlocked,
+			Lookup:  lookup,
+		})
+		client := transport.DefaultClient()
+		defer client.Close()
+
+		_, err := client.Get(ctx, "http://127.1:"+port+"/")
+		if err == nil {
+			t.Fatal("the legacy two-part loopback spelling was accepted")
+		}
+		if !strings.Contains(err.Error(), "invalid IPv4 hostname") {
+			t.Errorf("err = %v, want the validator's invalid-IPv4 refusal", err)
+		}
+		if got := lookups.Load(); got != 0 {
+			t.Errorf("resolved %d times, want 0: the host never reached the resolver", got)
+		}
+		if got := r.hits.Load(); got != 0 {
+			t.Errorf("the private endpoint served %d requests, want 0", got)
+		}
+	})
 }
 
 // TestAddressGuardWithoutAGuardDialsNormally is the control for every case

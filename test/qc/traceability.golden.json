@@ -3102,9 +3102,10 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "test/net/address_guard_test.go:TestAddressGuardChecksALiteralAddressWithoutResolving"
+      "test/net/address_guard_test.go:TestAddressGuardChecksALiteralAddressWithoutResolving",
+      "test/net/address_guard_test.go:TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4"
     ],
     "enforced": true
   },
