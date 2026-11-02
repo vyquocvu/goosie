@@ -354,11 +354,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/tab_lifecycle_test.go:TestBackgroundTabResultLeavesTheForegroundAlone"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-028",
