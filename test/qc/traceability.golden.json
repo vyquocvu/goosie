@@ -1604,7 +1604,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_form_validation_test.go:TestJourneyFormValidationBlocksRequestUntilValid",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneySubmitterNoValidateSkipsValidation",
@@ -1675,7 +1675,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyOnlyActivatedSubmitterIsSent",
       "test/engine/form_submission_test.go:TestFormButtonDefaultTypeSubmits",
