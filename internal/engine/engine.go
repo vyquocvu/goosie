@@ -2302,6 +2302,8 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 }
 
 // FormSubmission represents a form ready to be dispatched by the browser host.
+// Encoded holds the request body exactly as it must be sent; for
+// multipart/form-data that is binary data and Enctype carries the boundary.
 type FormSubmission struct {
 	Action  string
 	Method  string
@@ -2337,7 +2339,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 		return
 	}
 	if !SubmitterNoValidate(submitter) {
-		invalid := ValidateForm(form)
+		invalid := s.validateForm(form)
 		if len(invalid) > 0 {
 			// A blocked submission is the user interaction that promotes
 			// :invalid into :user-invalid for the offending controls.
@@ -2354,7 +2356,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}
-	data := CollectFormData(form, submitter)
+	data := s.collectFormData(form, submitter)
 	method := FormMethodFor(form, submitter)
 	if strings.EqualFold(method, "dialog") {
 		for cur := form.Parent; cur != nil; cur = cur.Parent {
@@ -2372,17 +2374,27 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 	}
 	action := FormActionFor(form, submitter)
 	// GET always uses URL encoding, whatever enctype or formenctype says. A
-	// POST honours text/plain; multipart/form-data has no encoder yet (file
-	// controls are not collected), so it degrades to URL encoding rather than
-	// claiming a body shape the request does not have.
+	// POST honours text/plain and multipart/form-data; anything else, including
+	// a multipart encoder failure, uses URL encoding rather than claiming a body
+	// shape the request does not have.
+	declaredEnctype := FormEnctypeFor(form, submitter)
 	enctype := "application/x-www-form-urlencoded"
 	var encoded string
-	if strings.EqualFold(method, "GET") {
+	switch {
+	case strings.EqualFold(method, "GET"):
 		encoded = EncodeFormURLEncoded(data)
-	} else if FormEnctypeFor(form, submitter) == "text/plain" {
+	case declaredEnctype == "text/plain":
 		enctype = "text/plain"
 		encoded = EncodeFormPlainText(data)
-	} else {
+	case declaredEnctype == "multipart/form-data":
+		boundary, body, err := EncodeFormMultipart(data)
+		if err == nil {
+			enctype = "multipart/form-data; boundary=" + boundary
+			encoded = string(body)
+		} else {
+			encoded = EncodeFormURLEncoded(data)
+		}
+	default:
 		encoded = EncodeFormURLEncoded(data)
 	}
 

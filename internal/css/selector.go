@@ -1427,6 +1427,9 @@ func constraintControlInvalid(n *dom.Node) bool {
 				return true
 			})
 			return !checked
+		case "file":
+			// A file control's value is its FileList, not a text value.
+			return n.InputFileCount == 0
 		}
 	}
 	// The constraint is about what the control currently holds, not the value

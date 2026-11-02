@@ -159,6 +159,10 @@ type Node struct {
 	// from :invalid/:valid. It travels with the document rather than in a
 	// process-wide registry.
 	UserInteracted bool
+	// InputFileCount mirrors the FileList length for a file input so constraint
+	// validation and CSS pseudo-classes can see the selection without reaching
+	// into the scripting runtime.
+	InputFileCount int
 	// PatternMismatch caches the latest native input pattern check for CSS
 	// constraint pseudo-classes, which depend on the same form-control state.
 	PatternMismatch bool

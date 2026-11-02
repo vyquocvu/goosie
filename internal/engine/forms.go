@@ -1,6 +1,10 @@
 package engine
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -14,26 +18,44 @@ const MaxFormControls = 256
 // MaxFormDataBytes bounds the encoded form data payload.
 const MaxFormDataBytes = 1 << 20 // 1 MiB
 
-// FormData is a single name/value pair from a form control.
+// FormFile is a file selected by an <input type="file"> when the submission
+// was assembled.
+type FormFile struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
+// FormData is a single name/value pair from a form control. A file control
+// contributes one entry per selected file with File set; Value carries the
+// filename so URL-encoded and text/plain submissions stay correct.
 type FormData struct {
 	Name  string
 	Value string
+	File  *FormFile
 }
+
+// FileSource returns the files selected on a file input, in FileList order.
+type FileSource func(*dom.Node) []FormFile
 
 // CollectFormData gathers successful controls from a form element.
 // It walks the form's subtree in tree order and collects name/value pairs
 // from input, select, textarea, and button elements.
 // Disabled controls and controls without a name attribute are skipped.
 func CollectFormData(form, submitter *dom.Node) []FormData {
+	return collectFormData(form, submitter, nil)
+}
+
+func collectFormData(form, submitter *dom.Node, files FileSource) []FormData {
 	if form == nil {
 		return nil
 	}
 	var data []FormData
-	collectFromNode(form, form, submitter, &data)
+	collectFromNode(form, form, submitter, files, &data)
 	return data
 }
 
-func collectFromNode(n, form, submitter *dom.Node, data *[]FormData) {
+func collectFromNode(n, form, submitter *dom.Node, files FileSource, data *[]FormData) {
 	if len(*data) >= MaxFormControls {
 		return
 	}
@@ -44,7 +66,8 @@ func collectFromNode(n, form, submitter *dom.Node, data *[]FormData) {
 	} else if n.Element() && isSuccessfulControl(n, form) {
 		name := n.GetAttribute("name")
 		if name != "" {
-			if n.Data == "select" {
+			switch {
+			case n.Data == "select":
 				for _, option := range dom.SelectOptions(n) {
 					if len(*data) >= MaxFormControls {
 						break
@@ -53,15 +76,33 @@ func collectFromNode(n, form, submitter *dom.Node, data *[]FormData) {
 						*data = append(*data, FormData{Name: name, Value: optionValue(option)})
 					}
 				}
-			} else {
+			case isFileInput(n):
+				// A file control always contributes at least one entry; with no
+				// files selected it is an empty filename part.
+				var selected []FormFile
+				if files != nil {
+					selected = files(n)
+				}
+				if len(selected) == 0 {
+					*data = append(*data, FormData{Name: name, File: &FormFile{}})
+				}
+				for i := range selected {
+					file := selected[i]
+					*data = append(*data, FormData{Name: name, Value: file.Filename, File: &file})
+				}
+			default:
 				value := controlSubmissionValue(n)
 				*data = append(*data, FormData{Name: name, Value: value})
 			}
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		collectFromNode(c, form, submitter, data)
+		collectFromNode(c, form, submitter, files, data)
 	}
+}
+
+func isFileInput(n *dom.Node) bool {
+	return n.Data == "input" && strings.EqualFold(n.GetAttribute("type"), "file")
 }
 
 func isSubmitButton(n, form *dom.Node) bool {
@@ -105,6 +146,10 @@ func FirstSubmitButton(form *dom.Node) *dom.Node {
 // ValidateForm returns invalid controls in tree order. This intentionally
 // implements only required, email, and number constraints.
 func ValidateForm(form *dom.Node) []*dom.Node {
+	return validateForm(form, nil)
+}
+
+func validateForm(form *dom.Node, files FileSource) []*dom.Node {
 	if form == nil || form.HasAttribute("novalidate") {
 		return nil
 	}
@@ -156,6 +201,8 @@ func ValidateForm(form *dom.Node) []*dom.Node {
 				if n.Data == "select" {
 					empty = dom.SelectValueMissing(n)
 				}
+			case "file":
+				empty = files == nil || len(files(n)) == 0
 			}
 			if empty {
 				invalidSet[n] = true
@@ -204,7 +251,7 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 			// Only successful if checked
 			return n.InputChecked()
 		case "file":
-			return false // not supported yet
+			return true
 		case "image":
 			return false // not supported yet
 		default:
@@ -285,6 +332,89 @@ func EncodeFormPlainText(data []FormData) string {
 		}
 	}
 	return buf.String()
+}
+
+// EncodeFormMultipart encodes form data as multipart/form-data and returns the
+// boundary the caller must append to the Content-Type header. File entries carry
+// their filename, content type and bytes; text entries are written as UTF-8.
+// The payload is capped like every other form encoding.
+func EncodeFormMultipart(data []FormData) (string, []byte, error) {
+	var token [18]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", nil, fmt.Errorf("could not create multipart boundary: %w", err)
+	}
+	boundary := "----GoosieFormBoundary" + hex.EncodeToString(token[:])
+	closing := len(boundary) + 6 // "--" + boundary + "--\r\n"
+	var body bytes.Buffer
+	for _, d := range data {
+		var header bytes.Buffer
+		header.WriteString("--" + boundary + "\r\nContent-Disposition: form-data; name=\"")
+		header.WriteString(escapeMultipartValue(normalizeFormLineBreaks(d.Name)))
+		header.WriteByte('"')
+		var payload []byte
+		if d.File == nil {
+			header.WriteString("\r\n\r\n")
+			payload = []byte(normalizeFormLineBreaks(d.Value))
+		} else {
+			header.WriteString("; filename=\"")
+			header.WriteString(escapeMultipartValue(d.File.Filename))
+			header.WriteString("\"\r\nContent-Type: ")
+			header.WriteString(cleanMultipartContentType(d.File.ContentType))
+			header.WriteString("\r\n\r\n")
+			payload = d.File.Data
+		}
+		// Check before copying so an oversized file never reaches the buffer.
+		if body.Len()+header.Len()+len(payload)+2+closing > MaxFormDataBytes {
+			return "", nil, fmt.Errorf("multipart form data exceeds %d bytes", MaxFormDataBytes)
+		}
+		body.Write(header.Bytes())
+		body.Write(payload)
+		body.WriteString("\r\n")
+	}
+	body.WriteString("--" + boundary + "--\r\n")
+	return boundary, body.Bytes(), nil
+}
+
+func escapeMultipartValue(value string) string {
+	return strings.NewReplacer("\r", "%0D", "\n", "%0A", "\"", "%22").Replace(value)
+}
+
+func cleanMultipartContentType(value string) string {
+	value = strings.NewReplacer("\r", "", "\n", "").Replace(strings.TrimSpace(value))
+	if value == "" {
+		return "application/octet-stream"
+	}
+	return value
+}
+
+// fileSource returns the live file selections, or nil without a scripting
+// runtime. File selections belong to the runtime's File objects, so a document
+// with scripts disabled can only contribute an empty file part.
+func (s *Session) fileSource() FileSource {
+	if s.jsRT == nil {
+		return nil
+	}
+	return func(n *dom.Node) []FormFile {
+		selected := s.jsRT.SelectedFiles(n)
+		if len(selected) == 0 {
+			return nil
+		}
+		files := make([]FormFile, len(selected))
+		for i, file := range selected {
+			files[i] = FormFile{Filename: file.Name, ContentType: file.ContentType, Data: file.Data}
+		}
+		return files
+	}
+}
+
+// collectFormData gathers submission entries including the files currently
+// selected on file controls.
+func (s *Session) collectFormData(form, submitter *dom.Node) []FormData {
+	return collectFormData(form, submitter, s.fileSource())
+}
+
+func (s *Session) validateForm(form *dom.Node) []*dom.Node {
+	return validateForm(form, s.fileSource())
 }
 
 // FormMethod returns the HTTP method for a form (GET, POST, or dialog).

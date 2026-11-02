@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -131,17 +132,18 @@ func TestSubmitterFormenctypeChoosesBodyEncoding(t *testing.T) {
 }
 
 // qc:BR-106
-func TestUnsuppportedMultipartFallsBackToURLEncoded(t *testing.T) {
+func TestMultipartFormWithoutFileControlsEncodesParts(t *testing.T) {
 	s := newFormSession(t, `<form id="f" action="/send" method="post" enctype="multipart/form-data">
 		<input name="q" value="a b">
 	</form>`)
 	form := s.Doc.ElementByID("f")
 	s.SubmitForm(form, nil)
 	sub := popForm(t, s)
-	if sub.Enctype != "application/x-www-form-urlencoded" {
-		t.Fatalf("enctype = %q, want the urlencoded fallback", sub.Enctype)
+	if !strings.HasPrefix(sub.Enctype, "multipart/form-data; boundary=") {
+		t.Fatalf("enctype = %q, want multipart/form-data with a boundary", sub.Enctype)
 	}
-	if sub.Encoded != "q=a+b" {
-		t.Fatalf("body = %q, want q=a+b", sub.Encoded)
+	parts := multipartParts(t, sub.Enctype, sub.Encoded)
+	if len(parts) != 1 || parts[0].Name != "q" || parts[0].Body != "a b" {
+		t.Fatalf("parts = %+v, want one q=a b part", parts)
 	}
 }

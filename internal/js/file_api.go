@@ -52,6 +52,36 @@ type browserFile struct {
 	isFile       bool
 }
 
+// FileSelection is one file selected by an <input type="file"> at the moment a
+// submission is assembled.
+type FileSelection struct {
+	Name        string
+	ContentType string
+	Data        []byte
+}
+
+// SelectedFiles returns the files selected on a file input, in FileList order.
+// It returns nil for any other node. The data slice is shared with the live
+// File object and must be treated as read-only.
+func (r *Runtime) SelectedFiles(node *dom.Node) []FileSelection {
+	if node == nil || node.Data != "input" || !strings.EqualFold(node.GetAttribute("type"), "file") {
+		return nil
+	}
+	objects := r.inputFiles[node]
+	if len(objects) == 0 {
+		return nil
+	}
+	files := make([]FileSelection, 0, len(objects))
+	for _, object := range objects {
+		file := r.fileValues[object]
+		if file == nil {
+			continue
+		}
+		files = append(files, FileSelection{Name: file.name, ContentType: file.typeValue, Data: file.data})
+	}
+	return files
+}
+
 type fileReaderState struct {
 	reader      *goja.Object
 	readyState  int
@@ -1028,7 +1058,14 @@ func (r *Runtime) setFileListFiles(list *goja.Object, files []*goja.Object) {
 	for node, inputList := range r.inputFileLists {
 		if inputList == list {
 			r.inputFiles[node] = append([]*goja.Object(nil), files...)
+			r.syncInputFileCount(node)
 		}
+	}
+}
+
+func (r *Runtime) syncInputFileCount(node *dom.Node) {
+	if node != nil {
+		node.InputFileCount = len(r.inputFiles[node])
 	}
 }
 
@@ -1043,6 +1080,7 @@ func (r *Runtime) clearInputFiles(node *dom.Node) {
 	}
 	r.setFileListFiles(list, nil)
 	r.inputFiles[node] = nil
+	r.syncInputFileCount(node)
 }
 
 func (r *Runtime) newFileList(files []*goja.Object) *goja.Object {
@@ -1134,6 +1172,7 @@ func (r *Runtime) installFileInputAccessors() {
 		}
 		r.inputFiles[node] = append([]*goja.Object(nil), files...)
 		r.inputFileLists[node] = list
+		r.syncInputFileCount(node)
 		return goja.Undefined()
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 }

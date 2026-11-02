@@ -839,3 +839,106 @@ input:user-valid { background-color: rgb(0, 128, 0); }
 		return ok && strings.HasPrefix(browser.activeURL(), server.URL+"/never")
 	})
 }
+
+// qc:BR-106
+// TestJourneyMultipartFormCarriesSelectedFile drives a real multipart upload:
+// page script selects a File, the host submit path assembles the body from the
+// live FileList, and the server parses the same filename, content type, bytes
+// and text fields. A URL-encoded fallback would be silently wrong here.
+func TestJourneyMultipartFormCarriesSelectedFile(t *testing.T) {
+	type upload struct {
+		contentType string
+		title       string
+		filename    string
+		fileType    string
+		fileData    string
+	}
+	var reqMu sync.Mutex
+	var got *upload
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/upload" {
+			record := &upload{contentType: r.Header.Get("Content-Type")}
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				http.Error(w, "bad multipart: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			record.title = r.FormValue("title")
+			if files := r.MultipartForm.File["attachment"]; len(files) > 0 {
+				header := files[0]
+				record.filename = header.Filename
+				record.fileType = header.Header.Get("Content-Type")
+				file, err := header.Open()
+				if err != nil {
+					http.Error(w, "open part: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				data, err := io.ReadAll(file)
+				file.Close()
+				if err != nil {
+					http.Error(w, "read part: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				record.fileData = string(data)
+			}
+			reqMu.Lock()
+			got = record
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="done">Uploaded</h1></body></html>`)
+			return
+		}
+		fmt.Fprint(w, `<!doctype html><html><body>
+<form id="f" action="/upload" method="POST" enctype="multipart/form-data">
+  <input type="text" id="title" name="title" value="Report">
+  <input type="file" id="upload" name="attachment">
+  <button type="submit" id="send">Upload</button>
+</form>
+<script>
+  (function(){
+    var transfer = new DataTransfer();
+    transfer.items.add(new File(["hello world"], "note.txt", {type: "text/plain"}));
+    document.getElementById("upload").files = transfer.files;
+  })();
+</script>
+</body></html>`)
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	browser.navigateViaAddressBar(t, pageURL)
+	browser.waitFor(t, "multipart form available in AX tree", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "title")
+		return ok && browser.activeURL() == pageURL
+	})
+
+	browser.clickNode(t, "send")
+	browser.waitFor(t, "the upload navigates to its result", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
+		return ok && strings.HasPrefix(browser.activeURL(), server.URL+"/upload")
+	})
+
+	reqMu.Lock()
+	defer reqMu.Unlock()
+	if got == nil {
+		t.Fatal("the server never received the multipart request")
+	}
+	if !strings.HasPrefix(got.contentType, "multipart/form-data; boundary=") {
+		t.Fatalf("Content-Type = %q, want multipart/form-data with a boundary", got.contentType)
+	}
+	if got.title != "Report" {
+		t.Fatalf("title part = %q, want Report", got.title)
+	}
+	if got.filename != "note.txt" {
+		t.Fatalf("filename = %q, want note.txt", got.filename)
+	}
+	if got.fileType != "text/plain" {
+		t.Fatalf("file content type = %q, want text/plain", got.fileType)
+	}
+	if got.fileData != "hello world" {
+		t.Fatalf("file bytes = %q, want hello world", got.fileData)
+	}
+}
