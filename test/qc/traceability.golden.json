@@ -956,8 +956,10 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
+      "test/engine/pseudo_generated_test.go:TestGeneratedContentAppearsOnlyWhenContentIsNotNone",
+      "test/engine/pseudo_generated_test.go:TestGeneratedContentFollowsPseudoState",
       "test/layout/first_letter_test.go:TestFirstLetterEmptyAndElementOnly",
       "test/layout/first_letter_test.go:TestFirstLetterEmptyContent",
       "test/layout/first_letter_test.go:TestFirstLetterFloatLeft",
