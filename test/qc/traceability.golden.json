@@ -448,11 +448,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_tabs_test.go:TestJourneySwitchTabRestoresScroll"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-035",
@@ -461,11 +461,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_tabs_test.go:TestJourneyTabsIndependentHistory"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-036",
