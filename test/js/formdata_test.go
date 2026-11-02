@@ -84,6 +84,8 @@ func TestFormDataConstructionGuardPreventsRecursiveFormSubmission(t *testing.T) 
 	}
 }
 
+// TestFormDataAppend verifies that appended entries are retrievable by name.
+// qc:BR-124
 func TestFormDataAppend(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
 	if err != nil {
@@ -112,6 +114,8 @@ func TestFormDataAppend(t *testing.T) {
 	}
 }
 
+// TestFormDataSet verifies that set replaces every existing entry for a name.
+// qc:BR-124
 func TestFormDataSet(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
 	if err != nil {
@@ -197,6 +201,8 @@ func TestFormDataDelete(t *testing.T) {
 	}
 }
 
+// TestFormDataGetAll verifies that repeated names keep insertion order.
+// qc:BR-124
 func TestFormDataGetAll(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
 	if err != nil {
@@ -267,5 +273,44 @@ func TestFormDataOnWindow(t *testing.T) {
 	val, _ := r.Global("val")
 	if val.Str != "value" {
 		t.Errorf("val = %q, want %q", val.Str, "value")
+	}
+}
+
+// TestFormDataSpecialCharactersPreserved verifies that separators, spaces, and
+// non-ASCII text in a FormData name or value are stored and returned verbatim
+// instead of being reinterpreted as form syntax.
+// qc:BR-124
+func TestFormDataSpecialCharactersPreserved(t *testing.T) {
+	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer r.Close()
+
+	err = r.Run(`
+		var fd = new FormData();
+		fd.append('a&b=c', 'x=y&z');
+		fd.append('vn', 'Nguyễn Văn A');
+		var specialKey = fd.get('a&b=c');
+		var vnValue = fd.get('vn');
+		var specialCount = fd.getAll('a&b=c').length;
+		var entries = 0;
+		fd.forEach(function() { entries++; });
+	`, "test.js")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if val, _ := r.Global("specialKey"); val.Str != "x=y&z" {
+		t.Errorf("value for special key = %q, want %q", val.Str, "x=y&z")
+	}
+	if val, _ := r.Global("vnValue"); val.Str != "Nguyễn Văn A" {
+		t.Errorf("unicode value = %q, want %q", val.Str, "Nguyễn Văn A")
+	}
+	if val, _ := r.Global("specialCount"); val.Num != 1 {
+		t.Errorf("special entry count = %v, want 1", val.Num)
+	}
+	if val, _ := r.Global("entries"); val.Num != 2 {
+		t.Errorf("forEach entries = %v, want 2", val.Num)
 	}
 }

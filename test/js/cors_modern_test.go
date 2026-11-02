@@ -6,6 +6,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
+// TestCORSOriginMatching pins the Access-Control-Allow-Origin decision: a
+// wildcard passes only without credentials, an exact origin passes with them,
+// and a mismatched origin never passes.
+// qc:BR-120
 func TestCORSOriginMatching(t *testing.T) {
 	origin := "https://foo.example.com"
 
@@ -50,6 +54,9 @@ func TestCORSOriginMatching(t *testing.T) {
 	}
 }
 
+// TestCORSPreflightResponseValidation pins which preflight responses permit a
+// cross-origin method and header set.
+// qc:BR-120
 func TestCORSPreflightResponseValidation(t *testing.T) {
 	origin := "https://app.example.com"
 

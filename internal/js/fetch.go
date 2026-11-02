@@ -300,7 +300,9 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 
 	resolvedURL := r.resolveFetchURL(rawURL)
 
-	var opts FetchOptions
+	// fetch(url) with no init still issues a GET; parseFetchOpts also defaults
+	// the method, but it is only called when an init object is present.
+	opts := FetchOptions{Method: "GET"}
 	if len(call.Arguments) >= 2 {
 		var err error
 		opts, err = r.parseFetchOpts(call.Arguments[1])

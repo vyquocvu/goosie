@@ -406,6 +406,7 @@ func TestFetchErrorSentinels(t *testing.T) {
 
 // TestFetchReturnsResponse verifies that a basic fetch resolves with the
 // correct status, headers, and body on the response object.
+// qc:BR-119
 func TestFetchReturnsResponse(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -553,6 +554,7 @@ func TestFetchDrainWaitsForSlowRequest(t *testing.T) {
 
 // TestFetchResponseText verifies that response.text() is available and
 // returns a thenable that resolves with the body string.
+// qc:BR-119
 func TestFetchResponseText(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -885,5 +887,179 @@ func TestFetchMultipleThenChain(t *testing.T) {
 	}
 	if v, ok := r.Global("fetchB"); !ok || v.Num != 201 {
 		t.Errorf("fetchB = %+v, want 201", v)
+	}
+}
+
+// TestFetchSameOriginSettlesOnce verifies that a same-origin fetch settles its
+// promise exactly once and that the body is readable from the resolved
+// response. Draining again must not re-deliver the same settlement.
+// qc:BR-119
+func TestFetchSameOriginSettlesOnce(t *testing.T) {
+	m := &mockFetcher{
+		responses: map[string]*js.FetchResponse{
+			"https://example.test/once": {
+				Status: 200, StatusText: "OK", Body: []byte("settled"),
+				URL: "https://example.test/once", OK: true,
+			},
+		},
+	}
+	r := newFetchRuntime(t, m)
+
+	if err := r.Run(`
+		var resolveCount = 0;
+		var rejectCount = 0;
+		var onceBody = '';
+		fetch('/once').then(function(resp) {
+			resolveCount++;
+			resp.text().then(function(body) { onceBody = body; });
+		}, function() {
+			rejectCount++;
+		});
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	drainFetch(t, r)
+	r.DrainFetchCallbacks()
+
+	if v, ok := r.Global("resolveCount"); !ok || v.Num != 1 {
+		t.Errorf("resolveCount = %+v, want 1", v)
+	}
+	if v, ok := r.Global("rejectCount"); !ok || v.Num != 0 {
+		t.Errorf("rejectCount = %+v, want 0", v)
+	}
+	if v, ok := r.Global("onceBody"); !ok || v.Str != "settled" {
+		t.Errorf("onceBody = %+v, want %q", v, "settled")
+	}
+}
+
+// TestFetchDefaultsToGETWithoutInit pins the method used when fetch is called
+// with no RequestInit: the client must receive GET, not an empty method.
+func TestFetchDefaultsToGETWithoutInit(t *testing.T) {
+	m := &mockFetcher{
+		responses: map[string]*js.FetchResponse{
+			"https://example.test/default-method": {Status: 200, OK: true},
+		},
+	}
+	r := newFetchRuntime(t, m)
+
+	if err := r.Run(`fetch('/default-method').then(function() {});`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	drainFetch(t, r)
+
+	if got := m.lastCall().Method; got != "GET" {
+		t.Errorf("method = %q, want GET", got)
+	}
+}
+
+// methodFetcher answers by URL and HTTP method, so a cross-origin request can
+// pass its preflight OPTIONS and then exercise the actual response check.
+type methodFetcher struct {
+	responses map[string]map[string]*js.FetchResponse
+	mu        sync.Mutex
+	calls     []string
+}
+
+func (f *methodFetcher) Fetch(url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, method+" "+url+" "+fmt.Sprint(headers))
+	f.mu.Unlock()
+	if byMethod, ok := f.responses[url]; ok {
+		if resp, ok := byMethod[method]; ok {
+			return resp, nil
+		}
+	}
+	return &js.FetchResponse{Status: 404, StatusText: "Not Found"}, nil
+}
+
+func corsPreflight(origin string) *js.FetchResponse {
+	return &js.FetchResponse{Status: 204, Headers: map[string]string{
+		"Access-Control-Allow-Origin":  origin,
+		"Access-Control-Allow-Methods": "GET, OPTIONS",
+		"Access-Control-Allow-Headers": "Origin",
+	}}
+}
+
+// TestFetchCrossOriginBlockedResponseDoesNotReachScript verifies that a
+// cross-origin response without Access-Control-Allow-Origin is rejected even
+// after a valid preflight, and that none of its body reaches the page.
+// qc:BR-120
+func TestFetchCrossOriginBlockedResponseDoesNotReachScript(t *testing.T) {
+	m := &methodFetcher{responses: map[string]map[string]*js.FetchResponse{
+		"https://other.test/secret": {
+			"OPTIONS": corsPreflight("https://example.test"),
+			"GET": {
+				Status: 200, StatusText: "OK", OK: true,
+				Body: []byte("TOP-SECRET"),
+			},
+		},
+	}}
+	r := newFetchRuntime(t, m)
+
+	if err := r.Run(`
+		var blockedResolved = false;
+		var blockedRejected = '';
+		var leaked = '';
+		fetch('https://other.test/secret').then(function(resp) {
+			blockedResolved = true;
+			resp.text().then(function(body) { leaked = body; });
+		}, function(err) {
+			blockedRejected = String(err);
+		});
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	drainFetch(t, r)
+
+	if v, ok := r.Global("blockedResolved"); !ok || v.Bool {
+		t.Errorf("blockedResolved = %+v, want false", v)
+	}
+	if v, ok := r.Global("leaked"); !ok || v.Str != "" {
+		t.Errorf("leaked = %+v, want empty (blocked body must not reach script)", v)
+	}
+	if v, ok := r.Global("blockedRejected"); !ok || !strings.Contains(v.Str, "CORS") {
+		t.Errorf("blockedRejected = %+v, want a CORS error", v)
+	}
+}
+
+// TestFetchCrossOriginAllowedResponseReachesScript verifies that a
+// cross-origin response that names the document origin in
+// Access-Control-Allow-Origin is delivered to the page.
+// qc:BR-120
+func TestFetchCrossOriginAllowedResponseReachesScript(t *testing.T) {
+	m := &methodFetcher{responses: map[string]map[string]*js.FetchResponse{
+		"https://other.test/open": {
+			"OPTIONS": corsPreflight("https://example.test"),
+			"GET": {
+				Status: 200, StatusText: "OK", OK: true,
+				Headers: map[string]string{"Access-Control-Allow-Origin": "https://example.test"},
+				Body:    []byte("OPEN"),
+			},
+		},
+	}}
+	r := newFetchRuntime(t, m)
+
+	if err := r.Run(`
+		var allowedBody = '';
+		var allowedResolved = false;
+		var allowedStatus = 0;
+		var allowedErr = '';
+		fetch('https://other.test/open').then(function(resp) {
+			allowedResolved = true;
+			allowedStatus = resp.status;
+			resp.text().then(function(body) { allowedBody = body; });
+		}, function(err) {
+			allowedErr = String(err);
+		});
+	`, "inline"); err != nil {
+		t.Fatal(err)
+	}
+	drainFetch(t, r)
+
+	if v, ok := r.Global("allowedBody"); !ok || v.Str != "OPEN" {
+		status, _ := r.Global("allowedStatus")
+		resolved, _ := r.Global("allowedResolved")
+		errText, _ := r.Global("allowedErr")
+		t.Errorf("allowedBody = %+v, want %q (resolved=%v status=%v err=%q calls=%v)", v, "OPEN", resolved.Bool, status.Num, errText.Str, m.calls)
 	}
 }

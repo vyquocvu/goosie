@@ -7,6 +7,9 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
+// TestLocalStorageOriginScoping verifies that localStorage is shared by two
+// documents of one origin and invisible to a different origin.
+// qc:BR-122
 func TestLocalStorageOriginScoping(t *testing.T) {
 	reg := js.NewOriginStorageRegistry("", false)
 
@@ -64,6 +67,10 @@ func TestLocalStorageOriginScoping(t *testing.T) {
 	}
 }
 
+// TestLocalStorageDiskPersistence verifies that values written in one runtime
+// are readable after a simulated browser restart on the same profile
+// directory, including the length property.
+// qc:BR-121
 func TestLocalStorageDiskPersistence(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "goosie-storage-test-*")
 	if err != nil {
@@ -124,6 +131,9 @@ func TestLocalStorageDiskPersistence(t *testing.T) {
 	}
 }
 
+// TestSessionStorageTabIsolation verifies that sessionStorage written by one
+// tab is not visible to another tab of the same origin.
+// qc:BR-122
 func TestSessionStorageTabIsolation(t *testing.T) {
 	reg := js.NewOriginStorageRegistry("", false)
 
@@ -166,6 +176,9 @@ func TestSessionStorageTabIsolation(t *testing.T) {
 	}
 }
 
+// TestIncognitoStorageNoDisk verifies that private-session storage writes no
+// profile file and is not visible to a normal runtime on the same directory.
+// qc:BR-122
 func TestIncognitoStorageNoDisk(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "goosie-incognito-test-*")
 	if err != nil {
@@ -192,5 +205,25 @@ func TestIncognitoStorageNoDisk(t *testing.T) {
 	entries, _ := os.ReadDir(tempDir)
 	if len(entries) != 0 {
 		t.Errorf("Incognito storage must not write files to disk, found: %v", entries)
+	}
+
+	// A normal registry on the same profile directory must not see the
+	// private-session item.
+	normalReg := js.NewOriginStorageRegistry(tempDir, false)
+	normalRT, err := js.New(js.Options{
+		URL:     "https://private.example.com/",
+		Storage: normalReg,
+	})
+	if err != nil {
+		t.Fatalf("New normal runtime failed: %v", err)
+	}
+	defer normalRT.Close()
+
+	v, err := normalRT.Evaluate("localStorage.getItem('temp')")
+	if err != nil {
+		t.Fatalf("normal getItem failed: %v", err)
+	}
+	if v != "null" {
+		t.Errorf("normal runtime saw private-session item %q, want null", v)
 	}
 }

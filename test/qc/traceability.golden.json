@@ -1717,8 +1717,12 @@
       "INT",
       "SEC"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/fetch_test.go:TestFetchResponseText",
+      "test/js/fetch_test.go:TestFetchReturnsResponse",
+      "test/js/fetch_test.go:TestFetchSameOriginSettlesOnce"
+    ],
     "enforced": false
   },
   {
@@ -1728,8 +1732,13 @@
       "INT",
       "SEC"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/cors_modern_test.go:TestCORSOriginMatching",
+      "test/js/cors_modern_test.go:TestCORSPreflightResponseValidation",
+      "test/js/fetch_test.go:TestFetchCrossOriginAllowedResponseReachesScript",
+      "test/js/fetch_test.go:TestFetchCrossOriginBlockedResponseDoesNotReachScript"
+    ],
     "enforced": false
   },
   {
@@ -1738,8 +1747,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/storage_origin_test.go:TestLocalStorageDiskPersistence"
+    ],
     "enforced": false
   },
   {
@@ -1748,8 +1759,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/storage_origin_test.go:TestIncognitoStorageNoDisk",
+      "test/js/storage_origin_test.go:TestLocalStorageOriginScoping",
+      "test/js/storage_origin_test.go:TestSessionStorageTabIsolation"
+    ],
     "enforced": false
   },
   {
@@ -1768,8 +1783,17 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/js/formdata_test.go:TestFormDataAppend",
+      "test/js/formdata_test.go:TestFormDataGetAll",
+      "test/js/formdata_test.go:TestFormDataSet",
+      "test/js/formdata_test.go:TestFormDataSpecialCharactersPreserved",
+      "test/js/url_test.go:TestURLConstructor",
+      "test/js/url_test.go:TestURLSearchParams",
+      "test/js/url_test.go:TestURLSearchParamsSpecialCharactersRoundTrip",
+      "test/js/url_test.go:TestURLWithBase"
+    ],
     "enforced": false
   },
   {

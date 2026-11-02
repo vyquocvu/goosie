@@ -7,6 +7,9 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
+// TestURLConstructor verifies the URL components parsed from an absolute URL
+// including credentials, port, query, and fragment.
+// qc:BR-124
 func TestURLConstructor(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
 	if err != nil {
@@ -56,6 +59,9 @@ func TestURLConstructor(t *testing.T) {
 	}
 }
 
+// TestURLWithBase verifies that a relative URL resolves against an explicit
+// base URL.
+// qc:BR-124
 func TestURLWithBase(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
 	if err != nil {
@@ -80,6 +86,9 @@ func TestURLWithBase(t *testing.T) {
 	}
 }
 
+// TestURLSearchParams verifies get/has over a decoded query string, including
+// repeated keys and a missing key.
+// qc:BR-124
 func TestURLSearchParams(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
 	if err != nil {
@@ -218,5 +227,57 @@ func TestURLSearchParamsSort(t *testing.T) {
 	val, _ := r.Global("str")
 	if val.Str != "a=1&b=2&c=3" {
 		t.Errorf("sorted = %q, want %q", val.Str, "a=1&b=2&c=3")
+	}
+}
+
+// TestURLSearchParamsSpecialCharactersRoundTrip verifies that separators,
+// spaces, and non-ASCII text survive serialization and parsing without being
+// split into extra parameters or dropped.
+// qc:BR-124
+func TestURLSearchParamsSpecialCharactersRoundTrip(t *testing.T) {
+	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer r.Close()
+
+	err = r.Run(`
+		var single = new URLSearchParams();
+		single.append('only', 'a b&c=d');
+		var singleSerialized = single.toString();
+		var singleParsed = new URLSearchParams(singleSerialized).get('only');
+
+		var multi = new URLSearchParams();
+		multi.append('q', 'a b&c=d');
+		multi.append('name', 'Nguyễn Văn A');
+		var multiSerialized = multi.toString();
+		var multiParsed = new URLSearchParams(multiSerialized);
+		var multiQ = multiParsed.get('q');
+		var multiName = multiParsed.get('name');
+		var paramCount = multiSerialized.split('&').length;
+
+		var fromURL = new URL('https://example.com/s?q=a+b%26c%3Dd').searchParams.get('q');
+	`, "test.js")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if val, _ := r.Global("singleSerialized"); val.Str != "only=a+b%26c%3Dd" {
+		t.Errorf("serialized = %q, want %q", val.Str, "only=a+b%26c%3Dd")
+	}
+	if val, _ := r.Global("singleParsed"); val.Str != "a b&c=d" {
+		t.Errorf("parsed = %q, want %q", val.Str, "a b&c=d")
+	}
+	if val, _ := r.Global("multiQ"); val.Str != "a b&c=d" {
+		t.Errorf("multi q = %q, want %q", val.Str, "a b&c=d")
+	}
+	if val, _ := r.Global("multiName"); val.Str != "Nguyễn Văn A" {
+		t.Errorf("multi name = %q, want %q", val.Str, "Nguyễn Văn A")
+	}
+	if val, _ := r.Global("paramCount"); val.Num != 2 {
+		t.Errorf("paramCount = %v, want 2 (special characters must not create parameters)", val.Num)
+	}
+	if val, _ := r.Global("fromURL"); val.Str != "a b&c=d" {
+		t.Errorf("URL query = %q, want %q", val.Str, "a b&c=d")
 	}
 }
