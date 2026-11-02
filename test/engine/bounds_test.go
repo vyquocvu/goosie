@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
@@ -62,6 +63,38 @@ func TestSessionRejectsOversizedHTMLBeforeParsing(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "node") || strings.Contains(err.Error(), "depth") {
 		t.Fatalf("error = %q, byte cap was not checked before the tree limits", err)
+	}
+}
+
+// qc:BR-163
+func TestParserStopsAtNodeAndDepthLimits(t *testing.T) {
+	limits := dom.ParseLimits{Nodes: 64, Depth: 8, Attributes: 8, AttributeBytes: 64}
+	if _, err := dom.ParseBounded(strings.Repeat("<br>", limits.Nodes+1), limits); err == nil ||
+		!strings.Contains(err.Error(), "node limit") {
+		t.Fatalf("flat document: err = %v, want the node limit", err)
+	}
+	if _, err := dom.ParseBounded(strings.Repeat("<div>", limits.Depth+1), limits); err == nil ||
+		!strings.Contains(err.Error(), "depth limit") {
+		t.Fatalf("nested document: err = %v, want the depth limit", err)
+	}
+}
+
+// qc:BR-163
+func TestSessionRejectsOverdeepProvidedTree(t *testing.T) {
+	// A MIME-aware parser can hand over a tree the HTML parser never built, so
+	// the depth bound has to be checked again before styling recurses into it.
+	// The validator stops at the first node past the limit, which is what keeps
+	// this from becoming a stack overflow on a deeply linked tree.
+	doc := dom.NewDocument()
+	parent := &doc.Node
+	for i := 0; i < 2000; i++ {
+		n := &dom.Node{ID: doc.AllocateNodeID(), Type: dom.NodeElement, Data: "div", Doc: doc}
+		parent.AppendChild(n)
+		parent = n
+	}
+	_, err := engine.NewSession("", nil, 400, engine.WithDocumentTree(doc))
+	if err == nil || !strings.Contains(err.Error(), "document tree depth limit") {
+		t.Fatalf("err = %v, want the pre-parsed tree admission limit", err)
 	}
 }
 

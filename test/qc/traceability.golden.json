@@ -3130,8 +3130,10 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
+      "test/engine/bounds_test.go:TestParserStopsAtNodeAndDepthLimits",
+      "test/engine/bounds_test.go:TestSessionRejectsOverdeepProvidedTree",
       "test/engine/bounds_test.go:TestSessionRejectsUnboundedInput"
     ],
     "enforced": true
