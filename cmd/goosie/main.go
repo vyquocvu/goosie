@@ -159,6 +159,9 @@ type framePath struct {
 	// so a journal already being written cannot land after the files are gone.
 	sessionDisabled atomic.Bool
 	sessionMu       sync.Mutex
+	// scriptTimeout overrides js.DefaultTimeout for this run. Zero keeps the
+	// default; tests shorten it so a 5-second watchdog does not cost 5 seconds.
+	scriptTimeout time.Duration
 	// document and docHeight say what the run depicts: the page's URL or "" for a synthetic
 	// scene, and its laid-out height in device pixels. Both go into the artifact, which
 	// otherwise carries timings with no statement of what they were taken on.

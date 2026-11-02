@@ -125,6 +125,11 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 - **Hệ quả đo được:** mọi reveal cần thời gian (`$('#form1').fadeIn(200)` của gov.vn là ví dụ đo thật duy nhất hiện có) không có cơ hội chạy trong sweep, kể cả khi binding đã đủ API.
 - **Quyết định ghi ở đây thay vì sửa ngay:** bật pump trong chế độ paced sẽ đổi **toàn bộ** đường chuẩn của các cổng đo đang tham chiếu nhau, nên theo Bước 2 của TASK-039, nhánh này được ghi vào roadmap và **defect để mở**, không hạ mức nghiêm trọng. Chưa đo blast radius; cần một task riêng với số liệu hai lần chạy trước/sau.
 
+**Trạng thái "Unresponsive Script" (cập nhật 2026-11-02):**
+- **Đã có trong mã:** `js.Runtime` phân biệt deadline của host với `Interrupt()` thủ công qua `TimedOut`/`TakeTimedOut`, nên điều hướng rời trang không bị báo nhầm là trang treo. `engine.Session` ghi `ScriptError.TimedOut`, đếm `ScriptTimeoutCount` cho script parser/defer/module, lifecycle event, và cả callback timer/RAF/event mà trước đây nuốt lỗi trong `Tick`. Khi một lượt load hoặc pump phát hiện timeout, chrome thay nội dung tab bằng prompt `goosie://unresponsive`: nêu script đã bị dừng sau 5 giây và cho hai lựa chọn — tải lại không chạy script, hoặc tải lại với giới hạn 30 giây. Hành động được route ngay trong `loadDocumentCtx`, không qua mạng và không ghi history cho lượt bị chặn.
+- **Kiểm thử tự động:** `test/js/timeout_state_test.go` xác nhận timeout báo đúng một lần, host `Interrupt` không bị tính là timeout, timer callback được đánh dấu; `test/engine/script_timeout_test.go` xác nhận script parser và timer qua `PumpJS` tăng đúng bộ đếm và lần pump thứ hai không đếm lại; `cmd/goosie/unresponsive_page_test.go` xác nhận trang chậm hiển thị prompt thay vì nội dung, hai action đi đúng policy (tắt script / 30 giây), URL không phải HTTP bị từ chối, và trang bình thường không bị prompt.
+- **Còn thiếu:** goja không có checkpoint nên script đã bị interrupt không thể resume; prompt xuất hiện sau khi engine đã dừng script chứ không phải hộp thoại chặn trước khi dừng như trình duyệt cũ. Với timeout sau khi trang đã hiển thị, toàn bộ trang được thay bằng prompt thay vì giữ nội dung đã render; chưa kiểm chứng CUA trên macOS.
+
 **Cổng P2:** các luồng đã công bố chạy lặp lại được trong bộ kiểm thử tự động và qua ứng dụng native. Không dùng tỷ lệ WPT chung để thay cho kết quả hành trình người dùng.
 
 ### P3 — Tiện ích và hoàn thiện sản phẩm
@@ -139,4 +144,4 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 - Chính sách origin, cookie, tải xuống và dữ liệu riêng tư đi cùng tính năng dùng chúng. Rủi ro phát hành đã được chủ sản phẩm chấp nhận trong [bản lịch sử](roadmap-v2-history.md); roadmap UX này không tự thay đổi quyết định phát hành đó.
 - Color emoji: font bitmap màu (sbix/COLR như Apple Color Emoji) chưa được thư viện font hiện tại (golang.org/x/image/font/opentype) rasterize; glyph thiếu hiện được thay thế bằng tofu có advance ổn định 1em để giữ layout và không nuốt ký tự.
 
-**Việc bắt đầu tiếp theo:** P0 FR-JS-06 (prompt "Unresponsive Script" cho script vượt 5000ms, thay vì chỉ interrupt im lặng) và kiểm chứng CUA khi có phiên macOS có display.
+**Việc bắt đầu tiếp theo:** P1 download robustness — tự tải lại từ đầu khi server trả `200` thay vì `206` cho yêu cầu Range, và hiển thị tiến độ xác định khi thiếu `Content-Length`. Các mục P0 còn lại (CUA native macOS) vẫn BLOCKED vì phiên kiểm thử không có display.

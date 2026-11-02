@@ -898,6 +898,8 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 		return buildFlagsPageHTML(f, rawURL)
 	case "settings":
 		return buildSettingsPageHTML(f, rawURL)
+	case "unresponsive":
+		return buildUnresponsivePageHTML(rawURL)
 	default:
 		// Index page listing available internal pages
 		body := `<div class="card">

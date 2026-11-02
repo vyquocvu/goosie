@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
@@ -60,7 +61,11 @@ func (r *Runtime) timeout() time.Duration {
 // when the bound fires. Non-interrupt failures pass through untouched, so
 // callers keep their existing error semantics and only add the stop rule.
 func (r *Runtime) callBounded(fn func() (goja.Value, error)) (goja.Value, error) {
-	t := time.AfterFunc(r.timeout(), func() { r.vm.Interrupt(ErrInterrupted) })
+	var fired atomic.Bool
+	t := time.AfterFunc(r.timeout(), func() {
+		fired.Store(true)
+		r.vm.Interrupt(ErrInterrupted)
+	})
 	defer t.Stop()
 	r.scriptExecutionDepth++
 	var v goja.Value
@@ -74,6 +79,12 @@ func (r *Runtime) callBounded(fn func() (goja.Value, error)) (goja.Value, error)
 	}
 	var ie *goja.InterruptedError
 	if errors.As(err, &ie) {
+		// Only the deadline makes this a timeout. A host Interrupt lands in
+		// the same error type but must not be reported as an unresponsive
+		// script.
+		if fired.Load() {
+			r.timedOut.Store(true)
+		}
 		return v, ErrInterrupted
 	}
 	return v, err
@@ -308,6 +319,11 @@ type Runtime struct {
 	timerNesting             int
 	scriptExecutionDepth     int
 	testDriverTrustedClick   bool
+	// timedOut records that the host's own deadline stopped user code. It is
+	// separate from Interrupt so a navigation or tab close is not reported to
+	// the user as an unresponsive page. Take clears the flag once the host has
+	// attributed it to one script.
+	timedOut atomic.Bool
 
 	// broadcastState lives here rather than in the goja global because worker
 	// goroutines read it while the parent runtime may be executing user code.
@@ -3716,7 +3732,9 @@ func (r *Runtime) Run(src, sourceURL string) error {
 	// Arm the timeout interrupt. It stays armed across the microtask
 	// checkpoint below so a self-perpetuating reaction chain ends in
 	// ErrInterrupted rather than a hang.
+	var fired atomic.Bool
 	timer := time.AfterFunc(timeout, func() {
+		fired.Store(true)
 		r.vm.Interrupt(ErrInterrupted)
 	})
 
@@ -3742,9 +3760,17 @@ func (r *Runtime) Run(src, sourceURL string) error {
 	}
 	timer.Stop()
 	if runErr != nil {
+		var ie *goja.InterruptedError
+		if fired.Load() && errors.As(runErr, &ie) {
+			r.timedOut.Store(true)
+		}
 		return r.mapError(runErr, sourceURL)
 	}
 	if drainErr != nil {
+		var ie *goja.InterruptedError
+		if fired.Load() && errors.As(drainErr, &ie) {
+			r.timedOut.Store(true)
+		}
 		return drainErr
 	}
 	r.flushIFrameLoads()
@@ -3770,7 +3796,9 @@ func (r *Runtime) Evaluate(expr string) (string, error) {
 		timeout = DefaultTimeout
 	}
 
+	var fired atomic.Bool
 	timer := time.AfterFunc(timeout, func() {
+		fired.Store(true)
 		r.vm.Interrupt(ErrInterrupted)
 	})
 	defer timer.Stop()
@@ -3782,6 +3810,10 @@ func (r *Runtime) Evaluate(expr string) (string, error) {
 	val, err := r.vm.RunProgram(prog)
 	_ = r.drainMicrotasks()
 	if err != nil {
+		var ie *goja.InterruptedError
+		if fired.Load() && errors.As(err, &ie) {
+			r.timedOut.Store(true)
+		}
 		return "", r.mapError(err, "eval")
 	}
 	if val == nil || goja.IsUndefined(val) {
@@ -3893,6 +3925,19 @@ func (r *Runtime) Title() string {
 // Interrupt stops a Run in progress, from any goroutine.
 func (r *Runtime) Interrupt() {
 	r.vm.Interrupt(ErrInterrupted)
+}
+
+// TimedOut reports whether the runtime's own deadline stopped user code since
+// the last TakeTimedOut. A host Interrupt does not set it, so a navigation or
+// tab close cannot be mistaken for a runaway page.
+func (r *Runtime) TimedOut() bool {
+	return r != nil && r.timedOut.Load()
+}
+
+// TakeTimedOut reports and clears the timeout flag, so one runaway script is
+// attributed once even when several call paths observe the interrupt.
+func (r *Runtime) TakeTimedOut() bool {
+	return r != nil && r.timedOut.Swap(false)
 }
 
 // Close releases the realm. Run after Close reports ErrClosed.

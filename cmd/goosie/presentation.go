@@ -59,6 +59,17 @@ func (f *framePath) pumpJS() bool {
 	if !sess.PumpJS(float32(f.config.width)) {
 		return false
 	}
+	// A callback that ran past the deadline was stopped by the engine. Replace
+	// the page with the prompt so the user chooses what happens next instead of
+	// the tab silently swallowing the runaway.
+	if sess.HasScriptTimeout() {
+		tab.Nav.Mu.Lock()
+		serial := tab.Nav.Serial
+		tab.Nav.Mu.Unlock()
+		if f.installUnresponsivePrompt(tab, tab.URL(), sess.ScriptTimeoutCount(), serial, sess) {
+			return true
+		}
+	}
 	f.repaintTab(tab, frame.Rect{})
 	return true
 }

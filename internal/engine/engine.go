@@ -240,6 +240,10 @@ type Session struct {
 	scriptErrMu    sync.Mutex
 	scriptErrs     []ScriptError
 	scriptErrTotal int
+	// scriptTimeoutTotal counts deadline stops specifically, so the chrome can
+	// prompt without matching error text. Kept under the same lock as the
+	// error window because it is written by the same call path.
+	scriptTimeoutTotal int
 
 	// jsNodeBudget gates script-driven DOM insertions against this document's
 	// admission caps (node count, depth, attributes) before they happen, so a
@@ -776,6 +780,9 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 			return nil, err
 		}
 	}
+	// Lifecycle callbacks discard their errors by design, so a deadline stop in
+	// DOMContentLoaded or load would otherwise leave no trace in this session.
+	s.noteScriptTimeout()
 	return s, nil
 }
 
@@ -3035,6 +3042,9 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	if s.jsRT.HasPendingRAF() {
 		s.jsRT.TickRAF(time.Now())
 	}
+	// Timer and animation-frame callbacks swallow their interrupt errors, so
+	// this is where a deadline stop becomes session state the chrome can act on.
+	s.noteScriptTimeout()
 	// Attribute changes made by timer or message callbacks can queue new
 	// iframe navigations after the document's initial load. Process those
 	// navigations as part of the event-loop pump so their child scripts and

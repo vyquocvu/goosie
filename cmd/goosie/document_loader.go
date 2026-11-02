@@ -73,6 +73,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var clipboardProvider js.ClipboardProvider
 	var mediaBackend media.Backend
 	var savePathPicker platform.SavePathPicker
+	var policy scriptPolicy
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -95,6 +96,8 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			mediaBackend = v
 		case platform.SavePathPicker:
 			savePathPicker = v
+		case scriptPolicy:
+			policy = v
 		}
 	}
 	if isViewSource && stream != nil {
@@ -551,7 +554,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 	}
 	var rt *js.Runtime
-	if jsAllowed {
+	if jsAllowed && !policy.disabled {
 		var rtErr error
 		rt, rtErr = js.New(js.Options{
 			URL:                      resp.URL,
@@ -564,6 +567,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			SessionID:                sessionID,
 			DarkMode:                 appMode.dark,
 			HighContrast:             appMode.highContrast,
+			Timeout:                  policy.timeout,
 		})
 		if rtErr != nil {
 			fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
@@ -593,7 +597,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		imageOption(deferImages, resp.URL, imageFetcher),
 		fontOption(deferFonts, resp.URL, fontFetcher, fonts),
 	}
-	if userscriptMgr != nil && jsAllowed {
+	if userscriptMgr != nil && jsAllowed && !policy.disabled {
 		start := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentStart)
 		end := userscriptMgr.MatchingScripts(resp.URL, userscript.RunAtDocumentEnd)
 		matched := append(start, end...)

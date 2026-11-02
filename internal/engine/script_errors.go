@@ -28,6 +28,10 @@ type ScriptError struct {
 	Source  string
 	Line    int
 	Message string
+	// TimedOut marks the exception as the host's deadline stopping user code,
+	// not a script that threw. The chrome turns it into the unresponsive-script
+	// prompt instead of a console line.
+	TimedOut bool
 }
 
 func (e ScriptError) String() string {
@@ -48,9 +52,18 @@ func (s *Session) recordScriptError(err error) {
 	if source == "" {
 		source = "script"
 	}
+	// The runtime flags its own deadline, and clearing it here attributes the
+	// stop to this error exactly once. A host Interrupt leaves the flag clear.
+	timedOut := false
+	if errors.Is(err, js.ErrInterrupted) {
+		timedOut = s.jsRT.TakeTimedOut()
+	}
 	s.scriptErrMu.Lock()
 	defer s.scriptErrMu.Unlock()
 	s.scriptErrTotal++
+	if timedOut {
+		s.scriptTimeoutTotal++
+	}
 	if len(s.scriptErrs) >= MaxScriptErrors {
 		return
 	}
@@ -65,7 +78,7 @@ func (s *Session) recordScriptError(err error) {
 		// invalid bytes on the report, so the tail is cleaned after the cut.
 		message = strings.ToValidUTF8(message[:maxScriptErrorMessage], "") + "..."
 	}
-	s.scriptErrs = append(s.scriptErrs, ScriptError{Source: source, Line: line, Message: message})
+	s.scriptErrs = append(s.scriptErrs, ScriptError{Source: source, Line: line, Message: message, TimedOut: timedOut})
 }
 
 // ScriptErrors returns the retained exceptions, in the order the document
@@ -94,4 +107,31 @@ func (s *Session) ScriptErrorCount() int {
 	s.scriptErrMu.Lock()
 	defer s.scriptErrMu.Unlock()
 	return s.scriptErrTotal
+}
+
+// ScriptTimeoutCount is how many times the host deadline stopped user code in
+// this document. A non-zero count is what the chrome turns into the
+// unresponsive-script prompt.
+func (s *Session) ScriptTimeoutCount() int {
+	if s == nil {
+		return 0
+	}
+	s.scriptErrMu.Lock()
+	defer s.scriptErrMu.Unlock()
+	return s.scriptTimeoutTotal
+}
+
+// HasScriptTimeout reports whether the document ran past the script deadline.
+func (s *Session) HasScriptTimeout() bool {
+	return s.ScriptTimeoutCount() > 0
+}
+
+// noteScriptTimeout attributes a deadline stop that no Run caller reported.
+// Timer, animation-frame and event callbacks discard their errors on purpose,
+// so the runtime's flag is the only evidence they ran too long.
+func (s *Session) noteScriptTimeout() {
+	if s == nil || s.jsRT == nil || !s.jsRT.TimedOut() {
+		return
+	}
+	s.recordScriptError(js.ErrInterrupted)
 }

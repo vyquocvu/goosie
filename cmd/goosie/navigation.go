@@ -182,8 +182,15 @@ func (f *framePath) navigateTabTransition(rawURL string, transition history.Tran
 
 // loadDocumentCtx loads an internal page (goosie://) or a network/file resource.
 func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+	policy := scriptPolicy{timeout: f.scriptTimeout}
 	if strings.HasPrefix(strings.ToLower(u), "goosie://") {
-		return f.renderInternalPage(ctx, u, viewportW, viewportH, scale)
+		// The unresponsive prompt's actions reload the page under a chosen
+		// script budget; every other goosie:// URL is an internal page.
+		target, promptPolicy, ok := unresponsiveScriptPolicy(u)
+		if !ok {
+			return f.renderInternalPage(ctx, u, viewportW, viewportH, scale)
+		}
+		u, policy = target, promptPolicy
 	}
 	if client == nil {
 		client = f.client
@@ -200,7 +207,7 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 		}
 	}
 	appMode := appearanceMode{dark: f.isDarkMode(), highContrast: f.isHighContrast()}
-	extra := []any{f.downloads, storage, tabID, appMode, f.userscripts, f.perms, broadcastHub, f.mediaBackend}
+	extra := []any{f.downloads, storage, tabID, appMode, f.userscripts, f.perms, broadcastHub, f.mediaBackend, policy}
 	if clipboard := platform.NewClipboard(); clipboard != nil {
 		extra = append(extra, clipboard)
 	}
@@ -316,6 +323,15 @@ func (f *framePath) applyNavResult(result navResult) {
 			}
 		}
 		return
+	}
+
+	// A script that ran past its deadline is not a page the user chose to
+	// display. Show the unresponsive-script prompt instead of committing it;
+	// its actions decide how the page is retried.
+	if result.session != nil && result.session.HasScriptTimeout() {
+		if f.installUnresponsivePrompt(tab, result.url, result.session.ScriptTimeoutCount(), result.serial, result.session) {
+			return
+		}
 	}
 
 	// Inspect the result document before publishing it to the active tab. Once
