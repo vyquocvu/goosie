@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -1072,40 +1073,149 @@ func (f *framePath) ensureActiveTabVisible() {
 	f.tabMgr.SetTabScroll(tabs.EnsureTabVisible(idx, n, w, f.tabMgr.TabScroll()), n, w)
 }
 
+// releaseTabState stops a tab's in-flight navigation and closes the document
+// behind it. Batch closures must do this for every tab they remove, exactly as
+// closing one tab does, or the loads keep running against tabs nothing paints.
+func releaseTabState(tab *tabs.Tab) {
+	if tab == nil {
+		return
+	}
+	tab.Nav.Mu.Lock()
+	if tab.Nav.Cancel != nil {
+		tab.Nav.Cancel()
+		tab.Nav.Cancel = nil
+	}
+	tab.Nav.Mu.Unlock()
+	if sess := tab.Session(); sess != nil {
+		sess.Close()
+	}
+}
+
 // closeTab closes a tab by ID and switches to the remaining active tab.
 func (f *framePath) closeTab(id uint64) {
 	if f.tabMgr == nil {
 		return
 	}
 	f.closeFind()
-	if tab := f.tabMgr.TabByID(id); tab != nil {
-		tab.Nav.Mu.Lock()
-		if tab.Nav.Cancel != nil {
-			tab.Nav.Cancel()
-			tab.Nav.Cancel = nil
+	releaseTabState(f.tabMgr.TabByID(id))
+	f.tabMgr.CloseTab(id)
+	f.showActiveTabAfterBatch()
+}
+
+// closeOtherTabs closes every unpinned tab except keepID.
+func (f *framePath) closeOtherTabs(keepID uint64) {
+	if f.tabMgr == nil {
+		return
+	}
+	f.closeFind()
+	for _, tab := range f.tabMgr.Tabs() {
+		if tab.ID() == keepID || tab.Pinned() {
+			continue
 		}
-		tab.Nav.Mu.Unlock()
-		if sess := tab.Session(); sess != nil {
-			sess.Close()
+		releaseTabState(tab)
+	}
+	f.tabMgr.CloseOtherTabs(keepID)
+	f.showActiveTabAfterBatch()
+}
+
+// closeTabsToRight closes every unpinned tab positioned after fromID.
+func (f *framePath) closeTabsToRight(fromID uint64) {
+	if f.tabMgr == nil {
+		return
+	}
+	f.closeFind()
+	tabList := f.tabMgr.Tabs()
+	fromIdx := -1
+	for i, tab := range tabList {
+		if tab.ID() == fromID {
+			fromIdx = i
+			break
 		}
 	}
-	f.tabMgr.CloseTab(id)
-	if f.tabMgr.Count() > 0 {
-		tab := f.tabMgr.Active()
-		f.ensureActiveTabVisible()
-		f.syncTabToToolbar()
-		if tab.Layer() != nil {
-			f.sched.SetPlan(frame.FramePlan{
-				Serial:     tab.Nav.Serial,
-				Layers:     []*frame.Layer{tab.Layer()},
-				Background: tab.BGColor(),
-			})
+	if fromIdx < 0 {
+		return
+	}
+	for _, tab := range tabList[fromIdx+1:] {
+		if tab.Pinned() {
+			continue
 		}
-		f.sched.SetViewport(frame.Viewport{
-			Offset: frame.Point{Y: tab.ScrollY()},
-			Size:   f.config.devSize(),
+		releaseTabState(tab)
+	}
+	f.tabMgr.CloseTabsToRight(fromID)
+	f.showActiveTabAfterBatch()
+}
+
+// toggleTabPin pins or unpins a tab and keeps the reordered strip's active tab
+// on screen.
+func (f *framePath) toggleTabPin(id uint64) {
+	if f.tabMgr == nil {
+		return
+	}
+	f.tabMgr.TogglePin(id)
+	f.ensureActiveTabVisible()
+	f.syncTabToToolbar()
+}
+
+// showActiveTabAfterBatch puts the surviving active tab back on screen after a
+// closure removed one or more tabs.
+func (f *framePath) showActiveTabAfterBatch() {
+	if f.tabMgr == nil || f.tabMgr.Count() == 0 {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil {
+		return
+	}
+	f.ensureActiveTabVisible()
+	f.syncTabToToolbar()
+	if tab.Layer() != nil {
+		f.sched.SetPlan(frame.FramePlan{
+			Serial:     tab.Nav.Serial,
+			Layers:     []*frame.Layer{tab.Layer()},
+			Background: tab.BGColor(),
 		})
-		f.publishAccessibility()
+	}
+	f.sched.SetViewport(frame.Viewport{
+		Offset: frame.Point{Y: tab.ScrollY()},
+		Size:   f.config.devSize(),
+	})
+	f.publishAccessibility()
+}
+
+// handleTabContextMenuAction executes an action chosen from a tab's menu. The
+// tab id travels in Data so the action lands on the tab that was right-clicked.
+func (f *framePath) handleTabContextMenuAction(action, data string) {
+	switch action {
+	case "tab_new":
+		f.newTab()
+		return
+	case "tab_reopen":
+		f.reopenTab()
+		return
+	}
+	id, err := strconv.ParseUint(data, 10, 64)
+	if err != nil || f.tabMgr == nil {
+		return
+	}
+	switch action {
+	case "tab_reload":
+		if f.tabMgr.TabByID(id) != nil {
+			f.switchTab(id)
+			f.reloadTab()
+		}
+	case "tab_duplicate":
+		if f.tabMgr.TabByID(id) != nil {
+			f.switchTab(id)
+			f.duplicateTab()
+		}
+	case "tab_toggle_pin":
+		f.toggleTabPin(id)
+	case "tab_close":
+		f.closeTab(id)
+	case "tab_close_others":
+		f.closeOtherTabs(id)
+	case "tab_close_right":
+		f.closeTabsToRight(id)
 	}
 }
 

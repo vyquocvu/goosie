@@ -1,10 +1,12 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
+	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
 const (
@@ -265,4 +267,27 @@ func BuildContextMenuItems(linkURL, imageURL, selText, focusedText string, isEdi
 	items = append(items, ContextMenuItem{Label: "Print to PDF", Action: "print_pdf"})
 
 	return items
+}
+
+// BuildTabContextMenuItems builds the actions menu for the tab at tabIndex.
+// Every entry carries the tab's id so the host acts on the tab the user
+// right-clicked, not whichever tab is active by the time the menu closes.
+func BuildTabContextMenuItems(tab *tabs.Tab, tabIndex, tabCount int, canReopen bool) []ContextMenuItem {
+	pinLabel := "Pin Tab"
+	if tab.Pinned() {
+		pinLabel = "Unpin Tab"
+	}
+	id := strconv.FormatUint(tab.ID(), 10)
+	return []ContextMenuItem{
+		{Label: "New Tab", Action: "tab_new"},
+		{Separator: true},
+		{Label: "Reload", Action: "tab_reload", Data: id, Disabled: tab.URL() == ""},
+		{Label: "Duplicate", Action: "tab_duplicate", Data: id},
+		{Label: pinLabel, Action: "tab_toggle_pin", Data: id},
+		{Separator: true},
+		{Label: "Close Tab", Action: "tab_close", Data: id},
+		{Label: "Close Other Tabs", Action: "tab_close_others", Data: id, Disabled: tabCount <= 1},
+		{Label: "Close Tabs to the Right", Action: "tab_close_right", Data: id, Disabled: tabIndex >= tabCount-1},
+		{Label: "Reopen Closed Tab", Action: "tab_reopen", Data: id, Disabled: !canReopen},
+	}
 }

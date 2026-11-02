@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +68,7 @@ type chromeWindow struct {
 	contextMenu             *ContextMenu
 	onContextMenu           func(contentX, contentY, winX, winY int32)
 	onContextMenuAction     func(action, data string)
+	onTabMenuAction         func(action, data string)
 	onPrintPDF              func()
 	onAccessibilitySetValue func(contentX, contentY int32, value string) bool
 	onAccessibilityChanged  func()
@@ -607,7 +609,11 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			if ev.Action == surface.PointerPress {
 				if it, ok := cw.contextMenu.HitItem(ev.Pos, cw.sc()); ok {
 					cw.contextMenu.Hide()
-					if cw.onContextMenuAction != nil {
+					if strings.HasPrefix(it.Action, "tab_") {
+						if cw.onTabMenuAction != nil {
+							cw.onTabMenuAction(it.Action, it.Data)
+						}
+					} else if cw.onContextMenuAction != nil {
 						cw.onContextMenuAction(it.Action, it.Data)
 					}
 					return true
@@ -653,6 +659,11 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				switch {
 				case ev.Action == surface.PointerPress && ev.Button == surface.ButtonLeft:
 					cw.handleTabBarPress(ev.Pos)
+					return true
+				case ev.Action == surface.PointerPress && ev.Button == surface.ButtonRight:
+					if tab := cw.tabAt(ev.Pos); tab != nil {
+						cw.showTabMenuAt(tab.ID(), ev.Pos)
+					}
 					return true
 				case ev.Action == surface.PointerMotion && ev.Button == surface.ButtonLeft:
 					cw.handleTabBarDrag(ev.Pos)
@@ -917,6 +928,62 @@ func (cw *chromeWindow) stripGeom() (tabList []*tabs.Tab, n, stripW, stripOff in
 		stripOff = max
 	}
 	return tabList, n, stripW, stripOff
+}
+
+// tabAt maps a window point onto the tab painted under it. It shares TabRect
+// and the clamped strip offset with drawing and left-press hit testing, so a
+// right press targets the same tab a left press would.
+func (cw *chromeWindow) tabAt(pos frame.Point) *tabs.Tab {
+	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
+	tabList, n, stripW, stripOff := cw.stripGeom()
+	if stripW <= 0 {
+		return nil
+	}
+	for i := range tabList {
+		r := tabs.TabRect(i, stripOff, n, stripW)
+		if lp.X >= r.X0 && lp.X < r.X1 && lp.Y >= r.Y0 && lp.Y < r.Y1 {
+			return tabList[i]
+		}
+	}
+	return nil
+}
+
+// showTabMenuAt opens the actions menu for tabID at a window point, clamped to
+// the window the same way the content menu is.
+func (cw *chromeWindow) showTabMenuAt(tabID uint64, pos frame.Point) {
+	if cw.contextMenu == nil {
+		return
+	}
+	tabList, n, _, _ := cw.stripGeom()
+	index := -1
+	var tab *tabs.Tab
+	for i, t := range tabList {
+		if t.ID() == tabID {
+			index, tab = i, t
+			break
+		}
+	}
+	if tab == nil {
+		return
+	}
+	winW, winH := cw.windowExtent()
+	cw.contextMenu.Show(pos.X, pos.Y, winW, winH,
+		BuildTabContextMenuItems(tab, index, int(n), cw.tabMgr.CanReopenTab()), cw.sc())
+}
+
+// windowExtent reports the last presented window size in device pixels,
+// falling back to the constructed bitmaps and finally the default window.
+func (cw *chromeWindow) windowExtent() (winW, winH int32) {
+	if cw.lastWinW > 0 && cw.lastWinH > 0 {
+		return cw.lastWinW, cw.lastWinH
+	}
+	if cw.outBitmap != nil {
+		return int32(cw.outBitmap.W), int32(cw.outBitmap.H)
+	}
+	if cw.chromeBitmap != nil {
+		return int32(cw.chromeBitmap.W), int32(cw.chromeBitmap.W) * 3 / 4
+	}
+	return 800 * cw.sc(), 600 * cw.sc()
 }
 
 func (cw *chromeWindow) handleTabBarPress(pos frame.Point) {
@@ -1298,20 +1365,7 @@ func (cw *chromeWindow) notifyContentResize() {
 	if cw.Window == nil {
 		return
 	}
-	var winW, winH int32
-	if cw.lastWinW > 0 && cw.lastWinH > 0 {
-		winW = cw.lastWinW
-		winH = cw.lastWinH
-	} else if cw.outBitmap != nil {
-		winW = int32(cw.outBitmap.W)
-		winH = int32(cw.outBitmap.H)
-	} else if cw.chromeBitmap != nil {
-		winW = int32(cw.chromeBitmap.W)
-		winH = int32(cw.chromeBitmap.W) * 3 / 4
-	} else {
-		winW = 800 * cw.sc()
-		winH = 600 * cw.sc()
-	}
+	winW, winH := cw.windowExtent()
 
 	contentDevH := winH - cw.chromeHeight()
 	if contentDevH < 0 {

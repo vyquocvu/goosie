@@ -758,6 +758,7 @@ func (f *framePath) openWindow() error {
 			cw.bookmarks = f.bookmarks
 			cw.onContextMenu = f.handleContextMenu
 			cw.onContextMenuAction = f.handleContextMenuAction
+			cw.onTabMenuAction = f.handleTabContextMenuAction
 			cw.onPrintPDF = f.printActiveTabToPDF
 			cw.onDeviceEmulation = func() { f.cycleDeviceEmulation() }
 			cw.onAccessibilityChanged = f.publishAccessibility
