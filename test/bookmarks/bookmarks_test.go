@@ -9,6 +9,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/bookmarks"
 )
 
+// TestBookmarkToggleAndContains verifies a fresh store starts empty, the first
+// toggle adds the page, and toggling the same URL again removes it instead of
+// creating a duplicate entry.
+// qc:BR-048
 func TestBookmarkToggleAndContains(t *testing.T) {
 	s := bookmarks.NewStore(filepath.Join(t.TempDir(), "bookmarks.json"))
 	if s.Contains("https://example.com") {
@@ -39,6 +43,9 @@ func TestBookmarkListOrder(t *testing.T) {
 	}
 }
 
+// TestBookmarkSaveLoadRoundTrip verifies a saved URL and title survive a
+// process restart with the same profile path.
+// qc:BR-046
 func TestBookmarkSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bookmarks.json")
 	s := bookmarks.NewStore(path)
@@ -104,6 +111,7 @@ func TestBookmarkSaveLeavesNoTempFiles(t *testing.T) {
 // hand-edited file with duplicates, unnavigable empty URLs and far more
 // entries than any real profile loads bounded, deduplicated and clean.
 // Valid stores already satisfy all three, so ordinary profiles are untouched.
+// qc:BR-048
 func TestBookmarksLoadBoundsHostileFile(t *testing.T) {
 	type entry struct {
 		URL   string `json:"url"`

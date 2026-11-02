@@ -52,6 +52,9 @@ func TestBookmarksBarToggle(t *testing.T) {
 	}
 }
 
+// TestBookmarksBarRenderingAndClick verifies a saved bookmark is rendered in
+// the bar and a click hands its stored URL to the navigation entry point.
+// qc:BR-047
 func TestBookmarksBarRenderingAndClick(t *testing.T) {
 	cw2 := &capWin{}
 	fonts, err := raster.NewFonts()

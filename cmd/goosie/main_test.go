@@ -1490,6 +1490,7 @@ func tabIDsOf(list []*tabs.Tab) []uint64 {
 // TestClearDataRemovesTracesKeepsBookmarks pins the v1 clear-data contract:
 // cookies, history and session files go; starred bookmarks stay. Missing
 // files are fine (idempotent); anything else is an error, not a half-clear.
+// qc:BR-053
 func TestClearDataRemovesTracesKeepsBookmarks(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) {
@@ -1530,6 +1531,7 @@ func TestClearDataRemovesTracesKeepsBookmarks(t *testing.T) {
 }
 
 // TestParseClearDataFlag pins the CLI surface of the v1 clear-data control.
+// qc:BR-053
 func TestParseClearDataFlag(t *testing.T) {
 	c, err := parse([]string{"-clear-data"})
 	if err != nil {
@@ -1550,6 +1552,7 @@ func TestParseClearDataFlag(t *testing.T) {
 // TestRunClearDataEndToEnd pins the flag wiring: -clear-data with a scratch
 // HOME clears the default profile's traces and exits success without opening
 // anything.
+// qc:BR-053
 func TestRunClearDataEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

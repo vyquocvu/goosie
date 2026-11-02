@@ -467,6 +467,68 @@ func TestShortcutsDuplicateAndReader(t *testing.T) {
 	}
 }
 
+// TestBookmarkShortcutInvokesBookmarkCommand verifies Cmd+D reaches the
+// bookmark action once and does not collide with Cmd+Shift+D (duplicate tab).
+// qc:BR-046
+func TestBookmarkShortcutInvokesBookmarkCommand(t *testing.T) {
+	bookmarkCalls := 0
+	dupCalls := 0
+	cw := &chromeWindow{
+		onBookmark:     func() { bookmarkCalls++ },
+		onDuplicateTab: func() { dupCalls++ },
+	}
+
+	if handled := cw.handleTabShortcut('d', surface.ModCommand); !handled || bookmarkCalls != 1 {
+		t.Fatalf("Cmd+D: handled=%v bookmarkCalls=%d, want true/1", handled, bookmarkCalls)
+	}
+	if handled := cw.handleTabShortcut('D', surface.ModCommand); !handled || bookmarkCalls != 2 {
+		t.Fatalf("Cmd+D uppercase: handled=%v bookmarkCalls=%d, want true/2", handled, bookmarkCalls)
+	}
+	if handled := cw.handleTabShortcut('d', surface.ModCommand|surface.ModShift); !handled || dupCalls != 1 || bookmarkCalls != 2 {
+		t.Fatalf("Cmd+Shift+D: handled=%v dup=%d bookmark=%d, want true/1/2", handled, dupCalls, bookmarkCalls)
+	}
+}
+
+// TestToggleBookmarkPersistsActivePage verifies the Cmd+D action stores the
+// active tab's URL and title once, survives a reload from disk, and removes
+// rather than duplicating when pressed again on the same page.
+// qc:BR-046 BR-048
+func TestToggleBookmarkPersistsActivePage(t *testing.T) {
+	f := newNavTestPath(t)
+	path := filepath.Join(t.TempDir(), "bookmarks.json")
+	store, err := bookmarks.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.bookmarks = store
+
+	tab := f.tabMgr.Active()
+	const url = "https://example.com/article"
+	const title = "Example Article"
+	tab.SetURL(url)
+	tab.SetTitle(title)
+
+	f.toggleBookmark()
+	got := store.List()
+	if len(got) != 1 || got[0].URL != url || got[0].Title != title {
+		t.Fatalf("after Cmd+D List() = %+v, want one %q/%q", got, url, title)
+	}
+
+	reloaded, err := bookmarks.Load(path)
+	if err != nil {
+		t.Fatalf("reload after Cmd+D: %v", err)
+	}
+	got = reloaded.List()
+	if len(got) != 1 || got[0].URL != url || got[0].Title != title {
+		t.Fatalf("after restart List() = %+v, want the saved bookmark", got)
+	}
+
+	f.toggleBookmark()
+	if got := store.List(); len(got) != 0 {
+		t.Fatalf("second Cmd+D List() = %+v, want the bookmark removed, not duplicated", got)
+	}
+}
+
 func TestInspectInternalPageNetworkActivity(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}

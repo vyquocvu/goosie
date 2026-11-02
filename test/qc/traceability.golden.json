@@ -566,8 +566,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/internal_pages_test.go:TestBookmarkShortcutInvokesBookmarkCommand",
+      "cmd/goosie/internal_pages_test.go:TestToggleBookmarkPersistsActivePage",
+      "test/bookmarks/bookmarks_test.go:TestBookmarkSaveLoadRoundTrip"
+    ],
     "enforced": false
   },
   {
@@ -577,8 +581,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/bookmarks_bar_test.go:TestBookmarksBarRenderingAndClick"
+    ],
     "enforced": false
   },
   {
@@ -587,8 +593,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/internal_pages_test.go:TestToggleBookmarkPersistsActivePage",
+      "test/bookmarks/bookmarks_test.go:TestBookmarkToggleAndContains",
+      "test/bookmarks/bookmarks_test.go:TestBookmarksLoadBoundsHostileFile"
+    ],
     "enforced": false
   },
   {
@@ -644,8 +654,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/main_test.go:TestClearDataRemovesTracesKeepsBookmarks",
+      "cmd/goosie/main_test.go:TestParseClearDataFlag",
+      "cmd/goosie/main_test.go:TestRunClearDataEndToEnd"
+    ],
     "enforced": false
   },
   {
