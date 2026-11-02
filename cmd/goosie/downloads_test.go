@@ -18,6 +18,9 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
+// TestDownloadsManagerIntegration drives a real attachment response through
+// loadURLCtx: the zip must be saved, recorded as completed, and never rendered.
+// qc:BR-149
 func TestDownloadsManagerIntegration(t *testing.T) {
 	dlDir := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

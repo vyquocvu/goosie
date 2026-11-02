@@ -17,6 +17,7 @@ import (
 // TestResponseTextUTF8Passthrough verifies that a UTF-8 body with no
 // charset declaration passes through unchanged. This is the common case:
 // the vast majority of pages are UTF-8 and must not be touched.
+// qc:BR-145
 func TestResponseTextUTF8Passthrough(t *testing.T) {
 	r := &net.Response{
 		Headers: map[string]string{"Content-Type": "text/html"},
@@ -29,6 +30,7 @@ func TestResponseTextUTF8Passthrough(t *testing.T) {
 
 // TestResponseTextExplicitUTF8Charset verifies that an explicit UTF-8
 // charset declaration is honoured and the body passes through.
+// qc:BR-145
 func TestResponseTextExplicitUTF8Charset(t *testing.T) {
 	r := &net.Response{
 		Headers: map[string]string{"Content-Type": "text/html; charset=utf-8"},
@@ -82,6 +84,7 @@ func TestResponseTextLatin1Decodes(t *testing.T) {
 // charset is present, the decoder sniffs a charset= declaration from the
 // first bytes of the body, matching what real pages serve via the
 // http-equiv Content-Type meta tag.
+// qc:BR-146
 func TestResponseTextSniffsCharsetFromMeta(t *testing.T) {
 	// The http-equiv form puts charset= inside a quoted content attribute,
 	// which the sniffer can parse: after "charset=" the value runs until
@@ -107,6 +110,7 @@ func TestResponseTextSniffsCharsetFromMeta(t *testing.T) {
 // charset is treated as UTF-8 (passthrough), which is the safe default:
 // the web is overwhelmingly UTF-8 and an unrecognized name should not
 // trigger a lossy conversion.
+// qc:BR-146
 func TestResponseTextUnknownCharsetPassesThrough(t *testing.T) {
 	body := []byte("hello world")
 	r := &net.Response{
@@ -115,6 +119,22 @@ func TestResponseTextUnknownCharsetPassesThrough(t *testing.T) {
 	}
 	if got := r.Text(); got != "hello world" {
 		t.Errorf("Text() = %q, want raw passthrough for unknown charset", got)
+	}
+}
+
+// TestResponseTextMissingContentTypeUsesHTMLDefault verifies the no-header
+// case: the decoder falls back to the HTML default (windows-1252, tentative)
+// deterministically instead of panicking or guessing per run.
+// qc:BR-146
+func TestResponseTextMissingContentTypeUsesHTMLDefault(t *testing.T) {
+	body := []byte{'<', 'p', '>', 0x93, 'h', 'i', 0x94, '<', '/', 'p', '>'}
+	r := &net.Response{Body: body}
+	got, label, certain := r.TextWithEncoding()
+	if want := "<p>\u201Chi\u201D</p>"; got != want {
+		t.Errorf("Text() = %q, want %q", got, want)
+	}
+	if label != "windows-1252" || certain {
+		t.Errorf("selected encoding = %q (certain %v), want windows-1252 (tentative)", label, certain)
 	}
 }
 

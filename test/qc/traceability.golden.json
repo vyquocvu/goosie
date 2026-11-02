@@ -2739,8 +2739,11 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/charset_test.go:TestResponseTextExplicitUTF8Charset",
+      "test/net/charset_test.go:TestResponseTextUTF8Passthrough"
+    ],
     "enforced": false
   },
   {
@@ -2749,8 +2752,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/charset_test.go:TestResponseTextMissingContentTypeUsesHTMLDefault",
+      "test/net/charset_test.go:TestResponseTextSniffsCharsetFromMeta",
+      "test/net/charset_test.go:TestResponseTextUnknownCharsetPassesThrough"
+    ],
     "enforced": false
   },
   {
@@ -2759,8 +2766,12 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/http_test.go:TestGetAcceptsLargeResponseHeadersUnderTheCap",
+      "test/net/http_test.go:TestGetRejectsMalformedResponseHeaders",
+      "test/net/http_test.go:TestGetRejectsOversizedResponseHeaders"
+    ],
     "enforced": false
   },
   {
@@ -2769,8 +2780,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/net/http_test.go:TestGetReportsTruncatedResponseBody"
+    ],
     "enforced": false
   },
   {
@@ -2779,8 +2792,13 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/downloads_test.go:TestDownloadsManagerIntegration",
+      "cmd/goosie/pdf_viewer_test.go:TestPDFViewer_AttachmentDispositionDownloads",
+      "test/download/download_test.go:TestFileNameFromDisposition",
+      "test/download/download_test.go:TestShouldDownloadAttachment"
+    ],
     "enforced": false
   },
   {
@@ -2789,8 +2807,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/download/download_test.go:TestSaveDeduplicatesNames"
+    ],
     "enforced": false
   },
   {
@@ -2812,8 +2832,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/download/download_test.go:TestSaveUnwritableDirectoryReturnsErrorAndWritesNothing"
+    ],
     "enforced": false
   },
   {
@@ -2822,8 +2844,10 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "internal/download/stream_test.go:TestSaveStreamHandlesFilesLargerThanDocumentLimit"
+    ],
     "enforced": false
   },
   {

@@ -12,11 +12,15 @@ import (
 	"testing"
 )
 
+// TestSaveStreamHandlesFilesLargerThanDocumentLimit verifies that a binary
+// stream well past the document limit lands on disk byte-for-byte with the
+// reported size and digest, and that progress reaches the final byte count.
+// qc:BR-153
 func TestSaveStreamHandlesFilesLargerThanDocumentLimit(t *testing.T) {
 	dir := t.TempDir()
 	body := bytes.Repeat([]byte("d"), (16<<20)+4096)
 	var lastProgress int64
-	path, written, _, err := SaveStream(context.Background(), dir, "large.bin", bytes.NewReader(body), func(n int64) {
+	path, written, sum, err := SaveStream(context.Background(), dir, "large.bin", bytes.NewReader(body), func(n int64) {
 		lastProgress = n
 	})
 	if err != nil {
@@ -31,6 +35,16 @@ func TestSaveStreamHandlesFilesLargerThanDocumentLimit(t *testing.T) {
 	}
 	if info.Size() != int64(len(body)) {
 		t.Fatalf("saved size = %d, want %d", info.Size(), len(body))
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(saved, body) {
+		t.Fatalf("saved bytes differ from the response (%d vs %d bytes)", len(saved), len(body))
+	}
+	if want := Digest(sha256.Sum256(body)); sum != want {
+		t.Fatalf("digest = %s, want %s", sum, want)
 	}
 }
 

@@ -111,6 +111,7 @@ func TestPDFViewer_NavigationRendersViewer(t *testing.T) {
 
 // TestPDFViewer_AttachmentDispositionDownloads tests that Content-Disposition: attachment
 // forces a file download instead of opening the viewer.
+// qc:BR-149
 func TestPDFViewer_AttachmentDispositionDownloads(t *testing.T) {
 	pdfBytes := buildViewerTestPDF("Invoice", "Total Due: $0")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

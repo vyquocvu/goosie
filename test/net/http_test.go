@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -307,6 +308,7 @@ func TestHTTPStopsAndClosesOversizedBody(t *testing.T) {
 // worst across the project's own 20-site live corpus is 6.4 KiB (Wikipedia,
 // including its redirect hop) with a median of 454 B, so the cap is set where a
 // browser's would be rather than at the transport's default.
+// qc:BR-147
 func TestGetRejectsOversizedResponseHeaders(t *testing.T) {
 	const fields = transport.MaxResponseHeaderBytes/1024 + 2
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -329,6 +331,7 @@ func TestGetRejectsOversizedResponseHeaders(t *testing.T) {
 // send. 250 fields is 250 KiB - just under the limit and forty times the
 // largest header block in the corpus - and a response that size must still
 // arrive, with its headers intact, rather than being truncated or refused.
+// qc:BR-147
 func TestGetAcceptsLargeResponseHeadersUnderTheCap(t *testing.T) {
 	const fields = 250
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +354,69 @@ func TestGetAcceptsLargeResponseHeadersUnderTheCap(t *testing.T) {
 	}
 	if !bytes.Equal(resp.Body, []byte("body")) {
 		t.Fatalf("body = %q, want %q", resp.Body, "body")
+	}
+}
+
+// TestGetRejectsMalformedResponseHeaders verifies that a header block which
+// cannot be parsed fails loudly at the transport boundary instead of being
+// accepted with invented fields.
+// qc:BR-147
+func TestGetRejectsMalformedResponseHeaders(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.WriteString(conn, "HTTP/1.1 200 OK\r\nHeaderWithoutColon\r\nContent-Length: 0\r\n\r\n")
+	}()
+
+	client := transport.DefaultClient()
+	defer client.Close()
+	resp, err := client.Get(context.Background(), "http://"+ln.Addr().String()+"/")
+	if err == nil {
+		t.Fatalf("malformed header block accepted with body %q", resp.Body)
+	}
+}
+
+// TestGetReportsTruncatedResponseBody verifies that a server closing the
+// connection before the declared Content-Length arrives surfaces as a body
+// read error rather than a silently short document.
+// qc:BR-148
+func TestGetReportsTruncatedResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("short"))
+	}))
+	defer server.Close()
+
+	client := transport.DefaultClient()
+	defer client.Close()
+	resp, err := client.Get(context.Background(), server.URL)
+	if err == nil {
+		t.Fatalf("truncated body accepted as %q", resp.Body)
+	}
+	if !strings.Contains(err.Error(), "reading body") {
+		t.Fatalf("error = %v, want a body read error", err)
+	}
+
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fine"))
+	}))
+	defer healthy.Close()
+	next, err := client.Get(context.Background(), healthy.URL)
+	if err != nil {
+		t.Fatalf("client unusable after a truncated body: %v", err)
+	}
+	if string(next.Body) != "fine" {
+		t.Fatalf("next body = %q, want fine", next.Body)
 	}
 }
 
