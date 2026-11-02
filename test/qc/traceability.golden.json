@@ -556,7 +556,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_history_private_test.go:TestJourneyHistoryRecordsDisplayedVisitsAndOmitsFailedLoad"
     ],
@@ -568,7 +568,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "test/tabs/toolbar_history_test.go:TestHistoryPushAfterBackDiscardsForwardTrail"
     ],
@@ -580,7 +580,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_history_private_test.go:TestJourneyReloadDoesNotAddHistoryVisits"
     ],
