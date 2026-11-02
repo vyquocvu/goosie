@@ -853,8 +853,8 @@ func (s *State) clipboardPending(wantPaste bool, copyText string, cb Clipboard) 
 }
 
 // handleFindKeyLocked edits the find query. Enter steps to the next match,
-// Shift+Enter to the previous, Esc closes, and any other edit reports the new
-// query to the host.
+// Shift+Enter to the previous, Cmd/Ctrl+G repeats that step, Esc closes, and
+// any other edit reports the new query to the host.
 func (s *State) handleFindKeyLocked(key rune, mods surface.KeyMod) []func() {
 	switch key {
 	case 0x1b:
@@ -871,6 +871,12 @@ func (s *State) handleFindKeyLocked(key rune, mods surface.KeyMod) []func() {
 			return []func(){func() { cb(back) }}
 		}
 		return nil
+	case 'g', 'G':
+		if mods&(surface.ModCommand|surface.ModControl) != 0 && s.OnFindNext != nil {
+			cb := s.OnFindNext
+			back := mods&surface.ModShift != 0
+			return []func(){func() { cb(back) }}
+		}
 	}
 	before := s.Input
 	pending := s.clipboardPending(s.editKeyLocked(key, mods))
@@ -882,6 +888,18 @@ func (s *State) handleFindKeyLocked(key rune, mods surface.KeyMod) []func() {
 		}
 	}
 	return pending
+}
+
+// StepFind runs one programmatic next/previous step, the same work Enter and
+// Cmd+G perform while find is open. It is a no-op when find mode is closed.
+func (s *State) StepFind(backward bool) {
+	s.mu.Lock()
+	active := s.FindActive
+	cb := s.OnFindNext
+	s.mu.Unlock()
+	if active && cb != nil {
+		cb(backward)
+	}
 }
 
 // editKeyLocked applies address-bar editing for one key event; it is shared

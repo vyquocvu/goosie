@@ -71,6 +71,33 @@ func TestFindInPageLifecycle(t *testing.T) {
 	}
 }
 
+func TestFindCmdGStepsWithoutEditingQuery(t *testing.T) {
+	tb := toolbar.NewState(800, nil)
+	var steps []bool
+	tb.OnFindNext = func(backward bool) { steps = append(steps, backward) }
+	tb.OpenFind()
+	for _, key := range "needle" {
+		tb.HandleKeyEvent(key, 0)
+	}
+
+	tb.HandleKeyEvent('g', surface.ModCommand)
+	tb.HandleKeyEvent('G', surface.ModCommand|surface.ModShift)
+	tb.HandleKeyEvent('g', surface.ModControl)
+
+	want := []bool{false, true, false}
+	if len(steps) != len(want) {
+		t.Fatalf("Cmd+G steps = %v, want %v", steps, want)
+	}
+	for i := range want {
+		if steps[i] != want[i] {
+			t.Fatalf("Cmd+G steps = %v, want %v", steps, want)
+		}
+	}
+	if tb.Input != "needle" {
+		t.Fatalf("find query after stepping = %q, want the unedited %q", tb.Input, "needle")
+	}
+}
+
 func TestFindRunFindPaintsHighlights(t *testing.T) {
 	f := newNavTestPath(t)
 	f.toolbar = toolbar.NewState(800, nil)
@@ -163,7 +190,7 @@ func TestFindScrollClampsToDocumentAndSyncsTab(t *testing.T) {
 	tab := f.tabMgr.Active()
 
 	f.findMatches = []engine.Match{{Y0: 1900, Y1: 1920}}
-	f.scrollToMatch(0)
+	f.scrollToMatchLocked(0)
 	if got, want := f.sched.Viewport().Offset.Y, int32(1792); got != want {
 		t.Fatalf("last-match scroll = %d, want %d (clamped to the document)", got, want)
 	}
@@ -175,7 +202,7 @@ func TestFindScrollClampsToDocumentAndSyncsTab(t *testing.T) {
 	}
 
 	f.findMatches = []engine.Match{{Y0: 20, Y1: 40}}
-	f.scrollToMatch(0)
+	f.scrollToMatchLocked(0)
 	if got := f.sched.Viewport().Offset.Y; got != 0 {
 		t.Fatalf("first-match scroll = %d, want 0", got)
 	}

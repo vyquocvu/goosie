@@ -2542,10 +2542,13 @@
     "id": "BR-135",
     "priority": "P1",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_find_test.go:TestJourneyFindShortcutsStepAndReopen"
+    ],
     "enforced": false
   },
   {

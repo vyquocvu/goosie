@@ -174,10 +174,16 @@ type framePath struct {
 	// document and docHeight say what the run depicts: the page's URL or "" for a synthetic
 	// scene, and its laid-out height in device pixels. Both go into the artifact, which
 	// otherwise carries timings with no statement of what they were taken on.
-	document          string
-	docHeight         int32
+	document  string
+	docHeight int32
+	// findMu guards the find session below. The chrome pump refreshes matches
+	// from its own goroutine while the window event thread edits, steps, or
+	// closes find, and navigation may close it from a drain goroutine.
+	findMu            sync.Mutex
 	findMatches       []engine.Match
 	findIdx           int
+	findQuery         string
+	findSignature     findSignature
 	selDrag           bool
 	contentDrag       *contentDragGesture
 	restoredActiveURL string

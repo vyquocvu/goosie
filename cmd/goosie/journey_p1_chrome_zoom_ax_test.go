@@ -127,8 +127,10 @@ func screenshotInk(t *testing.T, b *browserE2E) int {
 func waitTilesIdle(t *testing.T, b *browserE2E, description string) {
 	t.Helper()
 	b.waitFor(t, description, func() bool {
-		last := b.f.loop.Stats().Last
-		return last.Needed == 0 && last.PaintingBytes == 0 && b.f.sched.Stats().Rasterized > 0
+		// loop.Stats is the thread-safe view. sched.Stats belongs to the frame
+		// thread and reading it here would race BeginFrame on the loop.
+		st := b.f.loop.Stats()
+		return st.Last.Needed == 0 && st.Last.PaintingBytes == 0 && st.Rasterize > 0
 	})
 }
 

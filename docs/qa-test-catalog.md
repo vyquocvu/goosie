@@ -236,7 +236,7 @@ của miền nó thuộc về; miền chức năng vẫn do section chứa nó q
 - **BR-132 | P1 | CUA | NOT RUN** — Chuyển tab sau khi zoom tab A → zoom scope được giữ theo policy, tab B không bị áp sai.
 - **BR-133 | P1 | CUA | NOT RUN** — Cmd+F tìm chuỗi có trong trang → overlay mở, số kết quả và highlight đúng.
 - **BR-134 | P1 | CUA | NOT RUN** — Tìm chuỗi không có → hiển thị zero-match, nội dung không bị thay đổi.
-- **BR-135 | P1 | CUA | NOT RUN** — Tìm chuỗi có nhiều lần xuất hiện rồi Next/Previous → wrap và index đúng.
+- **BR-135 | P1 | CUA, INT | PASS** — Tìm chuỗi có nhiều lần xuất hiện rồi Next/Previous → wrap và index đúng. **Automated INT PASS:** `cmd/goosie/journey_find_test.go:TestJourneyFindShortcutsStepAndReopen` chạy qua `platform/headless` với 3 kết quả: Cmd+G → index 1, Cmd+Shift+G → index 0, Cmd+Shift+G quay vòng về kết quả cuối (index 2), Cmd+G quay vòng về kết quả đầu (index 0); Esc đóng find, rồi Cmd+G mở lại với query đã lưu và chọn kết quả đầu, Cmd+Shift+G mở lại và chọn kết quả cuối. `TestFindCmdGStepsWithoutEditingQuery` chốt ở tầng toolbar rằng Cmd/Ctrl+G và Cmd+Shift+G phát đúng hướng next/previous mà không chèn chữ vào query. Native CUA chưa chạy do phiên không có display.
 - **BR-136 | P1 | CUA | NOT RUN** — Tìm từ có chữ hoa/thường và tiếng Việt → behavior phân biệt hoa/thường và Unicode nhất quán.
 - **BR-137 | P1 | CUA | NOT RUN** — Đóng Find bằng Escape/nút đóng → overlay mất, focus trở lại trang hợp lý.
 - **BR-138 | P1 | CUA | NOT RUN** — Mở trang nội bộ Downloads/History/Bookmarks được hỗ trợ bằng URL → nội dung tải được và link thao tác đúng.

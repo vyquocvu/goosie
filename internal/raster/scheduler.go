@@ -315,6 +315,9 @@ func (s *Scheduler) Viewport() frame.Viewport {
 
 // Stats returns the scheduler's counters with the grid's memory read live, so a
 // caller watching a plateau does not have to reach past the scheduler to do it.
+// Like every other planning call it belongs to the frame thread: the counters
+// and the grid are written by BeginFrame, Submit and ComposeInto. A watcher on
+// another goroutine uses surface.Loop.Stats, Viewport, or Grid.Budget instead.
 func (s *Scheduler) Stats() Stats {
 	st := Stats{
 		Rasterized: s.rasterized,

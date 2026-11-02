@@ -1160,6 +1160,23 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 			cw.notifyAccessibilityChanged()
 			return true
 		}
+	case key == 'g' || key == 'G':
+		if cw.toolbar == nil {
+			return false
+		}
+		if active, _, _ := cw.toolbar.FindCounts(); active {
+			cw.toolbar.StepFind(shift)
+			return true
+		}
+		cw.toolbar.OpenFind()
+		cw.SetIME(false)
+		cw.notifyAccessibilityChanged()
+		if shift {
+			// Reopening selects the first match; step backward to wrap to the
+			// last, which is what "previous" means from a closed bar.
+			cw.toolbar.StepFind(true)
+		}
+		return true
 	case (key == 'm' || key == 'M') && shift:
 		if cw.onDeviceEmulation != nil {
 			cw.onDeviceEmulation()

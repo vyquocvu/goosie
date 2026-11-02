@@ -53,6 +53,7 @@ func mediaOption(backend media.Backend, client net.HTTP, docURL string) engine.O
 func (f *framePath) pumpChrome() {
 	f.pumpJS()
 	f.pumpMedia()
+	f.refreshFind()
 	if f.toolbar != nil {
 		f.toolbar.RefreshSuggestions(time.Now())
 	}

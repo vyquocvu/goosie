@@ -897,9 +897,12 @@ func (f *framePath) hoverCursor(contentX, contentY int32) surface.Cursor {
 // runFind recomputes the match set for a new find query on the active tab and
 // jumps to the first hit.
 func (f *framePath) runFind(query string) {
+	f.findMu.Lock()
+	defer f.findMu.Unlock()
 	if f.toolbar == nil {
 		return
 	}
+	f.findQuery = query
 	f.findMatches = nil
 	f.findIdx = 0
 	f.toolbar.ResetFindCounts()
@@ -908,6 +911,7 @@ func (f *framePath) runFind(query string) {
 		return
 	}
 	sess := tab.Session()
+	f.findSignature = findSignatureOf(sess)
 	if strings.TrimSpace(query) == "" {
 		sess.ClearFind()
 		f.repaintTab(tab, frame.Rect{})
@@ -919,13 +923,72 @@ func (f *framePath) runFind(query string) {
 		sess.SetFindActive(-1)
 	} else {
 		sess.SetFindActive(0)
-		f.scrollToMatch(0)
+		f.scrollToMatchLocked(0)
 	}
+	f.repaintTab(tab, frame.Rect{})
+}
+
+// findSignature is the pipeline work a find pass saw. A change means the
+// document was restyled or relaid out since the matches were computed.
+type findSignature struct {
+	styleResolves uint64
+	layoutBuilds  uint64
+}
+
+func findSignatureOf(sess *engine.Session) findSignature {
+	wc := sess.WorkCounts()
+	return findSignature{styleResolves: wc.StyleResolves, layoutBuilds: wc.LayoutBuilds}
+}
+
+// refreshFind keeps an open find in step with the document. A page script that
+// adds, removes, or reflows text bumps the style/layout counters, which is the
+// cue to recompute matches without waiting for the next keystroke. The active
+// index is preserved when the new set still has it, so a highlight does not
+// jump to a different hit just because an unrelated node appeared.
+func (f *framePath) refreshFind() {
+	f.findMu.Lock()
+	defer f.findMu.Unlock()
+	if f.toolbar == nil || strings.TrimSpace(f.findQuery) == "" {
+		return
+	}
+	active, _, idx := f.toolbar.FindCounts()
+	if !active {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return
+	}
+	sess := tab.Session()
+	sig := findSignatureOf(sess)
+	if sig == f.findSignature {
+		return
+	}
+	f.findSignature = sig
+	matches := sess.Find(f.findQuery)
+	f.findMatches = matches
+	if len(matches) == 0 {
+		f.findIdx = 0
+		f.toolbar.SetFindResult(0, 0)
+		sess.SetFindActive(-1)
+		f.repaintTab(tab, frame.Rect{})
+		return
+	}
+	if idx < 0 {
+		idx = 0
+	} else if idx >= len(matches) {
+		idx = len(matches) - 1
+	}
+	f.findIdx = idx
+	f.toolbar.SetFindResult(len(matches), idx)
+	sess.SetFindActive(idx)
 	f.repaintTab(tab, frame.Rect{})
 }
 
 // findStep moves to the next (or previous) match, wrapping around.
 func (f *framePath) findStep(backward bool) {
+	f.findMu.Lock()
+	defer f.findMu.Unlock()
 	if len(f.findMatches) == 0 {
 		return
 	}
@@ -941,17 +1004,18 @@ func (f *framePath) findStep(backward bool) {
 		}
 	}
 	f.toolbar.SetFindResult(len(f.findMatches), f.findIdx)
-	f.scrollToMatch(f.findIdx)
+	f.scrollToMatchLocked(f.findIdx)
 	if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
 		tab.Session().SetFindActive(f.findIdx)
 		f.repaintTab(tab, frame.Rect{})
 	}
 }
 
-// scrollToMatch brings the match's line into view, clamped to the document so
-// the last hits cannot scroll past the end, and records the offset on the tab
-// and the JS runtime the same way a wheel or key scroll does.
-func (f *framePath) scrollToMatch(idx int) {
+// scrollToMatchLocked brings the match's line into view, clamped to the
+// document so the last hits cannot scroll past the end, and records the offset
+// on the tab and the JS runtime the same way a wheel or key scroll does. The
+// caller holds findMu.
+func (f *framePath) scrollToMatchLocked(idx int) {
 	if idx < 0 || idx >= len(f.findMatches) {
 		return
 	}
@@ -991,8 +1055,12 @@ func (f *framePath) scrollToMatch(idx int) {
 
 // closeFind drops the match state; navigation and tab switches end find mode.
 func (f *framePath) closeFind() {
+	f.findMu.Lock()
+	defer f.findMu.Unlock()
 	f.findMatches = nil
 	f.findIdx = 0
+	f.findQuery = ""
+	f.findSignature = findSignature{}
 	if f.tabMgr != nil {
 		if tab := f.tabMgr.Active(); tab != nil && tab.Session() != nil {
 			tab.Session().ClearFind()
