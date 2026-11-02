@@ -163,6 +163,11 @@ type framePath struct {
 	// so a journal already being written cannot land after the files are gone.
 	sessionDisabled atomic.Bool
 	sessionMu       sync.Mutex
+	// resubmitMu guards the per-tab POST confirmations. A prompt shows instead
+	// of a page, so it owns the document it replaced until the user chooses;
+	// resubmits is keyed by tab because switching tabs must not lose it.
+	resubmitMu sync.Mutex
+	resubmits  map[uint64]*pendingResubmit
 	// scriptTimeout overrides js.DefaultTimeout for this run. Zero keeps the
 	// default; tests shorten it so a 5-second watchdog does not cost 5 seconds.
 	scriptTimeout time.Duration

@@ -43,15 +43,18 @@ type navResult struct {
 	traverseBase int
 	// transition labels the visit this navigation records in global history.
 	transition history.Transition
+	// request is what the load sent, and requestedURL is the address it was
+	// requested for before any redirect. Together they decide whether the
+	// history entry replays a POST or a GET.
+	request      navRequest
+	requestedURL string
 }
 
-// navRequest is the method and payload of one navigation. The zero value is a
-// GET; form submission with method="POST" carries the encoded controls.
-type navRequest struct {
-	Method      string
-	ContentType string
-	Body        string
-}
+// navRequest is the method and payload of one navigation. It shares its shape
+// with toolbar.Request so a history entry can be replayed and recorded without
+// a second representation. The zero value is a GET; form submission with
+// method="POST" carries the encoded controls.
+type navRequest = toolbar.Request
 
 // downloadDone reports a completed download instead of a rendered document;
 // the navigation goroutine converts it into navResult.downloadPath.
@@ -139,6 +142,13 @@ func (f *framePath) navigateTabRequest(rawURL string, transition history.Transit
 	if tab == nil {
 		return
 	}
+	// The resubmit prompt's own links are decisions, not destinations: handle
+	// them before starting a load so they never enter the history trail.
+	if action, ok := resubmitAction(rawURL); ok {
+		f.resolveResubmitAction(tab, action)
+		return
+	}
+	f.dropResubmit(tab.ID())
 	f.closeFind()
 	// A navigation start invalidates the dropdown even when it did not come
 	// from an omnibox submit (link click, internal-page action).
@@ -175,7 +185,7 @@ func (f *framePath) navigateTabRequest(rawURL string, transition history.Transit
 	go func() {
 		defer f.navWg.Done()
 		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true, req)
-		res := navResult{tabID: tab.ID(), serial: serial, url: u, transition: transition}
+		res := navResult{tabID: tab.ID(), serial: serial, url: u, transition: transition, request: req, requestedURL: u}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
 			// history record what displayed, not what was typed.
@@ -390,7 +400,14 @@ func (f *framePath) applyNavResult(result navResult) {
 		oldSession.Close()
 	}
 	if !result.noHistory {
-		tab.History().Push(result.url)
+		// A redirect means the response came from another address, and the
+		// client may have turned a 302 into a GET; recording a POST there would
+		// offer a resubmit prompt for a page that was never stored that way.
+		req := toolbar.Request{}
+		if result.request.IsPost() && result.url == result.requestedURL {
+			req = result.request
+		}
+		tab.History().PushRequest(result.url, req)
 	}
 	if result.traverse != 0 {
 		// The peeked back/forward step commits only now that its page
@@ -398,6 +415,9 @@ func (f *framePath) applyNavResult(result navResult) {
 		// A redirect rewrites the entry it landed on with the final URL.
 		if tab.History().Step(result.traverse, result.traverseBase) {
 			tab.History().ReplaceCurrent(result.url)
+			if result.request.IsPost() && result.url != result.requestedURL {
+				tab.History().ClearCurrentRequest()
+			}
 		}
 	}
 	if !tab.Incognito() && f.history != nil && !strings.HasPrefix(strings.ToLower(result.url), "goosie://") {
@@ -540,14 +560,18 @@ func (f *framePath) traverseTab(delta int) {
 		return
 	}
 	var url string
+	var req toolbar.Request
 	var base int
 	var ok bool
 	if delta < 0 {
-		url, base, ok = tab.History().PeekBack()
+		url, req, base, ok = tab.History().PeekBackRequest()
 	} else if delta > 0 {
-		url, base, ok = tab.History().PeekForward()
+		url, req, base, ok = tab.History().PeekForwardRequest()
 	}
 	if !ok || url == "" {
+		return
+	}
+	if req.IsPost() && f.promptResubmit(tab, url, req, delta, base, history.TransitionOther) {
 		return
 	}
 	f.navigateTabNoHistoryTraverse(url, delta, base, history.TransitionOther)
@@ -561,10 +585,18 @@ func (f *framePath) navigateTabNoHistory(rawURL string) {
 // navigateTabNoHistoryTraverse is navigateTabNoHistory carrying a traversal
 // commit: on success the history cursor steps by delta from base.
 func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int, transition history.Transition) {
+	f.navigateTabNoHistoryTraverseRequest(rawURL, delta, base, transition, navRequest{})
+}
+
+// navigateTabNoHistoryTraverseRequest is navigateTabNoHistoryTraverse with the
+// request to replay. A POST entry in the trail needs the same method and body
+// the original submission sent, not a bare GET.
+func (f *framePath) navigateTabNoHistoryTraverseRequest(rawURL string, delta, base int, transition history.Transition, req navRequest) {
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
 	}
+	f.dropResubmit(tab.ID())
 	f.closeFind()
 	if f.toolbar != nil {
 		f.toolbar.CloseSuggestions()
@@ -593,8 +625,8 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int,
 	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true)
-		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base, transition: transition}
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true, req)
+		res := navResult{tabID: tab.ID(), serial: serial, url: u, noHistory: true, traverse: delta, traverseBase: base, transition: transition, request: req, requestedURL: u}
 		if finalURL != "" {
 			res.url = finalURL
 		}
@@ -612,13 +644,28 @@ func (f *framePath) navigateTabNoHistoryTraverse(rawURL string, delta, base int,
 	}()
 }
 
-// reloadTab re-fetches the active tab's URL.
+// reloadTab re-fetches the active tab's current history entry. Reloading a
+// POST result asks first: repeating the request can repeat its side effects.
 func (f *framePath) reloadTab() {
 	tab := f.tabMgr.Active()
-	if tab == nil || tab.URL() == "" {
+	if tab == nil {
 		return
 	}
-	f.navigateTabNoHistoryTraverse(tab.URL(), 0, 0, history.TransitionReload)
+	url := tab.URL()
+	var req toolbar.Request
+	if current, r, ok := tab.History().CurrentRequest(); ok {
+		if current != "" {
+			url = current
+		}
+		req = r
+	}
+	if url == "" {
+		return
+	}
+	if req.IsPost() && f.promptResubmit(tab, url, req, 0, 0, history.TransitionReload) {
+		return
+	}
+	f.navigateTabNoHistoryTraverse(url, 0, 0, history.TransitionReload)
 }
 
 // stopTab cancels only the active tab's in-flight navigation. Advancing the

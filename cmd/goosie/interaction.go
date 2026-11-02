@@ -1121,7 +1121,10 @@ func (f *framePath) closeTab(id uint64) {
 		return
 	}
 	f.closeFind()
-	releaseTabState(f.tabMgr.TabByID(id))
+	if tab := f.tabMgr.TabByID(id); tab != nil {
+		f.dropResubmit(tab.ID())
+		releaseTabState(tab)
+	}
 	f.tabMgr.CloseTab(id)
 	f.showActiveTabAfterBatch()
 }
@@ -1136,6 +1139,7 @@ func (f *framePath) closeOtherTabs(keepID uint64) {
 		if tab.ID() == keepID || tab.Pinned() {
 			continue
 		}
+		f.dropResubmit(tab.ID())
 		releaseTabState(tab)
 	}
 	f.tabMgr.CloseOtherTabs(keepID)
@@ -1163,6 +1167,7 @@ func (f *framePath) closeTabsToRight(fromID uint64) {
 		if tab.Pinned() {
 			continue
 		}
+		f.dropResubmit(tab.ID())
 		releaseTabState(tab)
 	}
 	f.tabMgr.CloseTabsToRight(fromID)
