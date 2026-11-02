@@ -113,6 +113,77 @@ func TestFindRunFindPaintsHighlights(t *testing.T) {
 	}
 }
 
+func TestOpenFindRefocusesAndSelectsRestoredQuery(t *testing.T) {
+	tb := toolbar.NewState(800, nil)
+	tb.OpenFind()
+	for _, key := range "next" {
+		tb.HandleKeyEvent(key, 0)
+	}
+	// A click into the page leaves find mode open but moves focus away.
+	tb.Focus = toolbar.FocusNone
+
+	tb.OpenFind()
+	if !tb.FindActive {
+		t.Fatal("second OpenFind left find mode")
+	}
+	if tb.Focus != toolbar.FocusAddress {
+		t.Fatalf("OpenFind focus = %v, want FocusAddress", tb.Focus)
+	}
+	if tb.SelStart != 0 || tb.SelEnd != 4 {
+		t.Fatalf("restored query selection = [%d,%d), want [0,4)", tb.SelStart, tb.SelEnd)
+	}
+	// The selection is live: the next key replaces the whole query.
+	tb.HandleKeyEvent('x', 0)
+	if tb.Input != "x" {
+		t.Fatalf("typing over the selection left %q, want \"x\"", tb.Input)
+	}
+}
+
+func TestOpenFindRecomputesRestoredQuery(t *testing.T) {
+	tb := toolbar.NewState(800, nil)
+	var opened []string
+	tb.OnFindOpen = func(q string) { opened = append(opened, q) }
+
+	tb.OpenFind()
+	if len(opened) != 0 {
+		t.Fatalf("empty first open reported %v", opened)
+	}
+	tb.HandleKeyEvent('a', 0)
+	tb.HandleKeyEvent(0x1b, 0) // close, query retained for the next open
+
+	tb.OpenFind()
+	if len(opened) != 1 || opened[0] != "a" {
+		t.Fatalf("reopen reported %v, want [a]", opened)
+	}
+}
+
+func TestFindScrollClampsToDocumentAndSyncsTab(t *testing.T) {
+	f := tallNavTestPath(t)
+	f.config.width, f.config.height, f.config.dpr, f.zoom = 800, 256, 1, 1
+	tab := f.tabMgr.Active()
+
+	f.findMatches = []engine.Match{{Y0: 1900, Y1: 1920}}
+	f.scrollToMatch(0)
+	if got, want := f.sched.Viewport().Offset.Y, int32(1792); got != want {
+		t.Fatalf("last-match scroll = %d, want %d (clamped to the document)", got, want)
+	}
+	if got, want := tab.ScrollY(), int32(1792); got != want {
+		t.Fatalf("tab scroll = %d, want %d", got, want)
+	}
+	if got, want := f.sched.Viewport().Size, (frame.Size{W: 800, H: 256}); got != want {
+		t.Fatalf("viewport size = %v, want %v", got, want)
+	}
+
+	f.findMatches = []engine.Match{{Y0: 20, Y1: 40}}
+	f.scrollToMatch(0)
+	if got := f.sched.Viewport().Offset.Y; got != 0 {
+		t.Fatalf("first-match scroll = %d, want 0", got)
+	}
+	if got := tab.ScrollY(); got != 0 {
+		t.Fatalf("tab scroll = %d, want 0", got)
+	}
+}
+
 func TestZoomBadgeIndicatorAndReset(t *testing.T) {
 	tb := toolbar.NewState(800, nil)
 	var resetTriggered bool

@@ -918,9 +918,11 @@ func (f *framePath) runFind(query string) {
 		return
 	}
 	f.findMatches = sess.Find(query)
-	sess.SetFindActive(0)
 	f.toolbar.SetFindResult(len(f.findMatches), 0)
-	if len(f.findMatches) > 0 {
+	if len(f.findMatches) == 0 {
+		sess.SetFindActive(-1)
+	} else {
+		sess.SetFindActive(0)
 		f.scrollToMatch(0)
 	}
 	f.repaintTab(tab, frame.Rect{})
@@ -950,19 +952,45 @@ func (f *framePath) findStep(backward bool) {
 	}
 }
 
-// scrollToMatch centers the match's line in the upper part of the viewport.
+// scrollToMatch brings the match's line into view, clamped to the document so
+// the last hits cannot scroll past the end, and records the offset on the tab
+// and the JS runtime the same way a wheel or key scroll does.
 func (f *framePath) scrollToMatch(idx int) {
 	if idx < 0 || idx >= len(f.findMatches) {
+		return
+	}
+	tab := f.tabMgr.Active()
+	if tab == nil || f.sched == nil {
 		return
 	}
 	m := f.findMatches[idx]
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
 	size := f.devSize()
-	offsetY := int32(m.Y0*effectiveDPR) - size.H/4
-	if offsetY < 0 {
-		offsetY = 0
+	y := int32(m.Y0*effectiveDPR) - size.H/4
+	maxY := int32(0)
+	if layer := tab.Layer(); layer != nil {
+		maxY = layer.Bounds.Y1 - size.H
 	}
-	f.sched.SetViewport(frame.Viewport{Offset: frame.Point{Y: offsetY}, Size: size})
+	if maxY < 0 {
+		maxY = 0
+	}
+	if y < 0 {
+		y = 0
+	} else if y > maxY {
+		y = maxY
+	}
+	vp := f.sched.Viewport()
+	if vp.Offset.Y == y && vp.Size == size {
+		return
+	}
+	vp.Offset.Y = y
+	vp.Size = size
+	f.sched.SetViewport(vp)
+	tab.SetScrollY(y)
+	if sess := tab.Session(); sess != nil {
+		sess.SyncViewportScroll(float64(vp.Offset.X), float64(y))
+	}
+	f.publishAccessibility()
 }
 
 // closeFind drops the match state; navigation and tab switches end find mode.

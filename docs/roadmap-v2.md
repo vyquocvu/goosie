@@ -135,6 +135,12 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 - **Kiểm thử tự động:** `test/js/timeout_state_test.go` xác nhận timeout báo đúng một lần, host `Interrupt` không bị tính là timeout, timer callback được đánh dấu; `test/engine/script_timeout_test.go` xác nhận script parser và timer qua `PumpJS` tăng đúng bộ đếm và lần pump thứ hai không đếm lại; `cmd/goosie/unresponsive_page_test.go` xác nhận trang chậm hiển thị prompt thay vì nội dung, hai action đi đúng policy (tắt script / 30 giây), URL không phải HTTP bị từ chối, và trang bình thường không bị prompt.
 - **Còn thiếu:** goja không có checkpoint nên script đã bị interrupt không thể resume; prompt xuất hiện sau khi engine đã dừng script chứ không phải hộp thoại chặn trước khi dừng như trình duyệt cũ. Với timeout sau khi trang đã hiển thị, toàn bộ trang được thay bằng prompt thay vì giữ nội dung đã render; chưa kiểm chứng CUA trên macOS.
 
+**Trạng thái "Tìm trong trang" (cập nhật 2026-11-02):**
+- **Đã có trong mã:** Cmd+F mở find ngay trên thanh địa chỉ; bộ đếm `n/total` vẽ trong ô; Enter/Shift+Enter chuyển kết quả và quay vòng; Esc đóng, nhấp ra ngoài chrome cũng đóng; highlight tô theo từng match và match đang chọn dùng màu khác. `Session.Find` giới hạn 1.000 kết quả và chỉ tìm trong word box đã layout.
+- **Đã sửa trong lượt này:** mở lại Cmd+F khi find đang mở sẽ focus lại ô và chọn toàn bộ query để gõ đè; khi mở lại sau khi đóng, `OnFindOpen` chạy lại query đã lưu nên số kết quả hiện ngay thay vì `0/0`. Cuộn tới match nay clamp theo chiều cao layer (kết quả cuối không còn đẩy viewport quá cuối trang), đồng thời ghi offset vào tab, `window.scrollY` và accessibility tree giống cuộn bàn phím.
+- **Kiểm thử tự động:** `cmd/goosie/find_and_zoom_test.go` xác nhận lifecycle, highlight theo từng match, focus/chọn query khi mở lại, callback query khôi phục, và clamp + đồng bộ scroll; `cmd/goosie/journey_find_test.go` chạy trọn hành trình qua `platform/headless`: Cmd+F → gõ "needle" → 2 kết quả → Enter cuộn tới kết quả thứ hai → Esc → Cmd+F mở lại vẫn hiện 2 kết quả.
+- **Còn thiếu:** chưa có Cmd+G/Cmd+Shift+G; tập kết quả chỉ tính lại khi query đổi hoặc find mở lại, không theo dõi DOM mutation trong lúc find đang mở; chưa kiểm chứng CUA native macOS.
+
 **Cổng P2:** các luồng đã công bố chạy lặp lại được trong bộ kiểm thử tự động và qua ứng dụng native. Không dùng tỷ lệ WPT chung để thay cho kết quả hành trình người dùng.
 
 ### P3 — Tiện ích và hoàn thiện sản phẩm
@@ -149,4 +155,4 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 - Chính sách origin, cookie, tải xuống và dữ liệu riêng tư đi cùng tính năng dùng chúng. Rủi ro phát hành đã được chủ sản phẩm chấp nhận trong [bản lịch sử](roadmap-v2-history.md); roadmap UX này không tự thay đổi quyết định phát hành đó.
 - Color emoji: font bitmap màu (sbix/COLR như Apple Color Emoji) chưa được thư viện font hiện tại (golang.org/x/image/font/opentype) rasterize; glyph thiếu hiện được thay thế bằng tofu có advance ổn định 1em để giữ layout và không nuốt ký tự.
 
-**Việc bắt đầu tiếp theo:** P2 tìm trong trang (Cmd+F) — hiển thị số kết quả, di chuyển giữa các kết quả và cuộn trang tới kết quả đang chọn, kèm đóng/Enter/Escape rõ ràng. Các mục P1/P0 còn lại chỉ là kiểm chứng CUA native macOS, vẫn BLOCKED vì phiên kiểm thử không có display.
+**Việc bắt đầu tiếp theo:** P2 điền và gửi biểu mẫu trên luồng thật — kiểm tra `input`, `textarea`, `select`, checkbox/radio, nút submit cùng Tab/Enter/IME và thông báo lỗi; mỗi khoảng trống tái hiện được phải có fixture hồi quy. Các mục P1/P0 còn lại chỉ là kiểm chứng CUA native macOS, vẫn BLOCKED vì phiên kiểm thử không có display.

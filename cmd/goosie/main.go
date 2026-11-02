@@ -417,6 +417,9 @@ func build(c config) (*framePath, error) {
 		f.toolbar.OnFindChanged = func(query string) {
 			f.runFind(query)
 		}
+		// Reopening find restores the last query; recompute its count instead
+		// of showing 0/0 until the next keystroke.
+		f.toolbar.OnFindOpen = f.runFind
 		f.toolbar.OnFindNext = func(backward bool) {
 			f.findStep(backward)
 		}

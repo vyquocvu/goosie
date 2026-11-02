@@ -110,7 +110,10 @@ type State struct {
 	OnFindChanged func(string)
 	OnFindNext    func(bool)
 	OnFindClose   func()
-	Clipboard     Clipboard
+	// OnFindOpen runs with a restored query when find mode starts, so the host
+	// can show its match count without waiting for the first keystroke.
+	OnFindOpen func(string)
+	Clipboard  Clipboard
 
 	Suggestions     []Suggestion
 	SelectedSuggest int
@@ -396,13 +399,25 @@ func (s *State) ResetFindCounts() {
 	s.FindIndex = 0
 }
 
-// OpenFind reuses the address bar as the find field, restoring the previous
-// query. Total and index reset until the host recomputes them.
+// OpenFind reuses the address bar as the find field. Opening while find mode is
+// already active re-focuses the field and selects the restored query, so the
+// next keystroke replaces it like any other input. A restored query is reported
+// through OnFindOpen so the host can recompute its match count.
 func (s *State) OpenFind() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	pending := s.openFindLocked()
+	s.mu.Unlock()
+	for _, fn := range pending {
+		fn()
+	}
+}
+
+func (s *State) openFindLocked() []func() {
 	if s.FindActive {
-		return
+		s.Focus = FocusAddress
+		s.dragging = false
+		s.selectAllLocked()
+		return nil
 	}
 	s.FindActive = true
 	s.FindTotal = 0
@@ -413,6 +428,11 @@ func (s *State) OpenFind() {
 	s.SelStart = s.Cursor
 	s.SelEnd = s.Cursor
 	s.dragging = false
+	if s.FindQuery == "" || s.OnFindOpen == nil {
+		return nil
+	}
+	cb, query := s.OnFindOpen, s.FindQuery
+	return []func(){func() { cb(query) }}
 }
 
 // CloseFind restores the address bar to the current URL and keeps the query
