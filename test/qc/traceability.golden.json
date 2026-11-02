@@ -1477,12 +1477,14 @@
     "status": "NOT RUN",
     "tests": [
       "cmd/goosie/journey_p1_form_validation_test.go:TestJourneyFormValidationBlocksRequestUntilValid",
+      "cmd/goosie/journey_p2_forms_test.go:TestJourneySubmitterNoValidateSkipsValidation",
       "test/engine/form_submission_test.go:TestFormCheckboxRequiredValidation",
       "test/engine/form_submission_test.go:TestFormNovalidateBypass",
       "test/engine/form_submission_test.go:TestFormRadioRequiredValidation",
       "test/engine/form_submission_test.go:TestFormRequiredValidation",
       "test/engine/form_submission_test.go:TestFormTextareaSelectAndDialogValidation",
-      "test/engine/form_submission_test.go:TestFormValidationTypes"
+      "test/engine/form_submission_test.go:TestFormValidationTypes",
+      "test/engine/form_submitter_override_test.go:TestSubmitterNoValidateSkipsConstraintValidation"
     ],
     "enforced": false
   },
@@ -1497,6 +1499,8 @@
       "cmd/goosie/journey_p1_forms_test.go:TestJourneyFormMethodAndEncoding",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyPostFormCarriesBody",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyPostRedirectBecomesGet",
+      "cmd/goosie/journey_p2_forms_test.go:TestJourneySubmitterOverridesDestination",
+      "test/engine/form_submitter_override_test.go:TestSubmitterOverridesFormDestination",
       "test/engine/option_value_test.go:TestOptionValueAttributeIsSubmittedVerbatim"
     ],
     "enforced": false

@@ -283,10 +283,68 @@ func FormMethod(form *dom.Node) string {
 	}
 }
 
+// isSubmitter reports whether n is a submit button. The form* override
+// attributes are honored only on these elements, never on a plain button.
+func isSubmitter(n *dom.Node) bool {
+	if n == nil || !n.Element() {
+		return false
+	}
+	switch n.Data {
+	case "input":
+		typ := strings.ToLower(n.GetAttribute("type"))
+		return typ == "submit" || typ == "image"
+	case "button":
+		typ := strings.ToLower(n.GetAttribute("type"))
+		return typ == "" || typ == "submit"
+	default:
+		return false
+	}
+}
+
+func submitterAttr(submitter *dom.Node, name string) (string, bool) {
+	if !isSubmitter(submitter) || !submitter.HasAttribute(name) {
+		return "", false
+	}
+	return submitter.GetAttribute(name), true
+}
+
+// FormMethodFor resolves the method of a submission. A submit button's
+// formmethod wins over the form's method when it names get, post, or dialog;
+// any other value leaves the form's method in force.
+func FormMethodFor(form, submitter *dom.Node) string {
+	if value, ok := submitterAttr(submitter, "formmethod"); ok {
+		switch strings.ToLower(value) {
+		case "get":
+			return "GET"
+		case "post":
+			return "POST"
+		case "dialog":
+			return "dialog"
+		}
+	}
+	return FormMethod(form)
+}
+
 // FormAction returns the action URL for a form.
 // Returns empty string if no action is specified.
 func FormAction(form *dom.Node) string {
 	return form.GetAttribute("action")
+}
+
+// FormActionFor resolves the action of a submission. A submit button's
+// formaction wins over the form's action, including an explicitly empty value,
+// which the host resolves to the current document URL.
+func FormActionFor(form, submitter *dom.Node) string {
+	if value, ok := submitterAttr(submitter, "formaction"); ok {
+		return value
+	}
+	return FormAction(form)
+}
+
+// SubmitterNoValidate reports whether the activated submit button opted out of
+// constraint validation with formnovalidate.
+func SubmitterNoValidate(submitter *dom.Node) bool {
+	return isSubmitter(submitter) && submitter.HasAttribute("formnovalidate")
 }
 
 // FormEnctype returns the encoding type for a form.

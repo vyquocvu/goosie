@@ -2335,20 +2335,22 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 	if form == nil {
 		return
 	}
-	invalid := ValidateForm(form)
-	if len(invalid) > 0 {
-		for _, control := range invalid {
-			dom.DispatchEvent(control, dom.NewEvent("invalid", false, false))
+	if !SubmitterNoValidate(submitter) {
+		invalid := ValidateForm(form)
+		if len(invalid) > 0 {
+			for _, control := range invalid {
+				dom.DispatchEvent(control, dom.NewEvent("invalid", false, false))
+			}
+			s.setFocusedNodeLocked(invalid[0])
+			return
 		}
-		s.setFocusedNodeLocked(invalid[0])
-		return
 	}
 	ev := dom.NewEvent("submit", true, true)
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}
 	data := CollectFormData(form, submitter)
-	method := FormMethod(form)
+	method := FormMethodFor(form, submitter)
 	if strings.EqualFold(method, "dialog") {
 		for cur := form.Parent; cur != nil; cur = cur.Parent {
 			if cur.Element() && cur.Data == "dialog" {
@@ -2363,7 +2365,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 		}
 		return
 	}
-	action := FormAction(form)
+	action := FormActionFor(form, submitter)
 	encoded := EncodeFormURLEncoded(data)
 
 	s.submittedForm = &FormSubmission{

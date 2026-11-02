@@ -493,3 +493,169 @@ func TestJourneyPostRedirectBecomesGet(t *testing.T) {
 		t.Errorf("redirected request body = %q, want empty", gotBodies[1])
 	}
 }
+
+// qc:BR-106
+// TestJourneySubmitterOverridesDestination follows a form whose two submit
+// buttons lead to different places with different methods. The activated
+// button decides, exactly as sites rely on for "Save draft" versus "Publish".
+func TestJourneySubmitterOverridesDestination(t *testing.T) {
+	var reqMu sync.Mutex
+	var savedMethod, savedBody string
+	var publishedQuery url.Values
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/saved":
+			body, _ := io.ReadAll(r.Body)
+			reqMu.Lock()
+			savedMethod = r.Method
+			savedBody = string(body)
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="saved">Saved</h1></body></html>`)
+		case "/published":
+			reqMu.Lock()
+			publishedQuery = r.URL.Query()
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="published">Published</h1></body></html>`)
+		default:
+			fmt.Fprint(w, `<!doctype html><html><body>
+<form id="f" action="/published" method="GET">
+  <input type="text" id="title" name="title" value="draft">
+  <button type="submit" id="save" name="action" value="save" formaction="/saved" formmethod="POST">Save</button>
+  <button type="submit" id="publish" name="action" value="publish">Publish</button>
+</form>
+</body></html>`)
+		}
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	openForm := func() {
+		t.Helper()
+		browser.navigateViaAddressBar(t, pageURL)
+		browser.waitFor(t, "both destination buttons available in AX tree", func() bool {
+			_, save := findAXNode(browser.window.AccessibilityTree(), "save")
+			_, publish := findAXNode(browser.window.AccessibilityTree(), "publish")
+			return save && publish && browser.activeURL() == pageURL
+		})
+	}
+
+	openForm()
+	browser.clickNode(t, "save")
+	browser.waitFor(t, "the save button's own destination is displayed", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "saved")
+		return ok && browser.activeURL() == server.URL+"/saved"
+	})
+
+	openForm()
+	browser.clickNode(t, "publish")
+	browser.waitFor(t, "the publish button falls back to the form's destination", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "published")
+		return ok && strings.HasPrefix(browser.activeURL(), server.URL+"/published?")
+	})
+
+	reqMu.Lock()
+	gotSavedMethod, gotSavedBody := savedMethod, savedBody
+	gotPublishedQuery := publishedQuery
+	reqMu.Unlock()
+
+	if gotSavedMethod != http.MethodPost {
+		t.Errorf("save method = %q, want POST from formmethod", gotSavedMethod)
+	}
+	saved, err := url.ParseQuery(gotSavedBody)
+	if err != nil {
+		t.Fatalf("save body %q is not form-encoded: %v", gotSavedBody, err)
+	}
+	if saved.Get("action") != "save" || saved.Get("title") != "draft" {
+		t.Errorf("save body = %q, want action=save and title=draft", gotSavedBody)
+	}
+	if got := gotPublishedQuery.Get("action"); got != "publish" {
+		t.Errorf("publish action = %q, want publish", got)
+	}
+	if got := gotPublishedQuery.Get("title"); got != "draft" {
+		t.Errorf("publish title = %q, want draft", got)
+	}
+}
+
+// qc:BR-105
+// TestJourneySubmitterNoValidateSkipsValidation covers the escape hatch sites
+// use for "Skip" or "Save draft": an empty required field must not block the
+// button that opts out with formnovalidate, while the normal submit stays on
+// the page and focuses the missing value.
+func TestJourneySubmitterNoValidateSkipsValidation(t *testing.T) {
+	var reqMu sync.Mutex
+	var draftQuery url.Values
+	var submitted int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/draft":
+			reqMu.Lock()
+			draftQuery = r.URL.Query()
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="draft">Draft</h1></body></html>`)
+		case "/submit":
+			reqMu.Lock()
+			submitted++
+			reqMu.Unlock()
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="submitted">Submitted</h1></body></html>`)
+		default:
+			fmt.Fprint(w, `<!doctype html><html><body>
+<form id="f" action="/submit" method="GET">
+  <input type="text" id="q" name="q" required>
+  <button type="submit" id="skip" name="skip" value="1" formaction="/draft" formnovalidate>Skip</button>
+  <button type="submit" id="send">Send</button>
+</form>
+</body></html>`)
+		}
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	browser.navigateViaAddressBar(t, pageURL)
+	browser.waitFor(t, "validating form available in AX tree", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "send")
+		return ok && browser.activeURL() == pageURL
+	})
+
+	// The ordinary submit button is still blocked by the empty required field.
+	browser.clickNode(t, "send")
+	browser.waitFor(t, "the invalid submit focuses the missing control", func() bool {
+		return isNodeFocused(browser.window.AccessibilityTree(), "q")
+	})
+	reqMu.Lock()
+	gotSubmitted := submitted
+	reqMu.Unlock()
+	if gotSubmitted != 0 || browser.activeURL() != pageURL {
+		t.Fatalf("invalid submit reached %q after %d requests; want to stay on the form", browser.activeURL(), gotSubmitted)
+	}
+
+	// The activating button's formnovalidate lets the same data through.
+	browser.clickNode(t, "skip")
+	browser.waitFor(t, "the opt-out button reaches its own destination", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "draft")
+		return ok && strings.HasPrefix(browser.activeURL(), server.URL+"/draft?")
+	})
+
+	reqMu.Lock()
+	gotQuery := draftQuery
+	gotSubmitted = submitted
+	reqMu.Unlock()
+	if gotSubmitted != 0 {
+		t.Errorf("formnovalidate submission also hit the form action (%d times)", gotSubmitted)
+	}
+	if got := gotQuery.Get("skip"); got != "1" {
+		t.Errorf("draft skip = %q, want 1", got)
+	}
+	if got := gotQuery.Get("q"); got != "" {
+		t.Errorf("draft q = %q, want the empty required value", got)
+	}
+}
