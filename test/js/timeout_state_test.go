@@ -11,6 +11,7 @@ import (
 // FR-JS-06 needs to tell the host that the deadline, not a navigation, stopped
 // the script: only the former is an unresponsive page worth prompting about.
 
+// qc:BR-167
 func TestTimeoutIsReportedOnce(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/slow", Timeout: 50 * time.Millisecond})
 	if err := r.Run(`while (true) {}`, "inline"); !errors.Is(err, js.ErrInterrupted) {
@@ -27,6 +28,7 @@ func TestTimeoutIsReportedOnce(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestHostInterruptIsNotReportedAsTimeout(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/stop", Timeout: 30 * time.Second})
 	done := make(chan error, 1)
@@ -43,6 +45,7 @@ func TestHostInterruptIsNotReportedAsTimeout(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestCleanRunDoesNotReportTimeout(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/fast", Timeout: 50 * time.Millisecond})
 	if err := r.Run(`var x = 1 + 1;`, "inline"); err != nil {
@@ -53,6 +56,7 @@ func TestCleanRunDoesNotReportTimeout(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestTimerCallbackTimeoutIsReported(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/timer", Timeout: 50 * time.Millisecond})
 	if err := r.Run(`setTimeout(function () { while (true) {} }, 0);`, "inline"); err != nil {

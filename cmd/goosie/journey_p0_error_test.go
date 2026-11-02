@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/engine"
 )
@@ -107,6 +108,52 @@ func TestJourneyOversizedDocumentShowsErrorAndRecovers(t *testing.T) {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "recovered-after-oversize")
 		active := browser.f.tabMgr.Active()
 		return ok && browser.activeURL() == recoveredURL && active != nil && active.Error() == ""
+	})
+}
+
+// qc:BR-167
+func TestJourneyUnresponsiveScriptLeavesChromeOperable(t *testing.T) {
+	// A page whose inline script never returns must end in the prompt rather
+	// than a frozen browser: the engine stops the script, the tab keeps a real
+	// session to render, and the address bar still drives a later navigation.
+	// The second half is the acceptance criterion that no unit oracle covers -
+	// stopping the script is worthless if the chrome dies with it.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/slow":
+			fmt.Fprint(w, `<!doctype html><html><head><title>Slow</title></head><body><h1 id="slow-doc">SLOW PAGE BODY</h1><script>while (true) {}</script></body></html>`)
+		case "/after":
+			fmt.Fprint(w, `<!doctype html><html><head><title>After</title></head><body><h1 id="after-doc">After Timeout</h1></body></html>`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	browser.f.scriptTimeout = 50 * time.Millisecond
+
+	slowURL := server.URL + "/slow"
+	browser.navigateViaAddressBar(t, slowURL)
+	browser.waitFor(t, "unresponsive script prompt", func() bool {
+		tree := browser.window.AccessibilityTree()
+		active := browser.f.tabMgr.Active()
+		_, interruptedStillShown := findAXNode(tree, "slow-doc")
+		return active != nil && active.Title() == "Unresponsive Script" &&
+			!interruptedStillShown &&
+			axContainsLabel(tree, "Unresponsive Script") &&
+			axContainsLabel(tree, "Reload without scripts")
+	})
+
+	// The chrome has to accept input after the stop: typing in the address bar
+	// and pressing Enter must reach the new document.
+	afterURL := server.URL + "/after"
+	browser.navigateViaAddressBar(t, afterURL)
+	browser.waitFor(t, "navigation after unresponsive script", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "after-doc")
+		active := browser.f.tabMgr.Active()
+		return ok && browser.activeURL() == afterURL && active != nil && active.Error() == ""
 	})
 }
 

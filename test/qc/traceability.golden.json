@@ -3196,9 +3196,26 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "test/js/interrupt_test.go:TestInfiniteLoopIsStoppedByItsTimeout"
+      "cmd/goosie/journey_p0_error_test.go:TestJourneyUnresponsiveScriptLeavesChromeOperable",
+      "cmd/goosie/unresponsive_page_test.go:TestSlowLoadShowsPromptInsteadOfThePage",
+      "cmd/goosie/unresponsive_page_test.go:TestStopActionReloadsWithoutScripts",
+      "cmd/goosie/unresponsive_page_test.go:TestUnresponsivePolicyRoutesPromptActions",
+      "cmd/goosie/unresponsive_page_test.go:TestUnresponsivePromptNamesBothActions",
+      "cmd/goosie/unresponsive_page_test.go:TestWaitActionReloadsWithRetryBudget",
+      "test/engine/script_timeout_test.go:TestCleanDocumentHasNoScriptTimeout",
+      "test/engine/script_timeout_test.go:TestParserScriptTimeoutIsRecorded",
+      "test/engine/script_timeout_test.go:TestTimerCallbackTimeoutIsRecordedByPump",
+      "test/js/contract_test.go:TestOversizedScriptIsRefusedBeforeRunning",
+      "test/js/interrupt_test.go:TestDefaultTimeoutIsBoundedAndNotZero",
+      "test/js/interrupt_test.go:TestFastScriptIsNotReportedAsInterrupted",
+      "test/js/interrupt_test.go:TestInfiniteLoopIsStoppedByItsTimeout",
+      "test/js/interrupt_test.go:TestInterruptFromAnotherGoroutineStopsARunningScript",
+      "test/js/timeout_state_test.go:TestCleanRunDoesNotReportTimeout",
+      "test/js/timeout_state_test.go:TestHostInterruptIsNotReportedAsTimeout",
+      "test/js/timeout_state_test.go:TestTimeoutIsReportedOnce",
+      "test/js/timeout_state_test.go:TestTimerCallbackTimeoutIsReported"
     ],
     "enforced": true
   },

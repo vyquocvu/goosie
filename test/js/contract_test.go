@@ -250,6 +250,7 @@ func TestSyntaxErrorDoesNotPoisonLaterScripts(t *testing.T) {
 // Source size is admitted before compilation, not charged to it: MaxScriptBytes
 // exists so a page cannot make the engine build a multi-megabyte AST on a tab
 // that is already at its document limit.
+// qc:BR-167
 func TestOversizedScriptIsRefusedBeforeRunning(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
 

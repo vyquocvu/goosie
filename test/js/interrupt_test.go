@@ -44,6 +44,7 @@ func TestInfiniteLoopIsStoppedByItsTimeout(t *testing.T) {
 // end a script that is still running. It is called from another goroutine, so
 // the runtime must be safe to interrupt from outside the thread that is
 // executing it - which is also what -race checks here.
+// qc:BR-167
 func TestInterruptFromAnotherGoroutineStopsARunningScript(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a", Timeout: 0})
 
@@ -72,6 +73,7 @@ func TestInterruptFromAnotherGoroutineStopsARunningScript(t *testing.T) {
 // DefaultTimeout is a documented number, not a rumour: the brief's page-responsiveness
 // requirement is stated in wall-clock terms, and a bound nobody can read out of
 // the API cannot be tested or compared against it.
+// qc:BR-167
 func TestDefaultTimeoutIsBoundedAndNotZero(t *testing.T) {
 	if js.DefaultTimeout <= 0 || js.DefaultTimeout > 10*time.Second {
 		t.Errorf("DefaultTimeout = %v, want a positive bound no longer than 10s", js.DefaultTimeout)
@@ -81,6 +83,7 @@ func TestDefaultTimeoutIsBoundedAndNotZero(t *testing.T) {
 // A script that finishes normally must not be reported as interrupted because
 // the timer was armed and never disarmed. This is the false-positive half of
 // the previous two tests.
+// qc:BR-167
 func TestFastScriptIsNotReportedAsInterrupted(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a", Timeout: 2 * time.Second})
 	if err := r.Run(`var sum = 0; for (var i = 0; i < 1000; i++) { sum += i; }`, "inline"); err != nil {

@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ func newTimeoutRuntime(t *testing.T) *js.Runtime {
 	return rt
 }
 
+// qc:BR-167
 func TestParserScriptTimeoutIsRecorded(t *testing.T) {
 	html := `<html><body><p>before</p><script>while (true) {}</script><p>after</p></body></html>`
 	sess, err := engine.NewSession(html, nil, 800, engine.WithJS(newTimeoutRuntime(t)))
@@ -44,8 +46,19 @@ func TestParserScriptTimeoutIsRecorded(t *testing.T) {
 	if !found {
 		t.Fatalf("ScriptErrors = %+v, want one TimedOut entry", sess.ScriptErrors())
 	}
+	// The stop is scoped to the script, not the document: parsing continues,
+	// the elements after the script are in the tree, and the session still
+	// produces a paint list. A timeout that aborted the load would satisfy the
+	// counters above while leaving nothing for the chrome to show.
+	if text := sess.Doc.Node.TextContent(); !strings.Contains(text, "after") {
+		t.Fatalf("document text = %q, want parsing to continue past the stopped script", text)
+	}
+	if _, err := sess.PaintChecked(1); err != nil {
+		t.Fatalf("PaintChecked after a script timeout: %v", err)
+	}
 }
 
+// qc:BR-167
 func TestTimerCallbackTimeoutIsRecordedByPump(t *testing.T) {
 	html := `<html><body><script>setTimeout(function () { while (true) {} }, 0);</script></body></html>`
 	sess, err := engine.NewSession(html, nil, 800, engine.WithJS(newTimeoutRuntime(t)))
@@ -67,6 +80,7 @@ func TestTimerCallbackTimeoutIsRecordedByPump(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestCleanDocumentHasNoScriptTimeout(t *testing.T) {
 	html := `<html><body><script>document.title = "fast";</script></body></html>`
 	sess, err := engine.NewSession(html, nil, 800, engine.WithJS(newTimeoutRuntime(t)))

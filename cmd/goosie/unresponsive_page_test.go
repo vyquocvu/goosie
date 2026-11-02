@@ -31,6 +31,7 @@ func newUnresponsiveTestPath(t *testing.T) *framePath {
 	return f
 }
 
+// qc:BR-167
 func TestUnresponsivePolicyRoutesPromptActions(t *testing.T) {
 	stopURL := "goosie://unresponsive?action=stop&url=" + url.QueryEscape("https://example.test/slow")
 	target, policy, ok := unresponsiveScriptPolicy(stopURL)
@@ -55,6 +56,7 @@ func TestUnresponsivePolicyRoutesPromptActions(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestUnresponsivePromptNamesBothActions(t *testing.T) {
 	_, body := buildUnresponsivePageHTML("goosie://unresponsive?url=" + url.QueryEscape("https://example.test/slow") + "&count=1")
 	for _, want := range []string{
@@ -71,6 +73,7 @@ func TestUnresponsivePromptNamesBothActions(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestSlowLoadShowsPromptInsteadOfThePage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -107,6 +110,7 @@ func TestSlowLoadShowsPromptInsteadOfThePage(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestStopActionReloadsWithoutScripts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -136,6 +140,7 @@ func TestStopActionReloadsWithoutScripts(t *testing.T) {
 	}
 }
 
+// qc:BR-167
 func TestWaitActionReloadsWithRetryBudget(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
