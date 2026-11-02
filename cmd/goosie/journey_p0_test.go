@@ -310,7 +310,15 @@ func TestJourneyCmdLFocusesAddressBar(t *testing.T) {
 		return ok && node.Focused && node.AddressBar
 	})
 
-	// 4. Content is selected for replacement: navigating to a new URL succeeds
+	// 4. Content is selected for replacement: typing one key without an explicit
+	// select-all must replace the whole URL rather than append to it.
+	browser.pressKey(t, 'x')
+	browser.waitFor(t, "typing after Cmd+L replaces the selected URL", func() bool {
+		node, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
+		return ok && node.Focused && node.Value == "x"
+	})
+
+	// 5. Navigating to a new URL succeeds
 	browser.navigateViaAddressBar(t, secondURL)
 	browser.waitFor(t, "second page loaded after address bar replacement", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "second")

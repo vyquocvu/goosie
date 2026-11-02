@@ -288,11 +288,11 @@
     "methods": [
       "CUA"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p1_nav_test.go:TestJourneyAddressBarFocusTypingDoesNotLeakToDocument"
     ],
-    "enforced": false
+    "enforced": true
   },
   {
     "id": "BR-023",
@@ -2634,7 +2634,7 @@
     "methods": [
       "CUA"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/journey_p0_test.go:TestJourneyCmdLFocusesAddressBar"
     ],
