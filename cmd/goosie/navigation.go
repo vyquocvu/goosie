@@ -45,6 +45,14 @@ type navResult struct {
 	transition history.Transition
 }
 
+// navRequest is the method and payload of one navigation. The zero value is a
+// GET; form submission with method="POST" carries the encoded controls.
+type navRequest struct {
+	Method      string
+	ContentType string
+	Body        string
+}
+
 // downloadDone reports a completed download instead of a rendered document;
 // the navigation goroutine converts it into navResult.downloadPath.
 type downloadDone struct{ path string }
@@ -120,6 +128,13 @@ func (f *framePath) navigateTab(rawURL string) {
 
 // navigateTabTransition loads a URL and labels the visit it records.
 func (f *framePath) navigateTabTransition(rawURL string, transition history.Transition) {
+	f.navigateTabRequest(rawURL, transition, navRequest{})
+}
+
+// navigateTabRequest loads rawURL with an explicit request. Only a form
+// submission with method="POST" fills req; every other caller reaches the
+// server through navigateTabTransition's GET.
+func (f *framePath) navigateTabRequest(rawURL string, transition history.Transition, req navRequest) {
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
@@ -159,7 +174,7 @@ func (f *framePath) navigateTabTransition(rawURL string, transition history.Tran
 	client := f.clientForTab(tab)
 	go func() {
 		defer f.navWg.Done()
-		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true)
+		layer, _, bgColor, sess, finalURL, err := f.loadDocumentCtx(ctx, client, u, f.contentWidth(), f.contentHeight(), float32(f.config.dpr), f.downloadDirectory(), true, true, req)
 		res := navResult{tabID: tab.ID(), serial: serial, url: u, transition: transition}
 		if finalURL != "" {
 			// A redirect lands the final URL: the address bar and the
@@ -181,7 +196,8 @@ func (f *framePath) navigateTabTransition(rawURL string, transition history.Tran
 }
 
 // loadDocumentCtx loads an internal page (goosie://) or a network/file resource.
-func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
+// reqs carries an explicit request for a form submission; omitted means GET.
+func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool, reqs ...navRequest) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	policy := scriptPolicy{timeout: f.scriptTimeout}
 	if strings.HasPrefix(strings.ToLower(u), "goosie://") {
 		// The unresponsive prompt's actions reload the page under a chosen
@@ -213,6 +229,9 @@ func (f *framePath) loadDocumentCtx(ctx context.Context, client net.HTTP, u stri
 	}
 	if f.currentPreferences().AskDownloadLocation {
 		extra = append(extra, f.window)
+	}
+	if len(reqs) > 0 {
+		extra = append(extra, reqs[0])
 	}
 	return loadURLCtx(ctx, client, f.fonts, u, viewportW, viewportH, scale, downloadDir, deferImages, deferFonts, extra...)
 }

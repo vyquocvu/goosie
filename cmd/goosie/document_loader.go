@@ -46,23 +46,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	if isViewSource {
 		fetchURL = targetURL
 	}
-	var resp *net.Response
-	var stream *net.StreamResponse
-	var err error
-	if streamer, ok := client.(net.StreamingHTTP); ok && isHTTPURL(fetchURL) {
-		stream, err = streamer.GetStream(ctx, fetchURL)
-		if err == nil {
-			resp = &net.Response{StatusCode: stream.StatusCode, Headers: stream.Headers, URL: stream.URL}
-		}
-	} else {
-		resp, err = client.Get(ctx, fetchURL)
-	}
-	if err != nil {
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(fetchURL), err)
-	}
-	if stream != nil {
-		defer stream.Close()
-	}
 	var mgr *download.Manager
 	var storageReg *js.OriginStorageRegistry
 	var sessionID string
@@ -74,6 +57,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var mediaBackend media.Backend
 	var savePathPicker platform.SavePathPicker
 	var policy scriptPolicy
+	var request navRequest
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -98,7 +82,31 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			savePathPicker = v
 		case scriptPolicy:
 			policy = v
+		case navRequest:
+			request = v
 		}
+	}
+	var resp *net.Response
+	var stream *net.StreamResponse
+	var err error
+	if strings.EqualFold(request.Method, "POST") {
+		// A form submission is buffered by definition: the body is the encoded
+		// control set, and streaming a request body is not what StreamingHTTP
+		// offers. Redirects are the client's job, including the 302-to-GET rule.
+		resp, err = client.Post(ctx, fetchURL, request.ContentType, strings.NewReader(request.Body))
+	} else if streamer, ok := client.(net.StreamingHTTP); ok && isHTTPURL(fetchURL) {
+		stream, err = streamer.GetStream(ctx, fetchURL)
+		if err == nil {
+			resp = &net.Response{StatusCode: stream.StatusCode, Headers: stream.Headers, URL: stream.URL}
+		}
+	} else {
+		resp, err = client.Get(ctx, fetchURL)
+	}
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(fetchURL), err)
+	}
+	if stream != nil {
+		defer stream.Close()
 	}
 	if isViewSource && stream != nil {
 		body, readErr := stream.ReadBounded(net.MaxResponseBytes)

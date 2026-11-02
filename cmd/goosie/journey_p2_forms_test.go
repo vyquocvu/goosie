@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -316,4 +318,178 @@ input:invalid { background-color: rgb(255, 0, 0); }
 		last := browser.f.loop.Stats().Last
 		return last.Needed == 0 && last.PaintingBytes == 0
 	})
+}
+
+// qc:BR-106
+// TestJourneyPostFormCarriesBody covers the other half of BR-106: a POST
+// submission must reach the server as a request body, not as a query string,
+// and the response's cookie must outlive the submission. A browser that
+// navigates to the action URL without the payload loses every login and
+// checkout on the web.
+func TestJourneyPostFormCarriesBody(t *testing.T) {
+	var reqMu sync.Mutex
+	var posted bool
+	var method, contentType, rawBody string
+	var requestQuery url.Values
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/submit":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "read body", http.StatusBadRequest)
+				return
+			}
+			reqMu.Lock()
+			posted = true
+			method = r.Method
+			contentType = r.Header.Get("Content-Type")
+			rawBody = string(body)
+			requestQuery = r.URL.Query()
+			reqMu.Unlock()
+			http.SetCookie(w, &http.Cookie{Name: "receipt", Value: "1", Path: "/"})
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="done">Posted</h1></body></html>`)
+		case "/echo":
+			if _, err := r.Cookie("receipt"); err != nil {
+				fmt.Fprint(w, `<!doctype html><html><body><h1 id="missing">No cookie</h1></body></html>`)
+				return
+			}
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="echo">Cookie</h1></body></html>`)
+		default:
+			fmt.Fprint(w, `<!doctype html><html><body>
+<form id="f" action="/submit" method="POST">
+  <input type="text" id="who" name="who" value="Ada Lovelace">
+  <input type="hidden" name="n" value="7">
+  <button type="submit" id="send" name="go" value="1">Send</button>
+</form>
+</body></html>`)
+		}
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	browser.navigateViaAddressBar(t, pageURL)
+	browser.waitFor(t, "post form available in AX tree", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "send")
+		return ok && browser.activeURL() == pageURL
+	})
+
+	browser.clickNode(t, "send")
+	browser.waitFor(t, "the POST response replaces the form", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
+		return ok && browser.activeURL() == server.URL+"/submit"
+	})
+
+	reqMu.Lock()
+	gotPosted := posted
+	gotMethod, gotContentType, gotBody := method, contentType, rawBody
+	gotQuery := requestQuery
+	reqMu.Unlock()
+
+	if !gotPosted {
+		t.Fatal("the server never received the submitted form")
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("submission method = %q, want POST", gotMethod)
+	}
+	if !strings.HasPrefix(gotContentType, "application/x-www-form-urlencoded") {
+		t.Errorf("submission Content-Type = %q, want application/x-www-form-urlencoded", gotContentType)
+	}
+	if len(gotQuery) != 0 {
+		t.Errorf("POST request carried query %v; the payload belongs in the body", gotQuery)
+	}
+	payload, err := url.ParseQuery(gotBody)
+	if err != nil {
+		t.Fatalf("submission body %q is not form-encoded: %v", gotBody, err)
+	}
+	for name, want := range map[string]string{"who": "Ada Lovelace", "n": "7", "go": "1"} {
+		if got := payload.Get(name); got != want {
+			t.Errorf("submitted %s = %q, want %q (body %q)", name, got, want, gotBody)
+		}
+	}
+
+	// The response cookie is a normal cookie: the next navigation must send it.
+	browser.navigateViaAddressBar(t, server.URL+"/echo")
+	browser.waitFor(t, "the cookie set by the POST response reaches the next request", func() bool {
+		_, seen := findAXNode(browser.window.AccessibilityTree(), "echo")
+		return seen
+	})
+}
+
+// qc:BR-106
+// TestJourneyPostRedirectBecomesGet records the redirect rule that makes POST
+// safe to follow: 301/302/303 turn the redirected request into a GET, while the
+// POST itself still reaches the server with its body.
+func TestJourneyPostRedirectBecomesGet(t *testing.T) {
+	var reqMu sync.Mutex
+	var methods, bodies []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/submit":
+			body, _ := io.ReadAll(r.Body)
+			reqMu.Lock()
+			methods = append(methods, r.Method)
+			bodies = append(bodies, string(body))
+			reqMu.Unlock()
+			http.Redirect(w, r, "/landed", http.StatusFound)
+		case "/landed":
+			reqMu.Lock()
+			methods = append(methods, r.Method)
+			bodies = append(bodies, "")
+			reqMu.Unlock()
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<!doctype html><html><body><h1 id="landed">Landed</h1></body></html>`)
+		default:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<!doctype html><html><body>
+<form id="f" action="/submit" method="POST">
+  <input type="text" id="q" name="q" value="hello">
+  <button type="submit" id="go">Go</button>
+</form>
+</body></html>`)
+		}
+	}))
+	defer server.Close()
+
+	browser := newBrowserE2E(t)
+	defer browser.close(t)
+
+	pageURL := server.URL + "/form"
+	browser.navigateViaAddressBar(t, pageURL)
+	browser.waitFor(t, "redirecting form available in AX tree", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "go")
+		return ok && browser.activeURL() == pageURL
+	})
+
+	browser.clickNode(t, "go")
+	browser.waitFor(t, "the redirect target is displayed under its own URL", func() bool {
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "landed")
+		return ok && browser.activeURL() == server.URL+"/landed"
+	})
+
+	reqMu.Lock()
+	gotMethods := append([]string(nil), methods...)
+	gotBodies := append([]string(nil), bodies...)
+	reqMu.Unlock()
+
+	if len(gotMethods) != 2 {
+		t.Fatalf("the redirect chain produced %d requests (%v), want 2", len(gotMethods), gotMethods)
+	}
+	if gotMethods[0] != http.MethodPost {
+		t.Errorf("first request method = %q, want POST", gotMethods[0])
+	}
+	if gotBodies[0] != "q=hello" {
+		t.Errorf("first request body = %q, want q=hello", gotBodies[0])
+	}
+	if gotMethods[1] != http.MethodGet {
+		t.Errorf("redirected request method = %q, want GET", gotMethods[1])
+	}
+	if gotBodies[1] != "" {
+		t.Errorf("redirected request body = %q, want empty", gotBodies[1])
+	}
 }
