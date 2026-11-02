@@ -1369,8 +1369,9 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
+      "test/engine/script_test.go:TestInlineScriptOrderAroundDOMContentLoaded",
       "test/engine/script_test.go:TestScriptsRunInDocumentOrder"
     ],
     "enforced": true

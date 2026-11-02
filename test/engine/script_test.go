@@ -169,6 +169,50 @@ func TestScriptsRunInDocumentOrder(t *testing.T) {
 	}
 }
 
+// qc:BR-088
+func TestInlineScriptOrderAroundDOMContentLoaded(t *testing.T) {
+	rt, err := js.New(js.Options{URL: "https://example.test/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	html := `<!DOCTYPE html><html><body>
+<script>
+var trace = [];
+window.readyDuringInline = document.readyState;
+document.addEventListener("DOMContentLoaded", function () {
+	trace.push("dcl:" + document.readyState);
+	trace.push("tail:" + document.getElementById("tail").textContent);
+	window.order = trace.join(",");
+});
+trace.push("head-script");
+</script>
+<p id="head-node">head</p>
+<script>
+trace.push("body-script:" + (document.getElementById("head-node") !== null) + ":" + (document.getElementById("tail") === null));
+</script>
+<p id="tail">tail text</p>
+</body></html>`
+	sess, err := engine.NewSession(html, nil, 800, engine.WithJS(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	if v, ok := rt.Global("readyDuringInline"); !ok || v.Str != "loading" {
+		t.Errorf("readyState during inline script = %v (present %t), want %q", v, ok, "loading")
+	}
+	v, ok := rt.Global("order")
+	if !ok {
+		t.Fatal("DOMContentLoaded handler did not record the execution order")
+	}
+	want := "head-script,body-script:true:true,dcl:interactive,tail:tail text"
+	if v.Str != want {
+		t.Errorf("execution order = %q, want %q", v.Str, want)
+	}
+}
+
 func TestParserScriptRunsBeforeFollowingInputIsProcessed(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
