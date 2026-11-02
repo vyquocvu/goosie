@@ -326,6 +326,32 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 	return false
 }
 
+// extendDocumentSelection moves the page selection head with a Shift+Arrow
+// press, anchored where the selection started. Applies only when no editable
+// control owns the key; the caller checks that.
+func (f *framePath) extendDocumentSelection(tab *tabs.Tab, key rune) bool {
+	var dir engine.SelectDirection
+	switch key {
+	case 0xF702:
+		dir = engine.SelectLeft
+	case 0xF703:
+		dir = engine.SelectRight
+	case 0xF700:
+		dir = engine.SelectUp
+	case 0xF701:
+		dir = engine.SelectDown
+	default:
+		return false
+	}
+	sess := tab.Session()
+	oldR, oldOK := sess.SelectionBounds()
+	if !sess.ExtendSelectionByKey(dir) {
+		return false
+	}
+	f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
+	return true
+}
+
 // copySelection puts the selected text on the system clipboard.
 func (f *framePath) copySelection() bool {
 	tab := f.tabMgr.Active()
@@ -414,6 +440,13 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			return true
 		}
 	}
+	if !cmd && mods&surface.ModShift != 0 && !tab.Session().FocusedEditable() && tab.Session().FocusedSelect() == nil {
+		// Shift+Arrow extends the page selection. It must run before the scroll
+		// block, which would otherwise read the held Shift as a scroll gesture.
+		if f.extendDocumentSelection(tab, key) {
+			return true
+		}
+	}
 	if !cmd && !tab.Session().FocusedEditable() && tab.Session().FocusedSelect() == nil {
 		if f.scrollContentKey(tab, key, mods&surface.ModShift != 0) {
 			return true
@@ -480,16 +513,9 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 				}
 			}
 		case 'a', 'A':
-			if tab.Session().FocusedEditable() {
-				if tab.Session().SelectAllControl() {
-					f.repaintTab(tab, frame.Rect{})
-					return true
-				}
-			} else {
-				if tab.Session().SelectAll() {
-					f.repaintTab(tab, frame.Rect{})
-					return true
-				}
+			if tab.Session().SelectAllInFocus() {
+				f.repaintTab(tab, frame.Rect{})
+				return true
 			}
 		case 'c', 'C':
 			if cb := platform.NewClipboard(); cb != nil {

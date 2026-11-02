@@ -159,3 +159,61 @@ func TestSelectionBoundsUnion(t *testing.T) {
 		t.Fatalf("bounds %+v do not cover hello->world", r)
 	}
 }
+
+// qc:BR-108
+//
+// Shift+Arrow grows and shrinks the page selection from a fresh document, and a
+// vertical step carries the column into the neighbouring visual line, so the
+// painted range follows the keyboard the way it follows the mouse.
+func TestShiftArrowExtendsPageSelectionByRuneAndLine(t *testing.T) {
+	s := newFocusSession(t, `<html><body style="margin:0;">`+
+		`<p style="font-size:16px;">alpha beta<br>gamma delta</p></body></html>`)
+	if s.HasSelection() {
+		t.Fatal("fresh page already has a selection")
+	}
+	for i := 0; i < 5; i++ {
+		if !s.ExtendSelectionByKey(engine.SelectRight) {
+			t.Fatalf("Shift+Right %d did not move the selection", i)
+		}
+	}
+	if got := s.SelectionText(); got != "alpha" {
+		t.Fatalf("selection after five right steps = %q, want alpha", got)
+	}
+	if !s.ExtendSelectionByKey(engine.SelectLeft) {
+		t.Fatal("Shift+Left did not shrink the selection")
+	}
+	if got := s.SelectionText(); got != "alph" {
+		t.Fatalf("selection after one left step = %q, want alph", got)
+	}
+	if !s.ExtendSelectionByKey(engine.SelectRight) {
+		t.Fatal("Shift+Right did not restore the fifth rune")
+	}
+	if !s.ExtendSelectionByKey(engine.SelectDown) {
+		t.Fatal("Shift+Down did not move to the second line")
+	}
+	if got := s.SelectionText(); got != "alpha beta\ngamma" {
+		t.Fatalf("selection after down = %q, want the first line plus gamma", got)
+	}
+	if !s.ExtendSelectionByKey(engine.SelectUp) {
+		t.Fatal("Shift+Up did not return to the first line")
+	}
+	if got := s.SelectionText(); got != "alpha" {
+		t.Fatalf("selection after up = %q, want alpha", got)
+	}
+
+	if !s.ClearSelection() {
+		t.Fatal("ClearSelection reported no selection")
+	}
+	if s.ExtendSelectionByKey(engine.SelectLeft) {
+		t.Fatal("Shift+Left at the document start moved the selection")
+	}
+	if !s.SelectAll() {
+		t.Fatal("SelectAll found no text")
+	}
+	if s.ExtendSelectionByKey(engine.SelectRight) {
+		t.Fatal("Shift+Right at the document end moved the selection")
+	}
+	if got := s.SelectionText(); got != "alpha beta\ngamma delta" {
+		t.Fatalf("full selection = %q, want the whole paragraph", got)
+	}
+}

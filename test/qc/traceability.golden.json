@@ -1687,8 +1687,11 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/p1_selection_test.go:TestMouseDragAndShiftArrowSelectPageText",
+      "test/engine/selection_test.go:TestShiftArrowExtendsPageSelectionByRuneAndLine"
+    ],
     "enforced": false
   },
   {
@@ -1698,8 +1701,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/p1_selection_test.go:TestPageSelectionCopyIsPlainTextAndPastesIntoAControl"
+    ],
     "enforced": false
   },
   {
@@ -1708,8 +1713,12 @@
     "methods": [
       "CUA"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/clipboard_test.go:TestContentKeyCmdSelectAll",
+      "cmd/goosie/p1_selection_test.go:TestCmdASelectsOnlyTheContentEditableSubtree",
+      "cmd/goosie/p1_selection_test.go:TestCmdASelectsOnlyTheFocusedTextControl"
+    ],
     "enforced": false
   },
   {

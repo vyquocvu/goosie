@@ -166,6 +166,10 @@ func TestContentKeyCmdCopyAndCutDispatchEditingClipboardEvents(t *testing.T) {
 	}
 }
 
+// qc:BR-110
+//
+// With nothing focused, Cmd+A selects the whole document: the "outside a
+// control" half of the select-all policy.
 func TestContentKeyCmdSelectAll(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}

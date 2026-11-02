@@ -905,13 +905,7 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 				case "delete":
 					s.deleteContentEditableByWord(true)
 				case "a":
-					if s.FocusedEditable() {
-						if !s.SelectAllControl() && s.jsRT != nil {
-							_, _ = s.jsRT.Evaluate(`(function(){var h=document.activeElement,sel=getSelection();if(h&&h.isContentEditable&&sel)sel.selectAllChildren(h)})()`)
-						}
-					} else {
-						s.SelectAll()
-					}
+					s.SelectAllInFocus()
 				case "c":
 					testDriverClipboardText, testDriverClipboardHTML = s.CopySelectionData()
 				case "x":

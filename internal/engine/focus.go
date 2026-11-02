@@ -2625,6 +2625,29 @@ func (s *Session) SetFocusedText(value string) bool {
 	return true
 }
 
+// SelectAllInFocus selects what Cmd+A should select for the current focus: a
+// focused text control's whole value, a contenteditable element's children, or
+// the document when nothing editable owns focus. Hosts route Cmd+A here so a
+// contenteditable never falls through to selecting the rest of the page.
+func (s *Session) SelectAllInFocus() bool {
+	s.opMu.Lock()
+	focus := s.focus
+	rt := s.jsRT
+	s.opMu.Unlock()
+	if textSelectableControl(focus) {
+		return s.SelectAllControl()
+	}
+	if dom.IsContentEditable(focus) && rt != nil {
+		// selectAllChildren keeps the range inside the editable host: the
+		// surrounding document text must not join the selection.
+		result, err := rt.Evaluate(`(function(){var h=document.activeElement,sel=getSelection();if(h&&h.isContentEditable&&sel){sel.selectAllChildren(h);return true}return false})()`)
+		if err == nil && result == "true" {
+			return true
+		}
+	}
+	return s.SelectAll()
+}
+
 // SelectAllControl selects the full value of the focused text control.
 func (s *Session) SelectAllControl() bool {
 	s.opMu.Lock()

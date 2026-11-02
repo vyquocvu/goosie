@@ -17,10 +17,88 @@ type selPos struct {
 	rune int
 }
 
+// SelectDirection is one arrow-key step for keyboard selection extension.
+type SelectDirection int
+
+const (
+	SelectLeft SelectDirection = iota
+	SelectRight
+	SelectUp
+	SelectDown
+)
+
 // The selection state. selActive is true from press until reflow or a new
 // press; anchor is where the drag started, head where it currently reaches.
 // Both live on Session next to focus state, which Reflow also keeps while
 // selection dies, because word positions cannot survive an arena rebuild.
+
+// ExtendSelectionByKey moves the selection head one rune left or right, or one
+// visual line up or down, while the anchor stays where the selection started.
+// With no selection it starts at the beginning of the document, so Shift+Arrow
+// works before any pointer press. It reports whether the head moved.
+func (s *Session) ExtendSelectionByKey(dir SelectDirection) bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	words := s.selWords()
+	if len(words) == 0 {
+		return false
+	}
+	head := s.selHead
+	if !s.selActive {
+		head = selPos{}
+	}
+	if head.word < 0 || head.word >= len(words) {
+		return false
+	}
+	next := head
+	switch dir {
+	case SelectLeft:
+		if head.rune > 0 {
+			next.rune--
+		} else if head.word > 0 {
+			next.word--
+			next.rune = runeLen(words[next.word])
+		} else {
+			return false
+		}
+	case SelectRight:
+		if head.rune < runeLen(words[head.word]) {
+			next.rune++
+		} else if head.word+1 < len(words) {
+			next.word++
+			next.rune = 0
+		} else {
+			return false
+		}
+	case SelectUp, SelectDown:
+		start, end := lineBounds(words, head.word)
+		if dir == SelectDown {
+			if end+1 >= len(words) {
+				return false
+			}
+			start, end = lineBounds(words, end+1)
+		} else {
+			if start == 0 {
+				return false
+			}
+			start, end = lineBounds(words, start-1)
+		}
+		x := s.runeX(words[head.word], head.rune)
+		target := lineWordAtX(words, start, end, x)
+		next = selPos{word: target, rune: s.runeOffset(words[target], x)}
+	default:
+		return false
+	}
+	if next == head {
+		return false
+	}
+	if !s.selActive {
+		s.selAnchor = head
+		s.selActive = true
+	}
+	s.selHead = next
+	return true
+}
 
 // selWords returns the laid-out text word boxes in document order, skipping
 // whitespace-only runs the same way Find skips them when joining text.
@@ -82,22 +160,7 @@ func (s *Session) posAt(words []*layout.Object, x, y float32) selPos {
 	if base < 0 {
 		base = nearestBand(words, y)
 	}
-	_, by0, _, by1 := words[base].BorderRect()
-	lineStart, lineEnd := base, base
-	for lineStart > 0 {
-		_, y0, _, y1 := words[lineStart-1].BorderRect()
-		if y1 <= by0 || y0 >= by1 {
-			break
-		}
-		lineStart--
-	}
-	for lineEnd < len(words)-1 {
-		_, y0, _, y1 := words[lineEnd+1].BorderRect()
-		if y1 <= by0 || y0 >= by1 {
-			break
-		}
-		lineEnd++
-	}
+	lineStart, lineEnd := lineBounds(words, base)
 	if x0, _, _, _ := words[lineStart].BorderRect(); x < x0 {
 		return selPos{word: lineStart, rune: 0}
 	}
@@ -114,6 +177,80 @@ func (s *Session) posAt(words []*layout.Object, x, y float32) selPos {
 		}
 	}
 	return selPos{word: lineEnd, rune: runeLen(words[lineEnd])}
+}
+
+// lineBounds returns the first and last word index sharing idx's vertical
+// band: the visual line a selection position sits on.
+func lineBounds(words []*layout.Object, idx int) (start, end int) {
+	_, by0, _, by1 := words[idx].BorderRect()
+	start, end = idx, idx
+	for start > 0 {
+		_, y0, _, y1 := words[start-1].BorderRect()
+		if y1 <= by0 || y0 >= by1 {
+			break
+		}
+		start--
+	}
+	for end < len(words)-1 {
+		_, y0, _, y1 := words[end+1].BorderRect()
+		if y1 <= by0 || y0 >= by1 {
+			break
+		}
+		end++
+	}
+	return start, end
+}
+
+// lineWordAtX returns the word in a visual line under x. A point in the gap
+// between words, or left of the line, resolves to the next word's start; a
+// point past the line resolves to the last word's end.
+func lineWordAtX(words []*layout.Object, start, end int, x float32) int {
+	for i := start; i <= end; i++ {
+		_, _, x1, _ := words[i].BorderRect()
+		if x < x1 {
+			return i
+		}
+	}
+	return end
+}
+
+// runeX is the inverse of runeOffset: the x coordinate after idx runes,
+// advancing the pen with the same font metrics the paint builder uses.
+func (s *Session) runeX(w *layout.Object, idx int) float32 {
+	runes := []rune(w.Node.DataContent)
+	x0, _, _, _ := w.BorderRect()
+	if idx <= 0 {
+		return x0
+	}
+	if idx > len(runes) {
+		idx = len(runes)
+	}
+	fontSize := int32(16)
+	letterSpacing, wordSpacing := int32(0), int32(0)
+	var slot frame.FontSlot
+	var m layout.Metrics
+	if w.Style != nil {
+		fontSize = int32(w.Style.FontSize)
+		letterSpacing = int32(w.Style.LetterSpacing)
+		wordSpacing = int32(w.Style.WordSpacing)
+		slot = w.Style.FontSlot()
+		m = s.metrics
+	}
+	pen := int32(0)
+	for i := 0; i < idx; i++ {
+		if i > 0 {
+			pen += letterSpacing * 64
+		}
+		if m != nil {
+			pen += m.GlyphAdvanceFixed(fontSize, runes[i], slot)
+		} else {
+			pen += int32(fontSize) / 2 * 64
+		}
+		if runes[i] == ' ' {
+			pen += wordSpacing * 64
+		}
+	}
+	return x0 + float32((pen+32)>>6)
 }
 
 // nearestBand returns the word whose vertical band is closest to y.
