@@ -526,6 +526,7 @@ func TestStartupDoesNotOverwriteCrashJournalBeforeReadingIt(t *testing.T) {
 	}
 }
 
+// qc:BR-049
 func TestStartupSessionPreferenceControlsBuild(t *testing.T) {
 	for _, tc := range []struct {
 		mode     string

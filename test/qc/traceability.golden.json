@@ -365,7 +365,7 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
       "cmd/goosie/tab_lifecycle_test.go:TestOutOfOrderResultsLandOnTheirOwnTabs"
     ],
@@ -633,8 +633,9 @@
     "methods": [
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
+      "cmd/goosie/e2e_test.go:TestStartupSessionPreferenceControlsBuild",
       "cmd/goosie/main_test.go:TestSessionStateRoundTrip"
     ],
     "enforced": false
