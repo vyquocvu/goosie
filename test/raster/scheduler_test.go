@@ -3,7 +3,6 @@ package raster
 import (
 	"context"
 	"errors"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -131,12 +130,16 @@ func (h *schedHarness) pump() surface.FrameWork {
 	return h.s.Submit(needed)
 }
 
-// drain waits until all in-flight jobs have completed by polling the grid's painting
-// bytes. This makes async tests deterministic without blocking indefinitely.
+// drain waits until all in-flight jobs have completed by polling the pool and the
+// grid's painting bytes. It sleeps between polls rather than yielding only to the
+// scheduler: under -race with the rest of the suite running, a worker may not have
+// picked a job up yet, and a pure Gosched spin can exhaust its budget before a
+// single raster finishes. The deadline turns a worker that never returns into a
+// named failure instead of a test that quietly never reaches the retry limit.
 func (h *schedHarness) drain(t *testing.T) {
 	t.Helper()
-	for i := 0; i < 100 && h.l.Grid.Stats().PaintingBytes > 0; i++ {
-		// Poll for completed jobs and process them.
+	deadline := time.Now().Add(10 * time.Second)
+	for h.l.Grid.Stats().PaintingBytes > 0 {
 		for {
 			d, ok := h.pool.Poll()
 			if !ok {
@@ -144,8 +147,20 @@ func (h *schedHarness) drain(t *testing.T) {
 			}
 			_ = h.s.HandleDone(d)
 		}
-		// Give workers a chance to pick up jobs.
-		runtime.Gosched()
+		if h.l.Grid.Stats().PaintingBytes == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("raster never settled: %d painting bytes left", h.l.Grid.Stats().PaintingBytes)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	for {
+		d, ok := h.pool.Poll()
+		if !ok {
+			break
+		}
+		_ = h.s.HandleDone(d)
 	}
 }
 

@@ -475,6 +475,17 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// waitForCommitted waits until the loop has committed at least n frames.
+//
+// Present reaches the window before draw's deferred commit publishes the tally,
+// so a test that waits only on w.count() can read Stats a frame behind. Anything
+// asserting on a counter for a frame it just saw presented has to wait for the
+// commit as well.
+func waitForCommitted(t *testing.T, loop *surface.Loop, n int64) {
+	t.Helper()
+	waitFor(t, "the loop counters to catch up", func() bool { return loop.Stats().Frames >= n })
+}
+
 func newComposerFor(vp frame.Viewport) *surface.Composer {
 	return surface.NewComposer(vp.Size, frame.NewBitmapPool(vp.Size, 4))
 }
@@ -542,6 +553,7 @@ func TestWarmScrollRasterizesNoTiles(t *testing.T) {
 		w.vsync(t)
 	}
 	waitFor(t, "24 presents", func() bool { return w.count() == down })
+	waitForCommitted(t, loop, down)
 	if got := s.offsetY(); got != down*frame.TileSize {
 		t.Fatalf("scroll offset = %d, want %d: the deltas did not reach the viewport", got, down*frame.TileSize)
 	}
@@ -672,6 +684,7 @@ func TestLateTileNeverBlocksPresent(t *testing.T) {
 		w.vsync(t)
 		waitFor(t, "a present while every tile is in flight", func() bool { return w.count() == i+1 })
 	}
+	waitForCommitted(t, loop, ticks)
 
 	frames, submitted, refused := s.counters()
 	if frames != ticks {
@@ -734,6 +747,7 @@ func TestPresentUsesLatestPlanAndDropsSuperseded(t *testing.T) {
 
 	w.vsync(t)
 	waitFor(t, "one present", func() bool { return w.count() == 1 })
+	waitForCommitted(t, loop, 1)
 
 	if got := loop.Stats().LastPlan; got != 3 {
 		t.Fatalf("presented plan serial = %d, want 3 (the newest)", got)
@@ -767,6 +781,7 @@ func TestScrollDeltasCoalesceIntoOneFrame(t *testing.T) {
 	}
 	w.vsync(t)
 	waitFor(t, "the coalesced frame", func() bool { return w.count() == 1 })
+	waitForCommitted(t, loop, 1)
 
 	if got := s.offsetY(); got != 600 {
 		t.Fatalf("scroll offset = %d, want 600: a coalesced flick lost deltas", got)
@@ -794,6 +809,7 @@ func TestNonVsyncEventsDoNotDraw(t *testing.T) {
 	}
 	w.vsync(t)
 	waitFor(t, "the frame after 41 queued inputs", func() bool { return w.count() == 1 })
+	waitForCommitted(t, loop, 1)
 
 	// The vsync itself carries no delta, so what reached BeginFrame is the sum of
 	// the ten scrolls that preceded it.
@@ -863,6 +879,7 @@ func TestQueueFullIsRefusedNotBlocked(t *testing.T) {
 		w.vsync(t)
 		waitFor(t, "a present over a full queue", func() bool { return w.count() == i+1 })
 	}
+	waitForCommitted(t, loop, ticks)
 	if got := loop.Stats(); got.Refused == 0 {
 		t.Fatal("Refused = 0 with a 2-deep queue and 4 tiles needed: nothing was turned away, so this proved nothing")
 	}
@@ -924,6 +941,7 @@ func TestStatsIsSafeToReadWhileTheLoopRuns(t *testing.T) {
 	}
 	wg.Wait()
 	waitFor(t, "500 presents", func() bool { return w.count() == ticks })
+	waitForCommitted(t, loop, ticks)
 	if got := loop.Stats(); got.Frames != ticks || got.Presents != ticks {
 		t.Fatalf("frames/presents = %d/%d, want %d/%d", got.Frames, got.Presents, ticks, ticks)
 	}
