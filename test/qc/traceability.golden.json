@@ -3146,9 +3146,11 @@
       "SEC",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
-      "test/engine/adversarial_regression_test.go:TestManyQuerySelectorAll"
+      "test/engine/adversarial_regression_test.go:TestManyQuerySelectorAll",
+      "test/engine/adversarial_regression_test.go:TestStyleWorkBudgetClipsRulesInsteadOfHanging",
+      "test/engine/bounds_test.go:TestSessionRejectsAdversarialSelectorShapes"
     ],
     "enforced": true
   },

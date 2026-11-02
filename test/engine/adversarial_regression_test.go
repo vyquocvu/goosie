@@ -11,6 +11,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/style"
 )
@@ -93,6 +94,74 @@ func TestManyQuerySelectorAll(t *testing.T) {
 	}
 	if v, ok := r.Global("out"); !ok || v.Str != "same" {
 		t.Fatalf("wrapper identity = %+v, want same", v)
+	}
+}
+
+// TestStyleWorkBudgetClipsRulesInsteadOfHanging pins the soft work budget, which
+// is the third selector bound after count and shape. One selector with every
+// allowed condition and search combinator, repeated against 10,000 matching
+// elements, would price far past MaxStyleWork. The document must still build:
+// the sheet stops being appended to at the budget rather than the parser
+// refusing the page. The last rule paints blue if the budget does not fire, so
+// the final element reading red is the evidence that truncation happened.
+// qc:BR-164
+func TestStyleWorkBudgetClipsRulesInsteadOfHanging(t *testing.T) {
+	const elements = 10000
+	const rules = 1000
+	// Conditions include each part's tag, so the class count plus the 17 part
+	// tags has to stay inside MaxSelectorConditions while still pricing the
+	// selector well past MaxStyleWork. The ancestor chain must exist in the
+	// fixture or the selector would match nothing and the clip would be
+	// indistinguishable from an ordinary non-match.
+	selector := strings.Repeat("div ", engine.MaxSelectorSearches) + "p" + strings.Repeat(".a", 40)
+
+	var html strings.Builder
+	html.WriteString("<html><body>")
+	html.WriteString(strings.Repeat("<div>", engine.MaxSelectorSearches))
+	for i := 0; i < elements; i++ {
+		html.WriteString(`<p class="a">x</p>`)
+	}
+	html.WriteString(strings.Repeat("</div>", engine.MaxSelectorSearches))
+	html.WriteString("</body></html>")
+
+	var sheet strings.Builder
+	for i := 0; i < rules; i++ {
+		color := "red"
+		if i == rules-1 {
+			color = "blue"
+		}
+		fmt.Fprintf(&sheet, "%s{color:%s}", selector, color)
+	}
+	if sheet.Len() > engine.MaxCSSBytes {
+		t.Fatalf("fixture is %d bytes, already past the CSS byte cap; it would prove the wrong limit", sheet.Len())
+	}
+
+	sess, err := engine.NewSession(html.String(), []string{sheet.String()}, 400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+
+	var last *dom.Node
+	var walk func(*dom.Node)
+	walk = func(n *dom.Node) {
+		if n.Element() && n.Data == "p" {
+			last = n
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(&sess.Doc.Node)
+	if last == nil {
+		t.Fatal("document built without any p element")
+	}
+	st := sess.Styles[last.ID]
+	if st == nil {
+		t.Fatal("last p element has no computed style")
+	}
+	if st.Color.R != 255 || st.Color.G != 0 || st.Color.B != 0 {
+		t.Fatalf("last p color = rgb(%d,%d,%d), want red: the rule past MaxStyleWork was still applied (%d)", st.Color.R, st.Color.G, st.Color.B, engine.MaxStyleWork)
 	}
 }
 

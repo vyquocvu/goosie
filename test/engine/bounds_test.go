@@ -66,6 +66,42 @@ func TestSessionRejectsOversizedHTMLBeforeParsing(t *testing.T) {
 	}
 }
 
+// qc:BR-164
+func TestSessionRejectsAdversarialSelectorShapes(t *testing.T) {
+	// The selector-count and part-count caps are exercised by
+	// TestSessionRejectsUnboundedInput. These are the two costs that those
+	// shapes cannot reach: a single compound carrying every condition, and a
+	// chain built only from descendant combinators. Both are cheap to write and
+	// expensive to match, so they are refused while the sheet is admitted.
+	tests := []struct {
+		name string
+		css  string
+		want string
+	}{
+		{
+			name: "condition count",
+			css:  "p" + strings.Repeat(".a", engine.MaxSelectorConditions+1) + "{color:red}",
+			want: "selector condition limit",
+		},
+		{
+			name: "descendant searches",
+			css:  strings.Repeat("p ", engine.MaxSelectorSearches+1) + "p{color:red}",
+			want: "selector search limit",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.css) > engine.MaxCSSBytes {
+				t.Fatalf("fixture is %d bytes, already past the CSS byte cap; it would prove the wrong limit", len(tc.css))
+			}
+			_, err := engine.NewSession(`<p class="a">x</p>`, []string{tc.css}, 400)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
 // qc:BR-163
 func TestParserStopsAtNodeAndDepthLimits(t *testing.T) {
 	limits := dom.ParseLimits{Nodes: 64, Depth: 8, Attributes: 8, AttributeBytes: 64}
