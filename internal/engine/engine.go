@@ -285,6 +285,13 @@ type Session struct {
 	// userScripts configured for injection into this document.
 	userScripts []*userscript.Script
 
+	// lifecycleMu keeps a pump turn from overlapping Close. PumpJS deliberately
+	// composes opMu-locked primitives instead of holding opMu for the whole
+	// turn, so opMu alone does not exclude a concurrent teardown: the JS runtime
+	// it drives is single-threaded and cannot be closed underneath a callback.
+	// PumpJS takes the read side for one turn; Close takes the write side before
+	// opMu, so the lock order is always lifecycleMu then opMu.
+	lifecycleMu sync.RWMutex
 	// opMu serializes pipeline operations across threads: the UI pump
 	// (input handlers, the JS pump, repaints) and navigation drains
 	// (session install/teardown, deferred completions) share sessions, and
@@ -2934,6 +2941,8 @@ func isClassicScript(n *dom.Node) bool {
 // their downloaded files, because a document that is going away must not leave
 // audio playing behind it.
 func (s *Session) Close() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	for n := s.active; n != nil && n.Element(); n = n.Parent {
@@ -3013,6 +3022,10 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	if s.jsRT == nil {
 		return false
 	}
+	// One pump turn at a time, and never during teardown: Close waits for this
+	// read side before it closes the realm. See lifecycleMu.
+	s.lifecycleMu.RLock()
+	defer s.lifecycleMu.RUnlock()
 	canvasBefore := s.jsRT.CanvasVisualStamp()
 	// A scroll offset written during the previous frame is delivered here, before
 	// any animation frame callback of this one, which is the point a page that

@@ -16,11 +16,21 @@ import (
 // content is pure text becomes static text; everything else becomes a group.
 // Bounds are document coordinates in CSS pixels, matching the last Reflow. A
 // nil arena yields nil.
+//
+// The tree is built under opMu: it reads the arena and normalizes the live
+// selectedness of every select, both pipeline state shared with the pump and
+// with host queries arriving on another goroutine.
 func (s *Session) AccessibilityTree() []ax.Node {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.accessibilityTreeLocked()
+}
+
+func (s *Session) accessibilityTreeLocked() []ax.Node {
 	if s.Arena == nil || len(s.Arena.Objects) < 2 {
 		return nil
 	}
-	b := &axBuilder{session: s, objs: s.Arena.Objects, focused: s.Focused()}
+	b := &axBuilder{session: s, objs: s.Arena.Objects, focused: s.focus}
 	root, bubble := b.visit(1)
 	if root == nil {
 		if bubble.text == "" {
