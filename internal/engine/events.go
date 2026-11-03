@@ -186,6 +186,14 @@ func (s *Session) keyDefaultAction(key string, shift bool) bool {
 			return s.activateKeyboardTarget(n)
 		}
 	case "Escape":
+		if s.selectPopupNode() != nil {
+			// The listbox belongs to the focused control. Escape dismisses it and
+			// consumes the key: AFTER-ESCAPE reports the value and activeElement
+			// unchanged, so nothing here may blur the control or move the
+			// selection.
+			s.CloseSelectPopup()
+			return true
+		}
 		s.Edit(EditEscape, 0x1b)
 	}
 	return false

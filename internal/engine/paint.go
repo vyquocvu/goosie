@@ -83,6 +83,9 @@ func (s *Session) Paint(scale float32) *paint.List {
 		}
 		b.SetFind(marks)
 	}
+	if lb := s.listBoxLocked(s.selectPopup); lb != nil {
+		b.SetSelectListBox(lb)
+	}
 	if s.validationAnchor != nil && s.validationMessage != "" {
 		if obj := s.objectFor(s.validationAnchor); obj != nil {
 			b.SetValidationBubble(&paint.ValidationBubble{Obj: obj, Message: s.validationMessage})

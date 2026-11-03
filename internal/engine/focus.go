@@ -360,6 +360,12 @@ func (s *Session) changeFocusedNode(n *dom.Node) bool {
 		return false
 	}
 	prev := s.focus
+	// A listbox belongs to the control that raised it: focus moving on - by
+	// Tab, by a press on another control, or by a blur - dismisses it, the same
+	// way Escape and a press outside the rows do.
+	if s.selectPopup != nil && s.selectPopup != n {
+		s.selectPopup = nil
+	}
 	// A held Space activation ends when its control loses focus, even if the
 	// host action sequence has not delivered keyup yet.
 	s.clearKeyboardActiveLocked()

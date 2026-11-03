@@ -20,6 +20,9 @@ type Builder struct {
 	find      map[*layout.Object][]FindMark
 	// validation is the constraint message a blocked submission is showing.
 	validation *ValidationBubble
+	// listbox is the <select> option list a pointer has opened, in document CSS
+	// px. The engine computes it once and hit-tests the same rows.
+	listbox *ListBox
 	// scrollOffset queries the JS runtime for an element's current scroll
 	// offset along one axis. nil means no element scrolling is active.
 	scrollOffset func(obj *layout.Object, prop string) float64
@@ -88,4 +91,5 @@ func (b *Builder) SetScrollOffsetProvider(fn func(obj *layout.Object, prop strin
 func (b *Builder) Build(root layout.ObjectID) {
 	b.paintBox(root, nil, 0, 1)
 	b.paintValidationBubble()
+	b.paintSelectListBox()
 }

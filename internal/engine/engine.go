@@ -209,6 +209,13 @@ type Session struct {
 	validationAnchor  *dom.Node
 	validationMessage string
 
+	// selectPopup is the <select> whose option rows a pointer raised. It names
+	// only the control: the rows are recomputed from the live box and option
+	// list on every read (listBoxLocked), so a reflow cannot leave stale
+	// geometry behind. Escape, a press outside the rows, a pick and focus
+	// leaving the control all clear it. Guarded by opMu.
+	selectPopup *dom.Node
+
 	// JS runtime for this document's scripts. nil when the caller did not
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime
@@ -2109,9 +2116,24 @@ func isSupportedImageType(typ string) bool {
 //   - submit button: submit the form
 //   - reset button: reset the form
 //
-// Returns true if an activatable control was found at the point.
+// While a <select> listbox is open a press on a row picks its option and a press
+// on the panel itself is spent dismissing it; every other press closes the
+// listbox and then continues as if the press had found no listbox, so the
+// control under the cursor still acts on that first click. A press that lands on
+// a closed select raises its listbox, and a press on the select whose listbox is
+// open closes it instead of raising it again.
+//
+// Returns true if an activatable control was found at the point, or the press
+// dismissed an open select listbox and the host has rows to stop painting.
 func (s *Session) ClickAt(x, y float32) bool {
 	s.dismissValidationBubble()
+	var dismissedPopup *dom.Node
+	if open := s.selectPopupNode(); open != nil {
+		if s.clickSelectPopup(x, y) {
+			return true
+		}
+		dismissedPopup = open
+	}
 	hitNode := s.nodeAt(x, y)
 	dismissed := s.dismissAutoPopoversExcept(hitNode)
 	if hitNode != nil && !hitNode.Element() {
@@ -2150,8 +2172,12 @@ func (s *Session) ClickAt(x, y float32) bool {
 				s.jsRT.SetTransientUserActivation(true)
 			}
 			dom.DispatchEvent(hitNode, dom.NewTrustedEvent("click", true, true))
+			if sel := s.openableSelect(hitNode); sel != nil && sel != dismissedPopup {
+				s.openSelectPopup(sel, x, y)
+				return true
+			}
 		}
-		return dismissed
+		return dismissed || dismissedPopup != nil
 	}
 	if s.jsRT != nil {
 		s.jsRT.SetTransientUserActivation(true)

@@ -733,6 +733,17 @@ func selectDisplaySize(selectNode *Node) int {
 	return value
 }
 
+// SelectIsPopupStyle reports whether a select is drawn as a closed box that has
+// to raise a listbox for a pointer to pick an option, rather than as an inline
+// listbox that already shows its rows. A multiple control, or one whose display
+// size is greater than one, shows its rows inline.
+func SelectIsPopupStyle(selectNode *Node) bool {
+	if selectNode == nil || selectNode.Data != "select" {
+		return false
+	}
+	return !selectNode.HasAttribute("multiple") && selectDisplaySize(selectNode) == 1
+}
+
 // TextareaSubmissionValue returns a textarea's API value after the hard-wrap
 // transformation used for form submission. It deliberately leaves the live
 // value untouched. This implementation inserts LF after at most cols Unicode
