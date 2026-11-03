@@ -693,6 +693,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 				}
 				words = charWords
 			} else {
+				if k.Style.WordBreak != "keep-all" {
+					words = splitCJKWords(words, bc.avail, fontSize, a.Metrics, slot, letterSpacing)
+				}
 				words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
 			}
 		}
@@ -1071,6 +1074,66 @@ func breakOverlongWords(words []string, bounded func(string) bool, advance func(
 				continue
 			}
 			sum, count = next, count+1
+		}
+		out = append(out, string(runes[start:]))
+	}
+	return out
+}
+
+// cjkBreakRune reports whether a line may end after r. Chromium 1.63 put a
+// break opportunity after every Han ideograph, kana and Hangul syllable
+// (scripts/verify-br087-text-parity.js: 25 ideographs in a 200px box -> lines
+// of 12, 12, 1; the kana sentence -> 12, 12, 3), while Latin runs keep
+// breaking only at spaces.
+func cjkBreakRune(r rune) bool {
+	return (r >= 0x3040 && r <= 0x30FF) || // Hiragana + Katakana
+		(r >= 0x4E00 && r <= 0x9FFF) || // CJK Unified Ideographs
+		(r >= 0xAC00 && r <= 0xD7AF) || // Hangul syllables
+		(r >= 0xF900 && r <= 0xFAFF) // CJK Compatibility Ideographs
+}
+
+// splitCJKWords turns a word too long for its line into the units the line
+// breaker may place: each CJK rune closes a token, so the text after it -
+// including a Latin run that had no space before it - starts a new one, and
+// "中文aaa" breaks as 中 | 文aaa. A combining mark never opens a fragment, so
+// the decomposed accents stay with the base they decorate. A word that still
+// fits the line keeps its single box: a break opportunity that is never taken
+// must not fragment the run it sits in.
+func splitCJKWords(words []string, avail, fontSize float32, m Metrics, slot frame.FontSlot, letterSpacing float32) []string {
+	overlong := false
+	for _, w := range words {
+		if w != " " && w != "\n" && strings.ContainsFunc(w, cjkBreakRune) &&
+			measureWord(w, fontSize, m, slot, letterSpacing) > avail {
+			overlong = true
+			break
+		}
+	}
+	if !overlong {
+		return words
+	}
+	out := make([]string, 0, len(words)+8)
+	for _, word := range words {
+		if word == " " || word == "\n" || !strings.ContainsFunc(word, cjkBreakRune) ||
+			measureWord(word, fontSize, m, slot, letterSpacing) <= avail {
+			out = append(out, word)
+			continue
+		}
+		runes := []rune(word)
+		start := 0
+		for i := 0; i < len(runes); i++ {
+			if !cjkBreakRune(runes[i]) {
+				continue
+			}
+			end := i + 1
+			for end < len(runes) && unicode.IsMark(runes[end]) {
+				end++
+			}
+			if end == len(runes) {
+				break
+			}
+			out = append(out, string(runes[start:end]))
+			start = end
+			i = end - 1
 		}
 		out = append(out, string(runes[start:]))
 	}

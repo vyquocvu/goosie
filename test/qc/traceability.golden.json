@@ -1140,7 +1140,18 @@
       "PARITY"
     ],
     "status": "NOT RUN",
-    "tests": null,
+    "tests": [
+      "test/engine/cjk_line_break_test.go:TestBreakAfterIdeographBeforeLatinWord",
+      "test/engine/cjk_line_break_test.go:TestCjkIdeographsBreakAfterEachRune",
+      "test/engine/cjk_line_break_test.go:TestCjkKeepAllSuppressesBreakOpportunities",
+      "test/engine/cjk_line_break_test.go:TestCombiningMarkNeverLeadsABreakFragment",
+      "test/engine/cjk_line_break_test.go:TestCombiningMarksAddNoAdvanceButKeepInk",
+      "test/engine/cjk_line_break_test.go:TestKanaAndHangulBreakBetweenRunes",
+      "test/engine/cjk_line_break_test.go:TestLongUnbrokenLatinWordKeepsEveryGlyph",
+      "test/engine/cjk_line_break_test.go:TestNoBreakBeforeIdeographFromLatinSide",
+      "test/raster/default_ignorable_test.go:TestCombiningMarksStillInkAfterTheIgnorableRule",
+      "test/raster/default_ignorable_test.go:TestDefaultIgnorableControlsCostNothingAndInkNothing"
+    ],
     "enforced": false
   },
   {

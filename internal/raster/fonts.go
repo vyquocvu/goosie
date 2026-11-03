@@ -878,13 +878,20 @@ func (f *Fonts) fallbackLocked(size int32, slot frame.FontSlot) []*faceEntry {
 	return out
 }
 
-// isDefaultIgnorable reports whether r is a default-ignorable code point
-// per Unicode (such as variation selectors and zero-width spaces/joiners)
-// which should produce no visible glyph and zero advance when unhandled by font tables.
+// isDefaultIgnorable reports whether r is a format control that Unicode
+// defaults to ignorable: it costs no advance and carries no ink. Chromium 1.63
+// measured a Latin "a" and an "a" followed by one of these as the same
+// 8.906px (scripts/verify-br087-text-parity.js), so the answer is given before
+// any face is consulted - a host face that does map U+200D or U+200F would
+// otherwise draw a phantom box over the neighbours, and U+00AD would charge a
+// hyphen where the reference charges nothing. Combining marks are the opposite
+// case and stay out of this set: they advance zero but must keep their accent
+// ink.
 func isDefaultIgnorable(r rune) bool {
 	return (r >= 0xFE00 && r <= 0xFE0F) ||
 		(r >= 0xE0100 && r <= 0xE01EF) ||
-		r == 0x200B || r == 0x200C || r == 0x200D || r == 0xFEFF
+		r == 0x00AD || r == 0x200B || r == 0x200C || r == 0x200D ||
+		r == 0x200E || r == 0x200F || r == 0xFEFF
 }
 
 // tofuAdvanceFixed returns the advance of a missing glyph in 26.6 fixed-point units.
@@ -954,6 +961,12 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 	if size <= 0 {
 		return Glyph{}
 	}
+	if isDefaultIgnorable(r) {
+		// Asked and answered before any face is consulted: the control occupies
+		// nothing, so it must not be looked up, cached per face, or counted as
+		// missing coverage.
+		return Glyph{Ok: true}
+	}
 	// Fast path: a cached hit needs no face and no writer.
 	f.mu.RLock()
 	if e := f.lookupLocked(size, slot); e != nil {
@@ -997,11 +1010,6 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 		}
 	}
 	if !g.Ok {
-		if isDefaultIgnorable(r) {
-			ignorable := Glyph{Ok: true}
-			e.glyphs[r] = ignorable
-			return ignorable
-		}
 		e.missing[r] = struct{}{}
 		f.missingCount.Add(1)
 		tofu := tofuGlyph(size)
@@ -1028,6 +1036,11 @@ func (f *Fonts) GlyphAdvance(size int32, r rune, slot frame.FontSlot) int32 {
 // GlyphAdvance values.
 func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32 {
 	if size <= 0 {
+		return 0
+	}
+	if isDefaultIgnorable(r) {
+		// The same front door Glyph answers with: the control occupies nothing,
+		// so it is never measured and never counted as missing coverage.
 		return 0
 	}
 	// Fast path: a memoized advance is the value a fresh call would
@@ -1070,10 +1083,6 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 			}
 		}
 		if !ok {
-			if isDefaultIgnorable(r) {
-				e.adv[r] = 0
-				return 0
-			}
 			f.missingCount.Add(1)
 			fixedAdv := tofuAdvanceFixed(size)
 			e.advMiss[r] = struct{}{}
