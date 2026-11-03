@@ -245,6 +245,35 @@ func gradientKeywordAngle(s string) (float32, bool) {
 	return 0, false
 }
 
+// stopPosition reads the token that ends a colour stop. It returns the
+// position, whether the token IS one, and whether it could have been one - a
+// token that could have been and was not invalidates the whole ramp rather
+// than being folded into the colour, which is what Chromium does with
+// `#0a0 50`.
+//
+// A percentage is always a position. A bare number is one only when it is
+// zero, because CSS lets a <length> drop its unit only at zero. A length WITH
+// a unit is a real position too, but this model stores positions as fractions
+// of the gradient line and the line's length is not known at cascade time, so
+// those are left to the colour reader; the gap is recorded as
+// GOOSIE-GRADIENTPX-001.
+func stopPosition(tok string) (pos float32, is, legal bool) {
+	if strings.HasSuffix(tok, "%") {
+		n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "%"), 64)
+		if err != nil {
+			return 0, false, false
+		}
+		return float32(n / 100), true, true
+	}
+	if n, err := strconv.ParseFloat(tok, 64); err == nil {
+		if n == 0 {
+			return 0, true, true
+		}
+		return 0, false, false
+	}
+	return 0, false, true
+}
+
 // parseGradientStop reads one stop: a colour and an optional percentage
 // position.
 func parseGradientStop(s string) (GradientStop, bool) {
@@ -257,8 +286,11 @@ func parseGradientStop(s string) (GradientStop, bool) {
 
 // parseGradientStops reads one stop, expanding a double position
 // (color 25% 75%) into the solid band it denotes: two stops sharing the
-// colour at each position. Single positions and bare colours behave as
-// before.
+// colour at each position. A position is a <length-percentage>, so it is
+// written as a percentage, as a length with a unit, or - the only unitless
+// form CSS allows - as a bare zero. Single positions and bare colours behave
+// as before; a bare non-zero number makes the stop, and so the whole ramp,
+// invalid.
 func parseGradientStops(s string) ([]GradientStop, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -268,14 +300,14 @@ func parseGradientStops(s string) ([]GradientStop, bool) {
 	var pos []float32
 	for len(toks) > 1 {
 		last := toks[len(toks)-1]
-		if !strings.HasSuffix(last, "%") {
-			break
-		}
-		p, err := strconv.ParseFloat(strings.TrimSuffix(last, "%"), 64)
-		if err != nil {
+		p, ok, legal := stopPosition(last)
+		if !legal {
 			return nil, false
 		}
-		pos = append([]float32{float32(p / 100)}, pos...)
+		if !ok {
+			break
+		}
+		pos = append([]float32{p}, pos...)
 		toks = toks[:len(toks)-1]
 		if len(pos) == 2 {
 			break

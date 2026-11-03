@@ -962,8 +962,19 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/paint/color_idle_scroll_test.go:TestAnIdlePageRepaintsNothingAndTellsTheFramePathSo",
+      "test/paint/color_idle_scroll_test.go:TestGradientStopsWithUnitlessZeroPositionsPaint",
+      "test/paint/color_idle_scroll_test.go:TestGradientsPaintTheMeasuredRampAndBands",
+      "test/paint/color_idle_scroll_test.go:TestSolidAndOpacityGroupsPaintTheMeasuredColours",
+      "test/raster/color_idle_scroll_test.go:TestGradientColourIsAnchoredToTheDocumentNotTheViewport",
+      "test/raster/color_idle_scroll_test.go:TestIdleFramesMoveNoColourAndDrawNoTile",
+      "test/raster/color_idle_scroll_test.go:TestTheSameOffsetLooksTheSameHoweverTheScrollGotThere",
+      "test/style/gradient_stop_unitless_test.go:TestGradientDoublePositionWithUnitlessZero",
+      "test/style/gradient_stop_unitless_test.go:TestGradientUnitlessNonZeroStopPositionIsInvalid",
+      "test/style/gradient_stop_unitless_test.go:TestGradientUnitlessZeroStopPosition"
+    ],
     "enforced": false
   },
   {
