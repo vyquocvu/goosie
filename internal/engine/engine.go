@@ -1994,6 +1994,21 @@ func (s *Session) Reflow(viewportW float32) error {
 	return nil
 }
 
+// hitBoxContains reports whether the layout-space point (tx, ty) lands on the
+// pixels obj actually owns. That is its border box minus whatever a
+// border-radius cuts away: Chromium measures the same way, so a corner point
+// outside the curve falls through to what is underneath
+// (scripts/verify-br073-effects.js). Paint and hit testing resolve the radius
+// through one rule so a corner cannot be invisible to the eye and still
+// capture the pointer.
+func hitBoxContains(obj *layout.Object, tx, ty float32) bool {
+	x0, y0, x1, y1 := obj.BorderRect()
+	if obj.Style == nil {
+		return tx >= x0 && tx < x1 && ty >= y0 && ty < y1
+	}
+	return obj.Style.UsedBorderRadius(x1-x0, y1-y0, 1).Contains(x0, y0, x1, y1, tx, ty)
+}
+
 // HitTestLink returns the href of the nearest ancestor <a> at the given
 // document-coordinate point (CSS pixels), or empty string if no link is there.
 func (s *Session) HitTestLink(x, y float32) string {
@@ -2006,10 +2021,9 @@ func (s *Session) HitTestLink(x, y float32) string {
 		if obj.Style != nil && obj.Style.PointerEvents == "none" {
 			continue
 		}
-		x0, y0, x1, y1 := obj.BorderRect()
 		adjX, adjY := s.ancestorScrollOffset(obj)
 		tx, ty := x+adjX, y+adjY
-		if tx < x0 || tx >= x1 || ty < y0 || ty >= y1 {
+		if !hitBoxContains(obj, tx, ty) {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
@@ -2037,10 +2051,9 @@ func (s *Session) HitTestImage(x, y float32) string {
 		if obj.Style != nil && obj.Style.PointerEvents == "none" {
 			continue
 		}
-		x0, y0, x1, y1 := obj.BorderRect()
 		adjX, adjY := s.ancestorScrollOffset(obj)
 		tx, ty := x+adjX, y+adjY
-		if tx < x0 || tx >= x1 || ty < y0 || ty >= y1 {
+		if !hitBoxContains(obj, tx, ty) {
 			continue
 		}
 		if obj.Node != nil && obj.Node.DataAtom == dom.AtomImg {
@@ -2298,8 +2311,7 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 		if obj.Style != nil && obj.Style.PointerEvents == "none" {
 			continue
 		}
-		x0, y0, x1, y1 := obj.BorderRect()
-		if x < x0 || x >= x1 || y < y0 || y >= y1 {
+		if !hitBoxContains(obj, x, y) {
 			continue
 		}
 		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {

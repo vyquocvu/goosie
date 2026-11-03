@@ -42,6 +42,38 @@ func (c Corners) Shrunk(top, right, bottom, left int32) Corners {
 	}
 }
 
+// Contains reports whether the point (px, py) falls in the rounded rectangle
+// that cuts the corners of the box (x0, y0)-(x1, y1). With no radius declared
+// this is the plain rectangle test; a rounded corner drops the pixels outside
+// its quarter ellipse, so whatever paints the corner and whatever hit-tests it
+// agree about which pixels the element owns.
+func (c Corners) Contains(x0, y0, x1, y1, px, py float32) bool {
+	if px < x0 || px >= x1 || py < y0 || py >= y1 {
+		return false
+	}
+	if c.Empty() {
+		return true
+	}
+	in := func(r Radius, cx, cy float32) bool {
+		if r.X <= 0 || r.Y <= 0 {
+			return true
+		}
+		dx, dy := px-cx, py-cy
+		return (dx*dx)/(r.X*r.X)+(dy*dy)/(r.Y*r.Y) <= 1
+	}
+	switch {
+	case px < x0+c.TL.X && py < y0+c.TL.Y:
+		return in(c.TL, x0+c.TL.X, y0+c.TL.Y)
+	case px >= x1-c.TR.X && py < y0+c.TR.Y:
+		return in(c.TR, x1-c.TR.X, y0+c.TR.Y)
+	case px >= x1-c.BR.X && py >= y1-c.BR.Y:
+		return in(c.BR, x1-c.BR.X, y1-c.BR.Y)
+	case px < x0+c.BL.X && py >= y1-c.BL.Y:
+		return in(c.BL, x0+c.BL.X, y1-c.BL.Y)
+	}
+	return true
+}
+
 // FillRounded paints r with c, cutting its corners along rad. It is FillRect for
 // boxes that declare a radius: rows outside the corner bands keep the whole-row
 // copy, and only the rows an arc crosses take the per-pixel coverage path.

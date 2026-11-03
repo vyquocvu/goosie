@@ -938,8 +938,22 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "test/engine/effects_hit_test.go:TestClickOnARoundedCornerDoesNotActivateThatControl",
+      "test/engine/effects_hit_test.go:TestHitTestingIgnoresPaintOrderOfEffects",
+      "test/frame/corners_contains_test.go:TestEllipticalCornerTestsEachAxis",
+      "test/frame/corners_contains_test.go:TestRoundedCornerExcludesPixelsOutsideTheCurve",
+      "test/frame/corners_contains_test.go:TestSquareCornersAreThePlainRectTest",
+      "test/paint/box_shadow_ring_test.go:TestInsetOnlyShadowPaintsNoRing",
+      "test/paint/box_shadow_ring_test.go:TestOffsetBoxShadowInksOnlyTheSideItIsPushedTo",
+      "test/paint/box_shadow_ring_test.go:TestOuterBoxShadowPaintsOnlyTheRingOutsideTheBorderBox",
+      "test/paint/outline_ring_test.go:TestNoOutlineStylePaintsNoRing",
+      "test/paint/outline_ring_test.go:TestOutlinePaintsARingThatTouchesNoneOfTheBorderBox",
+      "test/style/used_border_radius_test.go:TestUsedBorderRadiusFollowsTheCSSUsedValueRule",
+      "test/style/used_border_radius_test.go:TestUsedBorderRadiusKeepsSquareBoxesSquare",
+      "test/style/used_border_radius_test.go:TestUsedBorderRadiusScalesAbsoluteRadiiButNotPercentages"
+    ],
     "enforced": false
   },
   {

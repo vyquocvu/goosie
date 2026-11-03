@@ -658,10 +658,12 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 	//                   antialiasing: 6000 of them sit in the 20px spacer row the
 	//                   div occupies (y 18..37) and 4800 below the second band
 	//                   (y 56+), because each box drew the element's ring around
-	//                   itself, and paintBoxShadow has no owner test. Pixel
-	//                   probe: (250,28) in the spacer is white in Chromium and in
-	//                   Goosie without anonymous boxes, (202,13,13) in Goosie with
-	//                   them. css-backgrounds-3 §7.1: box-shadow does not inherit.
+	//                   itself. Pixel probe: (250,28) in the spacer is white in
+	//                   Chromium and in Goosie without anonymous boxes,
+	//                   (202,13,13) in Goosie with them. `paintBoxShadow` had no
+	//                   owner test then; the element box's ring is now pinned by
+	//                   test/paint/box_shadow_ring_test.go, the per-run copy is
+	//                   not. css-backgrounds-3 §7.1: box-shadow does not inherit.
 	//   border-radius   Chromium changes the identical 412 px with and without an
 	//                   anonymous box; Goosie 385/385. Already inert at paint
 	//                   (paintBoxDecoration wants Display != inline, and the copy

@@ -228,12 +228,11 @@ func (s *Session) nodeAt(x, y float32) *dom.Node {
 		if obj.Style != nil && obj.Style.PointerEvents == "none" {
 			continue
 		}
-		x0, y0, x1, y1 := obj.BorderRect()
 		// Adjust the test point by the cumulative scroll offset of ancestor
 		// scroll containers, so hit-testing matches the painted position.
 		adjX, adjY := s.ancestorScrollOffset(obj)
 		tx, ty := x+adjX, y+adjY
-		if tx < x0 || tx >= x1 || ty < y0 || ty >= y1 {
+		if !hitBoxContains(obj, tx, ty) {
 			continue
 		}
 		if obj.Node != nil {
