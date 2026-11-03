@@ -81,7 +81,7 @@ func TestListboxRowsPaintTheLabelAttribute(t *testing.T) {
 		`</select></body></html>`
 	s, rows := openListbox(t, html)
 	cmds := popupCommands(t, s)
-	below := textRunsBelow(cmds, rows[0].Y0-1)
+	below := textRunsBelow(cmds, rows[0].Rect.Y0-1)
 	// Row c paints no glyphs, so two runs carry the three rows' strings.
 	if got := runStrings(below); len(got) != 2 {
 		t.Fatalf("the listbox drew %v below the control, want two runs (the third row has no text)", got)

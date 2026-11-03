@@ -26,6 +26,17 @@ import (
 // so the rows sit 1px inside the control's border box on x, tile it downward
 // with no gap, and are exactly as tall as the control font's normal line box
 // (3 x 20.1875 + 2 x 1 = 62.5625).
+//
+// The panel's place in the viewport is the other half, and it splits the same
+// way: the rows must be where the user can see them. The panel never covers more
+// than the viewport, it opens above the control when the whole list does not fit
+// below, and a list longer than the space on either side shows a window of rows
+// whose top line follows the selection.
+// scripts/verify-br101-listbox-viewport.js measures the window rule on the
+// in-page listbox (its scrollTop/rowH is exactly max(0, selected-visible+1)) and
+// proves the popup itself is unobservable from a headless host, so the side
+// choice and the clamp are this engine's rule, recorded as such in
+// docs/qa-open-defects.json rather than claimed as Chromium's.
 
 // listboxInset is the gap between the panel's outer edge and its rows, in CSS
 // px - the same 1px Chromium measures between a listbox's border box and its
@@ -49,20 +60,16 @@ func (s *Session) SelectPopupOpen() bool {
 }
 
 // SelectPopupRows returns the option rows the open listbox shows, in document
-// CSS px, one per option in tree order. It is the list the pointer hits and the
-// list paint draws; nil when no listbox is open.
-func (s *Session) SelectPopupRows() []frame.RectF {
+// CSS px, each row carrying the option it is showing. It is the list the pointer
+// hits and the list paint draws; nil when no listbox is open.
+func (s *Session) SelectPopupRows() []paint.ListBoxRow {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	lb := s.listBoxLocked(s.selectPopup)
 	if lb == nil {
 		return nil
 	}
-	rows := make([]frame.RectF, 0, len(lb.Rows))
-	for _, r := range lb.Rows {
-		rows = append(rows, r.Rect)
-	}
-	return rows
+	return lb.Rows
 }
 
 // CloseSelectPopup dismisses an open listbox without changing the selection. It
@@ -123,14 +130,10 @@ func (s *Session) openSelectPopup(sel *dom.Node, x, y float32) {
 func (s *Session) clickSelectPopup(x, y float32) bool {
 	s.opMu.Lock()
 	lb := s.listBoxLocked(s.selectPopup)
-	var opts []*dom.Node
-	if lb != nil {
-		opts = dom.SelectOptions(s.selectPopup)
-	}
 	s.opMu.Unlock()
-	if lb == nil || len(lb.Rows) != len(opts) {
-		// The control lost its box or its option list changed under the popup:
-		// there is nothing to pick, so the press simply dismisses it.
+	if lb == nil {
+		// The control lost its box: there is nothing to pick, so the press simply
+		// dismisses the listbox.
 		s.CloseSelectPopup()
 		return false
 	}
@@ -138,24 +141,24 @@ func (s *Session) clickSelectPopup(x, y float32) bool {
 		s.CloseSelectPopup()
 		return false
 	}
-	for i, row := range lb.Rows {
+	for _, row := range lb.Rows {
 		if !rectFContains(row.Rect, x, y) {
 			continue
 		}
-		if opts[i].OptionDisabled() {
+		if row.Disabled {
 			// EVENTS-CLICK-C: Chromium fires nothing at all for a press on a
 			// disabled option, and the listbox stays up.
 			return true
 		}
-		s.pickListboxRow(i)
+		s.pickListboxRow(row.Index)
 		return true
 	}
 	s.CloseSelectPopup()
 	return true
 }
 
-// pickListboxRow makes opts[index] the selection, reports it the way a change
-// made by the user is reported, and closes the listbox.
+// pickListboxRow makes the control's option at index the selection, reports it
+// the way a change made by the user is reported, and closes the listbox.
 func (s *Session) pickListboxRow(index int) {
 	s.opMu.Lock()
 	sel := s.selectPopup
@@ -209,25 +212,98 @@ func (s *Session) listBoxLocked(sel *dom.Node) *paint.ListBox {
 		return nil
 	}
 	panelW := box.X1 - box.X0
-	panelH := 2*listboxInset + float32(len(options))*rowH
-	// The listbox opens below the control and scrolls with the page. Choosing
-	// the side against the viewport, and scrolling a list longer than the
-	// page, are not implemented; docs/qa-open-defects.json carries the gap.
-	panel := frame.RectF4(box.X0, box.Y1, box.X0+panelW, box.Y1+panelH)
+	_, vpH := s.Viewport()
+	scrollY := s.windowScrollY()
+	// The panel may only cover the viewport the user is looking at: a row the
+	// pointer can hit must be a row that is on screen, and rows the panel cannot
+	// show are a window, not an overflow. The row-window rule is the one
+	// scripts/verify-br101-listbox-viewport.js measures on Chromium's in-page
+	// listbox (scrollTop/rowH is exactly max(0, selected-visible+1)); the side
+	// choice and the clamp are this engine's rule, because a closed select's
+	// native popup is invisible to every headless measurement - see the same
+	// script's POPUP-PIXELS line and GOOSIE-LISTBOX-001.
+	visible := len(options)
+	above := false
+	if vpH > 0 {
+		room := func(space float32) int {
+			if space <= 2*listboxInset {
+				return 0
+			}
+			return int((space - 2*listboxInset) / rowH)
+		}
+		// Room under the control only counts while its bottom edge is on screen:
+		// a panel below a control that has scrolled away is not visible either.
+		belowSpace := vpH - (box.Y1 - scrollY)
+		if box.Y1-scrollY <= 0 {
+			belowSpace = 0
+		}
+		below, up := room(belowSpace), room(box.Y0-scrollY)
+		switch {
+		case below >= len(options):
+			visible = len(options)
+		case up >= len(options):
+			visible, above = len(options), true
+		case up > below:
+			visible, above = max(up, 1), true
+		default:
+			visible = max(below, 1)
+		}
+	}
+	panelH := 2*listboxInset + float32(visible)*rowH
+	var panel frame.RectF
+	if above {
+		panel = frame.RectF4(box.X0, box.Y0-panelH, box.X0+panelW, box.Y0)
+	} else {
+		panel = frame.RectF4(box.X0, box.Y1, box.X0+panelW, box.Y1+panelH)
+	}
 
 	selected := sel.SelectedOption()
-	rows := make([]paint.ListBoxRow, 0, len(options))
+	first := 0
+	if visible < len(options) {
+		// The window starts at the smallest offset that shows the selection, which
+		// parks it on the last line: the anchor's ROW-WINDOW lines give exactly
+		// max(0, selected-visible+1) as the top visible row. selIndex is a real
+		// index into options, so that expression only needs a floor at zero.
+		selIndex := -1
+		for i, option := range options {
+			if option == selected {
+				selIndex = i
+				break
+			}
+		}
+		if selIndex >= 0 {
+			first = selIndex - visible + 1
+		}
+		first = max(first, 0)
+	}
+
+	rows := make([]paint.ListBoxRow, 0, visible)
 	top := panel.Y0 + listboxInset
-	for i, option := range options {
-		rect := frame.RectF4(panel.X0+listboxInset, top+float32(i)*rowH, panel.X1-listboxInset, top+float32(i+1)*rowH)
+	for j := 0; j < visible; j++ {
+		i := first + j
+		option := options[i]
+		rect := frame.RectF4(panel.X0+listboxInset, top+float32(j)*rowH, panel.X1-listboxInset, top+float32(j+1)*rowH)
 		rows = append(rows, paint.ListBoxRow{
 			Rect:     rect,
+			Index:    i,
 			Label:    option.OptionLabel(),
 			Selected: selected != nil && option == selected,
 			Disabled: option.OptionDisabled(),
 		})
 	}
 	return &paint.ListBox{Obj: obj, Panel: panel, Rows: rows}
+}
+
+// windowScrollY is the document's vertical scroll offset, which the JS runtime's
+// CSSOM View state owns. It is 0 when the session runs without scripting: an
+// engine with no runtime has never moved its viewport.
+//
+// Callers must hold opMu.
+func (s *Session) windowScrollY() float32 {
+	if s.jsRT == nil {
+		return 0
+	}
+	return float32(s.jsRT.WindowScrollY())
 }
 
 // listboxRowHeight is the height one option's row takes in CSS px: the control

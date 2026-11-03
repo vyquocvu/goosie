@@ -6,6 +6,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
 	"github.com/vyquocvu/goosie/internal/frame"
+	"github.com/vyquocvu/goosie/internal/paint"
 )
 
 // BR-101's pointer half: a mouse user must be able to choose an option in a
@@ -73,7 +74,7 @@ func eventLog(t *testing.T, s *engine.Session, id string, kinds ...string) *[]st
 
 // openPopup presses the middle of the control, the way a pointer user does, and
 // returns the rows the listbox is showing.
-func openPopup(t *testing.T, s *engine.Session) []frame.RectF {
+func openPopup(t *testing.T, s *engine.Session) []paint.ListBoxRow {
 	t.Helper()
 	x, y := clickPoint(t, s, "sel")
 	if !s.ClickAt(x, y) {
@@ -86,8 +87,8 @@ func openPopup(t *testing.T, s *engine.Session) []frame.RectF {
 	return rows
 }
 
-func rowCentre(rows []frame.RectF, i int) (float32, float32) {
-	r := rows[i]
+func rowCentre(rows []paint.ListBoxRow, i int) (float32, float32) {
+	r := rows[i].Rect
 	return (r.X0 + r.X1) / 2, (r.Y0 + r.Y1) / 2
 }
 
@@ -135,7 +136,8 @@ func TestListboxRowsAreInsetUniformAndStacked(t *testing.T) {
 	}
 	box := boxRect(t, s, "sel")
 	x0, x1, y1 := box.X0, box.X1, box.Y1
-	for i, r := range rows {
+	for i, row := range rows {
+		r := row.Rect
 		if r.X0 != x0+1 || r.X1 != x1-1 {
 			t.Errorf("row %d spans x [%v,%v], want [%v,%v] inset 1px inside the control", i, r.X0, r.X1, x0+1, x1-1)
 		}
@@ -146,13 +148,13 @@ func TestListboxRowsAreInsetUniformAndStacked(t *testing.T) {
 			t.Errorf("row %d starts at y %v, above the control's bottom edge %v: the listbox must not sit on top of the closed box", i, r.Y0, y1)
 		}
 	}
-	if rows[0].Y1-rows[0].Y0 != rows[1].Y1-rows[1].Y0 || rows[1].Y1-rows[1].Y0 != rows[2].Y1-rows[2].Y0 {
+	if rows[0].Rect.Y1-rows[0].Rect.Y0 != rows[1].Rect.Y1-rows[1].Rect.Y0 || rows[1].Rect.Y1-rows[1].Rect.Y0 != rows[2].Rect.Y1-rows[2].Rect.Y0 {
 		t.Errorf("row heights differ (%v, %v, %v); a listbox rows are uniform",
-			rows[0].Y1-rows[0].Y0, rows[1].Y1-rows[1].Y0, rows[2].Y1-rows[2].Y0)
+			rows[0].Rect.Y1-rows[0].Rect.Y0, rows[1].Rect.Y1-rows[1].Rect.Y0, rows[2].Rect.Y1-rows[2].Rect.Y0)
 	}
 	for i := 1; i < len(rows); i++ {
-		if rows[i].Y0 != rows[i-1].Y1 {
-			t.Errorf("row %d starts at %v, want it to abut row %d ending at %v", i, rows[i].Y0, i-1, rows[i-1].Y1)
+		if rows[i].Rect.Y0 != rows[i-1].Rect.Y1 {
+			t.Errorf("row %d starts at %v, want it to abut row %d ending at %v", i, rows[i].Rect.Y0, i-1, rows[i-1].Rect.Y1)
 		}
 	}
 }

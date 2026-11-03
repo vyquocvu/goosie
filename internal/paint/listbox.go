@@ -18,12 +18,17 @@ type ListBox struct {
 	// Panel is the listbox background, border included.
 	Panel frame.RectF
 	// Rows are the option rows in tree order, inset inside Panel and tiling it.
+	// A panel that cannot hold the whole option list shows only the rows that
+	// fit, so this is not necessarily every option.
 	Rows []ListBoxRow
 }
 
-// ListBoxRow is one option: where it sits and what it says.
+// ListBoxRow is one option: where it sits, what it says, and which option of the
+// control it is showing. Index is the row's position in the document's option
+// list, so a windowed panel can still tell a press which option it landed on.
 type ListBoxRow struct {
 	Rect     frame.RectF
+	Index    int
 	Label    string
 	Selected bool
 	Disabled bool

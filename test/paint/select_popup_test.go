@@ -27,7 +27,7 @@ const popupHTML = `<html><head><style>` +
 	`<option id="c" value="c" disabled>Charlie</option>` +
 	`</select></body></html>`
 
-func openListbox(t *testing.T, html string) (*engine.Session, []frame.RectF) {
+func openListbox(t *testing.T, html string) (*engine.Session, []paint.ListBoxRow) {
 	t.Helper()
 	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
 	if err != nil {
@@ -120,7 +120,7 @@ func TestOpenListboxPaintsOneRowPerOptionInOrder(t *testing.T) {
 		t.Errorf("the open listbox painted %d panel fills, want exactly 1", got)
 	}
 	wantLabels := []string{"Alpha", "Bravo", "Charlie"}
-	below := textRunsBelow(cmds, rows[0].Y0-1)
+	below := textRunsBelow(cmds, rows[0].Rect.Y0-1)
 	if len(below) != len(wantLabels) {
 		t.Fatalf("the listbox drew %d glyph runs below the control (%v), want one per option %v",
 			len(below), runStrings(below), wantLabels)
@@ -129,7 +129,7 @@ func TestOpenListboxPaintsOneRowPerOptionInOrder(t *testing.T) {
 		if got := runString(below[i]); got != want {
 			t.Errorf("row %d drew %q, want %q", i, got, want)
 		}
-		wantRect := rows[i].ToDevice(1.0)
+		wantRect := rows[i].Rect.ToDevice(1.0)
 		got := below[i].Rect
 		if got.Y0 != wantRect.Y0 || got.Y1 != wantRect.Y1 {
 			t.Errorf("row %d text rect %v does not sit in the engine's row %v", i, got, wantRect)
@@ -138,7 +138,7 @@ func TestOpenListboxPaintsOneRowPerOptionInOrder(t *testing.T) {
 	// Rows paint last, so nothing in the document can cover them.
 	lastRow := -1
 	for i, cmd := range cmds {
-		if cmd.Kind == paint.CmdText && len(cmd.Text.Glyphs) > 0 && float32(cmd.Text.Glyphs[0].Y) >= rows[0].Y0-1 {
+		if cmd.Kind == paint.CmdText && len(cmd.Text.Glyphs) > 0 && float32(cmd.Text.Glyphs[0].Y) >= rows[0].Rect.Y0-1 {
 			lastRow = i
 		}
 	}
@@ -164,11 +164,11 @@ func TestOpenListboxHighlightsExactlyTheSelectedRow(t *testing.T) {
 		t.Fatalf("the open listbox painted %v highlights, want exactly the selected row", highlights)
 	}
 	// Option b is the second option and the selected one.
-	want := rows[1].ToDevice(1.0)
+	want := rows[1].Rect.ToDevice(1.0)
 	if highlights[0] != want {
 		t.Errorf("highlight = %v, want the selected row %v", highlights[0], want)
 	}
-	below := textRunsBelow(cmds, rows[0].Y0-1)
+	below := textRunsBelow(cmds, rows[0].Rect.Y0-1)
 	if len(below) != 3 {
 		t.Fatalf("want three row runs, got %v", runStrings(below))
 	}
@@ -198,7 +198,7 @@ func TestOpenListboxPanelCoversEveryRow(t *testing.T) {
 	}
 	panel := panels[0]
 	for i, r := range rows {
-		d := r.ToDevice(1.0)
+		d := r.Rect.ToDevice(1.0)
 		if d.X0 < panel.X0 || d.X1 > panel.X1 || d.Y0 < panel.Y0 || d.Y1 > panel.Y1 {
 			t.Errorf("row %d %v sticks out of the panel %v", i, d, panel)
 		}
