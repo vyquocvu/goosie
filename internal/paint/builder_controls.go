@@ -387,27 +387,6 @@ func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.R
 	if s == nil || obj.Node == nil {
 		return
 	}
-	// Find the selected option.
-	var text string
-	var firstOption string
-	for option := obj.Node.FirstChild; option != nil; option = option.NextSibling {
-		if option.Data != "option" {
-			continue
-		}
-		if firstOption == "" && !option.OptionDisabled() {
-			firstOption = option.TextContent()
-		}
-		if option.OptionSelected() {
-			text = option.TextContent()
-			break
-		}
-	}
-	if text == "" && !obj.Node.SelectNoSelection && !obj.Node.HasAttribute("multiple") && obj.Node.GetAttribute("size") == "" {
-		text = firstOption
-	}
-	if text == "" {
-		return
-	}
 	x0, y0, x1, y1 := obj.ContentRect()
 	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
 	if rect.Empty() {
@@ -425,8 +404,18 @@ func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.R
 	if rect.X1-rect.X0 > arrowW {
 		textRect.X1 -= arrowW
 	}
-	b.appendRun(text, textRect, s, frame.RGB(0, 0, 0), opacity)
-
+	// Paint the same option the accessibility tree announces and the form
+	// submits: SelectedOption resolves a multiple-selected tie last-authored-
+	// wins and applies the single-line first-option default, and OptionLabel
+	// applies the shared whitespace normalisation. Reading the raw text of the
+	// first selected child would let one control show, announce and submit
+	// three different answers, and falling back to another option's text would
+	// paint a label the control does not carry.
+	if option := obj.Node.SelectedOption(); option != nil {
+		if text := option.OptionLabel(); text != "" {
+			b.appendRun(text, textRect, s, frame.RGB(0, 0, 0), opacity)
+		}
+	}
 	// Draw a dropdown arrow (small triangle) on the right side.
 	arrowCX := rect.X1 - arrowW/2
 	arrowCY := (rect.Y0 + rect.Y1) / 2

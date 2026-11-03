@@ -1543,18 +1543,24 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
+    "status": "BLOCKED",
     "tests": [
       "cmd/goosie/journey_p1_forms_test.go:TestJourneySelectOptionChange",
+      "test/css/interactive_test.go:TestFormStatePseudoClasses",
       "test/engine/option_value_test.go:TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX",
       "test/engine/option_value_test.go:TestLastAuthoredSelectedOptionWins",
       "test/engine/option_value_test.go:TestMoveSelectStepsFromTheLastAuthoredSelection",
+      "test/engine/option_value_test.go:TestPaintSelectFollowsTheKeyboardSelection",
       "test/engine/select_keyboard_test.go:TestClickFocusesSelectButNotDisabledControls",
       "test/engine/select_keyboard_test.go:TestSelectArrowKeysMoveSelection",
       "test/engine/select_keyboard_test.go:TestSelectHomeEndGoToTheEdges",
       "test/engine/select_keyboard_test.go:TestSelectKeysAreConsumedAtTheEnds",
       "test/engine/select_keyboard_test.go:TestSelectMoveChangesSubmittedValue",
-      "test/engine/select_keyboard_test.go:TestSelectSkipsDisabledOptions"
+      "test/engine/select_keyboard_test.go:TestSelectSkipsDisabledOptions",
+      "test/paint/select_selected_label_test.go:TestSelectPaintsArrowWithoutSelectedLabel",
+      "test/paint/select_selected_label_test.go:TestSelectPaintsLastAuthoredSelectedOption",
+      "test/paint/select_selected_label_test.go:TestSelectPaintsNoTextForSelectedOptionWithEmptyLabel",
+      "test/paint/select_selected_label_test.go:TestSelectPaintsNormalizedSelectedLabel"
     ],
     "enforced": false
   },

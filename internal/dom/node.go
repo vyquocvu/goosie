@@ -600,6 +600,74 @@ func NormalizeSelectSelectedness(selectNode *Node) {
 	}
 }
 
+// SelectedOption returns the option a select currently shows as selected. It
+// normalises selectedness first, so a tie between several "selected"
+// attributes resolves the same way everywhere: the last one in tree order
+// wins. A single-line single-select with no selected option reports its first
+// enabled option, while a multiple select reports its first selected option.
+func (n *Node) SelectedOption() *Node {
+	if n == nil || n.Data != "select" {
+		return nil
+	}
+	NormalizeSelectSelectedness(n)
+	for _, option := range SelectOptions(n) {
+		if option.OptionSelected() {
+			return option
+		}
+	}
+	return nil
+}
+
+// OptionLabel returns the text a control shows for an option: its text content
+// with leading and trailing ASCII whitespace removed and internal runs
+// collapsed to one space. The value content attribute does not participate;
+// the label is the displayed text whether or not a value overrides it.
+func (n *Node) OptionLabel() string {
+	if n == nil {
+		return ""
+	}
+	return NormalizeOptionText(n.TextContent())
+}
+
+// NormalizeOptionText is the normalisation Chromium applies to an option's text
+// content before it becomes a value or a label: leading and trailing ASCII
+// whitespace stripped, every internal run of ASCII whitespace collapsed to a
+// single U+0020. Measured by scripts/verify-task037-option-value.js, which also
+// shows what must NOT be touched - a U+00A0 on either edge survives verbatim,
+// so strings.TrimSpace and unicode.IsSpace are both wrong here. Whitespace is
+// ASCII and cannot occur inside a multi-byte UTF-8 sequence, so the byte scan
+// below is safe on any input.
+func NormalizeOptionText(text string) string {
+	var result strings.Builder
+	result.Grow(len(text))
+	pendingSpace := false
+	for i := 0; i < len(text); i++ {
+		if isOptionSpace(text[i]) {
+			pendingSpace = true
+			continue
+		}
+		if pendingSpace && result.Len() > 0 {
+			result.WriteByte(' ')
+		}
+		pendingSpace = false
+		result.WriteByte(text[i])
+	}
+	return result.String()
+}
+
+// isOptionSpace reports the bytes Chromium collapses in an option's text
+// content: U+0009, U+000A, U+000C, U+000D and U+0020. U+000B (vertical tab) is
+// deliberately absent - the same measurement shows "a\v\vb" keeps its vertical
+// tabs while "a\f\fb" collapses, so this is HTML's ASCII whitespace set and not
+// CSS's or unicode.IsSpace's.
+func isOptionSpace(b byte) bool {
+	switch b {
+	case '\t', '\n', '\f', '\r', ' ':
+		return true
+	}
+	return false
+}
+
 // SelectValueMissing reports the required-value-missing state for a select.
 // A required select is missing a value when it has no selected option, or
 // when its only selected option is the placeholder label option of a
@@ -646,23 +714,7 @@ func selectOptionValue(option *Node) string {
 	if option.HasAttribute("value") {
 		return option.GetAttribute("value")
 	}
-	text := option.TextContent()
-	var result strings.Builder
-	result.Grow(len(text))
-	pendingSpace := false
-	for i := 0; i < len(text); i++ {
-		switch text[i] {
-		case '\t', '\n', '\f', '\r', ' ':
-			pendingSpace = true
-		default:
-			if pendingSpace && result.Len() > 0 {
-				result.WriteByte(' ')
-			}
-			pendingSpace = false
-			result.WriteByte(text[i])
-		}
-	}
-	return result.String()
+	return NormalizeOptionText(option.TextContent())
 }
 
 func selectDisplaySize(selectNode *Node) int {

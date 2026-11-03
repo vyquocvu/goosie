@@ -149,6 +149,7 @@ func TestFocusOnNilNode(t *testing.T) {
 	}
 }
 
+// qc:BR-101
 func TestFormStatePseudoClasses(t *testing.T) {
 	doc := dom.NewDocument()
 	form := doc.NewElement("form")
@@ -211,6 +212,22 @@ func TestFormStatePseudoClasses(t *testing.T) {
 	secondOption.SetAttribute("selected", "")
 	if css.ParseSelector("option:checked").Matches(firstOption) || !css.ParseSelector("option:checked").Matches(secondOption) {
 		t.Error("selected option state was not reflected by :checked")
+	}
+
+	// A tie between two authored "selected" attributes resolves to the last one
+	// in tree order, the answer SelectedOption and form submission already give,
+	// so a `option:checked` rule cannot style a different option from the one the
+	// control announces and submits.
+	tie := doc.NewElement("select")
+	earlier := doc.NewElement("option")
+	earlier.SetAttribute("selected", "")
+	later := doc.NewElement("option")
+	later.SetAttribute("selected", "")
+	tie.AppendChild(earlier)
+	tie.AppendChild(later)
+	form.AppendChild(tie)
+	if css.ParseSelector("option:checked").Matches(earlier) || !css.ParseSelector("option:checked").Matches(later) {
+		t.Error("option:checked matched the first authored selection; want the last")
 	}
 
 	placeholder := doc.NewElement("input")

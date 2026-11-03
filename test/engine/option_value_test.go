@@ -6,6 +6,7 @@ import (
 
 	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/frame"
 )
 
 // TASK-037: the value contract of <option>. Hand-written markup indents its
@@ -393,5 +394,31 @@ func TestMoveSelectStepsFromTheLastAuthoredSelection(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("%d options carry selected after a move, want exactly 1", n)
+	}
+}
+
+// TestPaintSelectFollowsTheKeyboardSelection is the paint half of the row: the
+// glyphs in the display list have to be the option the control announces and
+// would submit, before and after a keyboard move. The indented option paints
+// its normalised label, not the three lines of markup it was written on.
+//
+// qc:BR-101
+func TestPaintSelectFollowsTheKeyboardSelection(t *testing.T) {
+	s := newFocusSession(t, charcoalFormHTML)
+	sel := s.Doc.ElementByID("s")
+	if !s.FocusNode(sel) {
+		t.Fatal("FocusNode rejected the select")
+	}
+	if got := string(textRunesIn(t, s.Paint(1).Build(1), frame.RGB(0, 0, 0))); got != "Charcoal" {
+		t.Fatalf("painted label before any key = %q, want %q", got, "Charcoal")
+	}
+	if !s.MoveSelect(engine.EditDown) {
+		t.Fatal("MoveSelect(EditDown) did not consume the key")
+	}
+	if got := string(textRunesIn(t, s.Paint(1).Build(1), frame.RGB(0, 0, 0))); got != "B" {
+		t.Fatalf("painted label after EditDown = %q, want %q", got, "B")
+	}
+	if got := s.FocusedSelectValue(); got != "b" {
+		t.Fatalf("value after EditDown = %q, want %q: the painted label and the submitted value must name the same option", got, "b")
 	}
 }

@@ -2788,43 +2788,11 @@ func optionValue(n *dom.Node) string {
 	return optionTextValue(n.TextContent())
 }
 
-// optionTextValue is the normalisation Chromium applies to an option's text
-// content before it becomes a value or a label: leading and trailing ASCII
-// whitespace stripped, every internal run of ASCII whitespace collapsed to a
-// single U+0020. Measured by scripts/verify-task037-option-value.js, which also
-// shows what must NOT be touched - a U+00A0 on either edge survives verbatim,
-// so strings.TrimSpace and unicode.IsSpace are both wrong
-// here. Whitespace is ASCII and cannot occur inside a multi-byte UTF-8
-// sequence, so the byte scan below is safe on any input.
+// optionTextValue keeps the accessibility tree, form submission and paint on
+// one normalisation rule: the same bytes are collapsed whether the text becomes
+// a submitted value, an announced label, or the glyphs drawn in the control.
 func optionTextValue(text string) string {
-	var sb strings.Builder
-	sb.Grow(len(text))
-	pendingSpace := false
-	for i := 0; i < len(text); i++ {
-		if isASCIISpace(text[i]) {
-			pendingSpace = true
-			continue
-		}
-		if pendingSpace && sb.Len() > 0 {
-			sb.WriteByte(' ')
-		}
-		pendingSpace = false
-		sb.WriteByte(text[i])
-	}
-	return sb.String()
-}
-
-// isASCIISpace reports the bytes Chromium collapses in an option's text content,
-// measured by scripts/verify-task037-option-value.js: U+0009, U+000A, U+000C,
-// U+000D and U+0020. U+000B (vertical tab) is deliberately absent - the same
-// measurement shows "a\v\vb" keeps its vertical tabs while "a\f\fb" collapses,
-// so this is HTML's ASCII whitespace set and not CSS's or unicode.IsSpace's.
-func isASCIISpace(b byte) bool {
-	switch b {
-	case '\t', '\n', '\f', '\r', ' ':
-		return true
-	}
-	return false
+	return dom.NormalizeOptionText(text)
 }
 
 // SelectedOption returns the currently selected <option> node within a <select>.
@@ -2837,16 +2805,7 @@ func isASCIISpace(b byte) bool {
 // untouched. If no option has the "selected" attribute, the first <option> child
 // is returned. Returns nil if selectNode is nil or has no <option> children.
 func SelectedOption(selectNode *dom.Node) *dom.Node {
-	if selectNode == nil {
-		return nil
-	}
-	dom.NormalizeSelectSelectedness(selectNode)
-	for _, option := range dom.SelectOptions(selectNode) {
-		if option.OptionSelected() {
-			return option
-		}
-	}
-	return nil
+	return selectNode.SelectedOption()
 }
 
 // ToggleControl toggles the checked state of a checkbox or radio input.
