@@ -618,13 +618,32 @@ func (n *Node) SelectedOption() *Node {
 	return nil
 }
 
-// OptionLabel returns the text a control shows for an option: its text content
-// with leading and trailing ASCII whitespace removed and internal runs
-// collapsed to one space. The value content attribute does not participate;
-// the label is the displayed text whether or not a value overrides it.
+// OptionLabel returns the text a control shows and announces for an option:
+// the label content attribute when it is not the empty string, otherwise the
+// option's text content, each normalised by NormalizeOptionText. The value
+// content attribute does not participate; the display is what the user reads,
+// whether or not a value overrides what the form submits.
+//
+// Measured by scripts/verify-br101-option-dom.js (Chromium 1.63, 2026-11-04,
+// lines "AX label-vs-text", "AX label shapes" and "AX value-only shapes"), on
+// options whose text content is "WWWWW":
+//
+//	label="IIIII"         -> option name "IIIII", combobox value "IIIII"
+//	label="  My   Label  " -> option name " My Label ", combobox value "My   Label"
+//	label=""              -> combobox value "WWWWW"   (the empty attribute is the absent one)
+//	label="   "           -> combobox value absent     (blank, NOT the text)
+//	value="V", no text    -> option name ""            (a value never names an option)
+//
+// Goosie answers the fully normalised form ("My Label") on both surfaces
+// because paint, the listbox rows and the accessibility tree read this one
+// function; Chromium's own two surfaces differ on edge whitespace, recorded as
+// GOOSIE-OPTIONAX-001.
 func (n *Node) OptionLabel() string {
 	if n == nil {
 		return ""
+	}
+	if label := n.GetAttribute("label"); label != "" {
+		return NormalizeOptionText(label)
 	}
 	return NormalizeOptionText(n.TextContent())
 }

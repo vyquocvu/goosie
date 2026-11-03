@@ -266,6 +266,12 @@ func TestSelectMultipleAndSizeChangesRecomputeSelection(t *testing.T) {
 	}
 }
 
+// The text getter strip-and-collapses; it does not echo raw bytes. IDL lines of
+// scripts/verify-br101-option-dom.js (Chromium 1.63, 2026-11-04): text
+// "Charcoal" for a textContent of "\n    Charcoal\n  ", and text "Hi there" for
+// "  Hi   there ". This oracle asserted the raw bytes before that measurement.
+//
+// qc:BR-101
 func TestOptionFormIndexTextLabelAndDisabledIDL(t *testing.T) {
 	doc := domtest.Parse(`<form id="f"><select><option id="o"> Alpha   Beta </option><option id="empty" label="">Visible text</option></select></form>`)
 	rt := newRuntime(t, js.Options{DOM: doc})
@@ -276,7 +282,7 @@ func TestOptionFormIndexTextLabelAndDisabledIDL(t *testing.T) {
 		var empty=document.getElementById('empty');
 		return [before,[o.text,o.value,o.label].join(','),empty.label].join('|');
 	})()`)
-	want := "f,0,Alpha Beta,Alpha Beta, Alpha   Beta ,false|Gamma Delta,Gamma Delta,Gamma Delta|"
+	want := "f,0,Alpha Beta,Alpha Beta,Alpha Beta,false|Gamma Delta,Gamma Delta,Gamma Delta|"
 	if got != want {
 		t.Fatalf("option IDL properties = %q, want %q", got, want)
 	}

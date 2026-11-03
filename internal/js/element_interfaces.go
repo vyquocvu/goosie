@@ -1316,22 +1316,10 @@ func optionValue(option *dom.Node) string {
 }
 
 func normalizeHTMLOptionText(text string) string {
-	var result strings.Builder
-	result.Grow(len(text))
-	pendingSpace := false
-	for i := 0; i < len(text); i++ {
-		c := text[i]
-		if c == '\t' || c == '\n' || c == '\f' || c == '\r' || c == ' ' {
-			pendingSpace = true
-			continue
-		}
-		if pendingSpace && result.Len() > 0 {
-			result.WriteByte(' ')
-		}
-		pendingSpace = false
-		result.WriteByte(c)
-	}
-	return result.String()
+	// One owner for the rule: internal/dom carries the measured byte scan
+	// (which whitespace collapses, and why U+000B does not), so the binding
+	// cannot drift from what paint and the accessibility tree answer.
+	return dom.NormalizeOptionText(text)
 }
 
 func (r *Runtime) installOptionInterface(proto *goja.Object) {
@@ -1410,7 +1398,11 @@ func (r *Runtime) installOptionInterface(proto *goja.Object) {
 		if node == nil {
 			return r.vm.ToValue("")
 		}
-		return r.vm.ToValue(node.TextContent())
+		// IDL line of scripts/verify-br101-option-dom.js: text answers the
+		// normalised text content ("Charcoal" for a textContent of
+		// "\n    Charcoal\n  ", "" for whitespace-only text) while textContent
+		// itself keeps its raw bytes.
+		return r.vm.ToValue(normalizeHTMLOptionText(node.TextContent()))
 	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
 		if node != nil {

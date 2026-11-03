@@ -369,23 +369,38 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
 		}
 		selected := SelectedOption(n)
+		// Iterate dom.SelectOptions because an <optgroup>'s options belong to the
+		// control: Chromium flattens them into .options and nests them under a
+		// group in the tree (OPTGROUP and OPTGROUP-AX lines of
+		// scripts/verify-br101-option-dom.js).
 		options := make([]ax.Node, 0)
-		for option := n.FirstChild; option != nil; option = option.NextSibling {
-			if !option.Element() || option.DataAtom != dom.AtomOption {
-				continue
-			}
-			// The same normalisation the value goes through, so one option node
-			// cannot answer with a cleaned label and a raw value (TASK-037).
-			optionLabel := optionTextValue(option.TextContent())
-			if optionLabel == "" {
-				optionLabel = option.GetAttribute("value")
-			}
-			options = append(options, ax.Node{
+		groupIdx := make(map[*dom.Node]int)
+		for _, option := range dom.SelectOptions(n) {
+			node := ax.Node{
 				Role: ax.RoleOption, RoleName: ax.RoleOption.String(), DOMNodeID: uint64(option.ID),
-				Label: optionLabel, Value: b.session.controlValue(option),
+				// The display string, not the raw text content: a label content
+				// attribute names the option and a value attribute never does
+				// (AX label-vs-text and AX value-only shapes lines).
+				Label: option.OptionLabel(), Value: b.session.controlValue(option),
 				Selected: option == selected, Disabled: option.OptionDisabled(),
 				X0: x0, Y0: y0, X1: x1, Y1: y1,
-			})
+			}
+			group := option.Parent
+			if group == nil || group.DataAtom != dom.AtomOptgroup {
+				options = append(options, node)
+				continue
+			}
+			idx, ok := groupIdx[group]
+			if !ok {
+				options = append(options, ax.Node{
+					Role: ax.RoleGroup, RoleName: ax.RoleGroup.String(), DOMNodeID: uint64(group.ID),
+					ID: group.GetAttribute("id"), Label: dom.NormalizeOptionText(group.GetAttribute("label")),
+					X0: x0, Y0: y0, X1: x1, Y1: y1,
+				})
+				idx = len(options) - 1
+				groupIdx[group] = idx
+			}
+			options[idx].Children = append(options[idx].Children, node)
 		}
 		selectLabel := strings.TrimSpace(n.GetAttribute("aria-label"))
 		if selectLabel == "" {
@@ -395,12 +410,12 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			selectLabel = strings.TrimSpace(label)
 		}
 		if selectLabel == "" && selected != nil {
-			selectLabel = optionTextValue(selected.TextContent())
+			selectLabel = selected.OptionLabel()
 		}
 		if selectLabel == "" {
 			optionsInSelect := dom.SelectOptions(n)
 			if len(optionsInSelect) > 0 {
-				selectLabel = optionTextValue(optionsInSelect[0].TextContent())
+				selectLabel = optionsInSelect[0].OptionLabel()
 			}
 		}
 		combo := emit(ax.RoleComboBox, selectLabel, b.session.controlValue(n), "")
