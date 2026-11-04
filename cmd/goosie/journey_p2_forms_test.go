@@ -23,6 +23,8 @@ import (
 // while a candidate is marked must not navigate, and the committed text is what
 // the server receives. A browser that submits a half-composed word is unusable
 // for Vietnamese and Japanese typing regardless of how correct the rest is.
+//
+// qc:BR-111
 func TestJourneyIMECompositionThenSubmit(t *testing.T) {
 	var reqMu sync.Mutex
 	var submits int

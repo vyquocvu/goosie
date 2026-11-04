@@ -14,6 +14,7 @@ import (
 // text. Cancel and blur remove the marked passage; maxlength applies to the
 // committed value, not to intermediate candidate text.
 
+// qc:BR-111
 func TestSetMarkedWithoutFocus(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
 	if s.SetMarked("に") {
@@ -24,6 +25,7 @@ func TestSetMarkedWithoutFocus(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestSetMarkedAndCommit(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
 	x, y := clickPoint(t, s, "a") // value "ab", caret ends at 2
@@ -48,6 +50,7 @@ func TestSetMarkedAndCommit(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestSetMarkedUnchangedNoChange(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
 	x, y := clickPoint(t, s, "a")
@@ -64,6 +67,7 @@ func TestSetMarkedUnchangedNoChange(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestCommitTextRespectsMaxlength(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="a" value="ab" maxlength="2"></body></html>`)
@@ -81,6 +85,7 @@ func TestCommitTextRespectsMaxlength(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestMaxlengthCountsUTF16CodeUnits(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="a" maxlength="2"></body></html>`)
@@ -100,6 +105,7 @@ func TestMaxlengthCountsUTF16CodeUnits(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestMaxlengthZeroPreventsUserInsertionAndCompositionCommit(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="a" maxlength="0"></body></html>`)
@@ -119,6 +125,7 @@ func TestMaxlengthZeroPreventsUserInsertionAndCompositionCommit(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestMaxlengthAbovePlatformIntegerRangeRemainsUsable(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="a" maxlength="999999999999999999999999999999"></body></html>`)
@@ -132,6 +139,7 @@ func TestMaxlengthAbovePlatformIntegerRangeRemainsUsable(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestMaxlengthUsesHTMLNonNegativeIntegerParsing(t *testing.T) {
 	for _, tc := range []struct {
 		name, attribute, want string
@@ -154,6 +162,7 @@ func TestMaxlengthUsesHTMLNonNegativeIntegerParsing(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestMarkedClearsOnBlurAndSwitch(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
 	x, y := clickPoint(t, s, "a")
@@ -172,6 +181,7 @@ func TestMarkedClearsOnBlurAndSwitch(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestEditEscapeClearsMarked(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
 	x, y := clickPoint(t, s, "a")
@@ -185,6 +195,7 @@ func TestEditEscapeClearsMarked(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestPaintMarkedPreviewAtCaret(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="a" value="ab"></body></html>`)
@@ -199,6 +210,7 @@ func TestPaintMarkedPreviewAtCaret(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestContentEditableIMEPreviewAtSelectionAndCommit(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
@@ -255,7 +267,9 @@ func TestContentEditableIMEPreviewAtSelectionAndCommit(t *testing.T) {
 	if got, err := s.EvaluateJS(`imeEvents.join(",")`); err != nil || got != wantEvents {
 		t.Fatalf("composition event order/payload = %q, err %v", got, err)
 	}
-	wantCancelable := "compositionstart:true,compositionupdate:false,compositionupdate:false,compositionend:false"
+	// Every composition event is cancelable, not just the start - measured on
+	// Chromium 153 in scripts/verify-br111-ime-composition.js (2026-11-05).
+	wantCancelable := "compositionstart:true,compositionupdate:true,compositionupdate:true,compositionend:true"
 	if got, err := s.EvaluateJS(`imeCancelable.join(",")`); err != nil || got != wantCancelable {
 		t.Fatalf("composition cancelability = %q, err %v", got, err)
 	}
@@ -268,6 +282,7 @@ func TestContentEditableIMEPreviewAtSelectionAndCommit(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestContentEditableIMECompositionCancel(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
@@ -300,6 +315,7 @@ func TestContentEditableIMECompositionCancel(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestContentEditableIMECommitCanceledByBeforeInput(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
@@ -336,6 +352,7 @@ func TestContentEditableIMECommitCanceledByBeforeInput(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestTextControlIMECompositionEvents(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -389,6 +406,7 @@ func TestTextControlIMECompositionEvents(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestTextControlIMECommitCanceledByBeforeInput(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
@@ -422,6 +440,7 @@ func TestTextControlIMECommitCanceledByBeforeInput(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestTextControlIMEStartCanceledByCompositionStart(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
@@ -452,6 +471,7 @@ func TestTextControlIMEStartCanceledByCompositionStart(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestTextControlIMEEndsBeforeBlur(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
@@ -490,6 +510,7 @@ func TestTextControlIMEEndsBeforeBlur(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestPaintMarkedOnEmptyControlSuppressesPlaceholder(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="empty" placeholder="hint"></body></html>`)
@@ -526,6 +547,7 @@ func TestPaintMarkedOnEmptyControlSuppressesPlaceholder(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestPaintPasswordMasksMarked(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="pw" type="password" value="ab"></body></html>`)
@@ -539,6 +561,7 @@ func TestPaintPasswordMasksMarked(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestCommitTextarea(t *testing.T) {
 	s := newFocusSession(t, textareaHTML)
 	x, y := clickPoint(t, s, "ta")
@@ -555,6 +578,7 @@ func TestCommitTextarea(t *testing.T) {
 	}
 }
 
+// qc:BR-111
 func TestPaintMarkedTextareaPreview(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<textarea id="ta">hi</textarea></body></html>`)
@@ -576,6 +600,8 @@ func TestPaintMarkedTextareaPreview(t *testing.T) {
 // or cancels the candidate, it does not submit the form under the control.
 // Chromium suppresses the implicit submission while isComposing is set, and the
 // same rule keeps a half-typed Vietnamese or Japanese word from navigation.
+// qc:BR-111
+
 func TestEnterDuringCompositionDoesNotSubmit(t *testing.T) {
 	s := newFocusSession(t, `<form id="f" action="/send" method="get">`+
 		`<input id="q" name="q"><button type="submit" name="go" value="1">Go</button></form>`)

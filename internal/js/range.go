@@ -1886,6 +1886,41 @@ func (r *Runtime) SelectionTextCaret(host *dom.Node) (*dom.Node, int, bool) {
 	return ran.start.container, offset, true
 }
 
+// CompositionCaret returns the Text node and UTF-16 offset a host IME's marked
+// passage belongs at. An editor with no text has no caret to read yet, and
+// Chromium does not wait for one: the first composition step into a fresh
+// <div contenteditable> inserts the Text node the preview lands in
+// (scripts/verify-br111-ime-composition.js, 2026-11-05 - its first input event
+// already carried value="ti" and a Selection equal to it). Without that node
+// the user types a whole word into an empty editor and sees nothing until the
+// commit. A host that already has children is left alone: where a marked
+// passage belongs inside element structure is a separate question, recorded as
+// GOOSIE-IMEPREVIEW-001.
+func (r *Runtime) CompositionCaret(host *dom.Node) (*dom.Node, int, bool) {
+	if node, at, ok := r.SelectionTextCaret(host); ok {
+		return node, at, true
+	}
+	if host == nil || host.Doc == nil || !dom.IsContentEditable(host) || host.FirstChild != nil {
+		return nil, 0, false
+	}
+	text := host.Doc.NewText("")
+	host.AppendChild(text)
+	if sel := r.selectionForDocument(host.Doc); sel != nil {
+		caret := rangeBoundary{container: text, offset: 0}
+		ran := &jsRange{start: caret, end: caret}
+		r.registerLiveRange(ran)
+		sel.ranges = []*jsRange{ran}
+		sel.selectedControl = nil
+		sel.backward = false
+	}
+	// An inserted node is a structural change however it arrived: a page
+	// observing the editor sees the child, and the engine learns that a node
+	// the load-time cascade never saw has to be styled before it can ink.
+	r.queueInsertionMutation(host, []*dom.Node{text}, nil)
+	r.notifyMutation()
+	return text, 0, true
+}
+
 func (r *Runtime) execCommandDeleteSelection(sel *jsSelection) goja.Value {
 	return r.execCommandDeleteSelectionWithInputType(sel, "deleteContentBackward")
 }

@@ -653,7 +653,7 @@ func (s *Session) SetMarked(text string) bool {
 	rt := s.jsRT
 	s.opMu.Unlock()
 	if !wasComposing && rt != nil {
-		if node, at, ok := rt.SelectionTextCaret(host); ok {
+		if node, at, ok := rt.CompositionCaret(host); ok {
 			nodeID, offset = node.ID, at
 			hasNode = true
 		}
@@ -2708,6 +2708,23 @@ func (s *Session) replaceControlCompositionLocked(n *dom.Node, start int, oldTex
 	s.setControlValue(n, string(out))
 	s.caret = start + len(inserted)
 	s.markedOffset = start
+	// While a passage is marked the control reports it as SELECTED: Chromium
+	// gave ss=0 se=2 for "ti" and se=5 for "tiếng", with selectionDirection
+	// "none" throughout (scripts/verify-br111-ime-composition.js, 2026-11-05).
+	// A page watching the selection, and the host that has to place a candidate
+	// window over the marked text, both read this range - a caret collapsed at
+	// its start tells them nothing is marked. The engine's own anchor/caret
+	// model stays untouched here, because a selection published through it would
+	// also claim a direction and paint a highlight the IME does not own.
+	if s.jsRT != nil {
+		markedEnd := start + len(inserted)
+		if markedEnd > len(out) {
+			markedEnd = len(out)
+		}
+		startOffset := utf16Length(string(out[:start]))
+		endOffset := startOffset + utf16Length(string(out[start:markedEnd]))
+		s.jsRT.SetTextControlSelection(n, startOffset, endOffset, "none")
+	}
 }
 
 func (s *Session) setControlValue(n *dom.Node, v string) {

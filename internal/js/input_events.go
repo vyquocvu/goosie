@@ -238,7 +238,11 @@ func (r *Runtime) DispatchTrustedCompositionEvent(target *dom.Node, typ, data st
 	if closed {
 		return false
 	}
-	event := dom.NewTrustedCompositionEvent(typ, true, typ == "compositionstart", data)
+	// Measured (scripts/verify-br111-ime-composition.js, Chromium 153): all
+	// three composition events arrive cancelable=true, not only the start - a
+	// page can veto the update it is being shown. The beforeinput that follows
+	// is the one that is not cancelable, and that stays with the caller.
+	event := dom.NewTrustedCompositionEvent(typ, true, true, data)
 	return r.dispatchWithWindowStep(target, &event.Event)
 }
 
