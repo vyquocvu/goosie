@@ -1139,8 +1139,19 @@
     "methods": [
       "PARITY"
     ],
-    "status": "NOT RUN",
+    "status": "PASS",
     "tests": [
+      "test/engine/bidi_visual_order_test.go:TestLtrArabicWordReversesInPlace",
+      "test/engine/bidi_visual_order_test.go:TestPlaintextResolvesToLtrAndAnchorsLeft",
+      "test/engine/bidi_visual_order_test.go:TestRtlArabicWordPaintsRightToLeftAndAnchorsAtTheRightEdge",
+      "test/engine/bidi_visual_order_test.go:TestRtlBidiOverrideReversesLatinToo",
+      "test/engine/bidi_visual_order_test.go:TestRtlEnAndAnIslandsReverseAsIslands",
+      "test/engine/bidi_visual_order_test.go:TestRtlHebrewAndArabicBothReverse",
+      "test/engine/bidi_visual_order_test.go:TestRtlMixedLineOrdersWordsByVisualIslands",
+      "test/engine/bidi_visual_order_test.go:TestRtlParenthesesWrapTheLatinIsland",
+      "test/engine/bidi_visual_order_test.go:TestRtlPureLatinKeepsLogicalOrderAndAnchorsRight",
+      "test/engine/bidi_visual_order_test.go:TestRtlStartAnchorSitsInsideThePadding",
+      "test/engine/bidi_visual_order_test.go:TestRtlTextAlignMovesTheAnchorNotTheOrder",
       "test/engine/cjk_line_break_test.go:TestBreakAfterIdeographBeforeLatinWord",
       "test/engine/cjk_line_break_test.go:TestCjkIdeographsBreakAfterEachRune",
       "test/engine/cjk_line_break_test.go:TestCjkKeepAllSuppressesBreakOpportunities",
@@ -1149,6 +1160,8 @@
       "test/engine/cjk_line_break_test.go:TestKanaAndHangulBreakBetweenRunes",
       "test/engine/cjk_line_break_test.go:TestLongUnbrokenLatinWordKeepsEveryGlyph",
       "test/engine/cjk_line_break_test.go:TestNoBreakBeforeIdeographFromLatinSide",
+      "test/layout/bidi_test.go:TestBidiDigitsStayLTRInRTL",
+      "test/layout/bidi_test.go:TestBidiMixedPlacementRTL",
       "test/raster/default_ignorable_test.go:TestCombiningMarksStillInkAfterTheIgnorableRule",
       "test/raster/default_ignorable_test.go:TestDefaultIgnorableControlsCostNothingAndInkNothing"
     ],

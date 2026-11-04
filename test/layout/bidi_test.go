@@ -57,9 +57,19 @@ func TestRTLHebrewWordPlacement(t *testing.T) {
 	}
 }
 
+// In an RTL line the logically first word is the rightmost one, whatever
+// script it is written in. Measured (scripts/verify-br087-bidi.js
+// ad_latin_logical_first, fixture box x=600..800):
+//
+//	visual ="םולש hello"
+//	LA "hello" x=[766.188 775.078 783.984 787.531 791.094] ascending=true
+//	HE "שלום"  x=[750.625 743.219 739.281 729.703] descending=true
+//
+// The old version of this test claimed the Hebrew went rightmost because it is
+// the RTL stretch; the reference reverses the whole line's run order, so being
+// RTL only decides which way the word itself reads.
+// qc:BR-087
 func TestBidiMixedPlacementRTL(t *testing.T) {
-	// In an RTL paragraph the RTL stretch is placed rightmost: "שלום" ends
-	// up to the right of "hello".
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="width: 800px; direction: rtl; font-size: 16px;">hello שלום</div>
 </body></html>`, 800)
@@ -70,14 +80,19 @@ func TestBidiMixedPlacementRTL(t *testing.T) {
 		t.Fatalf("mixed-run text objects not found")
 	}
 
-	if hebrew.X <= latin.X {
-		t.Errorf("expected שלום (%v) placed rightmost, to the right of hello (%v)", hebrew.X, latin.X)
+	if latin.X <= hebrew.X {
+		t.Errorf("expected hello (%v) placed rightmost, to the right of שלום (%v): the logically first word of an RTL line is the rightmost", latin.X, hebrew.X)
 	}
 }
 
+// "abc 123 שלום" in an RTL line gives visual ="םולש abc 123" (measured in
+// scripts/verify-br087-bidi.js fixture ae_latin_digits_logical_first, box
+// x=600..800): the Latin and the digits are one ascending island, and being
+// logically first it is the rightmost thing on the line - abc=743.063
+// 1=773.297 3=791.094 - while the Hebrew sits to its left reading reversed
+// (ש=727.5 … ם=706.578).
+// qc:BR-087
 func TestBidiDigitsStayLTRInRTL(t *testing.T) {
-	// Digits keep their LTR run and their logical order inside the RTL
-	// flow: abc, then 123, then the RTL stretch rightmost.
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="width: 800px; direction: rtl; font-size: 16px;">abc 123 שלום</div>
 </body></html>`, 800)
@@ -92,8 +107,8 @@ func TestBidiDigitsStayLTRInRTL(t *testing.T) {
 	if digits.X <= abc.X {
 		t.Errorf("expected digits (%v) to the right of abc (%v): LTR runs keep logical order", digits.X, abc.X)
 	}
-	if hebrew.X <= digits.X {
-		t.Errorf("expected שלום (%v) rightmost, to the right of the digits (%v)", hebrew.X, digits.X)
+	if hebrew.X >= abc.X {
+		t.Errorf("expected שלום (%v) to the LEFT of the Latin island starting at abc (%v): the logically first run is rightmost", hebrew.X, abc.X)
 	}
 }
 

@@ -340,14 +340,19 @@ func TestInlineStyleLosesToImportantAndBeatsRules(t *testing.T) {
 }
 
 // The table alignment reset distinguishes an inherited centre from one the table itself
-// declares: <center><table> puts its cells at the start edge, while table{text-align:center}
-// centres their contents. Both halves are asserted, because dropping the own-declaration
-// check would silently un-centre the second page.
+// declares: an inherited centre is replaced here, while table{text-align:center} or a style
+// attribute keeps it. Both halves are asserted, because dropping the own-declaration check
+// would silently un-centre the second page.
+//
+// The inherited half pins this engine's behaviour, not the reference's: measured with a
+// 300px table under body{text-align:center}, Chromium centres the cell's content at the
+// same x as a 300px div (scripts/verify-br087-bidi-residuals.js), so the reset is a
+// divergence recorded as GOOSIE-TABLEALIGN-001.
 func TestInheritedTextAlignResetsAtTableButOwnDeclarationDoesNot(t *testing.T) {
 	fromParent := styleFor(t, `<html><body><table><tbody><tr><td>x</td></tr></tbody></table></body></html>`,
 		`body { text-align: center }`, "table")
-	if fromParent.TextAlign != style.TextAlignLeft {
-		t.Errorf("inherited centre: table TextAlign = %v, want left", fromParent.TextAlign)
+	if fromParent.TextAlign != style.TextAlignStart {
+		t.Errorf("inherited centre: table TextAlign = %v, want start (this engine resets an inherited centre at the table box; Chromium centres the cell instead and keeps \"center\" in the computed value, which docs/qa-open-defects.json records as GOOSIE-TABLEALIGN-001)", fromParent.TextAlign)
 	}
 	own := styleFor(t, `<html><body><table><tbody><tr><td>x</td></tr></tbody></table></body></html>`,
 		`table { text-align: center }`, "table")

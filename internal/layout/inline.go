@@ -506,98 +506,68 @@ func inlineInto(a *Arena, id ObjectID) {
 				}
 			}
 		}
-		isRTL := obj.Style != nil && obj.Style.Direction == "rtl"
+		// Bidi resolution answers two separate questions with one level list:
+		// the order the runs and the glyphs inside each word land in, and
+		// whether the line's start edge is its right edge. A line of only
+		// Latin under direction:rtl keeps its logical order and only moves to
+		// the right edge, so both come from the same call.
 		lineRuns := line.runs
-		if isRTL {
-			// Bidi reordering decides both the walk order and whether the
-			// line still flows right-to-left at all: unicode-bidi:plaintext
-			// can resolve an RTL-declared element's line to LTR.
-			lineRuns, isRTL = bidiLineRuns(obj.Style, line.runs)
+		rtlStart := obj.Style != nil && obj.Style.Direction == "rtl"
+		if obj.Style != nil && (rtlStart || needsBidi(obj.Style, line.runs)) {
+			lineRuns, rtlStart = bidiReorder(obj.Style, a, line.runs)
 		}
-		if isRTL {
-			x := baseX + alignW
-			for _, run := range lineRuns {
-				runObj := a.Get(run.obj)
-				if run.atomic {
-					k := a.Get(run.obj)
-					x -= run.w
-					dx := (x + k.MarginLeft) - run.srcX
-					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
-					if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
-						dy -= line.h * 0.4
-					} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
-						dy += line.h * 0.2
-					}
-					shiftSubtree(a, run.obj, dx, dy)
-					continue
+		// `start` alignment follows the line's direction. Measured: an RTL line
+		// with no text-align ends its ink on the content box's right edge
+		// (rightmost edge x800.001 in a box ending at x800, and x770.001 with
+		// 30px inline padding), text-align:left moves it back to x600 and
+		// center leaves equal gaps (scripts/verify-br087-bidi.js
+		// y_cs_default_rtl, u_padding, ab_cs_left_rtl, s_align_center).
+		if rtlStart && obj.Style.TextAlign == style.TextAlignStart && alignW < lavail {
+			baseX += lavail - alignW
+		}
+		x := baseX
+		for _, run := range lineRuns {
+			runObj := a.Get(run.obj)
+			if run.atomic {
+				// The box's bottom margin edge sits on the line's baseline. This
+				// model centres text runs rather than sitting them on a baseline,
+				// and the line's own descent is a few pixels, so bottom-aligning
+				// against the line box puts it where Chromium puts it.
+				k := a.Get(run.obj)
+				dx := (x + k.MarginLeft) - run.srcX
+				dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+				if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
+					dy -= line.h * 0.4
+				} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
+					dy += line.h * 0.2
 				}
-				letterSpacing := float32(0)
-				if runObj.Style != nil {
-					letterSpacing = runObj.Style.LetterSpacing
-				}
-				wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
-				if run.text == " " && runObj.Style != nil {
-					wordW += runObj.Style.WordSpacing
-				}
-				x -= wordW
-				if runObj.X == 0 && runObj.Y == 0 {
-					runObj.X = x
-					baseY := y + (line.h-run.contentH)/2
-					if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
-						baseY -= run.contentH * 0.5
-					} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
-						baseY += run.contentH * 0.3
-					}
-					runObj.Y = baseY
-				}
-				runObj.W = wordW
-				runObj.H = run.contentH
+				shiftSubtree(a, run.obj, dx, dy)
+				x += run.w
+				continue
 			}
-		} else {
-			x := baseX
-			for _, run := range line.runs {
-				runObj := a.Get(run.obj)
-				if run.atomic {
-					// The box's bottom margin edge sits on the line's baseline. This
-					// model centres text runs rather than sitting them on a baseline,
-					// and the line's own descent is a few pixels, so bottom-aligning
-					// against the line box puts it where Chromium puts it.
-					k := a.Get(run.obj)
-					dx := (x + k.MarginLeft) - run.srcX
-					dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
-					if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
-						dy -= line.h * 0.4
-					} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
-						dy += line.h * 0.2
-					}
-					shiftSubtree(a, run.obj, dx, dy)
-					x += run.w
-					continue
+			letterSpacing := float32(0)
+			if runObj.Style != nil {
+				letterSpacing = runObj.Style.LetterSpacing
+			}
+			wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
+			if run.text == " " && runObj.Style != nil {
+				wordW += runObj.Style.WordSpacing
+			}
+			if runObj.X == 0 && runObj.Y == 0 {
+				runObj.X = x
+				baseY := y + (line.h-run.contentH)/2
+				if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
+					baseY -= run.contentH * 0.5
+				} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
+					baseY += run.contentH * 0.3
 				}
-				letterSpacing := float32(0)
-				if runObj.Style != nil {
-					letterSpacing = runObj.Style.LetterSpacing
-				}
-				wordW := measureWord(run.text, run.size, a.Metrics, run.slot, letterSpacing)
-				if run.text == " " && runObj.Style != nil {
-					wordW += runObj.Style.WordSpacing
-				}
-				if runObj.X == 0 && runObj.Y == 0 {
-					runObj.X = x
-					baseY := y + (line.h-run.contentH)/2
-					if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
-						baseY -= run.contentH * 0.5
-					} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
-						baseY += run.contentH * 0.3
-					}
-					runObj.Y = baseY
-				}
-				runObj.W = wordW
-				runObj.H = run.contentH
-				x += wordW
-				if justifyExtra > 0 && isSpaceWord(run.text) {
-					x += justifyExtra
-				}
+				runObj.Y = baseY
+			}
+			runObj.W = wordW
+			runObj.H = run.contentH
+			x += wordW
+			if justifyExtra > 0 && isSpaceWord(run.text) {
+				x += justifyExtra
 			}
 		}
 		y += line.h

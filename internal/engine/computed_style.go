@@ -351,6 +351,8 @@ func boxSizingKeyword(b style.BoxSizing) string {
 
 func textAlignKeyword(t style.TextAlign) string {
 	switch t {
+	case style.TextAlignStart:
+		return "start"
 	case style.TextAlignLeft:
 		return "left"
 	case style.TextAlignRight:

@@ -83,7 +83,16 @@ const (
 type TextAlign uint8
 
 const (
-	TextAlignLeft TextAlign = iota
+	// TextAlignStart is the initial value and the `start` keyword. It is a
+	// value rather than a shortcut for left or right because the alignment it
+	// means belongs to the *line*, which layout knows and the cascade does
+	// not: measured, an RTL start-aligned line puts its last glyph's right edge
+	// on the content box's right edge (x800.001 in a box ending at x800, and
+	// x770.001 with 30px padding) while an LTR one starts at the left edge, and
+	// getComputedStyle echoes "start" for both (scripts/verify-br087-bidi.js,
+	// fixtures y_cs_default_rtl, x_cs_default_ltr, z_cs_start_rtl).
+	TextAlignStart TextAlign = iota
+	TextAlignLeft
 	TextAlignRight
 	TextAlignCenter
 	TextAlignJustify
@@ -1987,15 +1996,23 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 		}
 	}
 
-	// An inherited `text-align: center` stops at a table. HTML's <center> - and
-	// any author rule that centres a block - reaches the text inside it, but the
-	// table algorithm resets the alignment at its own boundary: measured against
-	// Chromium, `<center><table><tr><td>TEXT` puts TEXT at the cell's start edge,
-	// while `<td style="text-align:center">` still centres it. Without the reset
-	// every cell of a centred table - Hacker News is one - drifts right by half
-	// the leftover line.
+	// An inherited `text-align: center` stops at a table here, and the reference
+	// does NOT do this. Measured 2026-11-04 with a 300px-wide table under
+	// body{text-align:center}, so alignment and cell padding are separable:
+	// the cell's content box runs 3..297 and its text lands at x=142 (centre
+	// 150), byte-for-byte where the 300px div control puts it
+	// (scripts/verify-br087-bidi-residuals.js). The reset therefore is an engine
+	// choice kept for the drift it was introduced to hide, not a Chromium rule,
+	// and the divergence is recorded as GOOSIE-TABLEALIGN-001 rather than
+	// dressed up as a measurement.
+	//
+	// Two facts fall out of the same probe and are worth keeping straight:
+	// Chromium also echoes the inherited "center" in the table's *computed*
+	// value, so this engine stores a used-value rule as a computed one; and the
+	// reset value is the direction-relative start rather than a literal left,
+	// because a reset that pinned left would mis-anchor an RTL table.
 	if cs.TextAlign == TextAlignCenter && cs.Display == DisplayTable && !declaresTextAlign(normal, important) {
-		cs.TextAlign = TextAlignLeft
+		cs.TextAlign = TextAlignStart
 	}
 
 	// A flex or grid item has its inline-level display blockified (Flexbox §4,
@@ -4364,6 +4381,8 @@ func parseOverflowProp(v string) Overflow {
 func parseTextAlign(v, dir string) TextAlign {
 	v = strings.TrimSpace(strings.ToLower(v))
 	switch v {
+	case "left":
+		return TextAlignLeft
 	case "right":
 		return TextAlignRight
 	case "center":
@@ -4371,17 +4390,21 @@ func parseTextAlign(v, dir string) TextAlign {
 	case "justify":
 		return TextAlignJustify
 	case "start":
-		if dir == "rtl" {
-			return TextAlignRight
-		}
-		return TextAlignLeft
+		return TextAlignStart
 	case "end":
+		// `end` is folded here while `start` is not, because the reference
+		// anchors an RTL `end` line at the content box's LEFT edge and an LTR one
+		// at the right (scripts/verify-br087-bidi-residuals.js: rtl end textX=0,
+		// ltr end textRight=200), and declaring `end` inside a `dir:rtl` ancestor
+		// measures the same as declaring it on the RTL element itself - the
+		// element's own computed direction is what counts, so the cascade has all
+		// the information the line would need.
 		if dir == "rtl" {
 			return TextAlignLeft
 		}
 		return TextAlignRight
 	}
-	return TextAlignLeft
+	return TextAlignStart
 }
 
 func parseWhiteSpace(v string) WhiteSpace {

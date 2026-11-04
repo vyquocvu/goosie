@@ -10,10 +10,11 @@ import (
 
 func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32, clip *frame.Rect) {
 	text := obj.Node.DataContent
+	order := obj.GlyphOrder
 	if b.composingTextareaText(obj) {
-		text = b.composeControlText(obj, text)
+		text, order = b.composeControlText(obj, text), nil
 	} else if b.composingEditableText(obj) {
-		text = b.composeTextAtUTF16Offset(text)
+		text, order = b.composeTextAtUTF16Offset(text), nil
 	}
 	if text == "" {
 		return
@@ -40,9 +41,9 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	}
 	// Text shadows paint behind the main text as offset copies.
 	if len(s.TextShadow) > 0 {
-		b.paintTextShadow(text, rect, s, opacity)
+		b.paintTextShadow(text, rect, s, opacity, order)
 	}
-	b.appendRun(text, rect, s, convertColor(s.Color), opacity)
+	b.appendRunOrdered(text, rect, s, convertColor(s.Color), opacity, order)
 }
 
 func (b *Builder) composingEditableText(obj *layout.Object) bool {
@@ -93,6 +94,16 @@ func (b *Builder) composingTextareaText(obj *layout.Object) bool {
 // appendRun emits one line of glyphs across the box's content origin, spacing
 // them with the same advances layout measured the line with.
 func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32) {
+	b.appendRunOrdered(text, rect, s, color, opacity, nil)
+}
+
+// appendRunOrdered draws visual slot k with the logical rune order[k],
+// advancing the pen by that rune's own advance. order is nil for identity,
+// which is every left-to-right word; layout stamps a reordered word with the
+// permutation and paint only ever reads it back. Reversing the slice instead
+// of placing it would move the advances with the wrong glyphs, and a word like
+// مرحبا has unequal per-rune advances, so the tail would drift.
+func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32, order []int) {
 	fontSize := int32(s.FontSize * b.scale)
 	if fontSize <= 0 {
 		return
@@ -121,11 +132,12 @@ func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle
 		// rounds, the way a browser places text: rounding each advance instead
 		// loses a fraction of a pixel per character and drifts the line tail.
 		pen := int32(0)
-		for i, r := range runes {
+		for k := range runes {
+			r := runes[logicalRune(order, k)]
 			x := rect.X0 + (pen+32)>>6
 			glyphs = append(glyphs, GlyphRun{Rune: r, X: x, Y: baseline, Size: fontSize, Slot: slot})
 			pen += b.metrics.GlyphAdvanceFixed(fontSize, r, slot)
-			if i < len(runes)-1 {
+			if k < len(runes)-1 {
 				pen += letterSpacing * 64
 			}
 			if r == ' ' {
@@ -135,10 +147,11 @@ func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle
 	} else {
 		x := rect.X0
 		advance := fontSize / 2
-		for i, r := range runes {
+		for k := range runes {
+			r := runes[logicalRune(order, k)]
 			glyphs = append(glyphs, GlyphRun{Rune: r, X: x, Y: baseline, Size: fontSize, Slot: slot})
 			x += advance
-			if i < len(runes)-1 {
+			if k < len(runes)-1 {
 				x += letterSpacing
 			}
 			if r == ' ' {
@@ -188,9 +201,20 @@ func isBlankText(text string) bool {
 	return true
 }
 
+// logicalRune returns the logical rune index visual slot k draws. A slot with
+// no entry is identity: layout only stamps a word its bidi resolution actually
+// reorders, so an unrecorded run - or one paint replaced with composed text -
+// keeps its logical order.
+func logicalRune(order []int, k int) int {
+	if k >= len(order) {
+		return k
+	}
+	return order[k]
+}
+
 // paintTextShadow draws each text-shadow layer as an offset copy of the text
 // in the shadow colour, painted before the main text so it appears behind.
-func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.ComputedStyle, opacity float32) {
+func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.ComputedStyle, opacity float32, order []int) {
 	for _, sh := range s.TextShadow {
 		dx := int32(sh.OffsetX * b.scale)
 		dy := int32(sh.OffsetY * b.scale)
@@ -207,6 +231,6 @@ func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.Compute
 		if sh.ColorIsCurrent {
 			color = convertColor(s.Color)
 		}
-		b.appendRun(text, shadowRect, s, color, opacity)
+		b.appendRunOrdered(text, shadowRect, s, color, opacity, order)
 	}
 }

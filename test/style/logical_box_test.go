@@ -127,8 +127,13 @@ func TestLogicalDirectionRTL(t *testing.T) {
 	if sLTR.MarginLeft != 10 || sLTR.MarginRight != 20 {
 		t.Errorf("LTR margin-inline-start/end = %v/%v, want 10/20", sLTR.MarginLeft, sLTR.MarginRight)
 	}
-	if sLTR.TextAlign != style.TextAlignLeft {
-		t.Errorf("LTR text-align: start = %v, want TextAlignLeft", sLTR.TextAlign)
+	// `text-align: start` stays a value of its own. Measured, getComputedStyle
+	// echoes "start" for both directions (scripts/verify-br087-bidi.js
+	// x_cs_default_ltr, z_cs_start_rtl) and only the *line* knows which edge it
+	// anchors at, so the direction is layout's to resolve - unlike the
+	// margin-inline pair above, which feeds geometry the cascade itself owns.
+	if sLTR.TextAlign != style.TextAlignStart {
+		t.Errorf("LTR text-align: start = %v, want TextAlignStart", sLTR.TextAlign)
 	}
 
 	// RTL
@@ -139,8 +144,8 @@ func TestLogicalDirectionRTL(t *testing.T) {
 	if sRTL.MarginRight != 10 || sRTL.MarginLeft != 20 {
 		t.Errorf("RTL margin-inline-start/end = %v/%v, want MarginRight=10 MarginLeft=20", sRTL.MarginRight, sRTL.MarginLeft)
 	}
-	if sRTL.TextAlign != style.TextAlignRight {
-		t.Errorf("RTL text-align: start = %v, want TextAlignRight", sRTL.TextAlign)
+	if sRTL.TextAlign != style.TextAlignStart {
+		t.Errorf("RTL text-align: start = %v, want TextAlignStart", sRTL.TextAlign)
 	}
 }
 

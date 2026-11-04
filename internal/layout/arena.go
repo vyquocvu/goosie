@@ -54,6 +54,13 @@ type Object struct {
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
 	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
 
+	// GlyphOrder is the bidi visual order of a word's glyphs: visual slot k
+	// draws logical rune GlyphOrder[k]. nil is identity, which every
+	// left-to-right word keeps so paint never pays for the resolver.
+	// bidiReorder writes it during inline placement; paint reads it and
+	// nothing else.
+	GlyphOrder []int
+
 	// GridCols and GridRows record the resolved track sizes (in px) of a grid
 	// container so subgrids can inherit track slices from their parent.
 	GridCols    []float32
