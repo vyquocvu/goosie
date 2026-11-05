@@ -369,6 +369,7 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
 		}
 		selected := SelectedOption(n)
+		controlDisabled := dom.IsFormControlDisabled(n)
 		// Iterate dom.SelectOptions because an <optgroup>'s options belong to the
 		// control: Chromium flattens them into .options and nests them under a
 		// group in the tree (OPTGROUP and OPTGROUP-AX lines of
@@ -395,7 +396,8 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 				// selections, which one selected option cannot express.
 				Label:    option.OptionAccessibleName(),
 				Selected: option.OptionSelected(), Disabled: option.OptionDisabled(),
-				X0: x0, Y0: y0, X1: x1, Y1: y1,
+				Props: optionAXProps(option, controlDisabled),
+				X0:    x0, Y0: y0, X1: x1, Y1: y1,
 			}
 			group := option.Parent
 			if group == nil || group.DataAtom != dom.AtomOptgroup {
@@ -450,8 +452,19 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			role = ax.RoleListBox
 		}
 		combo := emit(role, selectLabel, display, "")
-		combo.Disabled = dom.IsFormControlDisabled(n)
+		combo.Disabled = controlDisabled
 		combo.Children = options
+		// Which option the control names as its activedescendant: an open list
+		// answers one whenever something is selected - the first selection, and it
+		// keeps it even while disabled - while a closed box answers one only while
+		// it holds focus, and then names whatever it displays. With nothing
+		// selected, measured open-nothing-selected and focused-closed-all-disabled,
+		// no node answers one at all.
+		activeDescendant := selected
+		if !listbox && !combo.Focused {
+			activeDescendant = nil
+		}
+		combo.Props = selectAXProps(n, listbox, controlDisabled, combo.Focused, activeDescendant)
 		return combo, axBubble{}
 	}
 
@@ -472,6 +485,143 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		return nil, axBubble{}
 	}
 	return emit(ax.RoleGroup, "", "", ""), axBubble{}
+}
+
+// optionAXProps answers the property list Chromium reports for an option node.
+// It is one pruning rule rather than a set of independent flags
+// (scripts/verify-optionax-props.js): `focusable` is present exactly when the
+// option itself is enabled, `selected` exactly when neither the option nor its
+// control is disabled, and `disabled` when either of them is. A disabled option
+// therefore answers {disabled:true} alone - not even the `selected` of the option
+// that IS the selection (open-option-disabled) - while an enabled option inside a
+// disabled control answers {disabled:true, focusable:true}, keeping focusable and
+// losing only selected (closed-disabled, open-disabled).
+//
+// The pruning is an accessibility answer, not a DOM change: Node.Selected keeps
+// the option's own selectedness, which is what the platform shims read today.
+func optionAXProps(option *dom.Node, controlDisabled bool) []ax.Prop {
+	optionDisabled := option.OptionDisabled()
+	var props []ax.Prop
+	if optionDisabled || controlDisabled {
+		props = append(props, ax.BoolProp("disabled", true))
+	}
+	if !optionDisabled {
+		props = append(props, ax.BoolProp("focusable", true))
+	}
+	if !optionDisabled && !controlDisabled {
+		props = append(props, ax.BoolProp("selected", option.OptionSelected()))
+	}
+	return props
+}
+
+// selectAXProps answers the property list Chromium reports for a select control.
+// The two shapes answer disjoint sets, and which shape a control is was settled by
+// the previous slice (dom.SelectAnnouncesListbox): a closed box reports expanded
+// and hasPopup and never multiselectable, orientation or required - measured
+// closed-required-empty, which fails its constraint and still answers no required
+// key - while an open list reports the opposite set and always spells both
+// multiselectable and required out, false included.
+//
+// A disabled control loses `focusable` and keeps every other key of its shape,
+// including the activedescendant of an open list (open-disabled).
+func selectAXProps(n *dom.Node, listbox, disabled, focused bool, activeDescendant *dom.Node) []ax.Prop {
+	var props []ax.Prop
+	if disabled {
+		props = append(props, ax.BoolProp("disabled", true))
+	} else {
+		props = append(props, ax.BoolProp("focusable", true))
+	}
+	if focused {
+		props = append(props, ax.BoolProp("focused", true))
+	}
+	if invalid, ok := selectInvalidProp(n); ok {
+		props = append(props, ax.StringProp("invalid", invalid))
+	}
+	if listbox {
+		props = append(props, ax.BoolProp("multiselectable", n.HasAttribute("multiple")))
+		props = append(props, ax.StringProp("orientation", ariaOrientationToken(n, "vertical")))
+		props = append(props, ax.BoolProp("required",
+			n.HasAttribute("required") || ariaSaysTrue(n, "aria-required")))
+	} else {
+		props = append(props, ax.BoolProp("expanded", false))
+		props = append(props, ax.StringProp("hasPopup", ariaHasPopupToken(n)))
+		// A closed box has no orientation of its own - measured closed-enabled,
+		// which answers no orientation key at all - so only an authored token can
+		// add one, and an unusable token adds nothing (closed-orientation-bogus).
+		if orientation := ariaOrientationToken(n, ""); orientation != "" {
+			props = append(props, ax.StringProp("orientation", orientation))
+		}
+	}
+	if activeDescendant != nil {
+		props = append(props, ax.RefProp("activedescendant", uint64(activeDescendant.ID)))
+	}
+	return props
+}
+
+// selectInvalidProp answers the `invalid` property, which is a STRING rather than
+// a boolean: measured invalid:"false" for a control whose constraint holds and
+// invalid:"true" for one whose constraint fails. aria-invalid overrides the
+// constraint, with two measured surprises - an EMPTY aria-invalid reads as absent
+// rather than as "false", so the same fixture answers "true" when the constraint
+// fails (closed-aria-invalid-empty) and "false" when it holds
+// (closed-aria-invalid-empty-valid) - and the two tokens that mean neither true
+// nor false drop the key entirely (open-aria-invalid-grammar, -spelling).
+func selectInvalidProp(n *dom.Node) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(n.GetAttribute("aria-invalid"))) {
+	case "":
+		if selectConstraintFails(n) {
+			return "true", true
+		}
+		return "false", true
+	case "false":
+		return "false", true
+	case "grammar", "spelling":
+		return "", false
+	default:
+		return "true", true
+	}
+}
+
+// selectConstraintFails reports the constraint state the `invalid` property
+// answers for a select: an error set by script, or a required control whose value
+// is missing. aria-required does not participate - measured open-aria-required,
+// which answers required:true and invalid:"false" at the same time.
+func selectConstraintFails(n *dom.Node) bool {
+	return n.CustomValidityMessage != "" || dom.SelectValueMissing(n)
+}
+
+// ariaHasPopupToken answers the `hasPopup` property of a closed select. Only
+// ARIA's popup-kind tokens replace the native "menu": measured dialog, listbox,
+// tree and grid verbatim, while "true", "false" and an unusable token all leave
+// the answer at "menu" (closed-haspopup-true, -false, -bogus).
+func ariaHasPopupToken(n *dom.Node) string {
+	token := strings.ToLower(strings.TrimSpace(n.GetAttribute("aria-haspopup")))
+	switch token {
+	case "menu", "listbox", "tree", "grid", "dialog":
+		return token
+	}
+	return "menu"
+}
+
+// ariaOrientationToken answers the `orientation` property: the authored token when
+// it is one of the two ARIA orientations, otherwise the fallback the shape has of
+// its own - "vertical" for an open list, which keeps that default even for an
+// unusable token (open-orientation-bogus), and "" for a closed box, which has none.
+func ariaOrientationToken(n *dom.Node, fallback string) string {
+	token := strings.ToLower(strings.TrimSpace(n.GetAttribute("aria-orientation")))
+	switch token {
+	case "horizontal", "vertical":
+		return token
+	}
+	return fallback
+}
+
+// ariaSaysTrue reports whether an aria attribute answers "true". `required` is a
+// disjunction of the content attribute and aria-required rather than an override:
+// measured open-aria-required-false-over-attr, where aria-required="false" leaves
+// the content attribute's required:true standing.
+func ariaSaysTrue(n *dom.Node, name string) bool {
+	return strings.EqualFold(strings.TrimSpace(n.GetAttribute(name)), "true")
 }
 
 func elementInternalsAXRole(role string) (ax.Role, string, bool) {
