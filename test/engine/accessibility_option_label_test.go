@@ -8,25 +8,37 @@ import (
 )
 
 // The accessibility tree is where these rules are measurable: a browser's
-// rendered option text is not readable by page script, so the anchor is what
-// Chromium exposes as the name of each option node. Lines quoted below are
-// scripts/verify-br101-option-dom.js on this host (Chromium 1.63, 2026-11-04):
+// rendered option text is not readable by page script, so the tree is what
+// Chromium exposes as the name of each option node. The lines quoted below come
+// from scripts/verify-optionax-surfaces.js on this host (Chromium 153.0.8010.12,
+// 2026-11-05), which keeps the candidate rules in JavaScript and compares them
+// against Chromium's answer shape by shape - so a wrong guess about the
+// reference reddens the anchor, not these tests.
 //
-//	AX label-vs-text -> {"role":"combobox","value":"IIIII"} {"role":"option","name":"IIIII"}
-//	                    for <option selected label="IIIII">WWWWW</option>
-//	AX label shapes  -> option names " My Label ", "WWWWW", "  ", "WWWWW" for label=
-//	                    "  My   Label  ", "", "   " and absent, text "WWWWW"
-//	AX value-only shapes -> option name "" for <option selected value="V"></option>
-//	OPTGROUP-AX      -> combobox value "In two", plus role "group" named "Group
-//	                    Label" and BOTH options inside the group present
+//	AX edges+inner   -> {"role":"combobox","name":"","value":"My   Label"}
+//	                    {"role":"option","name":" My Label "}
+//	                    for label="  My   Label  ", text "WWWWW"
+//	AX three-spaces  -> {"role":"combobox","name":""} - no value at all -
+//	                    {"role":"option","name":"  "}
+//	AX vt-edges      -> combobox value "My" while the option name keeps
+//	                    "\u000bMy\u000b": the display trims U+000B, the name does not
+//	AX nbsp-edges    -> both surfaces keep U+00A0 verbatim
+//	AX bare          -> {"role":"combobox","name":"","value":"Alpha Beta"} for
+//	                    <option value="v1" selected>Alpha Beta</option>: the
+//	                    control announces the display and the form value stays
+//	                    in the form. label[for] -> name "Author label",
+//	                    aria-label -> "Aria name", size="2"/multiple -> listbox
+//	                    with no value.
+//	OPTGROUP-AX      -> group named "Group Label" with BOTH options inside it
 //
-// Goosie announces the fully normalised form ("My Label") on every surface
-// because paint, the listbox rows and this tree all read (*dom.Node).OptionLabel;
-// Chromium's own two surfaces differ on edge whitespace and that difference is
-// recorded in docs/qa-open-defects.json as GOOSIE-OPTIONAX-001.
+// The two spellings are two functions on purpose: OptionAccessibleName
+// collapses every run to one space and keeps one at each edge, while
+// OptionDisplayStyle strips the edges and leaves the interior written as it
+// was. Paint and the listbox rows keep the normalised form the BR-101 slice
+// shipped; the tree answers each surface the way the reference does.
 
-// comboByID finds the select's node by DOM id: this engine fills a combobox's
-// accessible name from the selected option, so a role+label lookup cannot pin it.
+// comboByID finds the select's node by DOM id: Chromium leaves a combobox's
+// accessible name to its author, so a role+label lookup cannot pin it.
 func comboByID(nodes []ax.Node, id string) *ax.Node {
 	for i := range nodes {
 		if nodes[i].Role == ax.RoleComboBox && nodes[i].ID == id {
@@ -47,12 +59,17 @@ func TestAccessibilityOptionNamesFollowTheLabelAttribute(t *testing.T) {
   <option id="empty" label="">BBBBB</option>
   <option id="blank" label="   ">CCCCC</option>
   <option id="valonly" value="V"></option>
+  <option id="spaces" label="  My   Label  ">DDDDD</option>
 </select></body></html>`)
 	options := comboByID(s.AccessibilityTree(), "sel")
 	if options == nil {
 		t.Fatal("no combo box in the accessibility tree")
 	}
-	want := []string{"IIIII", "BBBBB", "", ""}
+	// "  " for label="   " is the measured name, not a typo: a run touching
+	// each edge contributes one space, so a whitespace-only label announces two
+	// spaces. The old expectation here ("") was written before that shape was
+	// measured and is the clause GOOSIE-OPTIONAX-001 was opened for.
+	want := []string{"IIIII", "BBBBB", "  ", "", " My Label "}
 	if len(options.Children) != len(want) {
 		t.Fatalf("combo has %d children, want %d: %+v", len(options.Children), len(want), options.Children)
 	}

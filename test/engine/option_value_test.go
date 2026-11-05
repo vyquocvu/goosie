@@ -210,8 +210,11 @@ func TestLastAuthoredSelectedOptionWins(t *testing.T) {
 
 // TestAccessibilityOptionLabelAndValueShareNormalization is the cross-check on
 // the shape that used to drift: an AX option node whose Label was trimmed while
-// its Value kept the newlines. Both now come from the same rule, and the value
-// the tree announces is the value the form sends.
+// its Value kept the newlines. Both now come from the same rule. The control's
+// own announcement is a third surface and deliberately differs - measured
+// {"role":"combobox","name":"","value":"Alpha Beta"} for
+// <option value="v1" selected>Alpha Beta</option> while `select.value` stays
+// "v1" (scripts/verify-optionax-surfaces.js, 2026-11-05).
 //
 //	OPTION name=charcoal -> {"value":"Charcoal","label":"Charcoal"}
 //	INDENTED initial     -> {"selectedIndex":0,"value":"Charcoal","optionLabel":"Charcoal"}
@@ -254,10 +257,11 @@ func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
 		t.Fatalf("option node is labelled %q and valued %q, want %q for both",
 			got.Label, got.Value, "Hi there")
 	}
-	// The two answers only have to agree where they differ, so the third shape
-	// keeps the value attribute distinct from the displayed text: an AX tree that
-	// recomputed the select's value from the option's text would announce
-	// "Slate blue" here while the form sent "slate-blue".
+	// The two surfaces only have to be *distinguishable*, and the reference says
+	// they are: the control announces the display while the form sends the value
+	// attribute. Quoted from the same run - {"role":"combobox","value":"My   Label"}
+	// against `select.value === "sub"` for
+	// <option selected label="  My   Label  " value="sub">WWWWW</option>.
 	//
 	//	OPTION name=attrpad -> {"value":"  pad  me  ","label":"ignored text"}
 	//	INDENTED initial    -> {"optionLabel":"Charcoal"} (label is text, value is text)
@@ -266,9 +270,9 @@ func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
    Slate blue
  </option></select></form></body></html>`)
 	mixedCombo := axCombo(t, mixed, "s")
-	if mixedCombo.Value != "slate-blue" {
-		t.Fatalf("combo box announces value %q, want the value attribute %q it submits",
-			mixedCombo.Value, "slate-blue")
+	if mixedCombo.Value != "Slate blue" {
+		t.Fatalf("combo box announces value %q, want the display string %q Chromium announces",
+			mixedCombo.Value, "Slate blue")
 	}
 	if len(mixedCombo.Children) != 1 {
 		t.Fatalf("combo has %d option nodes, want 1", len(mixedCombo.Children))
@@ -277,9 +281,9 @@ func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
 		t.Fatalf("option node is labelled %q and valued %q, want %q and %q",
 			got.Label, got.Value, "Slate blue", "slate-blue")
 	}
-	if submitted := submittedValue(t, mixed, "f", "c"); submitted != mixedCombo.Value {
-		t.Fatalf("accessibility announces %q but the form submits %q: one control, two answers",
-			mixedCombo.Value, submitted)
+	if submitted := submittedValue(t, mixed, "f", "c"); submitted != mixedCombo.Children[0].Value {
+		t.Fatalf("the form submits %q while the option node carries %q: the option's own value drifted",
+			submitted, mixedCombo.Children[0].Value)
 	}
 }
 
@@ -321,8 +325,11 @@ func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 		t.Fatalf("form would submit c=%q after EditDown, want c=b", got)
 	}
 	combo := axCombo(t, s, "s")
-	if combo.Value != "b" {
-		t.Fatalf("combo box announces %q after EditDown, want %q", combo.Value, "b")
+	// The announced string is the display and the submitted one is the value
+	// attribute - two surfaces, measured apart: {"role":"combobox",
+	// "value":"Alpha Beta"} for <option value="v1" selected>Alpha Beta</option>.
+	if combo.Value != "B" {
+		t.Fatalf("combo box announces %q after EditDown, want the display string %q", combo.Value, "B")
 	}
 	selected := 0
 	for _, o := range combo.Children {

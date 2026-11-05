@@ -378,10 +378,12 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		for _, option := range dom.SelectOptions(n) {
 			node := ax.Node{
 				Role: ax.RoleOption, RoleName: ax.RoleOption.String(), DOMNodeID: uint64(option.ID),
-				// The display string, not the raw text content: a label content
-				// attribute names the option and a value attribute never does
-				// (AX label-vs-text and AX value-only shapes lines).
-				Label: option.OptionLabel(), Value: b.session.controlValue(option),
+				// The name Chromium announces, not the display string: a label
+				// content attribute names the option, a value attribute never
+				// does, and the label keeps one space at each edge where the
+				// control's value drops them (the two spellings of
+				// scripts/verify-optionax-surfaces.js section 1).
+				Label: option.OptionAccessibleName(), Value: b.session.controlValue(option),
 				Selected: option == selected, Disabled: option.OptionDisabled(),
 				X0: x0, Y0: y0, X1: x1, Y1: y1,
 			}
@@ -402,6 +404,15 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			}
 			options[idx].Children = append(options[idx].Children, node)
 		}
+		// The control's name belongs to its author - aria-label, a label
+		// element, or a wrapped label - and never to the selected option,
+		// which is where this engine used to look.
+		// scripts/verify-optionax-surfaces.js section 2 measures
+		// {"role":"combobox","name":"","value":"Alpha Beta"} for
+		// <select><option value="v1" selected>Alpha Beta</option></select> with
+		// label[for] and aria-label cases naming the control instead, so the
+		// display string reaches assistive tech as the value while the form
+		// value stays in the form.
 		selectLabel := strings.TrimSpace(n.GetAttribute("aria-label"))
 		if selectLabel == "" {
 			selectLabel = b.associatedLabel(n)
@@ -409,16 +420,18 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		if selectLabel == "" {
 			selectLabel = strings.TrimSpace(label)
 		}
-		if selectLabel == "" && selected != nil {
-			selectLabel = selected.OptionLabel()
-		}
-		if selectLabel == "" {
-			optionsInSelect := dom.SelectOptions(n)
-			if len(optionsInSelect) > 0 {
-				selectLabel = optionsInSelect[0].OptionLabel()
+		// Only a closed box spells its selection out: the same anchor reports
+		// no value at all for size="2" and for multiple, both of which are
+		// listboxes there.
+		display := ""
+		if dom.SelectIsPopupStyle(n) {
+			if selected != nil {
+				display = selected.OptionDisplayStyle()
+			} else if opts := dom.SelectOptions(n); len(opts) > 0 {
+				display = opts[0].OptionDisplayStyle()
 			}
 		}
-		combo := emit(ax.RoleComboBox, selectLabel, b.session.controlValue(n), "")
+		combo := emit(ax.RoleComboBox, selectLabel, display, "")
 		combo.Disabled = dom.IsFormControlDisabled(n)
 		combo.Children = options
 		return combo, axBubble{}

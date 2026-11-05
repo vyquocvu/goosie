@@ -618,11 +618,11 @@ func (n *Node) SelectedOption() *Node {
 	return nil
 }
 
-// OptionLabel returns the text a control shows and announces for an option:
-// the label content attribute when it is not the empty string, otherwise the
-// option's text content, each normalised by NormalizeOptionText. The value
-// content attribute does not participate; the display is what the user reads,
-// whether or not a value overrides what the form submits.
+// OptionLabel returns the text a control displays and a listbox row shows for
+// an option: the label content attribute when it is not the empty string,
+// otherwise the option's text content, each normalised by NormalizeOptionText.
+// The value content attribute does not participate; the display is what the
+// user reads, whether or not a value overrides what the form submits.
 //
 // Measured by scripts/verify-br101-option-dom.js (Chromium 1.63, 2026-11-04,
 // lines "AX label-vs-text", "AX label shapes" and "AX value-only shapes"), on
@@ -634,10 +634,11 @@ func (n *Node) SelectedOption() *Node {
 //	label="   "           -> combobox value absent     (blank, NOT the text)
 //	value="V", no text    -> option name ""            (a value never names an option)
 //
-// Goosie answers the fully normalised form ("My Label") on both surfaces
-// because paint, the listbox rows and the accessibility tree read this one
-// function; Chromium's own two surfaces differ on edge whitespace, recorded as
-// GOOSIE-OPTIONAX-001.
+// Goosie answers the fully normalised form ("My Label") here because paint and
+// the listbox rows read this one function. The accessibility tree no longer
+// does: measured by scripts/verify-optionax-surfaces.js, Chromium announces a
+// different spelling for the option name and for the control's value, so those
+// two surfaces read OptionAccessibleName and OptionDisplayStyle instead.
 func (n *Node) OptionLabel() string {
 	if n == nil {
 		return ""
@@ -761,6 +762,98 @@ func SelectIsPopupStyle(selectNode *Node) bool {
 		return false
 	}
 	return !selectNode.HasAttribute("multiple") && selectDisplaySize(selectNode) == 1
+}
+
+// OptionAccessibleName is the name Chromium announces for an option node. It
+// differs from OptionLabel by one clause, and the difference is measured:
+// scripts/verify-optionax-surfaces.js (Chromium 153.0.8010.12) reports the
+// accessible name of an option whose label attribute is "  My   Label  " as
+// " My Label " - every run of HTML ASCII whitespace becomes a single space and
+// a run touching an edge keeps that space, so a whitespace-only label
+// announces two spaces - while its text content "  My   Label  " announces the
+// fully normalised "My Label". A label attribute is therefore collapsed, never
+// trimmed; a vertical tab is not one of the bytes it collapses.
+func (n *Node) OptionAccessibleName() string {
+	if n == nil {
+		return ""
+	}
+	if label := n.GetAttribute("label"); label != "" {
+		return collapseOptionNameWhitespace(label)
+	}
+	return NormalizeOptionText(n.TextContent())
+}
+
+// OptionDisplayStyle is the spelling Chromium puts in the closed select's
+// accessible value: the edges go and the interior stays exactly as written, so
+// label="  My   Label  " displays "My   Label" where the option's own name
+// collapses it to " My Label ". Text content has already been normalised by
+// NormalizeOptionText before the edges are trimmed. U+000B joins the edge set
+// here even though the name keeps it - both halves measured on the same run.
+// A control whose display is empty exposes no value at all, which callers read
+// as the empty string.
+func (n *Node) OptionDisplayStyle() string {
+	if n == nil {
+		return ""
+	}
+	if label := n.GetAttribute("label"); label != "" {
+		return trimOptionDisplayEdges(label)
+	}
+	return trimOptionDisplayEdges(NormalizeOptionText(n.TextContent()))
+}
+
+// collapseOptionNameWhitespace turns every run of HTML ASCII whitespace into a
+// single space and keeps one space for each edge run, the accessible-name
+// spelling measured above.
+func collapseOptionNameWhitespace(text string) string {
+	lead := len(text) > 0 && isOptionSpace(text[0])
+	trail := len(text) > 0 && isOptionSpace(text[len(text)-1])
+	core := text
+	if lead {
+		for len(core) > 0 && isOptionSpace(core[0]) {
+			core = core[1:]
+		}
+	}
+	if trail {
+		for len(core) > 0 && isOptionSpace(core[len(core)-1]) {
+			core = core[:len(core)-1]
+		}
+	}
+	var out strings.Builder
+	out.Grow(len(text))
+	if lead {
+		out.WriteByte(' ')
+	}
+	pending := false
+	for i := 0; i < len(core); i++ {
+		if isOptionSpace(core[i]) {
+			pending = true
+			continue
+		}
+		if pending {
+			out.WriteByte(' ')
+			pending = false
+		}
+		out.WriteByte(core[i])
+	}
+	if trail {
+		out.WriteByte(' ')
+	}
+	return out.String()
+}
+
+// trimOptionDisplayEdges removes the leading and trailing run of the display
+// edge set: HTML ASCII whitespace plus U+000B, which the name keeps and the
+// display drops.
+func trimOptionDisplayEdges(text string) string {
+	isEdge := func(b byte) bool { return isOptionSpace(b) || b == '\v' }
+	start, end := 0, len(text)
+	for start < end && isEdge(text[start]) {
+		start++
+	}
+	for end > start && isEdge(text[end-1]) {
+		end--
+	}
+	return text[start:end]
 }
 
 // TextareaSubmissionValue returns a textarea's API value after the hard-wrap

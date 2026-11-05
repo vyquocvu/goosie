@@ -375,8 +375,13 @@ func TestAccessibilitySelectComboBoxAndOptions(t *testing.T) {
 	if combo == nil || combo.ID != "sel" {
 		t.Fatalf("select combo box missing or has wrong ID: %+v", combo)
 	}
-	if combo.Value != "second" {
-		t.Fatalf("combo value = %q, want selected form value second", combo.Value)
+	// Re-measured 2026-11-05: scripts/verify-optionax-surfaces.js answers
+	// {"role":"combobox","name":"Author label","value":"Gam Ma"} for
+	// <label for> + <option value="v2" selected>Gam Ma</option>, so the control
+	// announces the display string and the value attribute stays in the form.
+	// This expectation used to be "second", written before that was measured.
+	if combo.Value != "Second choice" {
+		t.Fatalf("combo value = %q, want the selected option's display string", combo.Value)
 	}
 	if len(combo.Children) != 3 {
 		t.Fatalf("combo has %d option children, want 3: %+v", len(combo.Children), combo.Children)
@@ -406,12 +411,18 @@ func TestAccessibilitySelectComboBoxAndOptions(t *testing.T) {
 func TestAccessibilitySelectDefaultsToFirstOption(t *testing.T) {
 	s := newFocusSession(t, `<html><body><select id="sel"><option value="alpha">Alpha</option><option value="beta">Beta</option></select></body></html>`)
 	tree := s.AccessibilityTree()
-	combo := axFind(tree, ax.RoleComboBox, "Alpha")
+	// The control is found by id, not by name: the anchor's author-less select
+	// measures as {"role":"combobox","name":"","value":"Alpha Beta"}, so the
+	// selected option's text lands in the value and names nothing.
+	combo := comboByID(tree, "sel")
 	if combo == nil {
 		t.Fatalf("select combo box not found: %+v", tree)
 	}
-	if combo.Value != "alpha" {
-		t.Fatalf("combo value = %q, want first option alpha", combo.Value)
+	if combo.Label != "" {
+		t.Fatalf("combo name = %q, want the empty name Chromium gives a select nothing labels", combo.Label)
+	}
+	if combo.Value != "Alpha" {
+		t.Fatalf("combo value = %q, want the first option's display string", combo.Value)
 	}
 	first := axFind(combo.Children, ax.RoleOption, "Alpha")
 	second := axFind(combo.Children, ax.RoleOption, "Beta")
@@ -422,7 +433,7 @@ func TestAccessibilitySelectDefaultsToFirstOption(t *testing.T) {
 
 func TestAccessibilityDisabledSelectAndOption(t *testing.T) {
 	s := newFocusSession(t, `<html><body><select id="sel" disabled><option value="x" disabled>Unavailable</option></select></body></html>`)
-	combo := axFind(s.AccessibilityTree(), ax.RoleComboBox, "Unavailable")
+	combo := comboByID(s.AccessibilityTree(), "sel")
 	if combo == nil || !combo.Disabled {
 		t.Fatalf("disabled select node = %+v, want present and disabled", combo)
 	}
@@ -439,12 +450,14 @@ func TestAccessibilitySelectTracksMoveSelect(t *testing.T) {
 	if !s.FocusNode(sel) || !s.MoveSelect(engine.EditDown) {
 		t.Fatal("could not focus select and move to the next option")
 	}
-	combo := axFind(s.AccessibilityTree(), ax.RoleComboBox, "Two")
+	combo := comboByID(s.AccessibilityTree(), "sel")
 	if combo == nil {
 		t.Fatalf("select combo box not found after MoveSelect: %+v", s.AccessibilityTree())
 	}
-	if combo.Value != "two" {
-		t.Fatalf("combo value after MoveSelect = %q, want two", combo.Value)
+	// The announced value tracks the selection's display string, measured as
+	// {"role":"combobox","value":"Gam Ma"} for <option value="v2">Gam Ma</option>.
+	if combo.Value != "Two" {
+		t.Fatalf("combo value after MoveSelect = %q, want the display string Two", combo.Value)
 	}
 	selected := 0
 	for _, option := range combo.Children {
@@ -479,40 +492,41 @@ func TestAccessibilityEmptySelectHasNoOptions(t *testing.T) {
 }
 
 // qc:BR-139
-func TestAccessibilitySelectValueMatchesSubmittedFormValue(t *testing.T) {
-	cases := []struct{ name, options, want string }{
+//
+// The two answers are two surfaces, and the reference keeps them apart:
+// scripts/verify-optionax-surfaces.js reports {"role":"combobox",
+// "value":"My   Label"} for an option whose label is "  My   Label  " and whose
+// value attribute is "sub", while `document.getElementById('spaced').value` is
+// "sub" in the same run. The old version of this test demanded the announced
+// value equal the submitted one - a rule written before either was measured.
+func TestAccessibilitySelectAnnouncesTheDisplayWhileTheFormSubmitsTheValue(t *testing.T) {
+	cases := []struct{ name, options, announce, want string }{
 		{"value attribute", `<option value="red">Red</option>
 <option value="blue" selected>Blue</option>
-<option>Charcoal</option>`, "blue"},
+<option>Charcoal</option>`, "Blue", "blue"},
 		{"text content fallback", `<option>Scarlet</option>
 <option selected>Cobalt</option>
-<option value="ink">Ink</option>`, "Cobalt"},
+<option value="ink">Ink</option>`, "Cobalt", "Cobalt"},
+		{"label attribute spelling", `<option selected label="  My   Label  " value="sub">WWWWW</option>`,
+			"My   Label", "sub"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newFocusSession(t, `<html><body><form id="f"><select id="sel" name="color">
 `+tc.options+`
 </select></form></body></html>`)
-			flat := axFlatten(s.AccessibilityTree())
-			var combo *ax.Node
-			for i := range flat {
-				if flat[i].Role == ax.RoleComboBox && flat[i].ID == "sel" {
-					combo = &flat[i]
-					break
-				}
-			}
+			combo := comboByID(axFlatten(s.AccessibilityTree()), "sel")
 			if combo == nil {
 				t.Fatal("select combo box missing from the accessibility tree")
+			}
+			if combo.Value != tc.announce {
+				t.Fatalf("accessibility announces %q, want the display string %q", combo.Value, tc.announce)
 			}
 			submitted := ""
 			for _, d := range engine.CollectFormData(s.Doc.ElementByID("f"), nil) {
 				if d.Name == "color" {
 					submitted = d.Value
 				}
-			}
-			if submitted != combo.Value {
-				t.Fatalf("accessibility announces %q but the form submits %q: one control, two answers",
-					combo.Value, submitted)
 			}
 			if submitted != tc.want {
 				t.Errorf("submitted value = %q, want %q", submitted, tc.want)
