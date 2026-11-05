@@ -41,7 +41,9 @@ func TestAbortControllerAbort(t *testing.T) {
 		var signal = controller.signal;
 		controller.abort();
 		var aborted = signal.aborted;
-		var reason = signal.reason;
+		var reasonName = signal.reason.name;
+		var reasonText = String(signal.reason);
+		var reasonIsDOMException = signal.reason instanceof DOMException;
 	`, "test.js")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -51,9 +53,16 @@ func TestAbortControllerAbort(t *testing.T) {
 	if !val.Bool {
 		t.Error("signal should be aborted after abort()")
 	}
-	val, _ = r.Global("reason")
-	if val.Str != "AbortError" {
-		t.Errorf("reason = %q, want %q", val.Str, "AbortError")
+	// Measured in Chromium: abort() with no argument installs a DOMException
+	// named AbortError reading "AbortError: signal is aborted without reason".
+	if v, ok := r.Global("reasonName"); !ok || v.Str != "AbortError" {
+		t.Errorf("reason.name = %q, want %q", v.Str, "AbortError")
+	}
+	if v, ok := r.Global("reasonText"); !ok || v.Str != "AbortError: signal is aborted without reason" {
+		t.Errorf("String(reason) = %q, want %q", v.Str, "AbortError: signal is aborted without reason")
+	}
+	if v, ok := r.Global("reasonIsDOMException"); !ok || !v.Bool {
+		t.Errorf("reason instanceof DOMException = %v, want true", v.Bool)
 	}
 }
 

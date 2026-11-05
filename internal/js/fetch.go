@@ -108,7 +108,7 @@ func fetchOf(r *Runtime) *fetchState {
 type fetchCallback struct {
 	fn       goja.Value   // the JS function to call
 	isReject bool         // true → call as onRejected, false → onFulfilled
-	arg      interface{}  // *FetchResponse for resolve, string for reject
+	arg      interface{}  // *FetchResponse for resolve, string or goja.Value for reject
 	chain    *thenableObj // non-nil when this callback feeds a chained thenable
 }
 
@@ -144,12 +144,14 @@ type fetchState struct {
 
 // fetchAbort is the plain-Go mirror of an AbortSignal. It is created on the
 // VM goroutine and awaited by the request goroutine, so the signal itself is
-// never touched off-thread: the abort algorithm converts the reason to a
-// string while it still runs on the VM goroutine.
+// never touched off-thread: the abort algorithm reads signal.reason into a
+// goja.Value while it still runs on the VM goroutine, and the request
+// goroutine only passes that value along. Chromium rejects with the reason
+// object itself, so its identity and type have to survive the hop.
 type fetchAbort struct {
 	mu      sync.Mutex
 	aborted bool
-	reason  string
+	reason  goja.Value
 	done    chan struct{}
 }
 
@@ -157,7 +159,7 @@ func newFetchAbort() *fetchAbort {
 	return &fetchAbort{done: make(chan struct{})}
 }
 
-func (a *fetchAbort) fire(reason string) {
+func (a *fetchAbort) fire(reason goja.Value) {
 	a.mu.Lock()
 	if a.aborted {
 		a.mu.Unlock()
@@ -169,10 +171,17 @@ func (a *fetchAbort) fire(reason string) {
 	close(a.done)
 }
 
-func (a *fetchAbort) fired() (bool, string) {
+func (a *fetchAbort) fired() (bool, goja.Value) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.aborted, a.reason
+}
+
+// reasonValue is the rejection value an aborted request settles with. It only
+// reads what the VM goroutine stored, so the request goroutine can call it.
+func (a *fetchAbort) reasonValue() goja.Value {
+	_, reason := a.fired()
+	return reason
 }
 
 // ---------------------------------------------------------------------------
@@ -313,37 +322,49 @@ func (r *Runtime) resolveFetchURL(raw string) string {
 	return resolved.String()
 }
 
+// fetchSignalInvalidMessage is the TypeError text Chromium puts on the
+// rejection of fetch(url, {signal: <not an AbortSignal>}), measured verbatim by
+// scripts/verify-br123-fetch-abort.js section 6.
+const fetchSignalInvalidMessage = "Failed to execute 'fetch' on 'Window': Failed to read the 'signal' property from 'RequestInit': Failed to convert value to 'AbortSignal'."
+
 // followFetchSignal reads RequestInit.signal on the VM goroutine and returns a
-// plain-Go abort control that the request goroutine can wait on. It returns
-// nil when no signal was supplied; values that are not AbortSignals are
-// ignored rather than rejected so a stub does not disable fetch entirely.
-func (r *Runtime) followFetchSignal(init goja.Value) *fetchAbort {
+// plain-Go abort control the request goroutine can wait on, plus a rejection
+// value when the init is not usable. The control is nil when no signal was
+// supplied. A `signal` that is present but not an AbortSignal rejects with a
+// TypeError and never reaches the client, the way Chromium's RequestInit
+// conversion does; Goosie identifies its own signals by the internal
+// registration hook because an AbortSignal has no private slot in this runtime.
+func (r *Runtime) followFetchSignal(init goja.Value) (*fetchAbort, goja.Value) {
 	if init == nil || goja.IsUndefined(init) || goja.IsNull(init) {
-		return nil
+		return nil, nil
 	}
 	initObj, ok := init.(*goja.Object)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	val := initObj.Get("signal")
 	if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
-		return nil
+		return nil, nil
 	}
 	signal, ok := val.(*goja.Object)
 	if !ok {
-		return nil
+		return nil, r.invalidFetchSignalError()
+	}
+	register, ok := goja.AssertFunction(signal.Get("__registerAbortAlgorithm__"))
+	if !ok {
+		return nil, r.invalidFetchSignalError()
 	}
 
 	control := newFetchAbort()
-	reason := func() string { return abortReasonString(signal.Get("reason")) }
+	reason := func() goja.Value {
+		if v := signal.Get("reason"); v != nil {
+			return v
+		}
+		return r.newAbortErrorDOMException()
+	}
 	if aborted := signal.Get("aborted"); aborted != nil && aborted.ToBoolean() {
 		control.fire(reason())
-		return control
-	}
-
-	register, ok := goja.AssertFunction(signal.Get("__registerAbortAlgorithm__"))
-	if !ok {
-		return nil
+		return control, nil
 	}
 	// The algorithm runs synchronously on the VM goroutine, either now (if the
 	// signal is already aborted) or inside AbortController.abort().
@@ -351,20 +372,18 @@ func (r *Runtime) followFetchSignal(init goja.Value) *fetchAbort {
 		control.fire(reason())
 		return goja.Undefined()
 	}))
-	return control
+	return control, nil
 }
 
-// abortReasonString normalizes an AbortSignal reason to the string the fetch
-// promise rejects with. The default reason installed by AbortController is
-// already the string "AbortError"; a custom reason is stringified.
-func abortReasonString(v goja.Value) string {
-	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
-		return "AbortError"
+// invalidFetchSignalError builds the TypeError value Chromium rejects a fetch
+// with when RequestInit.signal holds anything that is not an AbortSignal.
+func (r *Runtime) invalidFetchSignalError() goja.Value {
+	if ctor, ok := goja.AssertConstructor(r.vm.Get("TypeError")); ok {
+		if err, newErr := ctor(nil, r.vm.ToValue(fetchSignalInvalidMessage)); newErr == nil {
+			return err
+		}
 	}
-	if s := v.String(); s != "" {
-		return s
-	}
-	return "AbortError"
+	return r.vm.ToValue(fetchSignalInvalidMessage)
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +416,11 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 		if err != nil {
 			return r.makeRejectThenable(err.Error())
 		}
-		abort = r.followFetchSignal(call.Arguments[1])
+		var invalid goja.Value
+		abort, invalid = r.followFetchSignal(call.Arguments[1])
+		if invalid != nil {
+			return r.rejectThenableWithValue(invalid)
+		}
 	}
 
 	// Enforce request body limit before handing bytes to the network.
@@ -413,7 +436,7 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	// also keeps the concurrent-fetch slot free for a request that can run.
 	if abort != nil {
 		if fired, reason := abort.fired(); fired {
-			return r.makeRejectThenable(reason)
+			return r.rejectThenableWithValue(reason)
 		}
 	}
 
@@ -472,7 +495,7 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 				return fs.client.Fetch(fetchURL, "OPTIONS", preflightHeaders, nil)
 			})
 			if aborted {
-				fs.rejectFetch(t, abortReasonOf(abort))
+				fs.rejectFetch(t, abort.reasonValue())
 				return
 			}
 			if err != nil {
@@ -495,7 +518,7 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 		return fs.client.Fetch(fetchURL, opts.Method, opts.Headers, body)
 	})
 	if aborted {
-		fs.rejectFetch(t, abortReasonOf(abort))
+		fs.rejectFetch(t, abort.reasonValue())
 		return
 	}
 
@@ -558,20 +581,9 @@ func callFetcher(abort *fetchAbort, fn func() (*FetchResponse, error)) (resp *Fe
 	}
 }
 
-// abortReasonOf returns the string a request rejected by abort settles with.
-func abortReasonOf(a *fetchAbort) string {
-	if a == nil {
-		return "AbortError"
-	}
-	if _, reason := a.fired(); reason != "" {
-		return reason
-	}
-	return "AbortError"
-}
-
 // rejectFetch settles a thenable as rejected and queues exactly one callback
 // for the VM drain. The worker goroutine never touches goja.
-func (fs *fetchState) rejectFetch(t *thenableObj, msg string) {
+func (fs *fetchState) rejectFetch(t *thenableObj, msg interface{}) {
 	t.settleFetch(nil, msg, true)
 	fs.mu.Lock()
 	fs.callbacks = append(fs.callbacks, fetchCallback{
@@ -963,11 +975,19 @@ func (r *Runtime) responseBodyInit(value goja.Value) ([]byte, string, error) {
 // given error message. The catch callback fires on the next DrainFetchCallbacks
 // call.
 func (r *Runtime) makeRejectThenable(msg string) goja.Value {
+	return r.rejectThenableWithValue(r.vm.ToValue(msg))
+}
+
+// rejectThenableWithValue returns an already-rejected thenable carrying val.
+// An abort or an invalid RequestInit field settles with a specific JS object -
+// the signal's reason, a TypeError - so the value travels untouched rather than
+// as text the page has to re-wrap.
+func (r *Runtime) rejectThenableWithValue(val goja.Value) goja.Value {
 	t := r.newThenable()
 	// Mark the thenable as rejected immediately so that .catch() calls
 	// that arrive before DrainFetchCallbacks can still fire.
 	t.rejected = true
-	t.result = r.vm.ToValue(msg)
+	t.result = val
 
 	fs := fetchOf(r)
 	if fs == nil {
@@ -980,7 +1000,7 @@ func (r *Runtime) makeRejectThenable(msg string) goja.Value {
 	fs.callbacks = append(fs.callbacks, fetchCallback{
 		fn:       t.catchCB,
 		isReject: true,
-		arg:      msg,
+		arg:      val,
 		chain:    t,
 	})
 	fs.mu.Unlock()
@@ -1069,6 +1089,8 @@ func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 	var arg goja.Value
 	if resp, ok := cb.arg.(*FetchResponse); ok {
 		arg = r.makeResponseObject(resp)
+	} else if v, ok := cb.arg.(goja.Value); ok {
+		arg = v
 	} else if msg, ok := cb.arg.(string); ok {
 		arg = r.vm.ToValue(msg)
 	}

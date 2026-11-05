@@ -40,6 +40,13 @@ func waitAbortedDrain(t *testing.T, r *js.Runtime) {
 	r.DrainFetchCallbacks()
 }
 
+// defaultAbortText is what a rejection handler sees when it concatenates the
+// value of a default abort. Chromium's reason is a DOMException, so the text
+// carries its message: measured as "AbortError: signal is aborted without
+// reason" by scripts/verify-br123-fetch-abort.js, section 1. The value's own
+// shape is pinned in test/js/fetch_abort_reason_test.go.
+const defaultAbortText = "rejected:AbortError: signal is aborted without reason"
+
 // TestFetchAbortSignalRejectsAndDropsLateResponse pins the abort contract: a
 // pending fetch rejects with AbortError as soon as the signal fires, and the
 // response that arrives afterwards must never reach the script.
@@ -84,8 +91,8 @@ func TestFetchAbortSignalRejectsAndDropsLateResponse(t *testing.T) {
 	}
 	waitAbortedDrain(t, r)
 
-	if v, ok := r.Global("abortState"); !ok || v.Str != "rejected:AbortError" {
-		t.Fatalf("abortState = %+v, want %q", v, "rejected:AbortError")
+	if v, ok := r.Global("abortState"); !ok || v.Str != defaultAbortText {
+		t.Fatalf("abortState = %+v, want %q", v, defaultAbortText)
 	}
 
 	// The response completes only now; it must be dropped, not delivered.
@@ -93,8 +100,8 @@ func TestFetchAbortSignalRejectsAndDropsLateResponse(t *testing.T) {
 	drainFetch(t, r)
 	r.DrainFetchCallbacks()
 
-	if v, ok := r.Global("abortState"); !ok || v.Str != "rejected:AbortError" {
-		t.Errorf("state after late response = %+v, want %q", v, "rejected:AbortError")
+	if v, ok := r.Global("abortState"); !ok || v.Str != defaultAbortText {
+		t.Errorf("state after late response = %+v, want %q", v, defaultAbortText)
 	}
 	if v, ok := r.Global("abortLateBody"); !ok || v.Str != "" {
 		t.Errorf("abortLateBody = %+v, want empty (late response applied)", v)
@@ -125,8 +132,8 @@ func TestFetchAbortPreAbortedSignalSkipsRequest(t *testing.T) {
 	}
 	r.DrainFetchCallbacks()
 
-	if v, ok := r.Global("preAbortState"); !ok || v.Str != "rejected:AbortError" {
-		t.Errorf("preAbortState = %+v, want %q", v, "rejected:AbortError")
+	if v, ok := r.Global("preAbortState"); !ok || v.Str != defaultAbortText {
+		t.Errorf("preAbortState = %+v, want %q", v, defaultAbortText)
 	}
 	if got := m.callCount(); got != 0 {
 		t.Errorf("HTTP client called %d times for a pre-aborted fetch, want 0", got)
