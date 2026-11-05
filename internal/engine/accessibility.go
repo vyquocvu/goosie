@@ -383,8 +383,18 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 				// does, and the label keeps one space at each edge where the
 				// control's value drops them (the two spellings of
 				// scripts/verify-optionax-surfaces.js section 1).
-				Label: option.OptionAccessibleName(), Value: b.session.controlValue(option),
-				Selected: option == selected, Disabled: option.OptionDisabled(),
+				//
+				// No value: scripts/verify-optionax-roles.js reads
+				// "option nodes carry no value" in all seventeen of its cases,
+				// including the ones whose value attribute differs from the
+				// text. The submitted value stays in the form.
+				//
+				// Selected is the option's own selectedness, so a multiple
+				// control marks every selection it holds - measured
+				// [{Aye,true},{Bee,true},{Cee,false}] for two authored
+				// selections, which one selected option cannot express.
+				Label:    option.OptionAccessibleName(),
+				Selected: option.OptionSelected(), Disabled: option.OptionDisabled(),
 				X0: x0, Y0: y0, X1: x1, Y1: y1,
 			}
 			group := option.Parent
@@ -420,18 +430,26 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		if selectLabel == "" {
 			selectLabel = strings.TrimSpace(label)
 		}
-		// Only a closed box spells its selection out: the same anchor reports
-		// no value at all for size="2" and for multiple, both of which are
-		// listboxes there.
+		// Only the closed box spells its selection out. The role and the value
+		// answer are the same question - the used display size - and neither is
+		// `multiple`: scripts/verify-optionax-roles.js reads
+		// {"role":"listbox","name":""} with no value for size="2" and for
+		// multiple, and {"role":"combobox","value":"Mm One"} for the multiple
+		// control whose used size is 1.
+		listbox := dom.SelectAnnouncesListbox(n)
 		display := ""
-		if dom.SelectIsPopupStyle(n) {
+		if !listbox {
 			if selected != nil {
 				display = selected.OptionDisplayStyle()
 			} else if opts := dom.SelectOptions(n); len(opts) > 0 {
 				display = opts[0].OptionDisplayStyle()
 			}
 		}
-		combo := emit(ax.RoleComboBox, selectLabel, display, "")
+		role := ax.RoleComboBox
+		if listbox {
+			role = ax.RoleListBox
+		}
+		combo := emit(role, selectLabel, display, "")
 		combo.Disabled = dom.IsFormControlDisabled(n)
 		combo.Children = options
 		return combo, axBubble{}
@@ -483,11 +501,17 @@ func elementInternalsAXRole(role string) (ax.Role, string, bool) {
 			return ax.RoleComboBox, token, true
 		case "option":
 			return ax.RoleOption, token, true
+		case "listbox":
+			// scripts/verify-optionax-roles.js answers an authored
+			// role="listbox" with {"role":"listbox","name":"Authored listbox"} and
+			// its option as a child, so the token resolves to the same role an open
+			// select gets rather than a group.
+			return ax.RoleListBox, token, true
 		case "heading":
 			return ax.RoleHeading, token, true
 		case "directory":
 			return ax.RoleGroup, "list", true
-		case "alert", "alertdialog", "application", "article", "banner", "blockquote", "caption", "cell", "checkbox", "code", "columnheader", "complementary", "contentinfo", "definition", "deletion", "dialog", "document", "emphasis", "feed", "figure", "form", "generic", "grid", "gridcell", "insertion", "list", "listbox", "listitem", "log", "main", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "navigation", "none", "note", "presentation", "paragraph", "radio", "radiogroup", "range", "row", "rowgroup", "rowheader", "scrollbar", "searchbox", "separator", "slider", "spinbutton", "status", "strong", "subscript", "superscript", "switch", "tab", "table", "tablist", "tabpanel", "term", "time", "timer", "toolbar", "tooltip", "tree", "treegrid", "treeitem", "window":
+		case "alert", "alertdialog", "application", "article", "banner", "blockquote", "caption", "cell", "checkbox", "code", "columnheader", "complementary", "contentinfo", "definition", "deletion", "dialog", "document", "emphasis", "feed", "figure", "form", "generic", "grid", "gridcell", "insertion", "list", "listitem", "log", "main", "marquee", "math", "menu", "menubar", "menuitem", "menuitemcheckbox", "menuitemradio", "navigation", "none", "note", "presentation", "paragraph", "radio", "radiogroup", "range", "row", "rowgroup", "rowheader", "scrollbar", "searchbox", "separator", "slider", "spinbutton", "status", "strong", "subscript", "superscript", "switch", "tab", "table", "tablist", "tabpanel", "term", "time", "timer", "toolbar", "tooltip", "tree", "treegrid", "treeitem", "window":
 			return ax.RoleGroup, token, true
 		}
 	}

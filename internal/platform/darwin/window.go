@@ -465,6 +465,8 @@ func axRoleCode(role ax.Role) C.int {
 		return C.GOOSIE_AX_OPTION
 	case ax.RoleHeading:
 		return C.GOOSIE_AX_HEADING
+	case ax.RoleListBox:
+		return C.GOOSIE_AX_LIST_BOX
 	default:
 		return C.GOOSIE_AX_GROUP
 	}

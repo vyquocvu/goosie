@@ -208,19 +208,22 @@ func TestLastAuthoredSelectedOptionWins(t *testing.T) {
 	}
 }
 
-// TestAccessibilityOptionLabelAndValueShareNormalization is the cross-check on
-// the shape that used to drift: an AX option node whose Label was trimmed while
-// its Value kept the newlines. Both now come from the same rule. The control's
-// own announcement is a third surface and deliberately differs - measured
+// TestAccessibilityOptionAnnouncesANameAndNoValue is the cross-check on the shape
+// that used to drift: an AX option node whose Label was trimmed while its Value
+// kept the newlines. The name is the normalised text and the value is gone
+// altogether - scripts/verify-optionax-roles.js reads "option nodes carry no
+// value: [null,null]" in every one of its seventeen cases, including the ones
+// whose value attribute differs from the text. The control's announcement is a
+// third surface and deliberately differs - measured
 // {"role":"combobox","name":"","value":"Alpha Beta"} for
 // <option value="v1" selected>Alpha Beta</option> while `select.value` stays
 // "v1" (scripts/verify-optionax-surfaces.js, 2026-11-05).
 //
-//	OPTION name=charcoal -> {"value":"Charcoal","label":"Charcoal"}
+//	OPTION name=charcoal -> {"label":"Charcoal"} and no value of its own
 //	INDENTED initial     -> {"selectedIndex":0,"value":"Charcoal","optionLabel":"Charcoal"}
 //
 // qc:BR-139
-func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
+func TestAccessibilityOptionAnnouncesANameAndNoValue(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)
 	combo := axCombo(t, s, "s")
 	if combo.Value != "Charcoal" {
@@ -238,33 +241,30 @@ func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
 	if charcoal.Label != "Charcoal" {
 		t.Fatalf("option label = %q, want %q", charcoal.Label, "Charcoal")
 	}
-	if charcoal.Value != "Charcoal" {
-		t.Fatalf("option value = %q, want %q", charcoal.Value, "Charcoal")
+	if charcoal.Value != "" {
+		t.Fatalf("option value = %q, want none at all", charcoal.Value)
 	}
-	if submitted := submittedValue(t, s, "f", "c"); submitted != charcoal.Value {
-		t.Fatalf("accessibility announces %q but the form submits %q: one control, two answers",
-			charcoal.Value, submitted)
+	if submitted := submittedValue(t, s, "f", "c"); submitted != "Charcoal" {
+		t.Fatalf("the form submits %q while the tree announces the name %q: the option's text is the value here",
+			submitted, charcoal.Label)
 	}
 	// The whitespace shape has to agree too, not just the value: an option whose
-	// text is "  Hi   there " is labelled and valued "Hi there".
+	// text is "  Hi   there " is named "Hi there" and carries nothing else.
 	runs := newFocusSession(t, `<html><body><form id="f"><select id="s" name="c">`+
 		`<option selected>  Hi   there </option></select></form></body></html>`)
 	runsCombo := axCombo(t, runs, "s")
 	if len(runsCombo.Children) != 1 {
 		t.Fatalf("combo has %d option nodes, want 1", len(runsCombo.Children))
 	}
-	if got := runsCombo.Children[0]; got.Label != "Hi there" || got.Value != "Hi there" {
-		t.Fatalf("option node is labelled %q and valued %q, want %q for both",
+	if got := runsCombo.Children[0]; got.Label != "Hi there" || got.Value != "" {
+		t.Fatalf("option node is labelled %q and valued %q, want %q and no value",
 			got.Label, got.Value, "Hi there")
 	}
-	// The two surfaces only have to be *distinguishable*, and the reference says
-	// they are: the control announces the display while the form sends the value
-	// attribute. Quoted from the same run - {"role":"combobox","value":"My   Label"}
-	// against `select.value === "sub"` for
+	// The three surfaces only have to be *distinguishable*, and the reference says
+	// they are: the control announces the display, the option announces its name,
+	// and the form sends the value attribute. Quoted from the same run -
+	// {"role":"combobox","value":"My   Label"} against `select.value === "sub"` for
 	// <option selected label="  My   Label  " value="sub">WWWWW</option>.
-	//
-	//	OPTION name=attrpad -> {"value":"  pad  me  ","label":"ignored text"}
-	//	INDENTED initial    -> {"optionLabel":"Charcoal"} (label is text, value is text)
 	mixed := newFocusSession(t, `<html><body><form id="f"><select id="s" name="c">`+
 		`<option selected value="slate-blue">
    Slate blue
@@ -277,13 +277,13 @@ func TestAccessibilityOptionLabelAndValueShareNormalization(t *testing.T) {
 	if len(mixedCombo.Children) != 1 {
 		t.Fatalf("combo has %d option nodes, want 1", len(mixedCombo.Children))
 	}
-	if got := mixedCombo.Children[0]; got.Label != "Slate blue" || got.Value != "slate-blue" {
-		t.Fatalf("option node is labelled %q and valued %q, want %q and %q",
-			got.Label, got.Value, "Slate blue", "slate-blue")
+	if got := mixedCombo.Children[0]; got.Label != "Slate blue" || got.Value != "" {
+		t.Fatalf("option node is labelled %q and valued %q, want %q and no value",
+			got.Label, got.Value, "Slate blue")
 	}
-	if submitted := submittedValue(t, mixed, "f", "c"); submitted != mixedCombo.Children[0].Value {
-		t.Fatalf("the form submits %q while the option node carries %q: the option's own value drifted",
-			submitted, mixedCombo.Children[0].Value)
+	if submitted := submittedValue(t, mixed, "f", "c"); submitted != "slate-blue" {
+		t.Fatalf("the form submits %q while the option node carries no value and announces %q: "+
+			"the value attribute belongs to the form alone", submitted, mixedCombo.Children[0].Label)
 	}
 }
 
@@ -335,8 +335,11 @@ func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 	for _, o := range combo.Children {
 		if o.Selected {
 			selected++
-			if o.Value != "b" {
-				t.Fatalf("selected option node = %+v, want value b", o)
+			// The node names the row and carries no value: the same anchor reads
+			// "option nodes carry no value" for every option, whatever its value
+			// attribute holds.
+			if o.Label != "B" || o.Value != "" {
+				t.Fatalf("selected option node = %+v, want the name B and no value", o)
 			}
 		}
 	}

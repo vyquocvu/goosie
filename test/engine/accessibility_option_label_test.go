@@ -101,8 +101,8 @@ func TestAccessibilityValueAttributeNeverNamesAnOption(t *testing.T) {
 	if got := combo.Children[0].Label; got != "Alpha Label" {
 		t.Errorf("option announced %q, want %q", got, "Alpha Label")
 	}
-	if got := combo.Children[0].Value; got != "alpha" {
-		t.Errorf("option value = %q, want %q", got, "alpha")
+	if got := combo.Children[0].Value; got != "" {
+		t.Errorf("option value = %q, want none: scripts/verify-optionax-roles.js reads option nodes carry no value", got)
 	}
 }
 

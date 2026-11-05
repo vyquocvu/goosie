@@ -2962,6 +2962,7 @@
     ],
     "status": "PASS",
     "tests": [
+      "internal/platform/darwin/ax_role_test.go:TestAXRoleCodeSelectRoles",
       "test/engine/accessibility_option_label_test.go:TestAccessibilityExposesOptionsInsideOptgroup",
       "test/engine/accessibility_option_label_test.go:TestAccessibilityOptionNamesFollowTheLabelAttribute",
       "test/engine/accessibility_option_label_test.go:TestAccessibilityValueAttributeNeverNamesAnOption",
@@ -2976,13 +2977,17 @@
       "test/engine/accessibility_test.go:TestAccessibilitySelectTracksMoveSelect",
       "test/engine/accessibility_test.go:TestAccessibilityTextFieldValue",
       "test/engine/accessibility_test.go:TestAccessibilityTextareaValue",
+      "test/engine/option_ax_roles_test.go:TestAccessibilityAuthoredListboxTokenAnnouncesListbox",
+      "test/engine/option_ax_roles_test.go:TestAccessibilityMultipleSelectMarksEverySelectedOption",
+      "test/engine/option_ax_roles_test.go:TestAccessibilityOpenSelectAnnouncesNoValueAndClosedOneTheDisplay",
+      "test/engine/option_ax_roles_test.go:TestAccessibilityOptionNodesAnnounceNoValue",
+      "test/engine/option_ax_roles_test.go:TestAccessibilitySelectRoleFollowsTheUsedDisplaySize",
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityComboBoxAnnouncesTheDisplayWhileTheFormSubmitsTheValue",
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityControlNameComesFromTheAuthorOnly",
-      "test/engine/option_ax_surfaces_test.go:TestAccessibilityOpenSelectAnnouncesNoValue",
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityOptionNameAndControlValueSpellWhitespaceDifferently",
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityVerticalTabIsTrimmedOnlyOnTheDisplaySpelling",
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityWhitespaceOnlyLabelNamesTheOptionAndEmptyValue",
-      "test/engine/option_value_test.go:TestAccessibilityOptionLabelAndValueShareNormalization"
+      "test/engine/option_value_test.go:TestAccessibilityOptionAnnouncesANameAndNoValue"
     ],
     "enforced": true
   },

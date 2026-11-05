@@ -391,11 +391,13 @@ func TestAccessibilitySelectComboBoxAndOptions(t *testing.T) {
 		if option := axFind(combo.Children, ax.RoleOption, label); option == nil {
 			t.Errorf("option %q not found in combo children: %+v", label, combo.Children)
 		} else if label == "Second choice" {
-			if option.Value != "second" || !option.Selected {
-				t.Errorf("selected option = %+v, want value=second selected=true", option)
+			// scripts/verify-optionax-roles.js: an option node announces its name
+			// and carries no value, so "second" stays in the form.
+			if option.Value != "" || !option.Selected {
+				t.Errorf("selected option = %+v, want the name and selected=true with no value", option)
 			}
-		} else if label == "Third choice" && option.Value != "Third choice" {
-			t.Errorf("option without value attribute has value %q, want its text", option.Value)
+		} else if option.Value != "" {
+			t.Errorf("option %q announces value %q, want none at all", label, option.Value)
 		}
 	}
 	for _, option := range combo.Children {
@@ -463,8 +465,9 @@ func TestAccessibilitySelectTracksMoveSelect(t *testing.T) {
 	for _, option := range combo.Children {
 		if option.Selected {
 			selected++
-			if option.Label != "Two" || option.Value != "two" {
-				t.Fatalf("selected option after MoveSelect = %+v, want Two/two", option)
+			// The row names itself and carries no value: "two" is the form's answer.
+			if option.Label != "Two" || option.Value != "" {
+				t.Fatalf("selected option after MoveSelect = %+v, want the name Two and no value", option)
 			}
 		}
 	}

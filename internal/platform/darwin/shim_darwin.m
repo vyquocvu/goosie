@@ -118,6 +118,10 @@ static NSString *axRoleName(int role) {
 		case GOOSIE_AX_COMBO_BOX: return NSAccessibilityPopUpButtonRole;
 		case GOOSIE_AX_OPTION: return NSAccessibilityMenuItemRole;
 		case GOOSIE_AX_HEADING: return @"AXHeading";
+		// NSAccessibilityListRole is the AppKit container role for a list of rows.
+		// The string is not measured on this host - no assistive client runs in a
+		// headless session - while the numeric code is pinned by the Go test.
+		case GOOSIE_AX_LIST_BOX: return NSAccessibilityListRole;
 		default: return NSAccessibilityUnknownRole;
 	}
 }

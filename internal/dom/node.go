@@ -764,6 +764,21 @@ func SelectIsPopupStyle(selectNode *Node) bool {
 	return !selectNode.HasAttribute("multiple") && selectDisplaySize(selectNode) == 1
 }
 
+// SelectAnnouncesListbox reports the role the accessibility tree gives a select:
+// listbox when its used display size is above 1, combobox otherwise. This is
+// deliberately not SelectIsPopupStyle - scripts/verify-optionax-roles.js
+// (Chromium 153.0.8010.12) answers a <select multiple size="1"> as a combobox, so
+// `multiple` does not decide the role even though it decides whether rows show
+// inline, and it answers size="0", size="less" and size="-1" on a multiple control
+// as listboxes because those fall back to the default used size of 4. What the
+// control looks like and what it is called are two questions with two answers.
+func SelectAnnouncesListbox(selectNode *Node) bool {
+	if selectNode == nil || selectNode.Data != "select" {
+		return false
+	}
+	return selectDisplaySize(selectNode) > 1
+}
+
 // OptionAccessibleName is the name Chromium announces for an option node. It
 // differs from OptionLabel by one clause, and the difference is measured:
 // scripts/verify-optionax-surfaces.js (Chromium 153.0.8010.12) reports the

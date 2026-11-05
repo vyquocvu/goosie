@@ -23,6 +23,10 @@ const (
 	RoleComboBox
 	RoleOption
 	RoleHeading
+	// RoleListBox is an exposed list of rows: the role Chromium answers for a
+	// <select> whose used display size is above 1, and for an authored
+	// role="listbox". Appended last so no existing role changes number.
+	RoleListBox
 )
 
 func (r Role) String() string {
@@ -57,6 +61,8 @@ func (r Role) String() string {
 		return "option"
 	case RoleHeading:
 		return "heading"
+	case RoleListBox:
+		return "listbox"
 	default:
 		return "generic"
 	}
