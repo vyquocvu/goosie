@@ -84,7 +84,10 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 	pageURL := server.URL + "/ime"
 	browser.navigateViaAddressBar(t, pageURL)
 	browser.waitFor(t, "the fixture document is loaded", func() bool {
-		return browser.activeURL() == pageURL && len(browser.window.AccessibilityTree()) > 0
+		// The tree can publish a bare document root mid-reflow, so "non-empty"
+		// is not the loaded state; the node the test measures is.
+		_, ok := findAXNode(browser.window.AccessibilityTree(), "i")
+		return browser.activeURL() == pageURL && ok
 	})
 
 	tree := browser.window.AccessibilityTree()
@@ -103,9 +106,12 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 	snap := filepath.Join(t.TempDir(), "frame.png")
 	shoot := func() {
 		t.Helper()
-		browser.waitFor(t, "tiles to finish rasterizing", func() bool {
+		browser.waitFor(t, "a presented frame with tiles idle", func() bool {
+			// A plan-less tick commits a zero tally and presents nothing, so
+			// tile-idle alone can pass before the window has ever shown a
+			// frame; WritePNG needs one.
 			last := browser.f.loop.Stats().Last
-			return last.Needed == 0 && last.PaintingBytes == 0
+			return browser.window.Stats().Presents > 0 && last.Needed == 0 && last.PaintingBytes == 0
 		})
 		if err := browser.window.WritePNG(snap); err != nil {
 			t.Fatalf("write presented frame: %v", err)
