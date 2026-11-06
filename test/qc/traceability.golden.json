@@ -971,6 +971,8 @@
       "test/raster/color_idle_scroll_test.go:TestGradientColourIsAnchoredToTheDocumentNotTheViewport",
       "test/raster/color_idle_scroll_test.go:TestIdleFramesMoveNoColourAndDrawNoTile",
       "test/raster/color_idle_scroll_test.go:TestTheSameOffsetLooksTheSameHoweverTheScrollGotThere",
+      "test/style/gradient_px_test.go:TestGradientMixedLengthAndFractionRampDefersDistribution",
+      "test/style/gradient_px_test.go:TestGradientPxStopPositionsRideTheStopUnresolved",
       "test/style/gradient_stop_unitless_test.go:TestGradientDoublePositionWithUnitlessZero",
       "test/style/gradient_stop_unitless_test.go:TestGradientUnitlessNonZeroStopPositionIsInvalid",
       "test/style/gradient_stop_unitless_test.go:TestGradientUnitlessZeroStopPosition"

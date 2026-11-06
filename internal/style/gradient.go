@@ -9,10 +9,14 @@ import (
 )
 
 // GradientStop is one colour of a ramp. At is its position along the gradient
-// line as a fraction of that line's length, so it is only expressible for a
-// percentage position; a stop declared in pixels would need the box's size.
+// line as a fraction of that line's length, expressible only for a percentage
+// position; a position written as a <length> cannot become a fraction until
+// the box is laid out, so it rides on Px, PxSet through the cascade and paint
+// resolves it against the gradient line it measures.
 type GradientStop struct {
 	At    float32
+	Px    float32
+	PxSet bool
 	Color css.Color
 }
 
@@ -245,6 +249,15 @@ func gradientKeywordAngle(s string) (float32, bool) {
 	return 0, false
 }
 
+// stopPos is one parsed position token: either a fraction of the gradient
+// line, or a length in px that cannot become a fraction until the laid-out
+// box is measured at paint time.
+type stopPos struct {
+	at   float32
+	px   float32
+	isPx bool
+}
+
 // stopPosition reads the token that ends a colour stop. It returns the
 // position, whether the token IS one, and whether it could have been one - a
 // token that could have been and was not invalidates the whole ramp rather
@@ -252,26 +265,34 @@ func gradientKeywordAngle(s string) (float32, bool) {
 // `#0a0 50`.
 //
 // A percentage is always a position. A bare number is one only when it is
-// zero, because CSS lets a <length> drop its unit only at zero. A length WITH
-// a unit is a real position too, but this model stores positions as fractions
-// of the gradient line and the line's length is not known at cascade time, so
-// those are left to the colour reader; the gap is recorded as
+// zero, because CSS lets a <length> drop its unit only at zero. A pixel
+// length is a real position too, but the model cannot turn it into a
+// fraction of the gradient line at cascade time - the line's length belongs
+// to the laid-out box - so it rides on the stop (Px, PxSet) for paint to
+// resolve; the gap this leaves for other units is recorded as
 // GOOSIE-GRADIENTPX-001.
-func stopPosition(tok string) (pos float32, is, legal bool) {
+func stopPosition(tok string) (p stopPos, is, legal bool) {
 	if strings.HasSuffix(tok, "%") {
 		n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "%"), 64)
 		if err != nil {
-			return 0, false, false
+			return stopPos{}, false, false
 		}
-		return float32(n / 100), true, true
+		return stopPos{at: float32(n / 100)}, true, true
+	}
+	if strings.HasSuffix(tok, "px") {
+		n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "px"), 64)
+		if err != nil {
+			return stopPos{}, false, false
+		}
+		return stopPos{px: float32(n), isPx: true}, true, true
 	}
 	if n, err := strconv.ParseFloat(tok, 64); err == nil {
 		if n == 0 {
-			return 0, true, true
+			return stopPos{at: 0}, true, true
 		}
-		return 0, false, false
+		return stopPos{}, false, false
 	}
-	return 0, false, true
+	return stopPos{}, false, true
 }
 
 // parseGradientStop reads one stop: a colour and an optional percentage
@@ -288,16 +309,18 @@ func parseGradientStop(s string) (GradientStop, bool) {
 // (color 25% 75%) into the solid band it denotes: two stops sharing the
 // colour at each position. A position is a <length-percentage>, so it is
 // written as a percentage, as a length with a unit, or - the only unitless
-// form CSS allows - as a bare zero. Single positions and bare colours behave
-// as before; a bare non-zero number makes the stop, and so the whole ramp,
-// invalid.
+// form CSS allows - as a bare zero. Percentage and bare-zero positions become
+// fractions here; pixel lengths ride on the stop unresolved, because the
+// fraction they denote needs the laid-out gradient line. Single positions and
+// bare colours behave as before; a bare non-zero number makes the stop, and
+// so the whole ramp, invalid.
 func parseGradientStops(s string) ([]GradientStop, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil, false
 	}
 	toks := splitOutsideParens(s)
-	var pos []float32
+	var pos []stopPos
 	for len(toks) > 1 {
 		last := toks[len(toks)-1]
 		p, ok, legal := stopPosition(last)
@@ -307,7 +330,7 @@ func parseGradientStops(s string) ([]GradientStop, bool) {
 		if !ok {
 			break
 		}
-		pos = append([]float32{p}, pos...)
+		pos = append([]stopPos{p}, pos...)
 		toks = toks[:len(toks)-1]
 		if len(pos) == 2 {
 			break
@@ -317,60 +340,143 @@ func parseGradientStops(s string) ([]GradientStop, bool) {
 	if !ok {
 		return nil, false
 	}
+	stop := func(p stopPos) GradientStop {
+		if p.isPx {
+			return GradientStop{At: -1, Px: p.px, PxSet: true, Color: c}
+		}
+		return GradientStop{At: p.at, Color: c}
+	}
 	switch len(pos) {
 	case 0:
 		// Unpositioned: distributeStops gives it an even share of the line.
 		return []GradientStop{{Color: c, At: -1}}, true
 	case 1:
-		return []GradientStop{{Color: c, At: pos[0]}}, true
+		return []GradientStop{stop(pos[0])}, true
 	default:
 		lo, hi := pos[0], pos[1]
-		if hi < lo {
-			hi = lo
+		// Two tokens of the same kind can be ordered here; a mixed pair -
+		// `10px 50%` - waits for paint, which resolves the lengths first and
+		// clamps the whole run afterwards.
+		if lo.isPx == hi.isPx {
+			if lo.isPx {
+				if hi.px < lo.px {
+					hi.px = lo.px
+				}
+			} else if hi.at < lo.at {
+				hi.at = lo.at
+			}
 		}
-		return []GradientStop{{Color: c, At: lo}, {Color: c, At: hi}}, true
+		return []GradientStop{stop(lo), stop(hi)}, true
 	}
 }
 
 // distributeStops fills in the positions the declaration left out. The ends
 // anchor at 0 and 1, a run of unpositioned stops between two positioned ones
-// splits the distance evenly, and positions may not run backwards.
+// splits the distance evenly, and positions may not run backwards. A ramp
+// carrying a <length> position skips all of it: a fraction of the gradient
+// line is not expressible until the box is measured, so paint resolves the
+// whole run through StopsAlong instead.
 func distributeStops(stops []GradientStop) []GradientStop {
+	for _, s := range stops {
+		if s.PxSet {
+			return stops
+		}
+	}
 	n := len(stops)
 	if n == 0 {
 		return stops
 	}
-	if stops[0].At < 0 {
-		stops[0].At = 0
+	pos := make([]float32, n)
+	set := make([]bool, n)
+	for i, s := range stops {
+		if s.At >= 0 {
+			pos[i], set[i] = s.At, true
+		}
 	}
-	if stops[n-1].At < 0 {
-		stops[n-1].At = 1
+	fillPositions(pos, set, 1)
+	for i := range stops {
+		stops[i].At = pos[i]
+	}
+	return stops
+}
+
+// fillPositions fills unset positions between set ones: the ends anchor at 0
+// and end, an unset run between two set positions splits the distance evenly,
+// and the run may not go backwards. One algorithm serves both the cascade -
+// fractions of the line, end 1 - and paint's resolution of length stops along
+// the measured line, end lineLen.
+func fillPositions(pos []float32, set []bool, end float32) {
+	n := len(pos)
+	if n == 0 {
+		return
+	}
+	if !set[0] {
+		pos[0], set[0] = 0, true
+	}
+	if !set[n-1] {
+		pos[n-1], set[n-1] = end, true
 	}
 	for i := 0; i < n; {
-		if stops[i].At >= 0 {
+		if set[i] {
 			i++
 			continue
 		}
 		j := i
-		for j < n && stops[j].At < 0 {
+		for j < n && !set[j] {
 			j++
 		}
-		// stops[i-1] is positioned and stops[j] is, or is the end.
-		lo, hi := stops[i-1].At, float32(1)
+		// pos[i-1] is set and pos[j] is, or is the end.
+		lo, hi := pos[i-1], end
 		if j < n {
-			hi = stops[j].At
+			hi = pos[j]
 		}
 		for k := i; k < j; k++ {
-			stops[k].At = lo + (hi-lo)*float32(k-i+1)/float32(j-i+1)
+			pos[k] = lo + (hi-lo)*float32(k-i+1)/float32(j-i+1)
 		}
 		i = j
 	}
 	for i := 1; i < n; i++ {
-		if stops[i].At < stops[i-1].At {
-			stops[i].At = stops[i-1].At
+		if pos[i] < pos[i-1] {
+			pos[i] = pos[i-1]
 		}
 	}
-	return stops
+}
+
+// StopsAlong resolves a ramp's length-written stop positions against the
+// gradient line the painter measured: each px position becomes a fraction of
+// that line, the stops the declaration left unpositioned are distributed as
+// usual, and the run never goes backwards. A ramp without a length position
+// comes back unchanged - the cascade already distributed those.
+func StopsAlong(stops []GradientStop, lineLen float32) []GradientStop {
+	any := false
+	for _, s := range stops {
+		if s.PxSet {
+			any = true
+			break
+		}
+	}
+	if !any || lineLen <= 0 {
+		return stops
+	}
+	n := len(stops)
+	pos := make([]float32, n)
+	set := make([]bool, n)
+	for i, s := range stops {
+		switch {
+		case s.PxSet:
+			pos[i], set[i] = s.Px, true
+		case s.At >= 0:
+			pos[i], set[i] = s.At*lineLen, true
+		}
+	}
+	fillPositions(pos, set, lineLen)
+	out := make([]GradientStop, n)
+	copy(out, stops)
+	for i := range out {
+		out[i].At = pos[i] / lineLen
+		out[i].Px, out[i].PxSet = 0, false
+	}
+	return out
 }
 
 // callArgs returns what sits inside a function call whose opening parenthesis

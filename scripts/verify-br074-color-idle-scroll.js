@@ -152,20 +152,35 @@ const SYNTAX = [
   { name: 'px-mid', css: 'linear-gradient(180deg,#f00,#0f0 30px,#00f 60px)' },
 ];
 
+// SYNTAX_B rides the same page in a second column and measures the two
+// spellings whose Goosie behaviour needs MORE than the stop positions the
+// declaration writes: a px ANCHOR with unpositioned stops around it (does the
+// engine distribute the rest against the laid-out line, anchoring the tail at
+// its end?) and a percentage mixed with a px length (does the fraction stop
+// convert onto the same measured line the px stop resolves against?). Both
+// answer through 60px-tall cells like the first column's.
+const SYNTAX_B = [
+  { name: 'px-anchor-dist', css: 'linear-gradient(180deg,#f00 45px,#0f0,#00f)' },
+  { name: 'pct-px-mixed', css: 'linear-gradient(180deg,#f00 25%,#0f0 30px,#00b)' },
+];
+
 async function syntax(browser) {
   const cells = SYNTAX.map((c, i) =>
     `<div id="s${i}" style="position:absolute;left:10px;top:${10 + i * 70}px;width:120px;height:60px;background:${c.css}"></div>`).join('');
+  const cellsB = SYNTAX_B.map((c, i) =>
+    `<div id="sb${i}" style="position:absolute;left:150px;top:${10 + i * 70}px;width:120px;height:60px;background:${c.css}"></div>`).join('');
   const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 });
-  await page.setContent(`<!doctype html><html><head><style>html,body{margin:0;padding:0;background:#fff}</style></head><body>${cells}</body></html>`,
+  await page.setContent(`<!doctype html><html><head><style>html,body{margin:0;padding:0;background:#fff}</style></head><body>${cells}${cellsB}</body></html>`,
     { waitUntil: 'load' });
   const read = await page.evaluate(async (names) => {
     const out = [];
     for (let i = 0; i < names.length; i++) {
-      const el = document.getElementById('s' + i);
+      const el = document.getElementById(names[i]);
       out.push({ name: names[i], computed: getComputedStyle(el).backgroundImage });
     }
     return out;
-  }, SYNTAX.map(c => c.name));
+  }, [...SYNTAX.map((c, i) => 's' + i), ...SYNTAX_B.map((c, i) => 'sb' + i)]);
+  const all = [...SYNTAX, ...SYNTAX_B];
   const pts = [];
   SYNTAX.forEach((c, i) => {
     const top = 10 + i * 70;
@@ -173,10 +188,16 @@ async function syntax(browser) {
     pts.push({ name: `${c.name} 50%`, x: 70, y: top + 30 });
     pts.push({ name: `${c.name} 75%`, x: 70, y: top + 45 });
   });
+  SYNTAX_B.forEach((c, i) => {
+    const top = 10 + i * 70;
+    pts.push({ name: `${c.name} 25%`, x: 210, y: top + 15 });
+    pts.push({ name: `${c.name} 50%`, x: 210, y: top + 30 });
+    pts.push({ name: `${c.name} 75%`, x: 210, y: top + 45 });
+  });
   const px = await docPixels(page, pts);
-  for (let i = 0; i < SYNTAX.length; i++) {
+  for (let i = 0; i < read.length; i++) {
     const row = px.slice(i * 3, i * 3 + 3).map(p => `rgb(${p.rgb.join(',')})`).join(' ');
-    console.log(`SYNTAX ${SYNTAX[i].name.padEnd(24)} kept=${read[i].computed === 'none' ? 'DROPPED' : 'YES'} ` +
+    console.log(`SYNTAX ${(all[i].name).padEnd(24)} kept=${read[i].computed === 'none' ? 'DROPPED' : 'YES'} ` +
       `computed=${read[i].computed.slice(0, 72)} pixels ${row}`);
   }
   await page.close();

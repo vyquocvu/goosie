@@ -149,7 +149,10 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 // area is both the size they resolve auto axes against and the natural
 // size negotiation starts from. Each tile maps the ramp to itself, which
 // is what makes repeat tile a gradient instead of stretching one.
-func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, radius frame.Corners, g frame.LinearGradient, isRadial bool, rg frame.RadialGradient) {
+// Length-written stop positions resolve per tile against the line the
+// rasterizer will divide by - the command rect, i.e. the tile clipped to
+// the clip box - so the ramp lands where the author put it.
+func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, radius frame.Corners, sg *style.Gradient, srg *style.RadialGradient, opacity float32) {
 	s := obj.Style
 	if s == nil {
 		return
@@ -164,7 +167,9 @@ func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, ra
 		if dst.Empty() {
 			continue
 		}
-		if isRadial {
+		w, h := float32(t.vx1-t.vx0), float32(t.vy1-t.vy0)
+		if srg != nil {
+			rg := radialGradient(*srg, radialRadius(*srg, w, h), opacity)
 			b.list.Append(DisplayCmd{
 				Kind:           CmdRadialGradient,
 				Rect:           dst,
@@ -172,6 +177,7 @@ func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, ra
 				Radius:         radius,
 			})
 		} else {
+			g := gradient(*sg, gradientLineLength(sg.Angle, w, h), opacity)
 			b.list.Append(DisplayCmd{
 				Kind:     CmdGradient,
 				Rect:     dst,

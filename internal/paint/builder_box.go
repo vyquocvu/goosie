@@ -216,11 +216,11 @@ func (b *Builder) paintBoxBackground(obj *layout.Object, paint boxPaintContext) 
 	if computed.BackgroundColor.A > 0 && !paint.backgroundClip.Empty() {
 		b.appendBgFill(obj, paint.backgroundClip, paint.clipRadius, convertColor(computed.BackgroundColor), paint.opacity)
 	}
-	if g := gradient(computed.BackgroundGradient, paint.opacity); !g.Empty() {
-		b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, g, false, frame.RadialGradient{})
+	if !computed.BackgroundGradient.Empty() {
+		b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, &computed.BackgroundGradient, nil, paint.opacity)
 	}
-	if rg := radialGradient(computed.BackgroundRadialGradient, paint.opacity); !rg.Empty() {
-		b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, frame.LinearGradient{}, true, rg)
+	if !computed.BackgroundRadialGradient.Empty() {
+		b.paintGradientTiles(obj, paint.backgroundClip, paint.clipRadius, nil, &computed.BackgroundRadialGradient, paint.opacity)
 	}
 	b.paintBackground(obj, paint.opacity)
 }

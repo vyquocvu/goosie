@@ -45,6 +45,10 @@ html,body{margin:0;padding:0;background:#fff}
 #hard{left:10px;top:130px;width:200px;height:40px;background:linear-gradient(#111 0 50%,#eee 50% 100%)}
 #rad{left:230px;top:70px;width:100px;height:100px;background:radial-gradient(circle,#f00,#00f)}
 #tall{left:0;top:200px;width:800px;height:1600px;background:linear-gradient(180deg,#0a0 0,#a00 100%)}
+#pxa{left:450px;top:20px;width:120px;height:60px;background:linear-gradient(180deg,#0a0 0px,#a00 60px)}
+#pxm{left:590px;top:20px;width:120px;height:60px;background:linear-gradient(180deg,#f00,#0f0 30px,#00f 60px)}
+#pxd{left:450px;top:90px;width:120px;height:60px;background:linear-gradient(180deg,#f00 45px,#0f0,#00f)}
+#pxc{left:590px;top:90px;width:120px;height:60px;background:linear-gradient(180deg,#f00 25%,#0f0 30px,#00b)}
 </style></head><body>
 <div id="solid" class="box"></div>
 <div id="backdrop" class="box"><div id="over"></div></div>
@@ -52,6 +56,10 @@ html,body{margin:0;padding:0;background:#fff}
 <div id="hard" class="box"></div>
 <div id="rad" class="box"></div>
 <div id="tall" class="box"></div>
+<div id="pxa" class="box"></div>
+<div id="pxm" class="box"></div>
+<div id="pxd" class="box"></div>
+<div id="pxc" class="box"></div>
 </body></html>`
 
 func cisRaster(t *testing.T, s *engine.Session, fonts *raster.Fonts) *frame.Bitmap {
@@ -175,7 +183,15 @@ func TestGradientsPaintTheMeasuredRampAndBands(t *testing.T) {
 
 // The syntax that painted nothing until this slice: stop positions written
 // with CSS's unitless zero - `#111 0 50%` and `#0a0 0` - which the reference
-// keeps and paints as flat bands.
+// keeps and paints as flat bands, and stop positions written as <length>s -
+// `#0a0 0px`, `#0f0 30px` - which it also keeps and paints at the authored
+// offsets. Measured scripts/verify-br074-color-idle-scroll.js (Chromium 1.63,
+// this host, 2026-11-06): px-ends answers rgb(44,126,0) rgb(86,83,0)
+// rgb(129,41,0) at 25/50/75% of the 60px ramp and px-mid answers
+// rgb(123,132,0) rgb(0,250,4) rgb(0,123,132). The tolerance is wider than the
+// tall box's because Chromium dithers with an amplitude scaled to the local
+// slope - this ramp runs 255 units over 30px where the 1600px ramp ran 170
+// over 1600 - and Goosie's undithered arithmetic sits inside the band.
 //
 // qc:BR-074
 func TestGradientStopsWithUnitlessZeroPositionsPaint(t *testing.T) {
@@ -187,6 +203,24 @@ func TestGradientStopsWithUnitlessZeroPositionsPaint(t *testing.T) {
 		{x: 400, y: 300, r: 10, g: 159, b: 0, tol: 0, what: "#0a0 0 at 100px into the ramp"},
 		{x: 400, y: 450, r: 26, g: 143, b: 0, tol: 0, what: "#0a0 0 at 250px into the ramp"},
 		{x: 400, y: 590, r: 41, g: 128, b: 0, tol: 0, what: "#0a0 0 at 390px into the ramp"},
+		{x: 480, y: 35, r: 44, g: 126, b: 0, tol: 3, what: "#0a0 0px at 25% of the 60px ramp"},
+		{x: 480, y: 50, r: 86, g: 83, b: 0, tol: 3, what: "#0a0 0px at 50% of the ramp"},
+		{x: 480, y: 65, r: 129, g: 41, b: 0, tol: 3, what: "#0a0 60px at 75% of the ramp"},
+		{x: 620, y: 35, r: 123, g: 132, b: 0, tol: 3, what: "#f00 fading out at 25%, the 30px stop pending"},
+		{x: 620, y: 50, r: 0, g: 250, b: 4, tol: 3, what: "on the #0f0 30px stop itself"},
+		{x: 620, y: 65, r: 0, g: 123, b: 132, tol: 3, what: "fading toward #00f at 75%"},
+		// A px anchor with unpositioned stops around it: the tail anchors at the
+		// END of the laid-out line - Chromium stays solid #f00 through 50% and
+		// puts the middle stop at 52.5px, halfway from the 45px anchor, which
+		// even-distribution over the stops would answer (0,255,0) instead.
+		{x: 480, y: 105, r: 255, g: 0, b: 0, tol: 0, what: "solid above the 45px px anchor"},
+		{x: 480, y: 120, r: 255, g: 0, b: 0, tol: 0, what: "still solid at 50%, the tail waits past the anchor"},
+		{x: 480, y: 135, r: 238, g: 17, b: 0, tol: 1, what: "just past the 45px anchor, toward the 52.5px middle"},
+		// A percentage mixed with a px length: both convert onto the same
+		// measured line, the unpositioned end anchors there too.
+		{x: 620, y: 105, r: 247, g: 9, b: 0, tol: 2, what: "just past the 25% stop, toward the 30px stop"},
+		{x: 620, y: 120, r: 0, g: 250, b: 3, tol: 2, what: "on the 30px stop"},
+		{x: 620, y: 135, r: 0, g: 123, b: 97, tol: 2, what: "midway to the anchored #00b end"},
 	})
 }
 
