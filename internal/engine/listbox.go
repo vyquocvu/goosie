@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"math"
+
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
@@ -24,8 +26,8 @@ import (
 //	RECTS -> lb [40,60,180,62.5625], a [41,61,178,20.1875], b [41,81.1875,178,20.1875]
 //
 // so the rows sit 1px inside the control's border box on x, tile it downward
-// with no gap, and are exactly as tall as the control font's normal line box
-// (3 x 20.1875 + 2 x 1 = 62.5625).
+// with no gap, and follow the measured theme rule - floor-to-1/64(1.2 x
+// font-size) + 1px per row (3 x 20.1875 + 2 x 1 = 62.5625 at 16px).
 //
 // The panel's place in the viewport is the other half, and it splits the same
 // way: the rows must be where the user can see them. The panel never covers more
@@ -306,33 +308,24 @@ func (s *Session) windowScrollY() float32 {
 	return float32(s.jsRT.WindowScrollY())
 }
 
-// listboxRowHeight is the height one option's row takes in CSS px: the control
-// font's own normal line box, which is what Chromium's listbox rows measure
-// (20.1875px for its 16px default font). Layout asks the same face for the
-// height a line box takes with line-height: normal, so a row here is as tall as
-// the text inside it.
+// listboxRowHeight is the height one option's row takes in CSS px: Chromium's
+// measured theme rule, floor-to-1/64(1.2 x font-size) plus the option's own 1px
+// bottom padding. scripts/verify-br101-listbox-rowheight.js (Chromium
+// 153.0.8010.12, 2026-11-06) answers the same row box for every font family it
+// renders the listbox with (the UA default, Arial, "Times New Roman", system-ui
+// and Helvetica), so the control face's metrics do not participate, and an
+// authored line-height does not either (line-height:30px answers the same
+// 20.1875 at 16px) - this is a theme rule, not font metrics, and the old
+// LineMetrics answer (18px) and the size*1.25 fallback were both wrong against
+// the measurement (20.1875). The 1/64 floor reproduces the grid Chromium
+// measures on every size probed (13..512), whatever its internal precision.
 func (s *Session) listboxRowHeight(obj *layout.Object) float32 {
 	size := float32(16)
-	var slot frame.FontSlot
-	if obj.Style != nil {
+	if obj.Style != nil && obj.Style.FontSize > 0 {
 		size = obj.Style.FontSize
-		slot = obj.Style.FontSlot()
 	}
-	if size <= 0 {
-		return 0
-	}
-	if s.metrics != nil {
-		// LineMetrics answers in device pixels for the size it is given, so
-		// asking for the CSS size returns CSS heights.
-		a, d, h := s.metrics.LineMetrics(int32(size), slot)
-		switch {
-		case h > 0:
-			return float32(h)
-		case a+d > 0:
-			return float32(a + d)
-		}
-	}
-	return size * 1.25
+	content := math.Floor(float64(1.2)*float64(size)*64) / 64
+	return float32(content) + 1
 }
 
 func rectFContains(r frame.RectF, x, y float32) bool {
