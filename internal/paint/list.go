@@ -228,8 +228,9 @@ func sameCommand(a, b DisplayCmd) bool {
 		a.Text.Color == b.Text.Color && slices.Equal(a.Text.Glyphs, b.Text.Glyphs) &&
 		a.Image.SrcBox == b.Image.SrcBox && sameImage(a.Image.Src, b.Image.Src) && sameImage(a.Mask, b.Mask) &&
 		a.Gradient.Angle == b.Gradient.Angle && slices.Equal(a.Gradient.Stops, b.Gradient.Stops) &&
-		a.RadialGradient.Shape == b.RadialGradient.Shape && a.RadialGradient.Cx == b.RadialGradient.Cx &&
-		a.RadialGradient.Cy == b.RadialGradient.Cy && slices.Equal(a.RadialGradient.Stops, b.RadialGradient.Stops)
+		a.RadialGradient.Cx == b.RadialGradient.Cx && a.RadialGradient.Cy == b.RadialGradient.Cy &&
+		a.RadialGradient.Rx == b.RadialGradient.Rx && a.RadialGradient.Ry == b.RadialGradient.Ry &&
+		slices.Equal(a.RadialGradient.Stops, b.RadialGradient.Stops)
 }
 
 // Images are immutable; compare identity without walking decoded pixels or assuming a comparable implementation.

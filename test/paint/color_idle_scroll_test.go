@@ -171,13 +171,16 @@ func TestGradientsPaintTheMeasuredRampAndBands(t *testing.T) {
 		{x: 340, y: 30, r: 128, g: 128, b: 128, tol: 0, what: "linear 90deg at 50%"},
 		{x: 390, y: 30, r: 192, g: 192, b: 192, tol: 1, what: "linear 90deg at 75%"},
 		{x: 438, y: 30, r: 253, g: 253, b: 253, tol: 0, what: "linear 90deg 2px inside the #fff end"},
-		// The centre agrees; the RADIUS does not, and this oracle asserts only what
-		// both engines agree on. The anchor measures Chromium at rgb(33,0,221) 44px
-		// into the corner diagonal and rgb(76,0,178) 50px above the centre, where
-		// Goosie answers rgb(0,0,255) and rgb(2,0,252): internal/frame/gradient.go
-		// gives a circle min(w,h)/2 = 50px while the reference reaches the farthest
-		// corner, 70.7px. Recorded as GOOSIE-RADIALGRAD-001, not pinned here.
+		// The radius itself, now that GOOSIE-RADIALGRAD-001 fixed it: the box is
+		// 100x100 with centre (280,120), so Chromium's circle reaches the corner
+		// at 70.7px. The anchor measured rgb(76,0,178) 50px above the centre,
+		// rgb(130,0,125) midway to the corner and rgb(33,0,221) near the corner;
+		// a 50px min-side radius would have answered the end colour at the first
+		// of them.
 		{x: 280, y: 120, r: 252, g: 0, b: 2, tol: 1, what: "radial centre of #f00 to #00f"},
+		{x: 280, y: 70, r: 76, g: 0, b: 178, tol: 2, what: "radial 50px above the centre: half the side still blends"},
+		{x: 255, y: 95, r: 130, g: 0, b: 124, tol: 2, what: "radial midway to the corner"},
+		{x: 236, y: 76, r: 33, g: 0, b: 221, tol: 2, what: "radial near the corner: the ramp reaches 70.7px"},
 	})
 }
 

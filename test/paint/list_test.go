@@ -78,7 +78,7 @@ func TestContentDamageCommandProperties(t *testing.T) {
 		"mask":           func(c *paint.DisplayCmd) { c.Mask = image.NewRGBA(image.Rect(0, 0, 4, 4)) },
 		"gradient_angle": func(c *paint.DisplayCmd) { c.Gradient.Angle = 90 },
 		"gradient_stops": func(c *paint.DisplayCmd) { c.Gradient.Stops = []frame.GradientStop{{At: 0.5}} },
-		"radial_shape":   func(c *paint.DisplayCmd) { c.RadialGradient.Shape = "circle" },
+		"radial_rx":      func(c *paint.DisplayCmd) { c.RadialGradient.Rx += 1 },
 		"radial_x":       func(c *paint.DisplayCmd) { c.RadialGradient.Cx = 0.5 },
 		"radial_y":       func(c *paint.DisplayCmd) { c.RadialGradient.Cy = 0.5 },
 		"radial_stops":   func(c *paint.DisplayCmd) { c.RadialGradient.Stops = []frame.GradientStop{{At: 0.5}} },

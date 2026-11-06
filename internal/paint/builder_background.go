@@ -169,7 +169,8 @@ func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, ra
 		}
 		w, h := float32(t.vx1-t.vx0), float32(t.vy1-t.vy0)
 		if srg != nil {
-			rg := radialGradient(*srg, radialRadius(*srg, w, h), opacity)
+			rx, ry, cx, cy := radialRadii(*srg, w, h)
+			rg := radialGradient(*srg, rx, ry, cx, cy, opacity)
 			b.list.Append(DisplayCmd{
 				Kind:           CmdRadialGradient,
 				Rect:           dst,

@@ -38,12 +38,13 @@ func gradient(g style.Gradient, lineLen float32, opacity float32) frame.LinearGr
 }
 
 // radialGradient turns a declared radial ramp into a command, resolving its
-// length-written stops against the radius the rasterizer will blend across.
-func radialGradient(g style.RadialGradient, radius float32, opacity float32) frame.RadialGradient {
+// length-written stops against the horizontal semi-axis the rasterizer blends
+// along (the gradient ray) and carrying the resolved radii and centre.
+func radialGradient(g style.RadialGradient, rx, ry, cx, cy float32, opacity float32) frame.RadialGradient {
 	if g.Empty() {
 		return frame.RadialGradient{}
 	}
-	return frame.RadialGradient{Shape: g.Shape, Cx: g.Cx, Cy: g.Cy, Stops: convertStops(style.StopsAlong(g.Stops, radius), opacity)}
+	return frame.RadialGradient{Cx: cx, Cy: cy, Rx: rx, Ry: ry, Stops: convertStops(style.StopsAlong(g.Stops, rx), opacity)}
 }
 
 // gradientLineLength is the CSS gradient line across a tile: |W·sin θ| +
@@ -56,18 +57,50 @@ func gradientLineLength(angle, tw, th float32) float32 {
 	return float32(math.Abs(float64(tw)*dirX) + math.Abs(float64(th)*dirY))
 }
 
-// radialRadius mirrors the radius internal/frame.FillRadialGradient derives
-// from the command rect, so length stops divide by the length the
-// rasterizer actually blends across. The circle rule - half the shorter side,
-// not the reach to the farthest corner - is itself recorded as wrong against
-// the reference in GOOSIE-RADIALGRAD-001; resolving against it keeps px stops
-// consistent with the colours already painted.
-func radialRadius(g style.RadialGradient, tw, th float32) float32 {
-	if g.Shape == "circle" {
-		return float32(math.Min(float64(tw), float64(th)) / 2)
+// radialRadii resolves the gradient's centre and semi-axis radii against the
+// command rect, so the rasterizer never revisits the sizing rule. The table is
+// the CSS sizing grammar measured against Chromium (GOOSIE-RADIALGRAD-001):
+// each keyword names a side or corner the ending shape must touch, taken from
+// the centre's four side distances - hn/hf the nearest and farthest
+// horizontally, vn/vf vertically. A circle carries one radius; an ellipse
+// carries per-axis radii, the closest-side pair for the side and corner
+// keywords, and for farthest-corner the closest-side aspect scaled by the
+// factor that reaches the farthest corner. A circle with default size is that
+// same scaling collapsed to one radius.
+func radialRadii(g style.RadialGradient, tw, th float32) (rx, ry, cx, cy float32) {
+	cx, cy = g.Cx, g.Cy
+	if g.CxPxSet && tw > 0 {
+		cx = g.CxPx / tw
 	}
-	cx, cy := float64(g.Cx)*float64(tw), float64(g.Cy)*float64(th)
-	dx := math.Max(cx, float64(tw)-cx)
-	dy := math.Max(cy, float64(th)-cy)
-	return float32(math.Sqrt(dx*dx + dy*dy))
+	if g.CyPxSet && th > 0 {
+		cy = g.CyPx / th
+	}
+	l, t := cx*tw, cy*th
+	hn, hf := min(l, tw-l), max(l, tw-l)
+	vn, vf := min(t, th-t), max(t, th-t)
+	switch {
+	case g.Shape == "circle":
+		var r float32
+		switch g.Size {
+		case "closest-side":
+			r = min(hn, vn)
+		case "farthest-side":
+			r = max(hf, vf)
+		case "closest-corner":
+			r = float32(math.Hypot(float64(hn), float64(vn)))
+		default: // farthest-corner
+			r = float32(math.Hypot(float64(hf), float64(vf)))
+		}
+		return r, r, cx, cy
+	default: // ellipse
+		switch g.Size {
+		case "closest-side", "closest-corner":
+			return hn, vn, cx, cy
+		case "farthest-side":
+			return hf, vf, cx, cy
+		default: // farthest-corner
+			k := float32(math.Hypot(float64(hf)/float64(hn), float64(vf)/float64(vn)))
+			return hn * k, vn * k, cx, cy
+		}
+	}
 }

@@ -31,13 +31,19 @@ type Gradient struct {
 // RadialGradient is a radial colour ramp: colours radiate from a centre point.
 // Shape is "circle" or "ellipse" (default). Size is "closest-side",
 // "farthest-side", "closest-corner", or "farthest-corner" (default).
-// Cx, Cy are the centre as fractions of the box (0.5, 0.5 = centre).
+// Cx, Cy are the centre as fractions of the box (0.5, 0.5 = centre); a centre
+// component written as a <length> rides CxPx/CyPx with its PxSet flag, because
+// a fraction of the box is not expressible until the box is measured.
 type RadialGradient struct {
-	Shape string  // "circle" or "ellipse"
-	Size  string  // "closest-side", "farthest-side", "closest-corner", "farthest-corner"
-	Cx    float32 // centre x as fraction (0..1)
-	Cy    float32 // centre y as fraction (0..1)
-	Stops []GradientStop
+	Shape   string  // "circle" or "ellipse"
+	Size    string  // "closest-side", "farthest-side", "closest-corner", "farthest-corner"
+	Cx      float32 // centre x as fraction (0..1)
+	Cy      float32 // centre y as fraction (0..1)
+	CxPx    float32 // centre x in px from the left edge, when CxPxSet
+	CyPx    float32 // centre y in px from the top edge, when CyPxSet
+	CxPxSet bool
+	CyPxSet bool
+	Stops   []GradientStop
 }
 
 // Empty reports whether there is nothing to paint. A ramp needs two colours to
@@ -112,6 +118,10 @@ func parseLinearGradientArgs(args string) Gradient {
 	return g
 }
 
+// parseRadialGradientArgs reads one radial-gradient() argument list. The first
+// part may carry the header - shape, size, position in any order, the position
+// introduced by `at` - and the remaining parts are colour stops. A part whose
+// first token names none of those is headerless: every part is a stop.
 func parseRadialGradientArgs(args string) RadialGradient {
 	parts := splitArgs(args)
 	if len(parts) == 0 {
@@ -123,45 +133,185 @@ func parseRadialGradientArgs(args string) RadialGradient {
 		Cx:    0.5,
 		Cy:    0.5,
 	}
-	// Parse shape/size/position from the first parts.
-	stopStart := 0
-	for i, p := range parts {
-		p = strings.ToLower(strings.TrimSpace(p))
-		switch p {
-		case "circle", "ellipse":
-			g.Shape = p
-			stopStart = i + 1
-		case "closest-side", "farthest-side", "closest-corner", "farthest-corner":
-			g.Size = p
-			stopStart = i + 1
-		case "center":
-			g.Cx, g.Cy = 0.5, 0.5
-			stopStart = i + 1
-		case "top":
-			g.Cy = 0
-			stopStart = i + 1
-		case "bottom":
-			g.Cy = 1
-			stopStart = i + 1
-		case "left":
-			g.Cx = 0
-			stopStart = i + 1
-		case "right":
-			g.Cx = 1
-			stopStart = i + 1
-		default:
-			// Check for position keywords combination or percentage.
-			if strings.HasSuffix(p, "%") {
-				// Could be a position percentage.
-				break
+	header := strings.Fields(strings.ToLower(strings.TrimSpace(parts[0])))
+	if len(header) == 0 || !isRadialHeaderToken(header[0]) {
+		return radialWithStops(g, parts)
+	}
+	shape, size := "", ""
+	i := 0
+	for i < len(header) {
+		tok := header[i]
+		switch {
+		case tok == "circle" || tok == "ellipse":
+			if shape != "" {
+				return RadialGradient{}
 			}
-			// Must be a color stop, so we're done parsing the header.
-			goto parseStops
+			shape = tok
+			i++
+		case tok == "closest-side" || tok == "farthest-side" || tok == "closest-corner" || tok == "farthest-corner":
+			if size != "" {
+				return RadialGradient{}
+			}
+			size = tok
+			i++
+		case tok == "at":
+			n := radialPosition(header[i+1:], &g)
+			if n < 0 {
+				return RadialGradient{}
+			}
+			i += 1 + n
+			// The position ends the header: anything after it is not a colour
+			// this model accepts.
+			if i < len(header) {
+				return RadialGradient{}
+			}
+		default:
+			return RadialGradient{}
 		}
 	}
-parseStops:
-	stops := make([]GradientStop, 0, len(parts)-stopStart)
-	for _, p := range parts[stopStart:] {
+	if shape != "" {
+		g.Shape = shape
+	}
+	if size != "" {
+		g.Size = size
+	}
+	return radialWithStops(g, parts[1:])
+}
+
+// isRadialHeaderToken reports whether tok can start a radial header. A colour
+// stop never begins with one of these words, so this is also the headerless
+// test.
+func isRadialHeaderToken(tok string) bool {
+	switch tok {
+	case "circle", "ellipse", "at",
+		"closest-side", "farthest-side", "closest-corner", "farthest-corner":
+		return true
+	}
+	return false
+}
+
+// radialPosition consumes position components from toks and writes the centre
+// they denote into g, returning how many tokens it consumed, or -1 if the
+// position is malformed. One component owns the axis it names - a vertical
+// keyword the y, anything else the x - and the other axis keeps the centre;
+// two components fill both, a vertical keyword taking y, a horizontal one x,
+// and a component with no axis of its own (center, a length) taking whichever
+// axis its partner left open, or first x then y when neither has one.
+func radialPosition(toks []string, g *RadialGradient) int {
+	if len(toks) == 0 {
+		return -1
+	}
+	c1, ok := radialPosComp(toks[0])
+	if !ok {
+		return -1
+	}
+	if len(toks) == 1 {
+		axis := 0
+		if c1.vertical {
+			axis = 1
+		}
+		applyRadialComp(g, c1, axis)
+		return 1
+	}
+	c2, ok := radialPosComp(toks[1])
+	if !ok {
+		return -1
+	}
+	ax1, ax2 := -1, -1
+	switch {
+	case c1.vertical:
+		ax1 = 1
+	case c1.horizontal:
+		ax1 = 0
+	}
+	switch {
+	case c2.vertical:
+		ax2 = 1
+	case c2.horizontal:
+		ax2 = 0
+	}
+	if ax1 == -1 && ax2 == -1 {
+		ax1, ax2 = 0, 1
+	} else if ax1 == -1 {
+		ax1 = 1 - ax2
+	} else if ax2 == -1 {
+		ax2 = 1 - ax1
+	}
+	if ax1 == ax2 {
+		return -1
+	}
+	applyRadialComp(g, c1, ax1)
+	applyRadialComp(g, c2, ax2)
+	return 2
+}
+
+// radialComp is one parsed position component: a keyword (vertical or
+// horizontal by its word), a fraction, or a px length.
+type radialComp struct {
+	vertical   bool // top/bottom
+	horizontal bool // left/right
+	val        float32
+	isPx       bool
+}
+
+// radialPosComp reads one position component: a keyword, a percentage, a px
+// length, or the bare zero CSS allows a length to drop its unit for.
+func radialPosComp(tok string) (radialComp, bool) {
+	switch tok {
+	case "left":
+		return radialComp{horizontal: true}, true
+	case "right":
+		return radialComp{horizontal: true, val: 1}, true
+	case "top":
+		return radialComp{vertical: true}, true
+	case "bottom":
+		return radialComp{vertical: true, val: 1}, true
+	case "center":
+		return radialComp{val: 0.5}, true
+	}
+	if strings.HasSuffix(tok, "%") {
+		n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "%"), 64)
+		if err != nil {
+			return radialComp{}, false
+		}
+		return radialComp{val: float32(n / 100)}, true
+	}
+	if strings.HasSuffix(tok, "px") {
+		n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "px"), 64)
+		if err != nil {
+			return radialComp{}, false
+		}
+		return radialComp{val: float32(n), isPx: true}, true
+	}
+	if n, err := strconv.ParseFloat(tok, 64); err == nil && n == 0 {
+		return radialComp{isPx: true}, true
+	}
+	return radialComp{}, false
+}
+
+// applyRadialComp writes one component into g on the given axis: 0 for the
+// horizontal centre coordinate, 1 for the vertical one.
+func applyRadialComp(g *RadialGradient, c radialComp, axis int) {
+	if c.isPx {
+		if axis == 1 {
+			g.CyPx, g.CyPxSet = c.val, true
+		} else {
+			g.CxPx, g.CxPxSet = c.val, true
+		}
+		return
+	}
+	if axis == 1 {
+		g.Cy = c.val
+	} else {
+		g.Cx = c.val
+	}
+}
+
+// radialWithStops parses the stop parts of a radial declaration and distributes
+// them. A part that is not a stop drops the whole gradient, as Chromium does.
+func radialWithStops(g RadialGradient, parts []string) RadialGradient {
+	stops := make([]GradientStop, 0, len(parts))
+	for _, p := range parts {
 		ss, ok := parseGradientStops(p)
 		if !ok {
 			return RadialGradient{}

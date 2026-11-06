@@ -18,11 +18,14 @@ type LinearGradient struct {
 }
 
 // RadialGradient is a colour ramp radiating from a centre point.
-// Shape is "circle" or "ellipse". Cx, Cy are the centre as fractions (0..1).
+// Cx, Cy are the centre as fractions (0..1). Rx, Ry are the resolved
+// semi-axis radii in device-independent px, already sized by the declaration's
+// shape and size keyword: a circle carries Rx == Ry, an ellipse its two axes.
 type RadialGradient struct {
-	Shape string
 	Cx    float32
 	Cy    float32
+	Rx    float32
+	Ry    float32
 	Stops []GradientStop
 }
 
@@ -178,11 +181,12 @@ func sampleGradient(stops []GradientStop, t float64) Color {
 }
 
 // FillRadialGradient paints r with a radial gradient. The gradient radiates
-// from the centre point (Cx, Cy) as fractions of the box. For "ellipse" shape,
-// the radius scales with the box aspect ratio; for "circle", it uses the
-// smaller dimension.
+// from the centre point (Cx, Cy) as fractions of the box, across the resolved
+// semi-axis radii Rx and Ry the command carries: t is the pixel's position on
+// the ending shape, sqrt((dx/Rx)^2 + (dy/Ry)^2), so a circle is Rx == Ry and
+// an ellipse stretches per axis.
 func (b *Bitmap) FillRadialGradient(r Rect, rad Corners, g RadialGradient, writes *int64) {
-	if g.Empty() {
+	if g.Empty() || g.Rx <= 0 || g.Ry <= 0 {
 		return
 	}
 	cl := r.Intersection(b.Bounds())
@@ -194,20 +198,7 @@ func (b *Bitmap) FillRadialGradient(r Rect, rad Corners, g RadialGradient, write
 	}
 	cx := float64(r.X0) + float64(g.Cx)*float64(r.W())
 	cy := float64(r.Y0) + float64(g.Cy)*float64(r.H())
-	// Radius: for ellipse, use the distance to the farthest corner; for circle,
-	// use the smaller dimension.
-	var radius float64
-	if g.Shape == "circle" {
-		radius = math.Min(float64(r.W()), float64(r.H())) / 2
-	} else {
-		// Ellipse: use the distance to the farthest corner from centre.
-		dx := math.Max(cx-float64(r.X0), float64(r.X1)-cx)
-		dy := math.Max(cy-float64(r.Y0), float64(r.Y1)-cy)
-		radius = math.Sqrt(dx*dx + dy*dy)
-	}
-	if radius <= 0 {
-		return
-	}
+	rx, ry := float64(g.Rx), float64(g.Ry)
 	sorted := stopsSorted(g.Stops)
 	for y := int(cl.Y0); y < int(cl.Y1); y++ {
 		x0, x1 := float64(cl.X0), float64(cl.X1)
@@ -234,8 +225,8 @@ func (b *Bitmap) FillRadialGradient(r Rect, rad Corners, g RadialGradient, write
 			}
 			px := float64(x) + 0.5
 			dx := px - cx
-			dist := math.Sqrt(dx*dx + dy*dy)
-			t := dist / radius
+			ux, uy := dx/rx, dy/ry
+			t := math.Sqrt(ux*ux + uy*uy)
 			if t > 1 {
 				t = 1
 			}
