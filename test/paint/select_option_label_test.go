@@ -6,27 +6,37 @@ import (
 
 // What a control shows for an option is decided by the label content attribute,
 // not by its text content, and page script cannot read the rendered string - so
-// these rules are anchored on the accessibility names Chromium exposes for the
-// same markup, which is the closest observable to "what the user sees".
-// scripts/verify-br101-option-dom.js on this host (Chromium 1.63, 2026-11-04):
+// these rules are anchored on measurements of what the two engines actually
+// paint. scripts/verify-br101-option-dom.js on this host (Chromium 1.63,
+// 2026-11-04), lines "AX label-vs-text", "AX label shapes" and "AX value-only
+// shapes", fixes what the label attribute is at all:
 //
-//	AX label-vs-text   <option selected label="IIIII">WWWWW
-//	                   -> combobox value "IIIII", option name "IIIII"
-//	AX label shapes    <option selected label="  My   Label  ">WWWWW
-//	                   -> combobox value "My   Label", option name " My Label "
-//	                   <option selected label="">WWWWW    -> combobox value "WWWWW"
-//	                   <option selected label="   ">WWWWW -> combobox value absent
-//	AX value-only      <option selected value="V">        -> option name ""
+//	label="IIIII"         -> option name "IIIII", combobox value "IIIII"
+//	label=""              -> combobox value "WWWWW"   (the empty attribute is the absent one)
+//	label="   "           -> combobox value absent     (blank, NOT the text)
+//	value="V", no text    -> option name ""            (a value never names an option)
 //
-// So: a non-empty label attribute wins over the text, an *empty* attribute is
-// the absent one, a whitespace-only attribute is not (it shows nothing rather
-// than the text), and a value attribute never names the option.
+// The painted spelling of the closed control is measured by
+// scripts/verify-optionax-paint.js (Chromium 1.63, 2026-11-06, dpr 2, dark
+// columns inside the control band, gaps classified against baseline labels
+// b0..b3 "MyLabel"/"My Label"/"My  Label"/"My   Label" whose maxGap answers
+// 1.5/5/9/13 CSS px): the label attribute paints its interior whitespace
+// VERBATIM with the edge run trimmed - label="  My   Label  " paints
+// maxGap=13 span=62.5, byte-identical to the baseline b3, and label="  XY"
+// paints its first ink at the same offset as the unshifted baselines - while
+// the text content paints fully normalised (text "  My   Label  " answers
+// span=55 maxGap=5, identical to b1). U+000B joins the trimmed edge set
+// (label="\vMy\vLabel\v" answers span=55.5, one interior vertical tab's
+// advance over b1) but an interior run is kept verbatim
+// (label="\vMy\v\vLabel" answers span=60.5 maxGap=10.5, two interior
+// advances over b0). That is exactly (*dom.Node).OptionDisplayStyle, the
+// spelling the accessibility tree already announces as the combobox value.
 //
-// Goosie shows one normalised form on every surface - the closed box, the
-// listbox rows and the accessibility name - because they all read
-// (*dom.Node).OptionLabel. Chromium's own two surfaces disagree with each other
-// on edge whitespace ("My   Label" against " My Label "); that difference is
-// recorded in docs/qa-open-defects.json rather than reproduced here.
+// The listbox rows are NOT part of that measurement: the popup is a native
+// surface outside every headless probe here (GOOSIE-LISTBOX-002), so rows keep
+// reading (*dom.Node).OptionLabel and their normalised spelling is pinned by
+// TestListboxRowsPaintTheLabelAttribute below rather than claimed as
+// Chromium's.
 
 // qc:BR-101
 func TestSelectPaintsLabelAttributeOverTextContent(t *testing.T) {
@@ -36,11 +46,31 @@ func TestSelectPaintsLabelAttributeOverTextContent(t *testing.T) {
 	}
 }
 
-// qc:BR-101
-func TestSelectPaintsLabelAttributeWithWhitespaceCollapsed(t *testing.T) {
+// The interior whitespace of a label attribute is painted verbatim, edges
+// trimmed - Chromium 153.0.8010.12 answers label="  My   Label  " with the
+// same ink span and word gap as the authored "My   Label" baseline
+// (scripts/verify-optionax-paint.js: q1 span=62.5 maxGap=13 = b3, first ink
+// unshifted), while the fully normalised spelling would answer b1's gap of 5.
+//
+// qc:BR-139
+func TestSelectPaintsLabelAttributeInteriorVerbatim(t *testing.T) {
 	got := paintedSelectText(t, `<select><option selected label="  My   Label  ">WWWWW</option></select>`)
-	if got != "My Label" {
-		t.Fatalf("painted select label = %q, want %q", got, "My Label")
+	if got != "My   Label" {
+		t.Fatalf("painted select label = %q, want %q (the interior run paints verbatim, edges trimmed)", got, "My   Label")
+	}
+}
+
+// U+000B is trimmed off the display edges but an interior run stays: Chromium
+// answers label="\vMy\vLabel\v" one interior advance over the "My Label"
+// baseline and label="\vMy\v\vLabel" two interior advances over "MyLabel"
+// (scripts/verify-optionax-paint.js: q6 span=55.5, q7 span=60.5 maxGap=10.5),
+// so painting either edge tab or collapsing the interior run is wrong.
+//
+// qc:BR-139
+func TestSelectPaintsDisplayEdgesTrimmedAndInteriorVerbatim(t *testing.T) {
+	got := paintedSelectText(t, "<select><option selected label=\"\vMy\vLabel\v\">WWWWW</option></select>")
+	if got != "My\vLabel" {
+		t.Fatalf("painted select label = %q, want %q (edge vertical tabs trimmed, interior kept)", got, "My\vLabel")
 	}
 }
 
@@ -65,8 +95,14 @@ func TestSelectPaintsNothingForWhitespaceOnlyLabel(t *testing.T) {
 	}
 }
 
-// The listbox rows are drawn from the same owner as the closed box, so a row
-// cannot show one string while the control shows another.
+// The listbox rows are drawn from (*dom.Node).OptionLabel, the normalised
+// spelling, while the closed control above paints the measured display
+// spelling: the popup is a native surface outside every headless probe here
+// (GOOSIE-LISTBOX-002), so the rows' spelling is pinned as Goosie's own answer
+// instead of being claimed as Chromium's. Rows and control deliberately
+// disagree on a label attribute's interior whitespace; the option's accessible
+// name, the form value and the row text are still three separately owned
+// surfaces.
 //
 // qc:BR-101
 func TestListboxRowsPaintTheLabelAttribute(t *testing.T) {

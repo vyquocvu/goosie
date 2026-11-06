@@ -406,13 +406,17 @@ func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.R
 	}
 	// Paint the same option the accessibility tree announces and the form
 	// submits: SelectedOption resolves a multiple-selected tie last-authored-
-	// wins and applies the single-line first-option default, and OptionLabel
-	// applies the shared whitespace normalisation. Reading the raw text of the
-	// first selected child would let one control show, announce and submit
-	// three different answers, and falling back to another option's text would
-	// paint a label the control does not carry.
+	// wins and applies the single-line first-option default. The closed
+	// control paints the display spelling OptionDisplayStyle - measured by
+	// scripts/verify-optionax-paint.js (Chromium 1.63, 2026-11-06): a label
+	// attribute's interior whitespace paints verbatim with the edge run
+	// trimmed (label="  My   Label  " answers the same ink span and gap as the
+	// authored "My   Label" baseline), while text content arrives normalised.
+	// Reading the raw text of the first selected child would let one control
+	// show, announce and submit three different answers, and falling back to
+	// another option's text would paint a label the control does not carry.
 	if option := obj.Node.SelectedOption(); option != nil {
-		if text := option.OptionLabel(); text != "" {
+		if text := option.OptionDisplayStyle(); text != "" {
 			b.appendRun(text, textRect, s, frame.RGB(0, 0, 0), opacity)
 		}
 	}

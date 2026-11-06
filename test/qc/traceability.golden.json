@@ -1639,7 +1639,6 @@
       "test/paint/listbox_viewport_test.go:TestWindowedListboxPaintsOnlyTheRowsItShows",
       "test/paint/select_option_label_test.go:TestListboxRowsPaintTheLabelAttribute",
       "test/paint/select_option_label_test.go:TestSelectPaintsLabelAttributeOverTextContent",
-      "test/paint/select_option_label_test.go:TestSelectPaintsLabelAttributeWithWhitespaceCollapsed",
       "test/paint/select_option_label_test.go:TestSelectPaintsNothingForWhitespaceOnlyLabel",
       "test/paint/select_option_label_test.go:TestSelectPaintsTextWhenLabelAttributeIsEmpty",
       "test/paint/select_popup_test.go:TestClosedSelectPaintsNoListbox",
@@ -3000,7 +2999,9 @@
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityOptionNameAndControlValueSpellWhitespaceDifferently",
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityVerticalTabIsTrimmedOnlyOnTheDisplaySpelling",
       "test/engine/option_ax_surfaces_test.go:TestAccessibilityWhitespaceOnlyLabelNamesTheOptionAndEmptyValue",
-      "test/engine/option_value_test.go:TestAccessibilityOptionAnnouncesANameAndNoValue"
+      "test/engine/option_value_test.go:TestAccessibilityOptionAnnouncesANameAndNoValue",
+      "test/paint/select_option_label_test.go:TestSelectPaintsDisplayEdgesTrimmedAndInteriorVerbatim",
+      "test/paint/select_option_label_test.go:TestSelectPaintsLabelAttributeInteriorVerbatim"
     ],
     "enforced": true
   },

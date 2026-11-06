@@ -634,11 +634,11 @@ func (n *Node) SelectedOption() *Node {
 //	label="   "           -> combobox value absent     (blank, NOT the text)
 //	value="V", no text    -> option name ""            (a value never names an option)
 //
-// Goosie answers the fully normalised form ("My Label") here because paint and
-// the listbox rows read this one function. The accessibility tree no longer
-// does: measured by scripts/verify-optionax-surfaces.js, Chromium announces a
-// different spelling for the option name and for the control's value, so those
-// two surfaces read OptionAccessibleName and OptionDisplayStyle instead.
+// The listbox rows read this fully normalised form; the closed select paints
+// OptionDisplayStyle instead, measured by scripts/verify-optionax-paint.js
+// (2026-11-06): the popup is a native surface outside every headless probe, so
+// the rows keep the normalised spelling while the control shows the display
+// one. The accessibility tree reads OptionAccessibleName, a third spelling.
 func (n *Node) OptionLabel() string {
 	if n == nil {
 		return ""
@@ -799,13 +799,16 @@ func (n *Node) OptionAccessibleName() string {
 }
 
 // OptionDisplayStyle is the spelling Chromium puts in the closed select's
-// accessible value: the edges go and the interior stays exactly as written, so
-// label="  My   Label  " displays "My   Label" where the option's own name
-// collapses it to " My Label ". Text content has already been normalised by
-// NormalizeOptionText before the edges are trimmed. U+000B joins the edge set
-// here even though the name keeps it - both halves measured on the same run.
-// A control whose display is empty exposes no value at all, which callers read
-// as the empty string.
+// accessible value AND paints in the closed control: the edges go and the
+// interior stays exactly as written, so label="  My   Label  " displays
+// "My   Label" where the option's own name collapses it to " My Label ". Text
+// content has already been normalised by NormalizeOptionText before the edges
+// are trimmed. U+000B joins the edge set here even though the name keeps it -
+// the value half measured on the same run, the paint half by
+// scripts/verify-optionax-paint.js (2026-11-06), which answers the authored
+// interior baselines byte-identically and leaves a first ink unshifted by the
+// edge run. A control whose display is empty exposes no value at all, which
+// callers read as the empty string.
 func (n *Node) OptionDisplayStyle() string {
 	if n == nil {
 		return ""
