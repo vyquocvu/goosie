@@ -1316,11 +1316,17 @@ func (r *Runtime) setupDOMException() {
 			name = name === undefined ? 'Error' : String(name);
 			var exception = new Error(message);
 			Object.setPrototypeOf(exception, DOMException.prototype);
+			// Remove the inherited stack property - Chromium's DOMException
+			// does not carry one.
+			delete exception.stack;
 			Object.defineProperties(exception, {
 				name: {value: name, writable: true, configurable: true},
 				message: {value: message, writable: true, configurable: true},
-				code: {value: codes[name] || 0, enumerable: true}
+				code: {value: codes[name] || 0, writable: true, configurable: true}
 			});
+			// Set Symbol.toStringTag so Object.prototype.toString returns
+			// "[object DOMException]" instead of "[object Error]".
+			Object.defineProperty(exception, Symbol.toStringTag, {value: 'DOMException', configurable: true});
 			return exception;
 		}
 		DOMException.prototype = Object.create(Error.prototype);
