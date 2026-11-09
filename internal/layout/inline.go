@@ -473,6 +473,13 @@ func inlineInto(a *Arena, id ObjectID) {
 			applyFirstLineRuns(a, &lines[0], flStyle, obj.Style)
 		}
 	}
+	// A U+00AD that closed a line is a taken hyphenation opportunity: the
+	// glyph Chromium draws is U+002D, charged its real advance, and only
+	// then. An unused soft hyphen stays default-ignorable (zero advance,
+	// no ink). Applied after wrap, balance, clamp and ::first-line so the
+	// hyphen lands on the line that actually broke and is measured with the
+	// font that line will paint.
+	applyTakenSoftHyphens(a, lines)
 	// Re-fetch obj: the Alloc calls in the text path may have reallocated the
 	// arena slice, so the pointer captured at function entry is stale.
 	obj = a.Get(id)
@@ -666,6 +673,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 				if k.Style.WordBreak != "keep-all" {
 					words = splitCJKWords(words, bc.avail, fontSize, a.Metrics, slot, letterSpacing)
 				}
+				// Soft hyphen and ZWSP stay break opportunities under keep-all:
+				// that keyword only suppresses CJK breaks, not these.
+				words = splitSoftBreaks(words, bc.avail, fontSize, a.Metrics, slot, letterSpacing)
 				words = splitOverlongWords(words, fontSize, a.Metrics, slot, letterSpacing)
 			}
 		}
@@ -1153,6 +1163,96 @@ func splitCJKWords(words []string, avail, fontSize float32, m Metrics, slot fram
 		out = append(out, string(runes[start:]))
 	}
 	return out
+}
+
+// softBreakRune reports a CSS wrap opportunity that is not whitespace and
+// not CJK: U+00AD (soft hyphen) and U+200B (zero-width space). Chromium 1.63
+// broke `42 a's + opportunity + 48 b's` in a 200px box at that opportunity
+// (scripts/verify-br087-text-parity.js BREAK-shy / BREAK-zws) while a word
+// with neither overflowed as one line.
+func softBreakRune(r rune) bool {
+	return r == '\u00AD' || r == '\u200B'
+}
+
+// splitSoftBreaks is the SHY/ZWSP counterpart of splitCJKWords: a word too
+// long for its line becomes the units the line breaker may place, each
+// opportunity closing a token so the text after it starts a new one. A
+// combining mark never opens a fragment. A word that still fits keeps its
+// single box, so an unused soft hyphen does not split the run it sits in
+// and does not draw a hyphen.
+func splitSoftBreaks(words []string, avail, fontSize float32, m Metrics, slot frame.FontSlot, letterSpacing float32) []string {
+	overlong := false
+	for _, w := range words {
+		if w != " " && w != "\n" && strings.ContainsFunc(w, softBreakRune) &&
+			measureWord(w, fontSize, m, slot, letterSpacing) > avail {
+			overlong = true
+			break
+		}
+	}
+	if !overlong {
+		return words
+	}
+	out := make([]string, 0, len(words)+8)
+	for _, word := range words {
+		if word == " " || word == "\n" || !strings.ContainsFunc(word, softBreakRune) ||
+			measureWord(word, fontSize, m, slot, letterSpacing) <= avail {
+			out = append(out, word)
+			continue
+		}
+		runes := []rune(word)
+		start := 0
+		for i := 0; i < len(runes); i++ {
+			if !softBreakRune(runes[i]) {
+				continue
+			}
+			end := i + 1
+			for end < len(runes) && unicode.IsMark(runes[end]) {
+				end++
+			}
+			if end == len(runes) {
+				break
+			}
+			out = append(out, string(runes[start:end]))
+			start = end
+			i = end - 1
+		}
+		out = append(out, string(runes[start:]))
+	}
+	return out
+}
+
+// applyTakenSoftHyphens substitutes U+002D for a trailing U+00AD on every
+// line that actually wrapped. The last line of the block did not take the
+// opportunity, so its unused SHY stays invisible. Width is remeasured
+// because the ignorable SHY cost nothing and the hyphen does (Chromium
+// inked a 5.328px hyphen after the overflowing a-run).
+func applyTakenSoftHyphens(a *Arena, lines []lineBox) {
+	if len(lines) < 2 {
+		return
+	}
+	for i := 0; i < len(lines)-1; i++ {
+		line := &lines[i]
+		if len(line.runs) == 0 {
+			continue
+		}
+		last := &line.runs[len(line.runs)-1]
+		if last.atomic || !strings.HasSuffix(last.text, "\u00AD") {
+			continue
+		}
+		replaced := strings.TrimSuffix(last.text, "\u00AD") + "-"
+		letterSpacing := float32(0)
+		obj := a.Get(last.obj)
+		if obj.Style != nil {
+			letterSpacing = obj.Style.LetterSpacing
+		}
+		newW := measureWord(replaced, last.size, a.Metrics, last.slot, letterSpacing)
+		line.w += newW - last.w
+		last.w = newW
+		last.text = replaced
+		if obj.Node != nil {
+			obj.Node.DataContent = replaced
+		}
+	}
 }
 
 func measureWord(word string, fontSize float32, m Metrics, slot frame.FontSlot, letterSpacing float32) float32 {
