@@ -27,7 +27,7 @@ type wptFetchAdapter struct {
 	failures  *atomic.Int32
 }
 
-func (f wptFetchAdapter) Fetch(rawURL, method string, headers map[string]string, body []byte) (result *jsapi.FetchResponse, err error) {
+func (f wptFetchAdapter) Fetch(ctx context.Context, rawURL, method string, headers map[string]string, body []byte) (result *jsapi.FetchResponse, err error) {
 	if f.requests != nil {
 		f.requests.Add(1)
 	}

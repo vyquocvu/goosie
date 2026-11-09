@@ -48,8 +48,10 @@ type jsTransport struct {
 	ctx    context.Context
 }
 
-func (t jsTransport) Fetch(url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
-	ctx := t.ctx
+func (t jsTransport) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
+	if ctx == nil {
+		ctx = t.ctx
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}

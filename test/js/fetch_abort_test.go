@@ -1,6 +1,7 @@
 package js_test
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,7 +19,7 @@ type gatedFetcher struct {
 	calls   atomic.Int32
 }
 
-func (g *gatedFetcher) Fetch(string, string, map[string]string, []byte) (*js.FetchResponse, error) {
+func (g *gatedFetcher) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
 	g.calls.Add(1)
 	g.started <- struct{}{}
 	<-g.release

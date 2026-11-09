@@ -1,6 +1,7 @@
 package js
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"sort"
@@ -33,6 +34,7 @@ const xhrStateKey = "__xhrState__"
 
 type xhrBookkeeping struct {
 	client HTTPFetcher
+	ctx    context.Context
 	mu     sync.Mutex
 	active int
 }
@@ -80,6 +82,8 @@ type xhrObject struct {
 	timeoutMS      int64
 	listeners      map[string][]goja.Value
 	timer          *time.Timer
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
 // setupXHR installs the XMLHttpRequest constructor. The transport reuses the
@@ -87,7 +91,7 @@ type xhrObject struct {
 // through the error event, so feature-detecting pages never see a missing
 // constructor.
 func (r *Runtime) setupXHR(client HTTPFetcher) {
-	setXHRState(r, &xhrBookkeeping{client: client})
+	setXHRState(r, &xhrBookkeeping{client: client, ctx: context.Background()})
 
 	ctor := func(call goja.ConstructorCall) *goja.Object {
 		return r.constructXHR(call)
@@ -453,6 +457,14 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 	st.active++
 	st.mu.Unlock()
 
+	// Create a cancellable context for this request. The cancel function is
+	// stored on the XHR object so abort() can tear down the socket.
+	ctx, cancel := context.WithCancel(st.ctx)
+	x.mu.Lock()
+	x.ctx = ctx
+	x.cancel = cancel
+	x.mu.Unlock()
+
 	r.fireXHR(x, "readystatechange", 0, 0)
 
 	if timeoutMS > 0 {
@@ -482,10 +494,11 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 	budget := r.subresourceBudget()
 
 	go func() {
+		defer cancel()
 		if IsCORSRequest(r.opts.URL, reqURL) {
 			headers["Origin"] = getOrigin(r.opts.URL)
 		}
-		resp, err := st.client.Fetch(reqURL, method, headers, body)
+		resp, err := st.client.Fetch(ctx, reqURL, method, headers, body)
 		// Charge the response body to the document's shared subresource
 		// budget, mirroring fetch: a body that does not fit fails the request
 		// cleanly (XHR error) rather than succeeding past the cap.
@@ -537,6 +550,11 @@ func (r *Runtime) xhrAbort(x *xhrObject) goja.Value {
 	if x.timer != nil {
 		x.timer.Stop()
 		x.timer = nil
+	}
+	// Cancel the context to tear down the in-flight HTTP request at the socket
+	// level, not just mark the XHR as aborted.
+	if x.cancel != nil {
+		x.cancel()
 	}
 	x.state = xhrDone
 	x.status = 0

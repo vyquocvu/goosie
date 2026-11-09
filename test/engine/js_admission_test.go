@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ type jsFetchFetcher struct {
 	resp *js.FetchResponse
 }
 
-func (f *jsFetchFetcher) Fetch(url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
+func (f *jsFetchFetcher) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
 	return f.resp, nil
 }
 

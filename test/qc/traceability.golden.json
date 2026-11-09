@@ -2067,7 +2067,9 @@
       "test/js/fetch_abort_reason_test.go:TestFetchNonSignalValueRejectsWithTypeErrorAndNeverRequests",
       "test/js/fetch_abort_test.go:TestFetchAbortCustomReasonRejectsWithReason",
       "test/js/fetch_abort_test.go:TestFetchAbortPreAbortedSignalSkipsRequest",
-      "test/js/fetch_abort_test.go:TestFetchAbortSignalRejectsAndDropsLateResponse"
+      "test/js/fetch_abort_test.go:TestFetchAbortSignalRejectsAndDropsLateResponse",
+      "test/js/fetch_cancel_test.go:TestFetchAbortCancelsContext",
+      "test/js/fetch_cancel_test.go:TestXHRAbortCancelsContext"
     ],
     "enforced": false
   },

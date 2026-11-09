@@ -73,7 +73,7 @@ func TestWPTFetchAdapterRejectsOutsideOrigin(t *testing.T) {
 	base := httptest.NewServer(http.NotFoundHandler())
 	defer base.Close()
 	adapter := wptFetchAdapter{ctx: context.Background(), client: base.Client(), baseURL: base.URL}
-	if _, err := adapter.Fetch(server.URL+"/resource", http.MethodGet, nil, nil); err == nil {
+	if _, err := adapter.Fetch(context.Background(), server.URL+"/resource", http.MethodGet, nil, nil); err == nil {
 		t.Fatal("outside-origin fetch was allowed")
 	}
 	select {
@@ -98,7 +98,7 @@ func TestWPTFetchAdapterMapsConfiguredOriginAlias(t *testing.T) {
 	base := "http://wpt.localhost:" + port
 	target := "http://cross-origin.wpt-other.localhost:" + port + "/resource"
 	adapter := wptFetchAdapter{ctx: context.Background(), client: server.Client(), baseURL: base}
-	response, err := adapter.Fetch(target, http.MethodGet, nil, nil)
+	response, err := adapter.Fetch(context.Background(), target, http.MethodGet, nil, nil)
 	if err != nil {
 		t.Fatalf("Fetch configured WPT alias: %v", err)
 	}

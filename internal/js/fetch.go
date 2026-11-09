@@ -2,6 +2,7 @@ package js
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,9 +41,11 @@ var ErrTooManyConcurrentFetches = fmt.Errorf("too many concurrent fetches")
 // HTTPFetcher is the interface the engine's HTTP client satisfies for fetch.
 // It is defined here so that internal/js does not import internal/net, which
 // the archtest import graph forbids. The engine wires the concrete client in
-// at pipeline assembly time.
+// at pipeline assembly time. The context parameter carries cancellation: when
+// the fetch is aborted, the context is cancelled and the transport should
+// tear down the socket rather than continuing to download bytes.
 type HTTPFetcher interface {
-	Fetch(url string, method string, headers map[string]string, body []byte) (*FetchResponse, error)
+	Fetch(ctx context.Context, url string, method string, headers map[string]string, body []byte) (*FetchResponse, error)
 }
 
 // FetchOptions mirrors the JS RequestInit dictionary. Only the fields the
@@ -137,6 +140,7 @@ type thenableObj struct {
 // fetchState is the per-Runtime bookkeeping for the fetch subsystem.
 type fetchState struct {
 	client    HTTPFetcher
+	ctx       context.Context
 	mu        sync.Mutex
 	active    int
 	callbacks []fetchCallback
@@ -198,7 +202,7 @@ func (r *Runtime) setupFetch(client HTTPFetcher) {
 		return
 	}
 
-	fs := &fetchState{client: client}
+	fs := &fetchState{client: client, ctx: context.Background()}
 	setFetchState(r, fs)
 
 	fetchFn := func(call goja.FunctionCall) goja.Value {
@@ -491,8 +495,8 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 		if NeedsPreflight(opts.Method, opts.Headers) {
 			// Send preflight OPTIONS request
 			preflightHeaders := buildPreflightHeaders(origin, opts.Method, opts.Headers)
-			preflightResp, err, aborted := callFetcher(abort, func() (*FetchResponse, error) {
-				return fs.client.Fetch(fetchURL, "OPTIONS", preflightHeaders, nil)
+			preflightResp, err, aborted := callFetcher(fs.ctx, abort, func(ctx context.Context) (*FetchResponse, error) {
+				return fs.client.Fetch(ctx, fetchURL, "OPTIONS", preflightHeaders, nil)
 			})
 			if aborted {
 				fs.rejectFetch(t, abort.reasonValue())
@@ -514,8 +518,8 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 	if opts.HasBodyBytes {
 		body = opts.BodyBytes
 	}
-	resp, err, aborted := callFetcher(abort, func() (*FetchResponse, error) {
-		return fs.client.Fetch(fetchURL, opts.Method, opts.Headers, body)
+	resp, err, aborted := callFetcher(fs.ctx, abort, func(ctx context.Context) (*FetchResponse, error) {
+		return fs.client.Fetch(ctx, fetchURL, opts.Method, opts.Headers, body)
 	})
 	if aborted {
 		fs.rejectFetch(t, abort.reasonValue())
@@ -552,22 +556,34 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 }
 
 // callFetcher runs one HTTPFetcher call and waits for either its result or an
-// abort. The injected HTTPFetcher has no cancellation hook, so an aborted
-// request keeps running in the background; its eventual response is dropped.
-// When an abort and a result are both ready, abort wins, matching the Fetch
-// spec's preference for rejecting a request that has not settled yet.
-func callFetcher(abort *fetchAbort, fn func() (*FetchResponse, error)) (resp *FetchResponse, err error, aborted bool) {
+// abort. The context passed to the fetcher is cancelled when the abort fires,
+// so the transport tears down the socket rather than continuing to download
+// bytes that will be thrown away. When an abort and a result are both ready,
+// abort wins, matching the Fetch spec's preference for rejecting a request
+// that has not settled yet.
+func callFetcher(baseCtx context.Context, abort *fetchAbort, fn func(context.Context) (*FetchResponse, error)) (resp *FetchResponse, err error, aborted bool) {
+	ctx, cancel := context.WithCancel(baseCtx)
+	defer cancel()
+
 	if abort == nil {
-		resp, err = fn()
+		resp, err = fn(ctx)
 		return resp, err, false
 	}
+
+	// Cancel the context when the abort fires so the in-flight HTTP request
+	// is torn down at the socket level, not just ignored when it returns.
+	go func() {
+		<-abort.done
+		cancel()
+	}()
+
 	type result struct {
 		resp *FetchResponse
 		err  error
 	}
 	ch := make(chan result, 1)
 	go func() {
-		resp, err := fn()
+		resp, err := fn(ctx)
 		ch <- result{resp: resp, err: err}
 	}()
 	select {

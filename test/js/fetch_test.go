@@ -1,6 +1,7 @@
 package js_test
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -32,7 +33,7 @@ type mockCall struct {
 	Body    []byte
 }
 
-func (m *mockFetcher) Fetch(url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
+func (m *mockFetcher) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, mockCall{URL: url, Method: method, Headers: headers, Body: body})
@@ -63,7 +64,7 @@ func (m *mockFetcher) lastCall() mockCall {
 
 type delayedErrorFetcher struct{}
 
-func (delayedErrorFetcher) Fetch(string, string, map[string]string, []byte) (*js.FetchResponse, error) {
+func (delayedErrorFetcher) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
 	time.Sleep(300 * time.Millisecond)
 	return nil, fmt.Errorf("delayed network down")
 }
@@ -77,7 +78,7 @@ type blockingFetcher struct {
 	resp   *js.FetchResponse
 }
 
-func (b *blockingFetcher) Fetch(url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
+func (b *blockingFetcher) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
 	b.mu.Lock()
 	b.active++
 	b.mu.Unlock()
@@ -271,7 +272,7 @@ func TestMockFetcherReturnsConfiguredResponse(t *testing.T) {
 		},
 	}
 
-	resp, err := m.Fetch("https://example.test/api", "GET", nil, nil)
+	resp, err := m.Fetch(context.Background(), "https://example.test/api", "GET", nil, nil)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
@@ -283,7 +284,7 @@ func TestMockFetcherReturnsConfiguredResponse(t *testing.T) {
 	}
 
 	// Unknown URL -> 404.
-	resp, err = m.Fetch("https://example.test/missing", "GET", nil, nil)
+	resp, err = m.Fetch(context.Background(), "https://example.test/missing", "GET", nil, nil)
 	if err != nil {
 		t.Fatalf("Fetch unknown URL: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestMockFetcherReturnsConfiguredResponse(t *testing.T) {
 // error for every request.
 func TestMockFetcherReturnsError(t *testing.T) {
 	m := &mockFetcher{err: fmt.Errorf("network down")}
-	_, err := m.Fetch("https://example.test/", "GET", nil, nil)
+	_, err := m.Fetch(context.Background(), "https://example.test/", "GET", nil, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -312,8 +313,8 @@ func TestMockFetcherRecordsCalls(t *testing.T) {
 		responses: map[string]*js.FetchResponse{},
 	}
 	hdrs := map[string]string{"X-Test": "yes"}
-	_, _ = m.Fetch("https://example.test/a", "POST", hdrs, []byte("body"))
-	_, _ = m.Fetch("https://example.test/b", "GET", nil, nil)
+	_, _ = m.Fetch(context.Background(), "https://example.test/a", "POST", hdrs, []byte("body"))
+	_, _ = m.Fetch(context.Background(), "https://example.test/b", "GET", nil, nil)
 
 	if m.callCount() != 2 {
 		t.Fatalf("callCount = %d, want 2", m.callCount())
@@ -960,7 +961,7 @@ type methodFetcher struct {
 	calls     []string
 }
 
-func (f *methodFetcher) Fetch(url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
+func (f *methodFetcher) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, method+" "+url+" "+fmt.Sprint(headers))
 	f.mu.Unlock()
