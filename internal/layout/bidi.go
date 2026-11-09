@@ -338,28 +338,35 @@ func bidiReorder(st *style.ComputedStyle, a *Arena, runs []textRun) ([]textRun, 
 			visual = append(visual, spans[i].run)
 		}
 	}
-	// Stamp the glyph order. An identity order is left nil so paint keeps its
-	// fast path and no slice is retained for the overwhelmingly common case.
+	// Stamp the glyph order and bidi levels. An identity order is left nil so
+	// paint keeps its fast path. BidiLevels is stored only when at least one
+	// visual slot has an odd level (RTL context), so paint can mirror brackets.
 	for i := range spans {
 		s := &spans[i]
 		if len(s.glyphIdx) == 0 {
 			continue
 		}
+		obj := a.Get(s.run.obj)
 		identity := true
-		for k, logical := range s.glyphIdx {
-			if logical != s.start+k {
-				identity = false
-				break
-			}
-		}
-		if identity {
-			continue
-		}
+		hasOddLevel := false
 		order := make([]int, len(s.glyphIdx))
+		objLevels := make([]byte, len(s.glyphIdx))
 		for k, logical := range s.glyphIdx {
 			order[k] = logical - s.start
+			objLevels[k] = byte(levels[logical])
+			if objLevels[k]&1 == 1 {
+				hasOddLevel = true
+			}
+			if logical != s.start+k {
+				identity = false
+			}
 		}
-		a.Get(s.run.obj).GlyphOrder = order
+		if !identity {
+			obj.GlyphOrder = order
+		}
+		if hasOddLevel {
+			obj.BidiLevels = objLevels
+		}
 	}
 	return visual, base == 1
 }

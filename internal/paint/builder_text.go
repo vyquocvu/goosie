@@ -11,10 +11,11 @@ import (
 func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32, clip *frame.Rect) {
 	text := obj.Node.DataContent
 	order := obj.GlyphOrder
+	levels := obj.BidiLevels
 	if b.composingTextareaText(obj) {
-		text, order = b.composeControlText(obj, text), nil
+		text, order, levels = b.composeControlText(obj, text), nil, nil
 	} else if b.composingEditableText(obj) {
-		text, order = b.composeTextAtUTF16Offset(text), nil
+		text, order, levels = b.composeTextAtUTF16Offset(text), nil, nil
 	}
 	if text == "" {
 		return
@@ -41,9 +42,9 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	}
 	// Text shadows paint behind the main text as offset copies.
 	if len(s.TextShadow) > 0 {
-		b.paintTextShadow(text, rect, s, opacity, order)
+		b.paintTextShadow(text, rect, s, opacity, order, levels)
 	}
-	b.appendRunOrdered(text, rect, s, convertColor(s.Color), opacity, order)
+	b.appendRunOrdered(text, rect, s, convertColor(s.Color), opacity, order, levels)
 }
 
 func (b *Builder) composingEditableText(obj *layout.Object) bool {
@@ -94,7 +95,7 @@ func (b *Builder) composingTextareaText(obj *layout.Object) bool {
 // appendRun emits one line of glyphs across the box's content origin, spacing
 // them with the same advances layout measured the line with.
 func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32) {
-	b.appendRunOrdered(text, rect, s, color, opacity, nil)
+	b.appendRunOrdered(text, rect, s, color, opacity, nil, nil)
 }
 
 // appendRunOrdered draws visual slot k with the logical rune order[k],
@@ -102,8 +103,11 @@ func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle
 // which is every left-to-right word; layout stamps a reordered word with the
 // permutation and paint only ever reads it back. Reversing the slice instead
 // of placing it would move the advances with the wrong glyphs, and a word like
-// مرحبا has unequal per-rune advances, so the tail would drift.
-func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32, order []int) {
+// مرحبا has unequal per-rune advances, so the tail would drift. levels is
+// parallel to the visual slots: when levels[k] is odd the rune at that slot
+// sits in an RTL context and bidi-mirrored characters (brackets, guillemets)
+// draw their mirrored glyph instead (GOOSIE-BIDIMIRROR-001).
+func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32, order []int, levels []byte) {
 	fontSize := int32(s.FontSize * b.scale)
 	if fontSize <= 0 {
 		return
@@ -133,9 +137,11 @@ func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.Comput
 		// loses a fraction of a pixel per character and drifts the line tail.
 		pen := int32(0)
 		for k := range runes {
-			r := runes[logicalRune(order, k)]
+			logical := logicalRune(order, k)
+			r := runes[logical]
+			drawRune := mirrorRune(r, bidiLevel(levels, k))
 			x := rect.X0 + (pen+32)>>6
-			glyphs = append(glyphs, GlyphRun{Rune: r, X: x, Y: baseline, Size: fontSize, Slot: slot})
+			glyphs = append(glyphs, GlyphRun{Rune: drawRune, X: x, Y: baseline, Size: fontSize, Slot: slot})
 			pen += b.metrics.GlyphAdvanceFixed(fontSize, r, slot)
 			if k < len(runes)-1 {
 				pen += letterSpacing * 64
@@ -148,8 +154,10 @@ func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.Comput
 		x := rect.X0
 		advance := fontSize / 2
 		for k := range runes {
-			r := runes[logicalRune(order, k)]
-			glyphs = append(glyphs, GlyphRun{Rune: r, X: x, Y: baseline, Size: fontSize, Slot: slot})
+			logical := logicalRune(order, k)
+			r := runes[logical]
+			drawRune := mirrorRune(r, bidiLevel(levels, k))
+			glyphs = append(glyphs, GlyphRun{Rune: drawRune, X: x, Y: baseline, Size: fontSize, Slot: slot})
 			x += advance
 			if k < len(runes)-1 {
 				x += letterSpacing
@@ -212,9 +220,18 @@ func logicalRune(order []int, k int) int {
 	return order[k]
 }
 
+// bidiLevel returns the bidi level for visual slot k. A nil levels slice
+// means pure LTR (level 0), the common case that layout does not annotate.
+func bidiLevel(levels []byte, k int) byte {
+	if k >= len(levels) {
+		return 0
+	}
+	return levels[k]
+}
+
 // paintTextShadow draws each text-shadow layer as an offset copy of the text
 // in the shadow colour, painted before the main text so it appears behind.
-func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.ComputedStyle, opacity float32, order []int) {
+func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.ComputedStyle, opacity float32, order []int, levels []byte) {
 	for _, sh := range s.TextShadow {
 		dx := int32(sh.OffsetX * b.scale)
 		dy := int32(sh.OffsetY * b.scale)
@@ -231,6 +248,6 @@ func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.Compute
 		if sh.ColorIsCurrent {
 			color = convertColor(s.Color)
 		}
-		b.appendRunOrdered(text, shadowRect, s, color, opacity, order)
+		b.appendRunOrdered(text, shadowRect, s, color, opacity, order, levels)
 	}
 }

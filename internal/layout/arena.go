@@ -61,6 +61,12 @@ type Object struct {
 	// nothing else.
 	GlyphOrder []int
 
+	// BidiLevels stores the resolved bidi level for each visual slot in
+	// GlyphOrder. BidiLevels[k] is the level of the logical rune drawn at
+	// visual slot k. nil when GlyphOrder is nil (pure LTR). Paint uses odd
+	// levels to mirror bracket glyphs (GOOSIE-BIDIMIRROR-001).
+	BidiLevels []byte
+
 	// GridCols and GridRows record the resolved track sizes (in px) of a grid
 	// container so subgrids can inherit track slices from their parent.
 	GridCols    []float32

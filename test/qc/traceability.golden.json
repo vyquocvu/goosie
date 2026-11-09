@@ -1149,6 +1149,8 @@
     ],
     "status": "PASS",
     "tests": [
+      "test/engine/bidi_visual_order_test.go:TestBidiMirrorBracketsInRtl",
+      "test/engine/bidi_visual_order_test.go:TestBidiNoMirrorInLtr",
       "test/engine/bidi_visual_order_test.go:TestBidiSelectionRtlFullWordReturnsLogicalText",
       "test/engine/bidi_visual_order_test.go:TestLtrArabicWordReversesInPlace",
       "test/engine/bidi_visual_order_test.go:TestPlaintextResolvesToLtrAndAnchorsLeft",

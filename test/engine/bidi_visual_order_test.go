@@ -361,19 +361,61 @@ func TestLtrArabicWordReversesInPlace(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl "(abc)" gives visual =")abc(" - (=794.672 (rightmost),
-// a=768.875, b=777.766, c=786.672, )=763.547 (leftmost). The parentheses are
-// neutrals at the base level, so they ride the whole-line reversal while the
-// Latin island keeps its order. Only the order is asserted: mirroring the glyph
-// shapes is a separate defect.
+// Chromium: dir=rtl "(abc)" gives visual =(abc) after mirroring. The bidi
+// algorithm reverses the order to )abc( (=763.547 leftmost, (=794.672
+// rightmost), then bidi mirroring flips each bracket: logical ) draws as (
+// and logical ( draws as ). The Latin island keeps its LTR order.
 // qc:BR-087
 func TestRtlParenthesesWrapTheLatinIsland(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">(abc)</div>`)
 	glyphs := runFor(t, bidiGlyphRuns(t, sess), "(abc)")
-	if got := visualRunes(glyphs); got != ")abc(" {
-		t.Errorf("the line reads %q, want %q (Chromium: )=763.547 a=768.875 b=777.766 c=786.672 (=794.672)", got, ")abc(")
+	if got := visualRunes(glyphs); got != "(abc)" {
+		t.Errorf("the line reads %q, want %q (Chromium: bidi-reversed then mirrored brackets)", got, "(abc)")
 	}
 	assertDrawnAdvances(t, sess, "(abc)", glyphs)
+}
+
+// Chromium mirrors bracket glyphs in RTL context: each Bidi_Mirrored character
+// draws as its counterpart when the resolved bidi level is odd. This test
+// verifies the mirroring behavior with a multi-character Latin island that
+// forces the brackets to odd levels.
+// qc:BR-087
+func TestBidiMirrorBracketsInRtl(t *testing.T) {
+	fonts := cjkFonts(t)
+	// Use a longer Latin run so the brackets are resolved as neutrals between
+	// strong LTR characters in an RTL paragraph, giving them odd levels.
+	sess := cjkSession(t, fonts, `<div style="width:200px" dir="rtl">(abc)</div>`)
+	runs := bidiGlyphRuns(t, sess)
+	var glyphs []paint.GlyphRun
+	for _, r := range runs {
+		if len(r) > 0 {
+			glyphs = r
+			break
+		}
+	}
+	// After bidi reversal: )abc( → after mirroring: (abc)
+	if got := visualRunes(glyphs); got != "(abc)" {
+		t.Errorf("visual = %q, want %q (mirrored brackets in RTL)", got, "(abc)")
+	}
+}
+
+// LTR text must NOT mirror brackets: the bidi level is even (0), so the
+// mirror map is never consulted.
+// qc:BR-087
+func TestBidiNoMirrorInLtr(t *testing.T) {
+	fonts := cjkFonts(t)
+	sess := cjkSession(t, fonts, `<div style="width:200px">(abc)</div>`)
+	runs := bidiGlyphRuns(t, sess)
+	var glyphs []paint.GlyphRun
+	for _, r := range runs {
+		if len(r) > 0 {
+			glyphs = r
+			break
+		}
+	}
+	if got := visualRunes(glyphs); got != "(abc)" {
+		t.Errorf("LTR visual = %q, want %q (no mirroring in LTR context)", got, "(abc)")
+	}
 }
 
 // Chromium: text-align moves the anchor, never the order. dir=rtl with
