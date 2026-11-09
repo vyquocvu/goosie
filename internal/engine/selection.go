@@ -216,6 +216,9 @@ func lineWordAtX(words []*layout.Object, start, end int, x float32) int {
 
 // runeX is the inverse of runeOffset: the x coordinate after idx runes,
 // advancing the pen with the same font metrics the paint builder uses.
+// When the word carries a GlyphOrder (bidi-reordered), the logical index is
+// mapped through the visual permutation so the caret lands where the glyph
+// edge actually sits on screen.
 func (s *Session) runeX(w *layout.Object, idx int) float32 {
 	runes := []rune(w.Node.DataContent)
 	x0, _, _, _ := w.BorderRect()
@@ -235,6 +238,32 @@ func (s *Session) runeX(w *layout.Object, idx int) float32 {
 		wordSpacing = int32(w.Style.WordSpacing)
 		slot = w.Style.FontSlot()
 		m = s.metrics
+	}
+	order := w.GlyphOrder
+	if order != nil {
+		visualSlot := len(order)
+		for k, log := range order {
+			if log == idx {
+				visualSlot = k
+				break
+			}
+		}
+		pen := int32(0)
+		for k := 0; k < visualSlot; k++ {
+			r := runes[order[k]]
+			if k > 0 {
+				pen += letterSpacing * 64
+			}
+			if m != nil {
+				pen += m.GlyphAdvanceFixed(fontSize, r, slot)
+			} else {
+				pen += int32(fontSize) / 2 * 64
+			}
+			if r == ' ' {
+				pen += wordSpacing * 64
+			}
+		}
+		return x0 + float32((pen+32)>>6)
 	}
 	pen := int32(0)
 	for i := 0; i < idx; i++ {
@@ -281,7 +310,9 @@ func runeLen(w *layout.Object) int {
 // runeOffset converts an x inside a word's box to a rune index, walking the
 // same 26.6 fixed-point pen the paint builder places glyphs with, so the caret
 // boundary lands where the glyph edge is. A click in the left part of a rune
-// selects before it.
+// selects before it. When the word carries a GlyphOrder (bidi-reordered), the
+// walk iterates visual slots and maps each back to its logical rune, so the
+// returned index is the logical offset the rest of the selection code expects.
 func (s *Session) runeOffset(w *layout.Object, x float32) int {
 	runes := []rune(w.Node.DataContent)
 	x0, _, _, _ := w.BorderRect()
@@ -299,6 +330,29 @@ func (s *Session) runeOffset(w *layout.Object, x float32) int {
 		wordSpacing = int32(w.Style.WordSpacing)
 		slot = w.Style.FontSlot()
 		m = s.metrics
+	}
+	order := w.GlyphOrder
+	if order != nil {
+		pen := int32(0)
+		for k := range runes {
+			r := runes[order[k]]
+			if k > 0 {
+				pen += letterSpacing * 64
+			}
+			if m != nil {
+				pen += m.GlyphAdvanceFixed(fontSize, r, slot)
+			} else {
+				pen += int32(fontSize) / 2 * 64
+			}
+			if r == ' ' {
+				pen += wordSpacing * 64
+			}
+			next := (pen + 32) >> 6
+			if rel < float32(next) {
+				return order[k]
+			}
+		}
+		return len(runes)
 	}
 	pen := int32(0)
 	for i, r := range runes {

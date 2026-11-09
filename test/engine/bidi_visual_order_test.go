@@ -432,6 +432,27 @@ func TestPlaintextResolvesToLtrAndAnchorsLeft(t *testing.T) {
 	}
 }
 
+// Chromium: dir=rtl selection within an RTL word must map through the glyph
+// permutation. The full-word selection should return the complete logical text.
+// qc:BR-087
+func TestBidiSelectionRtlFullWordReturnsLogicalText(t *testing.T) {
+	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">مرحبا</div>`)
+	box := wordBox(t, sess, "مرحبا")
+	x0, y0, x1, y1 := box.BorderRect()
+	midY := (y0 + y1) / 2
+
+	// Select from before the word to after the word (full selection).
+	sess.SelectAt(x0-10, midY)
+	sess.SelectTo(x1+10, midY)
+	if !sess.HasSelection() {
+		t.Fatal("full-word selection should be active")
+	}
+	selText := sess.SelectionText()
+	if selText != "مرحبا" {
+		t.Errorf("full-word selection = %q, want %q (all logical runes in document order)", selText, "مرحبا")
+	}
+}
+
 // Chromium anchors an RTL line on the content box, not the border box: with
 // 30px of inline padding the last glyph's right edge is 770.001 in a box whose
 // border box ends at 800 (scripts/verify-br087-bidi.js u_padding).

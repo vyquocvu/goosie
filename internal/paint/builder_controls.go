@@ -464,7 +464,9 @@ func controlText(obj *layout.Object) string {
 }
 
 // paintCaret draws the 1px bar where the next typed rune goes, one glyph
-// advance past the value's first caret runes.
+// advance past the value's first caret runes. When the control carries a
+// GlyphOrder (direction:rtl), the logical caret index is mapped through the
+// visual permutation so the bar sits at the correct screen x.
 func (b *Builder) paintCaret(obj *layout.Object, clip *frame.Rect) {
 	s := obj.Style
 	if s == nil {
@@ -483,15 +485,33 @@ func (b *Builder) paintCaret(obj *layout.Object, clip *frame.Rect) {
 		return
 	}
 	slot := s.FontSlot()
+	x0, y0, _, y1 := obj.ContentRect()
 	pen := int32(0)
-	for _, r := range runes[:caret] {
-		if b.metrics != nil {
-			pen += b.metrics.GlyphAdvanceFixed(fontSize, r, slot)
-		} else {
-			pen += fontSize / 2 * 64
+	if order := obj.GlyphOrder; order != nil {
+		visualSlot := len(order)
+		for k, log := range order {
+			if log == caret {
+				visualSlot = k
+				break
+			}
+		}
+		for k := 0; k < visualSlot; k++ {
+			r := runes[order[k]]
+			if b.metrics != nil {
+				pen += b.metrics.GlyphAdvanceFixed(fontSize, r, slot)
+			} else {
+				pen += fontSize / 2 * 64
+			}
+		}
+	} else {
+		for _, r := range runes[:caret] {
+			if b.metrics != nil {
+				pen += b.metrics.GlyphAdvanceFixed(fontSize, r, slot)
+			} else {
+				pen += fontSize / 2 * 64
+			}
 		}
 	}
-	x0, y0, _, y1 := obj.ContentRect()
 	x := x0 + float32((pen+32)>>6)
 	rect := frame.RectF4(x, y0, x+1, y1).ToDevice(b.scale)
 	if clip != nil {

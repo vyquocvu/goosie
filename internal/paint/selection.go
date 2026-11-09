@@ -34,8 +34,12 @@ func (b *Builder) paintSelectionHighlight(obj *layout.Object, rect frame.Rect, s
 	if start >= end {
 		return
 	}
-	x0 := runeX(obj.Node.DataContent, rect, s, start, b.scale, b.metrics)
-	x1 := runeX(obj.Node.DataContent, rect, s, end, b.scale, b.metrics)
+	xa := runeX(obj.Node.DataContent, rect, s, start, b.scale, b.metrics, obj.GlyphOrder)
+	xb := runeX(obj.Node.DataContent, rect, s, end, b.scale, b.metrics, obj.GlyphOrder)
+	x0, x1 := xa, xb
+	if x1 < x0 {
+		x0, x1 = x1, x0
+	}
 	if x1 <= x0 {
 		return
 	}
@@ -47,10 +51,13 @@ func (b *Builder) paintSelectionHighlight(obj *layout.Object, rect frame.Rect, s
 	})
 }
 
-// runeX returns the device-pixel x of the left edge of rune i, walking the
-// same pen appendRun places glyphs with, so highlight edges line up with the
-// glyph boundaries instead of a proportional guess.
-func runeX(text string, rect frame.Rect, s *style.ComputedStyle, i int, scale float32, metrics layout.Metrics) int32 {
+// runeX returns the device-pixel x of the left edge of logical rune i, walking
+// the same pen appendRun places glyphs with, so highlight edges line up with
+// the glyph boundaries instead of a proportional guess. When order is non-nil
+// (a bidi-reordered word), it maps the logical index through the visual
+// permutation: the left edge of logical rune i is the cumulative advance of
+// every visual slot that precedes the slot holding i.
+func runeX(text string, rect frame.Rect, s *style.ComputedStyle, i int, scale float32, metrics layout.Metrics, order []int) int32 {
 	runes := []rune(text)
 	if i <= 0 {
 		return rect.X0
@@ -62,6 +69,9 @@ func runeX(text string, rect frame.Rect, s *style.ComputedStyle, i int, scale fl
 	letterSpacing := int32(s.LetterSpacing * scale)
 	wordSpacing := int32(s.WordSpacing * scale)
 	slot := s.FontSlot()
+	if order != nil {
+		return runeXBidi(runes, rect, fontSize, letterSpacing, wordSpacing, slot, i, metrics, order)
+	}
 	if metrics != nil {
 		pen := int32(0)
 		for k := 0; k < i; k++ {
@@ -82,6 +92,45 @@ func runeX(text string, rect frame.Rect, s *style.ComputedStyle, i int, scale fl
 			pen += letterSpacing
 		}
 		if runes[k] == ' ' {
+			pen += wordSpacing
+		}
+	}
+	return rect.X0 + pen
+}
+
+// runeXBidi computes the visual x of logical rune i when order is non-nil.
+// It finds the visual slot holding i, then sums the advances of every visual
+// slot before it, using the same 26.6 fixed-point pen appendRunOrdered uses.
+func runeXBidi(runes []rune, rect frame.Rect, fontSize, letterSpacing, wordSpacing int32, slot frame.FontSlot, i int, metrics layout.Metrics, order []int) int32 {
+	visualSlot := len(order)
+	for k, log := range order {
+		if log == i {
+			visualSlot = k
+			break
+		}
+	}
+	if metrics != nil {
+		pen := int32(0)
+		for k := 0; k < visualSlot; k++ {
+			r := runes[order[k]]
+			pen += metrics.GlyphAdvanceFixed(fontSize, r, slot)
+			if k < len(order)-1 {
+				pen += letterSpacing * 64
+			}
+			if r == ' ' {
+				pen += wordSpacing * 64
+			}
+		}
+		return rect.X0 + (pen+32)>>6
+	}
+	pen := int32(0)
+	for k := 0; k < visualSlot; k++ {
+		r := runes[order[k]]
+		pen += fontSize / 2
+		if k < len(order)-1 {
+			pen += letterSpacing
+		}
+		if r == ' ' {
 			pen += wordSpacing
 		}
 	}
