@@ -383,7 +383,8 @@ func (s *Session) changeFocusedNode(n *dom.Node) bool {
 	if composing && controlEditable(prev) && oldMarked != "" {
 		if rt != nil {
 			rt.DispatchTrustedCompositionEvent(prev, "compositionupdate", "")
-			_ = rt.DispatchTrustedBeforeInputEvent(prev, nil, "deleteCompositionText", true, false)
+			empty := ""
+			_ = rt.DispatchTrustedBeforeInputEvent(prev, &empty, "insertCompositionText", true, false)
 		}
 		s.opMu.Lock()
 		if s.focus == prev {
@@ -391,14 +392,15 @@ func (s *Session) changeFocusedNode(n *dom.Node) bool {
 		}
 		s.opMu.Unlock()
 		if rt != nil {
-			rt.DispatchTrustedInput(prev, nil, "deleteCompositionText", true)
+			rt.DispatchTrustedInput(prev, nil, "insertCompositionText", true)
 		}
 	}
 	if composing && dom.IsContentEditable(prev) && oldMarked != "" && markedHasNode && rt != nil {
 		rt.DispatchTrustedCompositionEvent(prev, "compositionupdate", "")
-		_ = rt.DispatchTrustedBeforeInputEvent(prev, nil, "deleteCompositionText", true, false)
+		empty := ""
+		_ = rt.DispatchTrustedBeforeInputEvent(prev, &empty, "insertCompositionText", true, false)
 		if rt.ReplaceCompositionText(prev, markedNode, markedStart, oldMarked, "") {
-			rt.DispatchTrustedInput(prev, nil, "deleteCompositionText", true)
+			rt.DispatchTrustedInput(prev, nil, "insertCompositionText", true)
 		}
 	}
 	if composing && prev != nil && rt != nil {
@@ -622,13 +624,15 @@ func (s *Session) SetMarked(text string) bool {
 		}
 		if text != "" || wasComposing {
 			inputType := "insertCompositionText"
-			var data *string = &text
+			beforeInputData := &text
+			var inputData *string = &text
 			if text == "" {
-				inputType = "deleteCompositionText"
-				data = nil
+				empty := ""
+				beforeInputData = &empty
+				inputData = nil
 			}
 			if rt != nil {
-				_ = rt.DispatchTrustedBeforeInputEvent(host, data, inputType, true, false)
+				_ = rt.DispatchTrustedBeforeInputEvent(host, beforeInputData, inputType, true, false)
 			}
 			s.opMu.Lock()
 			current := s.focus == host && s.marked == text && s.imeComposing == (text != "")
@@ -637,7 +641,7 @@ func (s *Session) SetMarked(text string) bool {
 			}
 			s.opMu.Unlock()
 			if current && rt != nil {
-				rt.DispatchTrustedInput(host, data, inputType, true)
+				rt.DispatchTrustedInput(host, inputData, inputType, true)
 			}
 			if current && text == "" && wasComposing && rt != nil {
 				rt.DispatchTrustedCompositionEvent(host, "compositionend", "")
@@ -694,14 +698,16 @@ func (s *Session) SetMarked(text string) bool {
 	}
 	if rt != nil && hasNode && (text != "" || wasComposing) {
 		inputType := "insertCompositionText"
-		var data *string = &text
+		beforeInputData := &text
+		var inputData *string = &text
 		if text == "" {
-			inputType = "deleteCompositionText"
-			data = nil
+			empty := ""
+			beforeInputData = &empty
+			inputData = nil
 		}
-		_ = rt.DispatchTrustedBeforeInputEvent(host, data, inputType, true, false)
+		_ = rt.DispatchTrustedBeforeInputEvent(host, beforeInputData, inputType, true, false)
 		if rt.ReplaceCompositionText(host, nodeID, offset, oldMarked, text) {
-			rt.DispatchTrustedInput(host, data, inputType, true)
+			rt.DispatchTrustedInput(host, inputData, inputType, true)
 		} else {
 			s.opMu.Lock()
 			if s.focus == host && s.marked == text {
@@ -909,19 +915,21 @@ func (s *Session) commitTextWithInputType(text, requestedInputType string) bool 
 		if composing && rt != nil && markedHasNode {
 			if text == "" {
 				rt.DispatchTrustedCompositionEvent(host, "compositionupdate", "")
-				_ = rt.DispatchTrustedBeforeInputEvent(host, nil, "deleteCompositionText", true, false)
+				empty := ""
+				_ = rt.DispatchTrustedBeforeInputEvent(host, &empty, "insertCompositionText", true, false)
 				changed := rt.ReplaceCompositionText(host, markedNode, markedOffset, marked, "")
 				if changed {
-					rt.DispatchTrustedInput(host, nil, "deleteCompositionText", true)
+					rt.DispatchTrustedInput(host, nil, "insertCompositionText", true)
 				}
 				rt.DispatchTrustedCompositionEvent(host, "compositionend", "")
 				return changed
 			}
 			if !rt.DispatchTrustedBeforeInputEvent(host, &text, "insertFromComposition", true, true) {
 				rt.DispatchTrustedCompositionEvent(host, "compositionupdate", "")
-				_ = rt.DispatchTrustedBeforeInputEvent(host, nil, "deleteCompositionText", true, false)
+				empty := ""
+				_ = rt.DispatchTrustedBeforeInputEvent(host, &empty, "insertCompositionText", true, false)
 				if rt.ReplaceCompositionText(host, markedNode, markedOffset, marked, "") {
-					rt.DispatchTrustedInput(host, nil, "deleteCompositionText", true)
+					rt.DispatchTrustedInput(host, nil, "insertCompositionText", true)
 				}
 				rt.DispatchTrustedCompositionEvent(host, "compositionend", "")
 				return false

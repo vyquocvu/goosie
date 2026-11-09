@@ -307,7 +307,7 @@ func TestContentEditableIMECompositionCancel(t *testing.T) {
 	if !s.SetMarked("候補") || !s.SetMarked("") {
 		t.Fatal("starting and canceling composition should update marked text")
 	}
-	if got, err := s.EvaluateJS(`imeEvents.join(",")`); err != nil || got != "compositionstart::true,compositionupdate:候補:true,beforeinput:insertCompositionText:候補:true,input:insertCompositionText:候補:true,compositionupdate::true,beforeinput:deleteCompositionText:null:true,input:deleteCompositionText:null:true,compositionend::true" {
+	if got, err := s.EvaluateJS(`imeEvents.join(",")`); err != nil || got != "compositionstart::true,compositionupdate:候補:true,beforeinput:insertCompositionText:候補:true,input:insertCompositionText:候補:true,compositionupdate::true,beforeinput:insertCompositionText::true,input:insertCompositionText:null:true,compositionend::true" {
 		t.Fatalf("canceled composition events = %q, err %v", got, err)
 	}
 	if got := edit.TextContent(); got != "text" {
@@ -345,8 +345,8 @@ func TestContentEditableIMECommitCanceledByBeforeInput(t *testing.T) {
 	}
 	want := "compositionstart::true,compositionupdate:候補:true,beforeinput:insertCompositionText:候補:true," +
 		"input:insertCompositionText:候補:true,beforeinput:insertFromComposition:仮:true," +
-		"compositionupdate::true,beforeinput:deleteCompositionText:null:true," +
-		"input:deleteCompositionText:null:true,compositionend::true"
+		"compositionupdate::true,beforeinput:insertCompositionText::true," +
+		"input:insertCompositionText:null:true,compositionend::true"
 	if got, err := s.EvaluateJS(`imeEvents.join(",")`); err != nil || got != want {
 		t.Fatalf("canceled contenteditable commit events = %q, err %v", got, err)
 	}
