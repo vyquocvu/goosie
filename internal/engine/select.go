@@ -118,8 +118,8 @@ func (s *Session) MoveSelect(action EditAction) bool {
 	setSelectedOption(opts, target)
 	// input before change: a page listening to both sees the value already
 	// settled by the time change fires.
-	dom.DispatchEvent(sel, dom.NewEvent("input", true, true))
-	dom.DispatchEvent(sel, dom.NewEvent("change", true, true))
+	dom.DispatchEvent(sel, dom.NewTrustedEvent("input", true, true))
+	dom.DispatchEvent(sel, dom.NewTrustedEvent("change", true, true))
 	return true
 }
 

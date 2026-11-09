@@ -3425,7 +3425,7 @@ func (r *Runtime) flushIFrameLoads() {
 		_ = r.iframeWindow(frame)
 		// Frame load events are queued until the current script task completes,
 		// giving the page the opportunity to register onload after insertion.
-		r.dispatchWithWindowStep(frame, dom.NewEvent("load", false, false))
+		r.dispatchWithWindowStep(frame, dom.NewTrustedEvent("load", false, false))
 	}
 }
 
@@ -3488,7 +3488,7 @@ func (r *Runtime) scheduleIFrameNavigation(frame *dom.Node, target string) {
 			return
 		}
 		if child := r.iframeChildRuntimes[frame]; child != nil {
-			beforeUnload := dom.NewEvent("beforeunload", false, true)
+			beforeUnload := dom.NewTrustedEvent("beforeunload", false, true)
 			child.fireWindowListeners(beforeUnload, true)
 			child.fireWindowListeners(beforeUnload, false)
 		}
@@ -3502,7 +3502,7 @@ func (r *Runtime) scheduleIFrameNavigation(frame *dom.Node, target string) {
 					_ = win.Set("document", r.wrapIFrameDocument(frame))
 				}
 				r.installExternalIFrameRuntime(frame, doc, target)
-				r.dispatchWithWindowStep(frame, dom.NewEvent("load", false, false))
+				r.dispatchWithWindowStep(frame, dom.NewTrustedEvent("load", false, false))
 				return
 			}
 		}

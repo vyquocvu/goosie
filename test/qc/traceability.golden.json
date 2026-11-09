@@ -1846,6 +1846,8 @@
     "tests": [
       "cmd/goosie/journey_ime_visual_test.go:TestJourneyIMECompositionInksThePreviewOnce",
       "cmd/goosie/journey_p2_forms_test.go:TestJourneyIMECompositionThenSubmit",
+      "test/engine/control_events_test.go:TestFocusTransitionEventsAreTrusted",
+      "test/engine/control_events_test.go:TestIMEBlurFiresTrustedChangeAndBlur",
       "test/engine/ime_composition_parity_test.go:TestCompositionEventStreamCarriesTheMarkedTextOnce",
       "test/engine/ime_composition_parity_test.go:TestCompositionInksTheMarkedTextOnce",
       "test/engine/ime_composition_parity_test.go:TestCompositionKeepsCombiningMarksVerbatim",

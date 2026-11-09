@@ -1,10 +1,12 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/engine"
+	"github.com/vyquocvu/goosie/internal/js"
 )
 
 // --- Focus/blur/change event tests ---
@@ -502,5 +504,91 @@ func TestAnchorWithoutHrefNotTabbable(t *testing.T) {
 	controls := engine.TabbableControls(doc)
 	if len(controls) != 0 {
 		t.Fatalf("tabbable controls = %d, want 0 (a without href)", len(controls))
+	}
+}
+
+// qc:BR-111
+func TestFocusTransitionEventsAreTrusted(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body><input id="a" value="x"><input id="b"></body></html>`)
+	if _, err := s.EvaluateJS(`(function(){
+		window.evts = [];
+		["a","b"].forEach(function(id){
+			var el = document.getElementById(id);
+			["blur","focus","focusout","focusin","change","input"].forEach(function(typ){
+				el.addEventListener(typ, function(e){ window.evts.push(id+":"+typ+":"+e.isTrusted); });
+			});
+		});
+	})()`); err != nil {
+		t.Fatalf("install listeners: %v", err)
+	}
+	cx, cy := clickPoint(t, s, "a")
+	s.FocusControl(cx, cy)
+	s.Edit(engine.EditRune, 'y')
+	s.FocusNext()
+	got, err := s.EvaluateJS(`window.evts.join(",")`)
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	for _, entry := range strings.Split(got, ",") {
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, ":", 3)
+		if len(parts) != 3 {
+			t.Fatalf("malformed event entry: %q", entry)
+		}
+		if parts[2] != "true" {
+			t.Errorf("event %q has isTrusted=%s, want true", entry, parts[2])
+		}
+	}
+	if len(got) == 0 {
+		t.Fatal("no focus events recorded")
+	}
+}
+
+// qc:BR-111
+func TestIMEBlurFiresTrustedChangeAndBlur(t *testing.T) {
+	rt, err := js.New(js.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := engine.NewSession(`<html><body><input id="edit"><input id="next"></body></html>`, nil, 400, engine.WithJS(rt))
+	if err != nil {
+		_ = rt.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	cx, cy := clickPoint(t, s, "edit")
+	s.FocusControl(cx, cy)
+	if _, err := s.EvaluateJS(`(function(){
+		window.evts = [];
+		var edit = document.getElementById("edit");
+		["blur","focusout","change","input","compositionend"].forEach(function(typ){
+			edit.addEventListener(typ, function(e){ window.evts.push(typ+":"+e.isTrusted); });
+		});
+	})()`); err != nil {
+		t.Fatalf("install listeners: %v", err)
+	}
+	s.SetMarked("te")
+	s.CommitText("tiếng")
+	edit := s.Doc.ElementByID("edit")
+	next := s.Doc.ElementByID("next")
+	s.BlurNode(edit)
+	s.FocusNode(next)
+	got, err := s.EvaluateJS(`window.evts.join(",")`)
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	for _, entry := range strings.Split(got, ",") {
+		if entry == "" {
+			continue
+		}
+		parts := strings.SplitN(entry, ":", 2)
+		if len(parts) != 2 {
+			t.Fatalf("malformed event entry: %q", entry)
+		}
+		if parts[1] != "true" {
+			t.Errorf("event %q has isTrusted=%s, want true", entry, parts[1])
+		}
 	}
 }

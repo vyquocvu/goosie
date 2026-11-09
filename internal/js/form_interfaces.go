@@ -621,10 +621,7 @@ func (r *Runtime) clickHTMLElement(call goja.FunctionCall) goja.Value {
 		r.activeSubmitter = node
 		r.activationFormFrames = nil
 	}
-	clickEvent := dom.NewEvent("click", true, true)
-	if r.testDriverTrustedClick {
-		clickEvent = dom.NewTrustedEvent("click", true, true)
-	}
+	clickEvent := dom.NewTrustedEvent("click", true, true)
 	clickAllowed := r.dispatchClickActivation(node, clickEvent)
 	activationFrames := r.activationFormFrames
 	r.activeSubmitter, r.activationFormFrames = previousSubmitter, previousActivationFrames
@@ -633,10 +630,7 @@ func (r *Runtime) clickHTMLElement(call goja.FunctionCall) goja.Value {
 	}
 	if label := labelForClick(node); label != nil {
 		if control := r.labelControl(label); control != nil && !dom.IsFormControlDisabled(control) {
-			controlClick := dom.NewEvent("click", true, true)
-			if r.testDriverTrustedClick {
-				controlClick = dom.NewTrustedEvent("click", true, true)
-			}
+			controlClick := dom.NewTrustedEvent("click", true, true)
 			if r.dispatchClickActivation(control, controlClick) && r.opts.OnFocusChange != nil {
 				r.opts.OnFocusChange(control, true)
 			}
@@ -1125,8 +1119,6 @@ func (r *Runtime) testDriverClick(target goja.Value) {
 			r.handleTestDriverPointerUp(node, "mouse", 0)
 		}
 	}
-	r.testDriverTrustedClick = true
-	defer func() { r.testDriverTrustedClick = false }()
 	r.clickHTMLElement(goja.FunctionCall{This: target})
 }
 
@@ -1310,7 +1302,7 @@ func (r *Runtime) checkFormValidityWithReport(form *dom.Node, report bool) bool 
 	valid := true
 	var firstInvalid *dom.Node
 	dispatchInvalid := func(control *dom.Node) {
-		if dom.DispatchEvent(control, dom.NewEvent("invalid", false, true)) && firstInvalid == nil {
+		if dom.DispatchEvent(control, dom.NewTrustedEvent("invalid", false, true)) && firstInvalid == nil {
 			firstInvalid = control
 		}
 	}

@@ -699,7 +699,7 @@ func TestCheckboxClickActivationStateAndEvents(t *testing.T) {
 			c.addEventListener('click',function(e){e.preventDefault()});
 			return first+'/'+canceled;
 		})()`,
-		want: "true|false|click:true:false:false>input:true:false:true>change:true:false:true/false|false|1",
+		want: "true|false|click:true:false:true>input:true:false:true>change:true:false:true/false|false|1",
 	}})
 }
 

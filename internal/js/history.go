@@ -197,7 +197,7 @@ func (h *historyObj) goTo(delta int) {
 
 	// Fire popstate event if we actually moved.
 	if newIndex != oldIndex && h.doc != nil {
-		ev := dom.NewEvent("popstate", false, false)
+		ev := dom.NewTrustedEvent("popstate", false, false)
 		dom.DispatchEvent(&h.doc.Node, ev)
 	}
 }

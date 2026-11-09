@@ -24,12 +24,12 @@ func (s *Session) showPopoverLocked(n *dom.Node) bool {
 	if pType == "" || pType == "auto" {
 		s.closeOpenAutoPopoversLocked(n)
 	}
-	beforeEv := dom.NewEvent("beforetoggle", false, true)
+	beforeEv := dom.NewTrustedEvent("beforetoggle", false, true)
 	if !dom.DispatchEvent(n, beforeEv) {
 		return false // canceled
 	}
 	n.IsPopoverOpen = true
-	dom.DispatchEvent(n, dom.NewEvent("toggle", false, false))
+	dom.DispatchEvent(n, dom.NewTrustedEvent("toggle", false, false))
 	return true
 }
 
@@ -45,12 +45,12 @@ func (s *Session) hidePopoverLocked(n *dom.Node) bool {
 	if n == nil || !n.Element() || !n.HasAttribute("popover") || !n.IsPopoverOpen {
 		return false
 	}
-	beforeEv := dom.NewEvent("beforetoggle", false, true)
+	beforeEv := dom.NewTrustedEvent("beforetoggle", false, true)
 	if !dom.DispatchEvent(n, beforeEv) {
 		return false // canceled
 	}
 	n.IsPopoverOpen = false
-	dom.DispatchEvent(n, dom.NewEvent("toggle", false, false))
+	dom.DispatchEvent(n, dom.NewTrustedEvent("toggle", false, false))
 	return true
 }
 
@@ -134,10 +134,10 @@ func (s *Session) closeOpenAutoPopoversLocked(except *dom.Node) {
 			if pType == "" || pType == "auto" {
 				// Don't close ancestors of except
 				if !isDescendantOrSelf(except, n) {
-					beforeEv := dom.NewEvent("beforetoggle", false, true)
+					beforeEv := dom.NewTrustedEvent("beforetoggle", false, true)
 					if dom.DispatchEvent(n, beforeEv) {
 						n.IsPopoverOpen = false
-						dom.DispatchEvent(n, dom.NewEvent("toggle", false, false))
+						dom.DispatchEvent(n, dom.NewTrustedEvent("toggle", false, false))
 					}
 				}
 			}
@@ -207,10 +207,10 @@ func (s *Session) dismissAutoPopoversExcept(hitNode *dom.Node) bool {
 		if hitNode != nil && (isDescendantOrSelf(hitNode, p) || isInvokerFor(hitNode, p)) {
 			continue
 		}
-		beforeEv := dom.NewEvent("beforetoggle", false, true)
+		beforeEv := dom.NewTrustedEvent("beforetoggle", false, true)
 		if dom.DispatchEvent(p, beforeEv) {
 			p.IsPopoverOpen = false
-			dom.DispatchEvent(p, dom.NewEvent("toggle", false, false))
+			dom.DispatchEvent(p, dom.NewTrustedEvent("toggle", false, false))
 			dismissedAny = true
 		}
 	}

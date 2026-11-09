@@ -37,7 +37,7 @@ func (s *Session) FireResizeEvent() {
 	// Resize events fire on the window object. Since we don't have a full
 	// window object in the DOM, we fire on the document which is the closest
 	// equivalent in our model.
-	ev := dom.NewEvent("resize", false, false)
+	ev := dom.NewTrustedEvent("resize", false, false)
 	dom.DispatchEvent(&s.Doc.Node, ev)
 }
 
@@ -284,7 +284,7 @@ func (s *Session) clearKeyboardActiveLocked() {
 }
 
 func (s *Session) activateKeyboardTarget(n *dom.Node) bool {
-	click := dom.NewEvent("click", true, true)
+	click := dom.NewTrustedEvent("click", true, true)
 	if !dom.DispatchEvent(n, click) {
 		return false
 	}

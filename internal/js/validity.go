@@ -955,7 +955,7 @@ func (r *Runtime) checkNativeFormControlValidity(node *dom.Node) bool {
 	r.updateRangeValidity(node)
 	invalid := node.CustomValidityMessage != "" || r.inputTypeMismatch(node) || r.inputPatternMismatch(node) || node.RangeUnderflow || node.RangeOverflow || node.StepMismatch || dom.IsTooLong(node) || dom.IsTooShort(node) || r.formControlValueMissing(node)
 	if invalid {
-		dom.DispatchEvent(node, dom.NewEvent("invalid", false, true))
+		dom.DispatchEvent(node, dom.NewTrustedEvent("invalid", false, true))
 	}
 	return !invalid
 }

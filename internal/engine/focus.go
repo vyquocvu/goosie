@@ -429,16 +429,16 @@ func (s *Session) setFocusedNodeLocked(n *dom.Node) bool {
 			css.SetFocus(previousHost, false)
 			css.SetFocusVisible(previousHost, false)
 		}
-		dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
+		dom.DispatchEvent(prev, dom.NewTrustedEvent("blur", false, false))
 		if previousHost != nil {
-			dom.DispatchEvent(previousHost, dom.NewEvent("blur", false, false))
+			dom.DispatchEvent(previousHost, dom.NewTrustedEvent("blur", false, false))
 		}
-		dom.DispatchEvent(prev, dom.NewEvent("focusout", true, false))
+		dom.DispatchEvent(prev, dom.NewTrustedEvent("focusout", true, false))
 		if previousHost != nil {
-			dom.DispatchEvent(previousHost, dom.NewEvent("focusout", true, false))
+			dom.DispatchEvent(previousHost, dom.NewTrustedEvent("focusout", true, false))
 		}
 		if controlEditable(prev) && s.focusUserChanged && s.controlValue(prev) != s.focusValue {
-			dom.DispatchEvent(prev, dom.NewEvent("change", true, true))
+			dom.DispatchEvent(prev, dom.NewTrustedEvent("change", true, true))
 		}
 	}
 	s.focus = n
@@ -460,13 +460,13 @@ func (s *Session) setFocusedNodeLocked(n *dom.Node) bool {
 			css.SetFocus(nextHost, true)
 			css.SetFocusVisible(nextHost, focusVisibleByDefault(nextHost))
 		}
-		dom.DispatchEvent(n, dom.NewEvent("focus", false, false))
+		dom.DispatchEvent(n, dom.NewTrustedEvent("focus", false, false))
 		if nextHost != nil {
-			dom.DispatchEvent(nextHost, dom.NewEvent("focus", false, false))
+			dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focus", false, false))
 		}
-		dom.DispatchEvent(n, dom.NewEvent("focusin", true, false))
+		dom.DispatchEvent(n, dom.NewTrustedEvent("focusin", true, false))
 		if nextHost != nil {
-			dom.DispatchEvent(nextHost, dom.NewEvent("focusin", true, false))
+			dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focusin", true, false))
 		}
 	} else {
 		s.caret = 0
@@ -479,13 +479,13 @@ func (s *Session) setFocusedNodeLocked(n *dom.Node) bool {
 				css.SetFocus(nextHost, true)
 				css.SetFocusVisible(nextHost, focusVisibleByDefault(nextHost))
 			}
-			dom.DispatchEvent(n, dom.NewEvent("focus", false, false))
+			dom.DispatchEvent(n, dom.NewTrustedEvent("focus", false, false))
 			if nextHost != nil {
-				dom.DispatchEvent(nextHost, dom.NewEvent("focus", false, false))
+				dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focus", false, false))
 			}
-			dom.DispatchEvent(n, dom.NewEvent("focusin", true, false))
+			dom.DispatchEvent(n, dom.NewTrustedEvent("focusin", true, false))
 			if nextHost != nil {
-				dom.DispatchEvent(nextHost, dom.NewEvent("focusin", true, false))
+				dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focusin", true, false))
 			}
 		}
 	}
@@ -1107,7 +1107,7 @@ func (s *Session) closeTopmostModalDialogLocked() bool {
 	if topmost == nil {
 		return false
 	}
-	cancelEv := dom.NewEvent("cancel", false, true)
+	cancelEv := dom.NewTrustedEvent("cancel", false, true)
 	if !dom.DispatchEvent(topmost, cancelEv) {
 		return false // preventDefault was called
 	}
@@ -1245,7 +1245,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.noteControlBlur(prev)
 			css.SetFocus(prev, false)
 			css.SetFocusVisible(prev, false)
-			dom.DispatchEvent(prev, dom.NewEvent("blur", false, false))
+			dom.DispatchEvent(prev, dom.NewTrustedEvent("blur", false, false))
 			return true
 		}
 		return closedDialog
@@ -1287,14 +1287,14 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			return false
 		}
 		if insert(string(r)) {
-			dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 			return true
 		}
 		return false
 	case EditEnter:
 		if s.focus.DataAtom == dom.AtomTextarea {
 			if insert("\n") {
-				dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+				dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 				return true
 			}
 			return false
@@ -1314,7 +1314,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionActive = false
 			s.setControlValue(s.focus, string(out))
 			s.syncControlSelectionLocked()
-			dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 			return true
 		}
 		if s.caret == 0 || len(runes) == 0 {
@@ -1326,7 +1326,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 		s.controlSelectionActive = false
 		s.setControlValue(s.focus, string(out))
 		s.syncControlSelectionLocked()
-		dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 		return true
 	case EditDelete:
 		if hasSelection {
@@ -1336,7 +1336,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionActive = false
 			s.setControlValue(s.focus, string(out))
 			s.syncControlSelectionLocked()
-			dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 			return true
 		}
 		if s.caret >= len(runes) {
@@ -1347,7 +1347,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 		s.controlSelectionActive = false
 		s.setControlValue(s.focus, string(out))
 		s.syncControlSelectionLocked()
-		dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 		return true
 	case EditLeft:
 		if shift {
@@ -2493,7 +2493,7 @@ func (s *Session) InsertText(text string) bool {
 	s.controlSelectionActive = false
 	s.setControlValue(s.focus, string(out))
 	s.syncControlSelectionLocked()
-	dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+	dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 	return true
 }
 
@@ -2623,7 +2623,7 @@ func (s *Session) SetFocusedText(value string) bool {
 		return false
 	}
 	s.setControlValue(s.focus, value)
-	dom.DispatchEvent(s.focus, dom.NewEvent("input", true, true))
+	dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
 	return true
 }
 
@@ -2845,8 +2845,8 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 	switch typ {
 	case "checkbox":
 		SetChecked(n, !IsChecked(n))
-		dom.DispatchEvent(n, dom.NewEvent("change", true, true))
-		dom.DispatchEvent(n, dom.NewEvent("input", true, true))
+		dom.DispatchEvent(n, dom.NewTrustedEvent("change", true, true))
+		dom.DispatchEvent(n, dom.NewTrustedEvent("input", true, true))
 		return true
 	case "radio":
 		// Uncheck all radios in the same group (same name, same form).
@@ -2863,8 +2863,8 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 		// Uncheck siblings with the same name.
 		uncheckRadioGroup(root, name, n)
 		SetChecked(n, true)
-		dom.DispatchEvent(n, dom.NewEvent("change", true, true))
-		dom.DispatchEvent(n, dom.NewEvent("input", true, true))
+		dom.DispatchEvent(n, dom.NewTrustedEvent("change", true, true))
+		dom.DispatchEvent(n, dom.NewTrustedEvent("input", true, true))
 		return true
 	}
 	return false
@@ -2967,10 +2967,10 @@ func (s *Session) FocusFrom(from *dom.Node, backwards bool) {
 		s.noteControlBlur(s.focus)
 		css.SetFocus(s.focus, false)
 		css.SetFocusVisible(s.focus, false)
-		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
-		dom.DispatchEvent(s.focus, dom.NewEvent("focusout", true, false))
+		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("blur", false, false))
+		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("focusout", true, false))
 		if s.focusUserChanged && s.controlValue(s.focus) != s.focusValue {
-			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
+			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("change", true, true))
 		}
 	}
 	s.focus = next
@@ -2984,8 +2984,8 @@ func (s *Session) FocusFrom(from *dom.Node, backwards bool) {
 	s.focusUserChanged = false
 	css.SetFocus(next, true)
 	css.SetFocusVisible(next, true)
-	dom.DispatchEvent(next, dom.NewEvent("focus", false, false))
-	dom.DispatchEvent(next, dom.NewEvent("focusin", true, false))
+	dom.DispatchEvent(next, dom.NewTrustedEvent("focus", false, false))
+	dom.DispatchEvent(next, dom.NewTrustedEvent("focusin", true, false))
 	s.scrollFocusedNodeIntoViewLocked(next)
 }
 
@@ -3045,10 +3045,10 @@ func (s *Session) FocusPrev() {
 		s.noteControlBlur(s.focus)
 		css.SetFocus(s.focus, false)
 		css.SetFocusVisible(s.focus, false)
-		dom.DispatchEvent(s.focus, dom.NewEvent("blur", false, false))
-		dom.DispatchEvent(s.focus, dom.NewEvent("focusout", true, false))
+		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("blur", false, false))
+		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("focusout", true, false))
 		if s.focusUserChanged && s.controlValue(s.focus) != s.focusValue {
-			dom.DispatchEvent(s.focus, dom.NewEvent("change", true, true))
+			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("change", true, true))
 		}
 	}
 	s.focus = prev
@@ -3062,8 +3062,8 @@ func (s *Session) FocusPrev() {
 	s.focusUserChanged = false
 	css.SetFocus(prev, true)
 	css.SetFocusVisible(prev, true)
-	dom.DispatchEvent(prev, dom.NewEvent("focus", false, false))
-	dom.DispatchEvent(prev, dom.NewEvent("focusin", true, false))
+	dom.DispatchEvent(prev, dom.NewTrustedEvent("focus", false, false))
+	dom.DispatchEvent(prev, dom.NewTrustedEvent("focusin", true, false))
 	s.scrollFocusedNodeIntoViewLocked(prev)
 }
 
@@ -3314,7 +3314,7 @@ func (s *Session) SetHover(x, y float32) bool {
 		for current := prev; current != nil && current.Element(); current = current.Parent {
 			css.SetHover(current, false)
 		}
-		dom.DispatchEvent(prev, dom.NewEvent("mouseleave", false, false))
+		dom.DispatchEvent(prev, dom.NewTrustedEvent("mouseleave", false, false))
 	}
 
 	s.hovered = hovered
@@ -3324,7 +3324,7 @@ func (s *Session) SetHover(x, y float32) bool {
 		for current := hovered; current != nil && current.Element(); current = current.Parent {
 			css.SetHover(current, true)
 		}
-		dom.DispatchEvent(hovered, dom.NewEvent("mouseenter", false, false))
+		dom.DispatchEvent(hovered, dom.NewTrustedEvent("mouseenter", false, false))
 	}
 
 	return true

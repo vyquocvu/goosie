@@ -360,7 +360,7 @@ func (r *Runtime) DispatchMediaEvents(node *dom.Node, events []media.Event) {
 		// Media events do not bubble: they are about one element's own state, and
 		// a document-level listener for "play" would otherwise fire for every
 		// video on the page.
-		ev := dom.NewEvent(name, false, false)
+		ev := dom.NewTrustedEvent(name, false, false)
 		_, _ = r.callBounded(func() (goja.Value, error) {
 			dom.DispatchEvent(node, ev)
 			return goja.Undefined(), nil

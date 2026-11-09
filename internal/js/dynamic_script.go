@@ -65,7 +65,7 @@ func (r *Runtime) tickDynamicScripts() bool {
 	}
 	r.dynamicScriptStarted[node] = true
 	if r.dynamicScriptLimit > 0 && r.dynamicScriptCount >= r.dynamicScriptLimit {
-		r.dispatchWithWindowStep(node, dom.NewEvent("error", false, false))
+		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("error", false, false))
 		if len(r.dynamicScriptErrors) < 64 {
 			r.dynamicScriptErrors = append(r.dynamicScriptErrors, src+": external script limit exceeded")
 		}
@@ -89,7 +89,7 @@ func (r *Runtime) tickDynamicScripts() bool {
 		}
 		typ = "error"
 	}
-	r.dispatchWithWindowStep(node, dom.NewEvent(typ, false, false))
+	r.dispatchWithWindowStep(node, dom.NewTrustedEvent(typ, false, false))
 	return true
 }
 

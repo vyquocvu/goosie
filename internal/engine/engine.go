@@ -2399,7 +2399,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 			form.UserInteracted = true
 			for _, control := range invalid {
 				control.UserInteracted = true
-				dom.DispatchEvent(control, dom.NewEvent("invalid", false, false))
+				dom.DispatchEvent(control, dom.NewTrustedEvent("invalid", false, false))
 			}
 			s.setFocusedNodeLocked(invalid[0])
 			s.validationAnchor = invalid[0]
@@ -2407,7 +2407,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 			return
 		}
 	}
-	ev := dom.NewEvent("submit", true, true)
+	ev := dom.NewTrustedEvent("submit", true, true)
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}

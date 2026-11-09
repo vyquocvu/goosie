@@ -4104,7 +4104,7 @@ func (r *Runtime) applyImageResult(node *dom.Node, st *imageLoadState, res Loade
 			r.rejectPromise(p, reason)
 		}
 		st.waiters = nil
-		dom.DispatchEvent(node, dom.NewEvent("error", false, false))
+		dom.DispatchEvent(node, dom.NewTrustedEvent("error", false, false))
 		return
 	}
 	st.status = imageLoaded
@@ -4125,7 +4125,7 @@ func (r *Runtime) applyImageResult(node *dom.Node, st *imageLoadState, res Loade
 	if sink != nil {
 		sink(node, st.src, res.Pixels)
 	}
-	dom.DispatchEvent(node, dom.NewEvent("load", false, false))
+	dom.DispatchEvent(node, dom.NewTrustedEvent("load", false, false))
 }
 
 // encodingError is the DOMException-shaped rejection decode() reports, which

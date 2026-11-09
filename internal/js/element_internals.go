@@ -90,7 +90,7 @@ func (r *Runtime) setupElementInternals() {
 			panic(r.domError("NotSupportedError", "The element is not form-associated."))
 		}
 		if !state.valid {
-			dom.DispatchEvent(state.node, dom.NewEvent("invalid", false, true))
+			dom.DispatchEvent(state.node, dom.NewTrustedEvent("invalid", false, true))
 		}
 		return r.vm.ToValue(state.valid)
 	})
@@ -103,7 +103,7 @@ func (r *Runtime) setupElementInternals() {
 			panic(r.domError("NotSupportedError", "The element is not form-associated."))
 		}
 		if !state.valid {
-			if dom.DispatchEvent(state.node, dom.NewEvent("invalid", false, true)) {
+			if dom.DispatchEvent(state.node, dom.NewTrustedEvent("invalid", false, true)) {
 				r.focusInvalidControl(state.node)
 			}
 		}

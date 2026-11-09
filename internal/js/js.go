@@ -318,7 +318,6 @@ type Runtime struct {
 	inDeferScript            bool
 	timerNesting             int
 	scriptExecutionDepth     int
-	testDriverTrustedClick   bool
 	// timedOut records that the host's own deadline stopped user code. It is
 	// separate from Interrupt so a navigation or tab close is not reported to
 	// the user as an unresponsive page. Take clears the flag once the host has
