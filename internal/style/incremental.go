@@ -230,7 +230,10 @@ func sameTreeInputs(a, b treeInputSnapshot) bool {
 	}
 	for id, before := range a.nodes {
 		after, ok := b.nodes[id]
-		if !ok || !sameNodeStyleInput(before, after) {
+		if !ok {
+			return false
+		}
+		if !sameNodeStyleInput(before, after) {
 			return false
 		}
 		for i := 0; i < before.attrCount; i++ {
@@ -244,12 +247,21 @@ func sameTreeInputs(a, b treeInputSnapshot) bool {
 
 func sameNodeStyleInput(a, b nodeStyleInput) bool {
 	if a.typeOf != b.typeOf || a.namespace != b.namespace || a.data != b.data || a.dataAtom != b.dataAtom ||
-		a.dataContent != b.dataContent || a.parent != b.parent || a.firstChild != b.firstChild ||
+		a.parent != b.parent || a.firstChild != b.firstChild ||
 		a.lastChild != b.lastChild || a.nextSibling != b.nextSibling || a.prevSibling != b.prevSibling ||
 		a.shadowFirst != b.shadowFirst || a.shadowLast != b.shadowLast || a.shadowMode != b.shadowMode ||
 		a.hasShadow != b.hasShadow || a.modal != b.modal || a.popoverOpen != b.popoverOpen || a.scopeRoot != b.scopeRoot ||
-		a.attrStart != b.attrStart || a.attrCount != b.attrCount {
+		a.attrCount != b.attrCount {
 		return false
+	}
+	// Ignore dataContent differences for whitespace-only text nodes
+	// These are often normalized during parsing/layout
+	if a.dataContent != b.dataContent {
+		aIsWhitespaceText := a.typeOf == dom.NodeText && strings.TrimSpace(a.dataContent) == ""
+		bIsWhitespaceText := b.typeOf == dom.NodeText && strings.TrimSpace(b.dataContent) == ""
+		if !(aIsWhitespaceText && bIsWhitespaceText) {
+			return false
+		}
 	}
 	return true
 }

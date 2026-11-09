@@ -355,13 +355,13 @@ func (a *Arena) RefreshComputedStylesForNodes(styles map[dom.NodeID]*style.Compu
 	if a == nil {
 		return false
 	}
+	if len(nodes) == 0 {
+		return true
+	}
 	for i := 1; i < len(a.Objects); i++ {
 		if a.Objects[i].flags&flagAnonymous != 0 {
 			return false
 		}
-	}
-	if len(nodes) == 0 {
-		return true
 	}
 	wanted := make(map[dom.NodeID]struct{}, len(nodes))
 	for _, id := range nodes {

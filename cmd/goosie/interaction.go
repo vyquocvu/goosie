@@ -197,16 +197,44 @@ func (f *framePath) hoverContent(contentX, contentY int32) {
 	}
 	sess := tab.Session()
 	dx, dy := f.docPoint(contentX, contentY)
+
+	// Compute damage rect BEFORE changing hover state
+	prevHoverRect := sess.HoverDamageRect()
+
 	if !sess.SetHover(dx, dy) {
 		return
 	}
+
+	// Compute new hover damage rect
+	newHoverRect := sess.HoverDamageRect()
+
+	// Union of old and new hover areas
+	damageRect := prevHoverRect.Union(newHoverRect)
+
 	if !sess.HasPseudoClassRule("hover") || sess.CanDeferControlEditReflow() {
+		// No :hover rules or can defer - just repaint the damage
+		if !damageRect.Empty() {
+			f.repaintTab(tab, damageRect)
+		}
 		return
 	}
-	if err := sess.RestyleAndReflow(float32(f.contentWidth())); err != nil {
-		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+
+	// Has :hover rules - need to re-style
+	// Check if hover change is geometry-neutral (only affects paint, not layout)
+	if sess.IsHoverGeometryNeutral() {
+		// Geometry-neutral: skip reflow, only re-style and repaint
+		if err := sess.RestyleForHover(); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie: restyle:", err)
+		}
+	} else {
+		// Geometry changed: need full reflow
+		if err := sess.RestyleAndReflow(float32(f.contentWidth())); err != nil {
+			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+		}
 	}
-	f.repaintTab(tab, frame.Rect{})
+
+	// Repaint with accurate damage rect
+	f.repaintTab(tab, damageRect)
 }
 
 // setContentActive updates :active from primary-pointer input. Restyling is
@@ -234,10 +262,15 @@ func (f *framePath) refreshActiveContent() {
 	if tab == nil || tab.Session() == nil || !tab.Session().HasPseudoClassRule("active") {
 		return
 	}
+	// Pre-compute damage rect before reflow
+	prevRect := tab.Session().FocusDamageRect()
 	if err := tab.Session().RestyleAndReflow(float32(f.contentWidth())); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 	}
-	f.repaintTab(tab, frame.Rect{})
+	// Union old and new damage rects for accurate repaint
+	newRect := tab.Session().FocusDamageRect()
+	damageRect := prevRect.Union(newRect)
+	f.repaintTab(tab, damageRect)
 }
 
 // setWindowIME turns the platform input context on while a document control has
@@ -301,7 +334,11 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 		dx, dy := f.docPoint(contentX, contentY)
 		if tab.Session().MoveRangePointerDragAt(dx, dy) {
 			f.reflowAfterControlEdit(tab)
-			f.repaintTab(tab, frame.Rect{})
+			if newR, ok := tab.Session().SelectionBounds(); ok {
+				f.repaintTab(tab, f.selectionDamage(tab, newR, true))
+			} else {
+				f.repaintTab(tab, frame.Rect{})
+			}
 			return true
 		}
 		if !f.selDrag {
@@ -316,7 +353,11 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 	case surface.PointerRelease:
 		dx, dy := f.docPoint(contentX, contentY)
 		if tab.Session().EndRangePointerDragAt(dx, dy) {
-			f.repaintTab(tab, frame.Rect{})
+			if newR, ok := tab.Session().SelectionBounds(); ok {
+				f.repaintTab(tab, f.selectionDamage(tab, newR, true))
+			} else {
+				f.repaintTab(tab, frame.Rect{})
+			}
 			return true
 		}
 		wasDragging := f.selDrag
