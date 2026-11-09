@@ -2,6 +2,7 @@ package js
 
 import (
 	"errors"
+	"time"
 
 	"github.com/dop251/goja"
 )
@@ -49,12 +50,35 @@ func (r *Runtime) setupAbortController() {
 		return r.newAbortSignal(true, r.resolveAbortReason(call.Arguments))
 	})
 
-	// AbortSignal.timeout(ms) static method. Chromium reports signal.reason as
-	// undefined until the timer fires; the timer itself is not implemented yet
-	// (GOOSIE-SIGNALTIMEOUT-001), so the reason starts out undefined rather
-	// than claiming a TimeoutError that never arrives.
+	// AbortSignal.timeout(ms) static method. Creates a signal that automatically
+	// aborts after ms milliseconds with a TimeoutError DOMException as the reason.
+	// Per Chromium measurement (scripts/verify-br123-fetch-abort.js section 8):
+	// reason is undefined before the timer fires, then becomes a TimeoutError
+	// DOMException with name="TimeoutError", message="signal timed out", code=23.
 	_ = signalObj.Set("timeout", func(call goja.FunctionCall) goja.Value {
-		return r.newAbortSignal(false, goja.Undefined())
+		ms := int64(0)
+		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) && !goja.IsNull(call.Arguments[0]) {
+			ms = call.Arguments[0].ToInteger()
+		}
+		if ms < 0 {
+			ms = 0
+		}
+		signal := r.newAbortSignal(false, goja.Undefined())
+		r.nextTimerID++
+		id := r.nextTimerID
+		callback := r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+			timeoutErr := r.newDOMExceptionValue("TimeoutError", "signal timed out")
+			if fn, ok := goja.AssertFunction(signal.Get("__abort__")); ok {
+				_, _ = fn(signal, timeoutErr)
+			}
+			return goja.Undefined()
+		})
+		r.timers[id] = &timer{
+			id:       id,
+			callback: callback,
+			nextFire: time.Now().Add(time.Duration(ms) * time.Millisecond),
+		}
+		return signal
 	})
 
 	_ = r.vm.Set("AbortSignal", signalObj)
@@ -137,11 +161,22 @@ func (r *Runtime) newAbortSignal(aborted bool, reason goja.Value) *goja.Object {
 			stateReason = call.Arguments[0]
 		}
 		r.runAbortAlgorithms(signal)
-		handler := signal.Get("onabort")
-		if fn, ok := goja.AssertFunction(handler); ok {
-			eventObj := r.vm.NewObject()
-			_ = eventObj.Set("type", "abort")
-			_, _ = fn(signal, eventObj)
+		// Create an abort event and dispatch it. The onabort property handler
+		// is called directly; addEventListener('abort', ...) listeners are
+		// invoked through dispatchGenericEvent.
+		eventObj := r.jsCreateLegacyEvent("Event")
+		if evt, ok := eventObj.(*goja.Object); ok {
+			_ = evt.Set("type", "abort")
+			_ = evt.Set("__initialized", true)
+			_ = evt.Set("isTrusted", true)
+			handler := signal.Get("onabort")
+			if fn, ok := goja.AssertFunction(handler); ok {
+				_, _ = fn(signal, evt)
+			}
+			r.dispatchGenericEvent(goja.FunctionCall{
+				This:      signal,
+				Arguments: []goja.Value{evt},
+			})
 		}
 		return goja.Undefined()
 	})

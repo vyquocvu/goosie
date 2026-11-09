@@ -2058,6 +2058,9 @@
     ],
     "status": "PASS",
     "tests": [
+      "test/js/abort_controller_test.go:TestAbortSignalTimeoutFiresAbortEvent",
+      "test/js/abort_controller_test.go:TestAbortSignalTimeoutFiresWithTimeoutError",
+      "test/js/abort_controller_test.go:TestAbortSignalTimeoutReasonUndefinedBeforeFire",
       "test/js/fetch_abort_reason_test.go:TestAbortSignalReasonIsADOMException",
       "test/js/fetch_abort_reason_test.go:TestFetchAbortDefaultRejectsAsADOMException",
       "test/js/fetch_abort_reason_test.go:TestFetchAbortErrorReasonStaysAnError",
