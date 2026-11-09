@@ -1893,32 +1893,67 @@ func (r *Runtime) SelectionTextCaret(host *dom.Node) (*dom.Node, int, bool) {
 // (scripts/verify-br111-ime-composition.js, 2026-11-05 - its first input event
 // already carried value="ti" and a Selection equal to it). Without that node
 // the user types a whole word into an empty editor and sees nothing until the
-// commit. A host that already has children is left alone: where a marked
-// passage belongs inside element structure is a separate question, recorded as
-// GOOSIE-IMEPREVIEW-001.
+// commit. A host that already has children but no selection inside them gets
+// the caret placed at the end of the last text node descendant (GOOSIE-IMEPREVIEW-001).
 func (r *Runtime) CompositionCaret(host *dom.Node) (*dom.Node, int, bool) {
 	if node, at, ok := r.SelectionTextCaret(host); ok {
 		return node, at, true
 	}
-	if host == nil || host.Doc == nil || !dom.IsContentEditable(host) || host.FirstChild != nil {
+	if host == nil || host.Doc == nil || !dom.IsContentEditable(host) {
 		return nil, 0, false
 	}
-	text := host.Doc.NewText("")
-	host.AppendChild(text)
-	if sel := r.selectionForDocument(host.Doc); sel != nil {
-		caret := rangeBoundary{container: text, offset: 0}
-		ran := &jsRange{start: caret, end: caret}
-		r.registerLiveRange(ran)
-		sel.ranges = []*jsRange{ran}
-		sel.selectedControl = nil
-		sel.backward = false
+	// If the host has no children, create a text node for the composition.
+	if host.FirstChild == nil {
+		text := host.Doc.NewText("")
+		host.AppendChild(text)
+		if sel := r.selectionForDocument(host.Doc); sel != nil {
+			caret := rangeBoundary{container: text, offset: 0}
+			ran := &jsRange{start: caret, end: caret}
+			r.registerLiveRange(ran)
+			sel.ranges = []*jsRange{ran}
+			sel.selectedControl = nil
+			sel.backward = false
+		}
+		// An inserted node is a structural change however it arrived: a page
+		// observing the editor sees the child, and the engine learns that a node
+		// the load-time cascade never saw has to be styled before it can ink.
+		r.queueInsertionMutation(host, []*dom.Node{text}, nil)
+		r.notifyMutation()
+		return text, 0, true
 	}
-	// An inserted node is a structural change however it arrived: a page
-	// observing the editor sees the child, and the engine learns that a node
-	// the load-time cascade never saw has to be styled before it can ink.
-	r.queueInsertionMutation(host, []*dom.Node{text}, nil)
-	r.notifyMutation()
-	return text, 0, true
+	// Host has children but no selection inside them. Find the last text node
+	// descendant and place the caret at the end.
+	if text := lastTextDescendant(host); text != nil {
+		offset := len(characterDataCodeUnits(text))
+		if sel := r.selectionForDocument(host.Doc); sel != nil {
+			caret := rangeBoundary{container: text, offset: offset}
+			ran := &jsRange{start: caret, end: caret}
+			r.registerLiveRange(ran)
+			sel.ranges = []*jsRange{ran}
+			sel.selectedControl = nil
+			sel.backward = false
+		}
+		return text, offset, true
+	}
+	return nil, 0, false
+}
+
+// lastTextDescendant returns the last text node descendant of node in tree
+// order, or nil if none exists.
+func lastTextDescendant(node *dom.Node) *dom.Node {
+	if node == nil {
+		return nil
+	}
+	// Walk children in reverse to find the last text node.
+	for child := node.LastChild; child != nil; child = child.PrevSibling {
+		if child.Type == dom.NodeText {
+			return child
+		}
+		if found := lastTextDescendant(child); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) execCommandDeleteSelection(sel *jsSelection) goja.Value {

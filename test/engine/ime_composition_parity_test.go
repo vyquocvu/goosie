@@ -232,6 +232,40 @@ func TestCompositionPreviewsLiveInAnEmptyContenteditable(t *testing.T) {
 
 // qc:BR-111
 //
+// A pre-filled contenteditable whose selection is not inside its text nodes
+// still gets a composition preview: the caret is placed at the end of the last
+// text node descendant. This pins the fix for GOOSIE-IMEPREVIEW-001.
+func TestCompositionPreviewsInPrefilledContenteditableWithoutSelection(t *testing.T) {
+	s := newCompositionSession(t, `<html><body style="margin:0"><div id="ce" contenteditable="true">hello</div></body></html>`)
+	installIMEProbe(t, s, "ce")
+	if !s.FocusNode(s.Doc.ElementByID("ce")) {
+		t.Fatal("contenteditable should take focus")
+	}
+	// Clear the selection so CompositionCaret falls through to lastTextDescendant
+	// instead of finding the caret via SelectionTextCaret at offset 0.
+	if _, err := s.EvaluateJS(`getSelection().removeAllRanges()`); err != nil {
+		t.Fatalf("clear selection: %v", err)
+	}
+	// Don't position the selection inside the text - leave it on the host.
+	// This simulates the case where focus lands on the editor but the IME
+	// starts before any caret exists inside the text.
+	if !s.SetMarked("ti") {
+		t.Fatal("SetMarked reported no change")
+	}
+	// The marked text should be appended to the existing content.
+	if got, want := evalState(t, s, `document.getElementById('ce').textContent`), "helloti"; got != want {
+		t.Errorf("contenteditable text during composition = %q, want %q", got, want)
+	}
+	if !s.CommitText("ti") {
+		t.Fatal("commit reported no change")
+	}
+	if got, want := evalState(t, s, `document.getElementById('ce').textContent`), "helloti"; got != want {
+		t.Errorf("after commit textContent = %q, want %q", got, want)
+	}
+}
+
+// qc:BR-111
+//
 // The preview node is an observed DOM insertion. Chromium's MutationObserver on
 // a fresh <div contenteditable> reported exactly:
 //

@@ -532,7 +532,7 @@ func characterDataCodeUnits(node *dom.Node) []uint16 {
 	if node == nil {
 		return nil
 	}
-	if node.DataUTF16 != nil {
+	if len(node.DataUTF16) > 0 {
 		return node.DataUTF16
 	}
 	return utf16.Encode([]rune(node.DataContent))

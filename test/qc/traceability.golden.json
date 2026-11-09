@@ -1855,6 +1855,7 @@
       "test/engine/ime_composition_parity_test.go:TestCompositionInksTheMarkedTextOnce",
       "test/engine/ime_composition_parity_test.go:TestCompositionKeepsCombiningMarksVerbatim",
       "test/engine/ime_composition_parity_test.go:TestCompositionMutatesTheDocumentAsObserved",
+      "test/engine/ime_composition_parity_test.go:TestCompositionPreviewsInPrefilledContenteditableWithoutSelection",
       "test/engine/ime_composition_parity_test.go:TestCompositionPreviewsLiveInAnEmptyContenteditable",
       "test/engine/ime_composition_parity_test.go:TestCompositionSelectsTheMarkedRangeInATextControl",
       "test/engine/ime_selection_paint_test.go:TestIMECompositionContentEditablePaintsSelectionHighlight",
