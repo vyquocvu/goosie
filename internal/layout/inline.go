@@ -1062,13 +1062,50 @@ func cjkBreakRune(r rune) bool {
 		(r >= 0xF900 && r <= 0xFAFF) // CJK Compatibility Ideographs
 }
 
+// kinsokuNoLineStart reports whether r must not begin a line (行頭禁則).
+// Chromium 1.63 pulled the previous character down rather than leave one of
+// these at line start (scripts/verify-br087-text-parity.js: the full-stop
+// fixture `文本文本文本文本文本文本。文本` broke as 11 ideographs + `本。文本`,
+// stop leads a line=false). The set covers the JIS X 4051 "no line start"
+// class: closing brackets, CJK punctuation, small kana, the prolonged-sound
+// mark, and iteration marks.
+func kinsokuNoLineStart(r rune) bool {
+	switch r {
+	// CJK punctuation: full stop, comma, prolonged sound
+	case 0x3001, 0x3002, 0x30FC: // 、 。 ー
+		return true
+	// Fullwidth forms of ASCII punctuation that close
+	case 0xFF01, 0xFF09, 0xFF0C, 0xFF0E, 0xFF1A, 0xFF1B, 0xFF1F, 0xFF3D, 0xFF5D: // ！ ） ， ． ： ； ？ ］ ｝
+		return true
+	// CJK closing brackets
+	case 0x3009, 0x300B, 0x300D, 0x300F, 0x3011, 0x3015: // 〉 》 」 』 】 〙
+		return true
+	// Small Hiragana
+	case 0x3041, 0x3043, 0x3045, 0x3047, 0x3048, 0x3063, 0x3083, 0x3085, 0x3087, 0x308E, 0x3095, 0x3096: // ぁ ぃ ぅ ぇ ぉ っ ゃ ゅ ょ ゎ ゕ ゖ
+		return true
+	// Small Katakana
+	case 0x30A1, 0x30A3, 0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE, 0x30F5, 0x30F6: // ァ ィ ゥ ェ ォ ッ ャ ュ ョ ヮ ヵ ヶ
+		return true
+	// Iteration marks
+	case 0x3005, 0x309D, 0x309E, 0x30FD, 0x30FE: // 々 ゝ ゞ ヽ ヾ
+		return true
+	// Horizontal ellipsis and related
+	case 0x2026, 0x2025, 0x3003: // … ‥ 〃
+		return true
+	}
+	return false
+}
+
 // splitCJKWords turns a word too long for its line into the units the line
 // breaker may place: each CJK rune closes a token, so the text after it -
 // including a Latin run that had no space before it - starts a new one, and
 // "中文aaa" breaks as 中 | 文aaa. A combining mark never opens a fragment, so
-// the decomposed accents stay with the base they decorate. A word that still
-// fits the line keeps its single box: a break opportunity that is never taken
-// must not fragment the run it sits in.
+// the decomposed accents stay with the base they decorate. A kinsoku no-line-
+// start character (。、ー and the rest of kinsokuNoLineStart) that would open
+// the next fragment is pulled into the current one instead, so the break sits
+// before the ideograph that precedes it and the forbidden character never
+// leads a line (GOOSIE-KINSOKU-001). A word that still fits keeps its single
+// box: a break opportunity that is never taken must not fragment the run.
 func splitCJKWords(words []string, avail, fontSize float32, m Metrics, slot frame.FontSlot, letterSpacing float32) []string {
 	overlong := false
 	for _, w := range words {
@@ -1097,6 +1134,14 @@ func splitCJKWords(words []string, avail, fontSize float32, m Metrics, slot fram
 			end := i + 1
 			for end < len(runes) && unicode.IsMark(runes[end]) {
 				end++
+			}
+			// Kinsoku: extend past any no-line-start rune so the fragment
+			// that follows the break does not open with one.
+			for end < len(runes) && kinsokuNoLineStart(runes[end]) {
+				end++
+				for end < len(runes) && unicode.IsMark(runes[end]) {
+					end++
+				}
 			}
 			if end == len(runes) {
 				break

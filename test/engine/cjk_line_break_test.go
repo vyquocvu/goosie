@@ -284,6 +284,107 @@ func TestCombiningMarksAddNoAdvanceButKeepInk(t *testing.T) {
 	}
 }
 
+// Chromium 1.63, 200px box, 16px: the fixture `文本文本文本文本文本文本。文本`
+// (12 ideographs + full stop + 2 ideographs) broke into line 0 = 11
+// ideographs (w=179.531) and line 1 = `本。文本` (w=65.281). The 12th
+// ideograph moved down with the stop so the stop never led the line.
+// qc:BR-087
+func TestKinsokuFullStopDoesNotLeadLine(t *testing.T) {
+	fonts := cjkFonts(t)
+	body := `<div style="width: 200px; font-size: 16px">` +
+		`文本文本文本文本文本文本。文本</div>`
+	sess := cjkSession(t, fonts, body)
+	lines := cjkLines(t, sess)
+	if len(lines) < 2 {
+		t.Fatalf("line count = %d, want >= 2", len(lines))
+	}
+	for i, line := range lines {
+		for _, frag := range line {
+			if len(frag) > 0 && firstRune(frag) == '。' {
+				t.Errorf("line %d begins with 。 (fragment %q): kinsoku forbids it", i, frag)
+			}
+		}
+	}
+	if got := strings.Join(lines[0], ""); len([]rune(got)) != 11 {
+		t.Errorf("line 0 has %d runes, want 11 (Chromium: 11 ideographs)", len([]rune(got)))
+	}
+	if got := strings.Join(lines[1], ""); got != "本。文本" {
+		t.Errorf("line 1 = %q, want \"本。文本\" (Chromium: stop rides with the previous ideograph)", got)
+	}
+}
+
+// Same shape as the full-stop case but with the CJK comma 、 instead.
+// qc:BR-087
+func TestKinsokuCommaDoesNotLeadLine(t *testing.T) {
+	fonts := cjkFonts(t)
+	body := `<div style="width: 200px; font-size: 16px">` +
+		`文本文本文本文本文本文本、文本</div>`
+	sess := cjkSession(t, fonts, body)
+	lines := cjkLines(t, sess)
+	for i, line := range lines {
+		for _, frag := range line {
+			if len(frag) > 0 && firstRune(frag) == '、' {
+				t.Errorf("line %d begins with 、 (fragment %q): kinsoku forbids it", i, frag)
+			}
+		}
+	}
+}
+
+// Katakana prolonged-sound mark ー (U+30FC) must not lead a line either.
+// qc:BR-087
+func TestKinsokuProlongedSoundDoesNotLeadLine(t *testing.T) {
+	fonts := cjkFonts(t)
+	body := `<div style="width: 200px; font-size: 16px">` +
+		`カタカナカタカナカタカナカタカナカタカナカタカーテキスト</div>`
+	sess := cjkSession(t, fonts, body)
+	lines := cjkLines(t, sess)
+	for i, line := range lines {
+		for _, frag := range line {
+			if len(frag) > 0 && firstRune(frag) == 'ー' {
+				t.Errorf("line %d begins with ー (fragment %q): kinsoku forbids it", i, frag)
+			}
+		}
+	}
+}
+
+// Kinsoku must not suppress ordinary CJK break opportunities: the same 25
+// ideographs without a trailing stop still break 12, 12, 1.
+// qc:BR-087
+func TestKinsokuDoesNotSuppressOrdinaryBreaks(t *testing.T) {
+	fonts := cjkFonts(t)
+	sess := cjkSession(t, fonts, `<div style="width: 200px; font-size: 16px">`+cjkIdeographs+`</div>`)
+	lines := cjkLines(t, sess)
+	if got := lineCounts(lines); len(got) != 3 || got[0] != 12 || got[1] != 12 || got[2] != 1 {
+		t.Fatalf("CJK line structure = %v, want [12 12 1]: kinsoku must not disturb ordinary breaks", got)
+	}
+}
+
+// No kinsoku character may lead any line in a mixed paragraph that exercises
+// several of them in sequence.
+// qc:BR-087
+func TestKinsokuNoForbiddenCharacterLeadsAnyLine(t *testing.T) {
+	fonts := cjkFonts(t)
+	body := `<div style="width: 200px; font-size: 16px">` +
+		`文本文本文本文本文本文本。、ー文本文本文本文本文本文本。文本</div>`
+	sess := cjkSession(t, fonts, body)
+	lines := cjkLines(t, sess)
+	forbidden := map[rune]bool{'。': true, '、': true, 'ー': true}
+	for i, line := range lines {
+		for _, frag := range line {
+			if r := firstRune(frag); forbidden[r] {
+				t.Errorf("line %d begins with U+%04X (fragment %q): kinsoku forbids it", i, r, frag)
+			}
+		}
+	}
+}
+
+func firstRune(s string) rune {
+	for _, r := range s {
+		return r
+	}
+	return 0
+}
+
 func sessWidth(t *testing.T, fonts *raster.Fonts, text string) float32 {
 	t.Helper()
 	sess := cjkSession(t, fonts, `<p>`+text+`</p>`)
