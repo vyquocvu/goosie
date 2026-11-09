@@ -33,6 +33,7 @@ type focusState struct {
 	object            *layout.Object
 	caret             int
 	marked            string
+	markedLen         int // rune length of marked range for selection highlight
 	compositionNode   uint32
 	compositionOffset int
 }
@@ -46,9 +47,11 @@ func NewBuilder(list *List, arena *layout.Arena, scale float32, metrics layout.M
 
 // SetFocus marks the control to paint with a caret and focus ring. caret is a
 // rune index into the control's value; marked is the IME composition preview
-// shown spliced into the value at the caret.
-func (b *Builder) SetFocus(obj *layout.Object, caret int, marked string) {
-	b.focus = focusState{object: obj, caret: caret, marked: marked}
+// shown spliced into the value at the caret; markedLen is the rune length of
+// the marked range for selection highlight (may differ from len(marked) when
+// the value already includes the marked text).
+func (b *Builder) SetFocus(obj *layout.Object, caret int, marked string, markedLen int) {
+	b.focus = focusState{object: obj, caret: caret, marked: marked, markedLen: markedLen}
 }
 
 // SetCompositionCaret locates a contenteditable IME preview in its source Text

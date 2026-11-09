@@ -1857,6 +1857,8 @@
       "test/engine/ime_composition_parity_test.go:TestCompositionMutatesTheDocumentAsObserved",
       "test/engine/ime_composition_parity_test.go:TestCompositionPreviewsLiveInAnEmptyContenteditable",
       "test/engine/ime_composition_parity_test.go:TestCompositionSelectsTheMarkedRangeInATextControl",
+      "test/engine/ime_selection_paint_test.go:TestIMECompositionContentEditablePaintsSelectionHighlight",
+      "test/engine/ime_selection_paint_test.go:TestIMECompositionPaintsSelectionHighlight",
       "test/engine/ime_test.go:TestCommitTextRespectsMaxlength",
       "test/engine/ime_test.go:TestCommitTextarea",
       "test/engine/ime_test.go:TestContentEditableIMECommitCanceledByBeforeInput",

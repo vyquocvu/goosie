@@ -69,6 +69,43 @@ func (b *Builder) composeControlText(obj *layout.Object, text string) string {
 	return string(out)
 }
 
+// paintControlSelectionHighlight paints the selection highlight for the IME
+// marked range in a focused text control. The marked range starts at the caret
+// and extends for markedLen runes.
+func (b *Builder) paintControlSelectionHighlight(obj *layout.Object, rect frame.Rect, s *style.ComputedStyle, opacity float32) {
+	if b.focus.object != obj || b.focus.markedLen == 0 {
+		return
+	}
+	caret := b.focus.caret
+	if caret < 0 {
+		caret = 0
+	}
+	start := caret
+	end := caret + b.focus.markedLen
+	// The text is what paintControlValue will draw: the control's value with
+	// the marked text already spliced in by the engine.
+	text := obj.Node.InputControlValue()
+	if b.focus.marked != "" {
+		// If marked is not empty, composeControlText will splice it in.
+		text = b.composeControlText(obj, text)
+	}
+	xa := runeX(text, rect, s, start, b.scale, b.metrics, nil)
+	xb := runeX(text, rect, s, end, b.scale, b.metrics, nil)
+	x0, x1 := xa, xb
+	if x1 < x0 {
+		x0, x1 = x1, x0
+	}
+	if x1 <= x0 {
+		return
+	}
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    frame.Rect{X0: x0, Y0: rect.Y0, X1: x1, Y1: rect.Y1},
+		Color:   selectionColor,
+		Opacity: opacity,
+	})
+}
+
 // paintControlValue draws the text an input holds. The value is not in the DOM
 // text flow, so like the placeholder it starts at the content origin bounded
 // by the content box. Textareas paint through the normal text path instead.
@@ -102,6 +139,8 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 			return
 		}
 	}
+	// Paint the IME marked range highlight before the text.
+	b.paintControlSelectionHighlight(obj, rect, s, opacity)
 	b.appendRun(text, rect, s, frame.RGB(0, 0, 0), opacity)
 }
 

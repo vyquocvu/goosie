@@ -61,12 +61,14 @@ func (s *Session) Paint(scale float32) *paint.List {
 	if s.focus != nil {
 		if obj := s.objectFor(s.focus); obj != nil {
 			marked := s.marked
+			markedLen := len([]rune(s.marked))
 			if controlEditable(s.focus) || (dom.IsContentEditable(s.focus) && s.markedHasNode) {
 				// Text controls and live contenteditable ranges already include the
-				// active IME text in the value or Text node.
+				// active IME text in the value or Text node. Clear marked to prevent
+				// double-splicing, but keep markedLen for selection highlight.
 				marked = ""
 			}
-			b.SetFocus(obj, s.caret, marked)
+			b.SetFocus(obj, s.caret, marked, markedLen)
 		}
 	}
 	if spans := s.selectionSpans(); len(spans) > 0 {

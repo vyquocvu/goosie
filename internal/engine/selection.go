@@ -478,6 +478,12 @@ func (s *Session) SelectionText() string {
 // selectionSpans returns the paint-side highlight rects, one per selected
 // word box, with edge words clipped to the selected rune range.
 func (s *Session) selectionSpans() []paint.SelSpan {
+	// IME composition: highlight the marked range in contenteditable.
+	if s.imeComposing && s.markedHasNode && s.marked != "" {
+		if spans := s.imeMarkedSpans(); len(spans) > 0 {
+			return spans
+		}
+	}
 	words, from, to, ok := s.selCoverage()
 	if !ok {
 		return nil
@@ -497,6 +503,30 @@ func (s *Session) selectionSpans() []paint.SelSpan {
 		spans = append(spans, paint.SelSpan{Obj: words[i], Start: start, End: end})
 	}
 	return spans
+}
+
+// imeMarkedSpans returns the selection spans for the IME marked range in
+// contenteditable. The marked text is already in the DOM node; this finds the
+// layout object for the node and returns a span covering the marked range.
+func (s *Session) imeMarkedSpans() []paint.SelSpan {
+	if s.Arena == nil {
+		return nil
+	}
+	// Find the layout object for the marked node.
+	var markedObj *layout.Object
+	for i := range s.Arena.Objects {
+		if s.Arena.Objects[i].Node != nil && s.Arena.Objects[i].Node.ID == s.markedNode {
+			markedObj = &s.Arena.Objects[i]
+			break
+		}
+	}
+	if markedObj == nil {
+		return nil
+	}
+	// The marked range starts at markedOffset and extends for len(marked) runes.
+	start := s.markedOffset
+	end := start + len([]rune(s.marked))
+	return []paint.SelSpan{{Obj: markedObj, Start: start, End: end}}
 }
 
 // SelectAll selects all text in the document. It returns true if there is text to select.
