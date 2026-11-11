@@ -216,6 +216,13 @@ type Session struct {
 	// leaving the control all clear it. Guarded by opMu.
 	selectPopup *dom.Node
 
+	// inspectNode is the DOM node the inspector is outlining. Only the node is
+	// stored: Paint re-resolves its box from the live arena (objectFor), so a
+	// reflow cannot leave a stale highlight behind, and a node with no box paints
+	// nothing. The overlay is paint-only and never mutates the DOM. Guarded by
+	// opMu.
+	inspectNode *dom.Node
+
 	// JS runtime for this document's scripts. nil when the caller did not
 	// supply WithJS, so a session without scripting works exactly as before.
 	jsRT *js.Runtime

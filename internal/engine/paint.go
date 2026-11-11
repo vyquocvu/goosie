@@ -93,6 +93,11 @@ func (s *Session) Paint(scale float32) *paint.List {
 			b.SetValidationBubble(&paint.ValidationBubble{Obj: obj, Message: s.validationMessage})
 		}
 	}
+	if s.inspectNode != nil {
+		if obj := s.objectFor(s.inspectNode); obj != nil {
+			b.SetInspectHighlight(&paint.InspectHighlight{Obj: obj})
+		}
+	}
 	b.Build(layout.ObjectID(1))
 	// z-index is resolved into DisplayCmd.Z by the builder; sorting once per
 	// content version keeps that out of the frame path, and the stable sort

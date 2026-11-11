@@ -23,6 +23,9 @@ type Builder struct {
 	// listbox is the <select> option list a pointer has opened, in document CSS
 	// px. The engine computes it once and hit-tests the same rows.
 	listbox *ListBox
+	// inspect is the node the inspector is outlining, in document CSS px. It is
+	// a paint-only overlay and never mutates the DOM.
+	inspect *InspectHighlight
 	// scrollOffset queries the JS runtime for an element's current scroll
 	// offset along one axis. nil means no element scrolling is active.
 	scrollOffset func(obj *layout.Object, prop string) float64
@@ -95,4 +98,5 @@ func (b *Builder) Build(root layout.ObjectID) {
 	b.paintBox(root, nil, 0, 1)
 	b.paintValidationBubble()
 	b.paintSelectListBox()
+	b.paintInspectHighlight()
 }
