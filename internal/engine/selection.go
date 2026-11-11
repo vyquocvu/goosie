@@ -561,7 +561,7 @@ func (s *Session) selectionSpans() []paint.SelSpan {
 		if start >= end {
 			continue
 		}
-		spans = append(spans, paint.SelSpan{Obj: words[i], Start: start, End: end})
+		spans = append(spans, paint.SelSpan{Key: words[i].Key, Start: start, End: end})
 	}
 	return spans
 }
@@ -587,7 +587,7 @@ func (s *Session) imeMarkedSpans() []paint.SelSpan {
 	// The marked range starts at markedOffset and extends for len(marked) runes.
 	start := s.markedOffset
 	end := start + len([]rune(s.marked))
-	return []paint.SelSpan{{Obj: markedObj, Start: start, End: end}}
+	return []paint.SelSpan{{Key: markedObj.Key, Start: start, End: end}}
 }
 
 // SelectAll selects all text in the document. It returns true if there is text to select.

@@ -7,10 +7,10 @@ import (
 )
 
 // SelSpan marks the rune range [Start, End) of one word box as selected.
-// Obj points at the same layout object the builder's arena walk visits, so the
-// engine can key spans by pointer identity without a second lookup.
+// Key names the same box the builder's arena walk visits, so paint matches by
+// document-lifetime identity instead of holding an arena pointer.
 type SelSpan struct {
-	Obj   *layout.Object
+	Key   layout.BoxKey
 	Start int
 	End   int
 }

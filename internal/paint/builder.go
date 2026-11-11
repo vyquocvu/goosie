@@ -16,7 +16,7 @@ type Builder struct {
 	scale     float32
 	metrics   layout.Metrics
 	focus     focusState
-	selection map[*layout.Object]SelSpan
+	selection map[layout.BoxKey]SelSpan
 	find      map[*layout.Object][]FindMark
 	// validation is the constraint message a blocked submission is showing.
 	validation *ValidationBubble
@@ -64,13 +64,13 @@ func (b *Builder) SetCompositionCaret(nodeID uint32, offset int) {
 	b.focus.compositionOffset = offset
 }
 
-// SetSelection marks word boxes to paint with the selection highlight. The
-// spans reference the same layout objects the arena walk visits, so identity
-// in this map is what paintText matches on.
+// SetSelection marks word boxes to paint with the selection highlight. Spans
+// are keyed by BoxKey, the document-lifetime identity of the box the arena walk
+// visits, so paintText matches on identity rather than an arena pointer.
 func (b *Builder) SetSelection(spans []SelSpan) {
-	b.selection = make(map[*layout.Object]SelSpan, len(spans))
+	b.selection = make(map[layout.BoxKey]SelSpan, len(spans))
 	for _, sp := range spans {
-		b.selection[sp.Obj] = sp
+		b.selection[sp.Key] = sp
 	}
 }
 

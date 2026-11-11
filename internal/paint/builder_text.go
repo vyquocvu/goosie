@@ -37,7 +37,7 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	if marks := b.find[obj]; len(marks) > 0 {
 		b.paintFindHighlights(marks, opacity, clip)
 	}
-	if sp, ok := b.selection[obj]; ok {
+	if sp, ok := b.selection[obj.Key]; ok {
 		b.paintSelectionHighlight(obj, rect, s, sp, opacity)
 	}
 	// Text shadows paint behind the main text as offset copies.
