@@ -3,6 +3,7 @@ package main
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/raster"
@@ -25,7 +26,14 @@ type ContextMenuItem struct {
 }
 
 // ContextMenu represents an in-viewport context menu popup.
+//
+// mu guards every field: the chrome pump owns the menu and mutates it through
+// the locked methods below, while an off-thread observer (an e2e journey or
+// automation bridge) reads a consistent copy via Snapshot. The pump's own
+// direct field reads in intercept stay on the pump goroutine; anything reading
+// from another goroutine must take a Snapshot instead of touching the fields.
 type ContextMenu struct {
+	mu      sync.Mutex
 	Visible bool
 	X, Y    int32
 	W, H    int32
@@ -40,6 +48,8 @@ func NewContextMenu() *ContextMenu {
 
 // Show populates and opens the context menu at (x, y) with boundary clamping.
 func (cm *ContextMenu) Show(x, y, maxW, maxH int32, items []ContextMenuItem, scale int32) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if scale < 1 {
 		scale = 1
 	}
@@ -77,13 +87,44 @@ func (cm *ContextMenu) Show(x, y, maxW, maxH int32, items []ContextMenuItem, sca
 
 // Hide closes the context menu.
 func (cm *ContextMenu) Hide() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	cm.Visible = false
 	cm.Hover = -1
 	cm.Items = nil
 }
 
+// Snapshot returns an independent copy of the menu for off-thread observers.
+// The returned value owns its Items slice and a zero mutex, so callers can read
+// its fields without locking and without copying the live lock.
+func (cm *ContextMenu) Snapshot() *ContextMenu {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	items := append([]ContextMenuItem(nil), cm.Items...)
+	return &ContextMenu{
+		Visible: cm.Visible,
+		X:       cm.X,
+		Y:       cm.Y,
+		W:       cm.W,
+		H:       cm.H,
+		Items:   items,
+		Hover:   cm.Hover,
+	}
+}
+
+// IsVisible reports whether the menu is open, under the lock, so callers on any
+// goroutine can guard on it without reading the field directly. Draw and Rect
+// re-check Visible under their own lock, so a hide racing this check is harmless.
+func (cm *ContextMenu) IsVisible() bool {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.Visible
+}
+
 // Rect returns the bounding box of the context menu.
 func (cm *ContextMenu) Rect() frame.Rect {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if !cm.Visible {
 		return frame.Rect{}
 	}
@@ -92,6 +133,8 @@ func (cm *ContextMenu) Rect() frame.Rect {
 
 // UpdateHover updates the hovered item based on pointer position.
 func (cm *ContextMenu) UpdateHover(pos frame.Point, scale int32) bool {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if !cm.Visible || scale < 1 {
 		return false
 	}
@@ -127,6 +170,8 @@ func (cm *ContextMenu) UpdateHover(pos frame.Point, scale int32) bool {
 
 // HitItem checks if pos clicks on an active context menu item.
 func (cm *ContextMenu) HitItem(pos frame.Point, scale int32) (ContextMenuItem, bool) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if !cm.Visible || scale < 1 {
 		return ContextMenuItem{}, false
 	}
@@ -155,6 +200,8 @@ func (cm *ContextMenu) HitItem(pos frame.Point, scale int32) (ContextMenuItem, b
 
 // Draw renders the context menu on buf.
 func (cm *ContextMenu) Draw(buf *frame.Bitmap, fonts *raster.Fonts, scale int32) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	if !cm.Visible || scale < 1 {
 		return
 	}

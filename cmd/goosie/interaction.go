@@ -820,11 +820,14 @@ func (f *framePath) handleContextMenu(contentX, contentY, winX, winY int32) {
 	items := BuildContextMenuItems(linkURL, imageURL, selText, focusedText, isEditable, canBack, canForward)
 	winW := int32(f.contentWidth()) * cw.sc()
 	winH := int32(f.contentHeight()) * cw.sc()
-	if cw.chromeBitmap != nil {
-		winW = int32(cw.chromeBitmap.W)
+	cw.extentMu.Lock()
+	chrome, out := cw.chromeBitmap, cw.outBitmap
+	cw.extentMu.Unlock()
+	if chrome != nil {
+		winW = int32(chrome.W)
 	}
-	if cw.outBitmap != nil {
-		winH = int32(cw.outBitmap.H)
+	if out != nil {
+		winH = int32(out.H)
 	}
 	cw.contextMenu.Show(winX, winY, winW, winH, items, cw.sc())
 }

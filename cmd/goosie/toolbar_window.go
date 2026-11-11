@@ -75,7 +75,12 @@ type chromeWindow struct {
 	onAccessibilityChanged  func()
 
 	// Full screen mode & sizing
-	fullscreen          bool
+	fullscreen bool
+	// extentMu guards the presented window geometry the pump goroutine reads
+	// (menu clamping, bookmark pills, content resize) while the surface loop
+	// writes it in Present. A bitmap's internals are immutable once constructed,
+	// so only the last-presented size and the bitmap pointers are shared.
+	extentMu            sync.Mutex
 	lastWinW            int32
 	lastWinH            int32
 	onFullscreenChanged func(fullscreen bool)
@@ -399,19 +404,21 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	chromeH := cw.chromeHeight()
 	if cw.fullscreen || cw.isStandalone() {
 		if cw.outBitmap == nil || cw.outBitmap.W != buf.W || cw.outBitmap.H != buf.H {
-			cw.outBitmap = frame.NewBitmap(buf.W, buf.H)
+			nb := frame.NewBitmap(buf.W, buf.H)
+			cw.extentMu.Lock()
+			cw.outBitmap = nb
+			cw.extentMu.Unlock()
 		}
-		cw.lastWinW = int32(buf.W)
-		cw.lastWinH = int32(buf.H)
+		cw.setPresentedSize(int32(buf.W), int32(buf.H))
 		copy(cw.outBitmap.RGBA, buf.RGBA)
 		merged := append(make([]frame.Rect, 0, len(damage)+2), damage...)
-		if cw.contextMenu != nil && cw.contextMenu.Visible {
+		if cw.contextMenu != nil && cw.contextMenu.IsVisible() {
 			cw.contextMenu.Draw(cw.outBitmap, cw.fonts, cw.sc())
 			if mRect := cw.contextMenu.Rect(); !mRect.Empty() {
 				merged = append(merged, mRect)
 			}
 		}
-		if cw.mainMenu != nil && cw.mainMenu.Visible {
+		if cw.mainMenu != nil && cw.mainMenu.IsVisible() {
 			cw.mainMenu.Draw(cw.outBitmap, cw.fonts, cw.sc())
 			if mRect := cw.mainMenu.Rect(); !mRect.Empty() {
 				merged = append(merged, mRect)
@@ -421,7 +428,10 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	}
 
 	if cw.chromeBitmap == nil || cw.chromeBitmap.W != buf.W || int32(cw.chromeBitmap.H) != chromeH {
-		cw.chromeBitmap = frame.NewBitmap(buf.W, int(chromeH))
+		nb := frame.NewBitmap(buf.W, int(chromeH))
+		cw.extentMu.Lock()
+		cw.chromeBitmap = nb
+		cw.extentMu.Unlock()
 	}
 
 	cw.chromeBitmap.FillRect(frame.Rect4(0, 0, int32(cw.chromeBitmap.W), chromeH), frame.RGB(255, 255, 255), nil)
@@ -448,10 +458,12 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	outH := int32(buf.H) + chromeH
 	outResized := cw.outBitmap == nil || int32(cw.outBitmap.W) != int32(buf.W) || int32(cw.outBitmap.H) != outH
 	if outResized {
-		cw.outBitmap = frame.NewBitmap(buf.W, int(outH))
+		nb := frame.NewBitmap(buf.W, int(outH))
+		cw.extentMu.Lock()
+		cw.outBitmap = nb
+		cw.extentMu.Unlock()
 	}
-	cw.lastWinW = int32(buf.W)
-	cw.lastWinH = outH
+	cw.setPresentedSize(int32(buf.W), outH)
 	out := cw.outBitmap
 	chromeHeightChanged := cw.lastChromeH != chromeH
 	chromeChanged := outResized || chromeHeightChanged || !bitmapRegionEqual(cw.chromeBitmap, out, chromeH)
@@ -498,14 +510,14 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 			merged = append(merged, sugRect)
 		}
 	}
-	if cw.contextMenu != nil && cw.contextMenu.Visible {
+	if cw.contextMenu != nil && cw.contextMenu.IsVisible() {
 		cw.contextMenu.Draw(out, cw.fonts, cw.sc())
 		mRect := cw.contextMenu.Rect()
 		if !mRect.Empty() {
 			merged = append(merged, mRect)
 		}
 	}
-	if cw.mainMenu != nil && cw.mainMenu.Visible {
+	if cw.mainMenu != nil && cw.mainMenu.IsVisible() {
 		cw.mainMenu.Draw(out, cw.fonts, cw.sc())
 		if mRect := cw.mainMenu.Rect(); !mRect.Empty() {
 			merged = append(merged, mRect)
@@ -656,7 +668,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				cw.onActiveStyle()
 			}
 		}
-		if cw.contextMenu != nil && cw.contextMenu.Visible {
+		if cw.contextMenu != nil && cw.contextMenu.IsVisible() {
 			if ev.Action == surface.PointerMotion {
 				cw.contextMenu.UpdateHover(ev.Pos, cw.sc())
 				mRect := cw.contextMenu.Rect()
@@ -682,7 +694,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				}
 			}
 		}
-		if cw.mainMenu != nil && cw.mainMenu.Visible {
+		if cw.mainMenu != nil && cw.mainMenu.IsVisible() {
 			if ev.Action == surface.PointerMotion {
 				cw.mainMenu.UpdateHover(ev.Pos, cw.sc())
 				mRect := cw.mainMenu.Rect()
@@ -880,13 +892,13 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		if ev.Key == 0x1B && cw.onCancelDrag != nil && cw.onCancelDrag() {
 			return true
 		}
-		if cw.contextMenu != nil && cw.contextMenu.Visible {
+		if cw.contextMenu != nil && cw.contextMenu.IsVisible() {
 			if ev.Key == 0x1B { // Escape
 				cw.contextMenu.Hide()
 				return true
 			}
 		}
-		if cw.mainMenu != nil && cw.mainMenu.Visible {
+		if cw.mainMenu != nil && cw.mainMenu.IsVisible() {
 			if ev.Key == 0x1B { // Escape
 				cw.mainMenu.Hide()
 				return true
@@ -944,8 +956,7 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvResize:
-		cw.lastWinW = ev.Size.W
-		cw.lastWinH = ev.Size.H
+		cw.setPresentedSize(ev.Size.W, ev.Size.H)
 		cw.toolbar.SetBounds(ev.Size.W)
 		cw.notifyAccessibilityChanged()
 		contentDevH := ev.Size.H - cw.chromeHeight()
@@ -1063,17 +1074,29 @@ func (cw *chromeWindow) showTabMenuAt(tabID uint64, pos frame.Point) {
 		BuildTabContextMenuItems(tab, index, int(n), cw.tabMgr.CanReopenTab()), cw.sc())
 }
 
+// setPresentedSize publishes the last presented window size under extentMu so
+// the pump goroutine can read it without racing the surface loop's Present.
+func (cw *chromeWindow) setPresentedSize(w, h int32) {
+	cw.extentMu.Lock()
+	cw.lastWinW, cw.lastWinH = w, h
+	cw.extentMu.Unlock()
+}
+
 // windowExtent reports the last presented window size in device pixels,
 // falling back to the constructed bitmaps and finally the default window.
 func (cw *chromeWindow) windowExtent() (winW, winH int32) {
-	if cw.lastWinW > 0 && cw.lastWinH > 0 {
-		return cw.lastWinW, cw.lastWinH
+	cw.extentMu.Lock()
+	w, h := cw.lastWinW, cw.lastWinH
+	out, chrome := cw.outBitmap, cw.chromeBitmap
+	cw.extentMu.Unlock()
+	if w > 0 && h > 0 {
+		return w, h
 	}
-	if cw.outBitmap != nil {
-		return int32(cw.outBitmap.W), int32(cw.outBitmap.H)
+	if out != nil {
+		return int32(out.W), int32(out.H)
 	}
-	if cw.chromeBitmap != nil {
-		return int32(cw.chromeBitmap.W), int32(cw.chromeBitmap.W) * 3 / 4
+	if chrome != nil {
+		return int32(chrome.W), int32(chrome.W) * 3 / 4
 	}
 	return 800 * cw.sc(), 600 * cw.sc()
 }
@@ -1407,8 +1430,11 @@ func (cw *chromeWindow) bookmarkPills() []bookmarkPill {
 	if cw.toolbar != nil && cw.toolbar.BoundsWidth() > 0 {
 		maxW = cw.toolbar.BoundsWidth()
 	}
-	if cw.chromeBitmap != nil {
-		maxW = int32(cw.chromeBitmap.W)
+	cw.extentMu.Lock()
+	chrome := cw.chromeBitmap
+	cw.extentMu.Unlock()
+	if chrome != nil {
+		maxW = int32(chrome.W)
 	}
 
 	for _, bm := range entries {
