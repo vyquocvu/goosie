@@ -329,10 +329,6 @@ type Session struct {
 	// while it is nonzero and retries next tick, so a pump reflow never
 	// reads a half-attached document.
 	deferredActive int32
-
-	// phaseTracker tracks per-node render counts and detects phase offsets.
-	// nil when debug tracking is disabled.
-	phaseTracker interface{} // *debug.PhaseTracker, use interface to avoid import cycle
 }
 
 // WorkCounts reports how many expensive pipeline stages this session has run.
@@ -659,15 +655,6 @@ func WithUserScripts(scripts []*userscript.Script) Option {
 	}
 }
 
-// WithPhaseTracker enables per-node render count tracking and phase offset detection.
-// The tracker parameter should be a *debug.PhaseTracker; we use interface{} to avoid
-// an import cycle.
-func WithPhaseTracker(tracker interface{}) Option {
-	return func(s *Session) {
-		s.phaseTracker = tracker
-	}
-}
-
 // fontJob is one @font-face descriptor set queued for fetching.
 type fontJob struct {
 	family, srcURL, weightStr, styleStr string
@@ -777,21 +764,6 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.workCounts.styleResolves.Add(1)
 	s.Styles = s.styleResolver.ResolveViewport(doc, s.styleViewport(), s.customFonts)
 	s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
-	// Track per-node style counts for debug phase tracking
-	if tracker := s.PhaseTracker(); tracker != nil {
-		nodeIDs := make([]dom.NodeID, 0, len(s.Styles))
-		for id := range s.Styles {
-			nodeIDs = append(nodeIDs, id)
-		}
-		tracker.TrackStyleBatch(nodeIDs)
-		// Register node metadata for debug output
-		doc.Node.Walk(func(n *dom.Node) bool {
-			if n.Element() {
-				tracker.RegisterNode(n.ID, n.Data, n.GetAttribute("class"), n.GetAttribute("id"))
-			}
-			return true
-		})
-	}
 	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(doc, s.Styles, s.customFonts)
 	s.styleDirty.Store(false)
 	s.startAnimations()
@@ -1897,16 +1869,6 @@ func (s *Session) Reflow(viewportW float32) error {
 	candidate := layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 	candidate.Metrics = s.metrics
 	candidate.NaturalSizes = s.natural
-	// Track per-node layout counts for debug phase tracking
-	if tracker := s.PhaseTracker(); tracker != nil {
-		nodeIDs := make([]dom.NodeID, 0, len(candidate.Objects))
-		for _, obj := range candidate.Objects {
-			if obj.Node != nil {
-				nodeIDs = append(nodeIDs, obj.Node.ID)
-			}
-		}
-		tracker.TrackLayoutBatch(nodeIDs)
-	}
 	layout.Block(candidate, layout.ObjectID(1), viewportW, s.viewportH)
 	if err := validateArena(candidate); err != nil {
 		return err
