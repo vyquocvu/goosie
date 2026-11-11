@@ -115,6 +115,8 @@ export WPT_DIR
 export WPT_GOOSIE_BINARY
 export WPT_CONFIG
 export WPT_OUTPUT_DIR
+# Without this the suite skips and the script used to exit 0 anyway.
+export WPT_RUN_SUITE=1
 
 if [[ -n "$WPT_DIRS" ]]; then
   export WPT_DIRS
@@ -151,10 +153,25 @@ if [[ -f "$WPT_OUTPUT_DIR/report.html" ]]; then
 fi
 
 echo ""
-if [[ $EXIT_CODE -eq 0 ]]; then
-  echo "WPT run completed successfully."
-else
+if [[ $EXIT_CODE -ne 0 ]]; then
   echo "WPT run completed with failures (exit code: $EXIT_CODE)."
+  exit "$EXIT_CODE"
 fi
 
-exit $EXIT_CODE
+# Fail closed: a skipped suite (no results, or zero tests discovered) is not
+# a successful run. This is the bug where make wpt printed "completed
+# successfully" while TestWPTSuite never executed.
+if [[ ! -s "$WPT_OUTPUT_DIR/results.json" ]]; then
+  echo "WPT suite did not run: no results.json in $WPT_OUTPUT_DIR" >&2
+  exit 1
+fi
+if command -v python3 &>/dev/null; then
+  TOTAL=$(python3 -c "import json;print(json.load(open('$WPT_OUTPUT_DIR/results.json'))['total'])" 2>/dev/null || echo 0)
+  if [[ "$TOTAL" == "0" ]]; then
+    echo "WPT suite did not run: zero tests discovered" >&2
+    exit 1
+  fi
+fi
+
+echo "WPT run completed successfully."
+exit 0
