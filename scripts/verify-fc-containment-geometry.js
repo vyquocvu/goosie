@@ -4,25 +4,22 @@
 //
 //   node scripts/verify-fc-containment-geometry.js
 //
-// This is the oracle for the SP-4 L2 second landing (authoritative FC roots).
-// It loads the fixture Goosie will render once that landing lands and reads the
-// box rects straight out of Chromium's own layout, so the "which box establishes
-// a formatting context" answer comes from the reference engine, not a spec
-// recollection. The fixture is deterministic: fixed px sizes, system sans font,
-// no network.
+// This is the oracle for the SP-5 L2 second landing (authoritative FC roots).
+// It loads the fixture Goosie renders and reads the box rects straight out of
+// Chromium's own layout, so the "which box establishes a formatting context"
+// answer comes from the reference engine, not a spec recollection. The fixture
+// is deterministic: fixed px sizes, system sans font, no network.
 //
-// The fixture lives in testdata/fc-containment/ (NOT testdata/render/ or
-// testdata/layout-parity/) on purpose: Goosie still diverges on it (the
-// inline-block sole-child-of-flow-root lands at the origin, and a flow-root
-// group margin is dropped), so promoting it into either gated corpus today
-// would break the zero-diff gate. SP-5 promotes it into layout-parity/ with the
-// sibling .reference.json once Goosie matches.
+// The fixture lives in testdata/layout-parity/float-containment-001.html and is
+// gated by TestLayoutParityWithChromium against its sibling .reference.json:
+// since display:flow-root parses to a block with a FlowRoot flag (SP-5), Goosie
+// matches Chromium on every box here, so the gated corpus stays zero-diff.
 const { chromium } = require('playwright');
 const path = require('path');
 
 const VIEWPORT = { width: 800, height: 600 };
 const FIXTURE = 'file://' + path.resolve(__dirname,
-  '../testdata/fc-containment/nested-float-containment.html');
+  '../testdata/layout-parity/float-containment-001.html');
 
 async function main() {
   const browser = await chromium.launch();
