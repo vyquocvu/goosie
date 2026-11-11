@@ -79,12 +79,16 @@ child sits at the group's content origin in normal flow.
 
 The one genuinely **long-lived** arena pointer is `findMark.obj`
 (`internal/engine/engine.go:2623`), held in `Session.findMarks` between `Find`
-and `Paint` and only cleared by `Reflow`. Migrate it to `BoxKey`:
+and `Paint` and only cleared by `Reflow`. It is dereferenced for **only** its
+`.Key` at paint time (`internal/engine/paint.go:81`); the highlight rect is
+already stored by value in `findMark.rect` (a `Match`). Migrate it to `BoxKey`:
 
 - `findMark` carries `key layout.BoxKey` instead of `obj *layout.Object`.
 - `Find` (`engine.go:2679`) stores `words[first].Key`.
-- The paint producer (`internal/engine/paint.go:81`) re-resolves the box via
-  `Arena.ForKey(m.key)` to read its rect, instead of dereferencing a stale pointer.
+- The paint producer (`internal/engine/paint.go:81`) uses `m.key` directly. No
+  `ForKey` re-resolution is needed: the rect is a stored value, and find marks
+  are cleared on every `Reflow` (`engine.go:2016`), so a mark never outlives its
+  generation. This removes the held pointer entirely.
 
 The transient per-paint overlays (`focusState.object`, `ListBox.Obj`,
 `ValidationBubble.Obj`, `InspectHighlight.Obj`) are re-fetched from DOM-node
@@ -113,9 +117,9 @@ geometry matches Chromium. Find: `Find` stores `BoxKey` → `Paint` re-resolves 
 - `FlowRoot` on a non-block used display (e.g. a flex item that declares
   `display:flow-root`): `applyDisplay` forces `DisplayBlock`, matching CSS
   (flow-root is block-level). Verify against Chromium if a fixture exercises it.
-- `ForKey` miss at paint (box not in this generation): the find mark is skipped,
-  matching the current behavior when a matched word's box is gone after reflow
-  (find marks are cleared on reflow anyway).
+- Find marks never outlive their generation: `Reflow` clears `findMarks`
+  (`engine.go:2016`), so the stored `key`+`rect` values are always current; no
+  stale-key resolution path is needed.
 
 ## 6. Testing
 
