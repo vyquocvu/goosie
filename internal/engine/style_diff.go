@@ -15,6 +15,7 @@ import (
 // can reuse the existing arena after all keys compare equal.
 type layoutStyleKey struct {
 	Display, Position, Float, Clear               uint8
+	FlowRoot                                      bool
 	Overflow, OverflowX, OverflowY                uint8
 	BoxSizing                                     uint8
 	Visibility, ContentVisibility                 string
@@ -99,6 +100,7 @@ func makeLayoutStyleKey(s *style.ComputedStyle) layoutStyleKey {
 	}
 	return layoutStyleKey{
 		Display: uint8(s.Display), Position: uint8(s.Position), Float: uint8(s.Float), Clear: uint8(s.Clear),
+		FlowRoot: s.FlowRoot,
 		Overflow: uint8(s.Overflow), OverflowX: uint8(s.OverflowX), OverflowY: uint8(s.OverflowY), BoxSizing: uint8(s.BoxSizing),
 		Visibility: s.Visibility, ContentVisibility: s.ContentVisibility,
 		ContainIntrinsicWidth: s.ContainIntrinsicWidth, ContainIntrinsicHeight: s.ContainIntrinsicHeight,

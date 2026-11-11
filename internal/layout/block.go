@@ -2894,6 +2894,9 @@ func startsNewFC(a *Arena, obj *Object) bool {
 	default:
 		return true
 	}
+	if s.FlowRoot {
+		return true
+	}
 	if s.Overflow != style.OverflowVisible || s.OverflowX != style.OverflowVisible || s.OverflowY != style.OverflowVisible {
 		return true
 	}
