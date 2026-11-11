@@ -72,7 +72,9 @@ PASS_AT = 90.0
 # to the element, not to the two anonymous bands it generated.
 # 93: js-dom/03-intersection-observer-first-reflow.html (TASK-054, GOOSIE-IOEXPORT-001)
 # - registering an IntersectionObserver used to wedge the load; the gate is reaching a first frame.
-MIN_SCORED_FIXTURES = 93
+# 105: SP-2 (2026-11-12) locks the full corpus; the floor had 12 fixtures of
+# un-ratcheted slack (93 vs 105 scored).
+MIN_SCORED_FIXTURES = 105
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
