@@ -17,7 +17,7 @@ type Builder struct {
 	metrics   layout.Metrics
 	focus     focusState
 	selection map[layout.BoxKey]SelSpan
-	find      map[*layout.Object][]FindMark
+	find      map[layout.BoxKey][]FindMark
 	// validation is the constraint message a blocked submission is showing.
 	validation *ValidationBubble
 	// listbox is the <select> option list a pointer has opened, in document CSS
@@ -75,12 +75,13 @@ func (b *Builder) SetSelection(spans []SelSpan) {
 }
 
 // SetFind marks find-in-page highlight rects to paint under their text boxes.
-// A mark is emitted when the walk reaches its Obj, so the fill lands beneath
-// that run's glyphs rather than on top of the whole layer.
+// Marks are keyed by BoxKey: a mark is emitted when the walk reaches the box
+// with that identity, so the fill lands beneath that run's glyphs rather than
+// on top of the whole layer.
 func (b *Builder) SetFind(marks []FindMark) {
-	b.find = make(map[*layout.Object][]FindMark, len(marks))
+	b.find = make(map[layout.BoxKey][]FindMark, len(marks))
 	for _, m := range marks {
-		b.find[m.Obj] = append(b.find[m.Obj], m)
+		b.find[m.Key] = append(b.find[m.Key], m)
 	}
 }
 

@@ -6,10 +6,10 @@ import (
 )
 
 // FindMark is one find-in-page highlight rectangle in document CSS pixels.
-// Obj is the text box whose painting emits the fill: emitting it there puts
+// Key names the text box whose painting emits the fill: emitting it there puts
 // the highlight underneath that run's glyphs, before they are painted.
 type FindMark struct {
-	Obj    *layout.Object
+	Key    layout.BoxKey
 	Rect   frame.RectF
 	Active bool
 }

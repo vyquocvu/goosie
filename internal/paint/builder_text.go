@@ -34,7 +34,7 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	if s == nil {
 		return
 	}
-	if marks := b.find[obj]; len(marks) > 0 {
+	if marks := b.find[obj.Key]; len(marks) > 0 {
 		b.paintFindHighlights(marks, opacity, clip)
 	}
 	if sp, ok := b.selection[obj.Key]; ok {

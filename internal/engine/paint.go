@@ -78,7 +78,7 @@ func (s *Session) Paint(scale float32) *paint.List {
 		marks := make([]paint.FindMark, 0, len(s.findMarks))
 		for _, m := range s.findMarks {
 			marks = append(marks, paint.FindMark{
-				Obj:    m.obj,
+				Key:    m.obj.Key,
 				Rect:   frame.RectF4(m.rect.X0, m.rect.Y0, m.rect.X1, m.rect.Y1),
 				Active: m.match == s.findActive,
 			})
