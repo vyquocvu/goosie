@@ -748,9 +748,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.styleDirty.Store(true)
 	s.layoutDirty.Store(true)
 	s.runScripts()
-	s.opMu.Lock()
-	s.clearDetachedFocusLocked()
-	s.opMu.Unlock()
+	s.clearDetachedFocus()
 	sheets := preScriptSheets
 	if stylesheetDOMSignature(doc) != preScriptStyleSignature {
 		sheets, err = checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
@@ -2368,49 +2366,65 @@ type FormSubmission struct {
 // data and encodes it. The submission details are stored on the session for
 // the host to retrieve via PopSubmittedForm.
 func (s *Session) SubmitForm(form, submitter *dom.Node) {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.submitFormLocked(form, submitter)
+	s.submitForm(form, submitter)
 }
 
+// queueDialogClose fires the dialog's close event. It must be called without
+// opMu held: with no runtime the event dispatches synchronously.
 func (s *Session) queueDialogClose(node *dom.Node) {
 	if node == nil {
 		return
 	}
-	if s.jsRT == nil {
+	s.opMu.Lock()
+	rt := s.jsRT
+	s.opMu.Unlock()
+	if rt == nil {
 		dom.DispatchEvent(node, dom.NewTrustedEvent("close", false, false))
 		return
 	}
-	s.jsRT.QueueTask(func() {
+	rt.QueueTask(func() {
 		dom.DispatchEvent(node, dom.NewTrustedEvent("close", false, false))
 	})
 }
 
-func (s *Session) submitFormLocked(form, submitter *dom.Node) {
+// submitForm runs validation, the submit gate, and collection as separate
+// locked phases so no page-visible event dispatches under opMu: listeners may
+// call back into the session, and re-locking from a dispatch would deadlock.
+func (s *Session) submitForm(form, submitter *dom.Node) {
 	if form == nil {
 		return
 	}
+	s.opMu.Lock()
 	s.clearValidationBubbleLocked()
+	var invalid []*dom.Node
 	if !SubmitterNoValidate(submitter) {
-		invalid := s.validateForm(form)
-		if len(invalid) > 0 {
-			// A blocked submission is the user interaction that promotes
-			// :invalid into :user-invalid for the offending controls.
-			form.UserInteracted = true
-			for _, control := range invalid {
-				control.UserInteracted = true
-				dom.DispatchEvent(control, dom.NewTrustedEvent("invalid", false, false))
-			}
-			s.setFocusedNodeLocked(invalid[0])
-			s.validationAnchor = invalid[0]
-			s.validationMessage = constraintValidationMessage(invalid[0])
-			return
+		invalid = s.validateForm(form)
+	}
+	if len(invalid) > 0 {
+		// A blocked submission is the user interaction that promotes
+		// :invalid into :user-invalid for the offending controls.
+		form.UserInteracted = true
+		for _, control := range invalid {
+			control.UserInteracted = true
 		}
+	}
+	s.opMu.Unlock()
+	if len(invalid) > 0 {
+		for _, control := range invalid {
+			dom.DispatchEvent(control, dom.NewTrustedEvent("invalid", false, false))
+		}
+		s.setFocusedNodeUnlocked(invalid[0])
+		s.opMu.Lock()
+		s.validationAnchor = invalid[0]
+		s.validationMessage = constraintValidationMessage(invalid[0])
+		s.opMu.Unlock()
+		return
 	}
 	ev := dom.NewTrustedEvent("submit", true, true)
 	if !dom.DispatchEvent(form, ev) {
 		return // preventDefault was called
 	}
+	s.opMu.Lock()
 	data := s.collectFormData(form, submitter)
 	method := FormMethodFor(form, submitter)
 	if strings.EqualFold(method, "dialog") {
@@ -2418,22 +2432,28 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 			if cur.Element() && cur.Data == "dialog" {
 				cur.RemoveAttribute("open")
 				cur.IsModal = false
-				if s.jsRT != nil {
-					s.restoreDialogFocusLocked(cur)
+				previous := s.dialogFocusReturnLocked(cur)
+				s.opMu.Unlock()
+				if previous != nil {
+					s.setFocusedNodeUnlocked(previous)
 				}
 				s.queueDialogClose(cur)
 				return
 			}
 		}
+		s.opMu.Unlock()
 		return
 	}
+	rt := s.jsRT
+	s.opMu.Unlock()
 	// A target that names a live iframe navigates that browsing context, not the
 	// tab the form lives in. The runtime owns the frame load and reports whether
 	// the name matched; unmatched or reserved targets stay with the host below.
-	if s.jsRT != nil && (strings.EqualFold(method, "GET") || strings.EqualFold(method, "POST")) &&
-		s.jsRT.NavigateFormTargetToFrame(form, submitter) {
+	if rt != nil && (strings.EqualFold(method, "GET") || strings.EqualFold(method, "POST")) &&
+		rt.NavigateFormTargetToFrame(form, submitter) {
 		return
 	}
+	s.opMu.Lock()
 	action := FormActionFor(form, submitter)
 	// GET always uses URL encoding, whatever enctype or formenctype says. A
 	// POST honours text/plain and multipart/form-data; anything else, including
@@ -2468,6 +2488,7 @@ func (s *Session) submitFormLocked(form, submitter *dom.Node) {
 		Data:    data,
 		Encoded: encoded,
 	}
+	s.opMu.Unlock()
 }
 
 // PopSubmittedForm returns and clears the pending form submission, if any.
@@ -3221,8 +3242,8 @@ func (s *Session) RestyleAndReflow(viewportW float32) error {
 	if s == nil {
 		return nil
 	}
+	s.clearDetachedFocus()
 	s.opMu.Lock()
-	s.clearDetachedFocusLocked()
 	s.workCounts.styleResolves.Add(1)
 	if s.styleResolver == nil {
 		s.styleResolver = style.NewResolver(s.sheets)

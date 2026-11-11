@@ -407,42 +407,103 @@ func (s *Session) changeFocusedNode(n *dom.Node) bool {
 		rt.DispatchTrustedCompositionEvent(prev, "compositionend", "")
 	}
 	s.opMu.Lock()
-	if s.focus != prev {
+	if s.focus != prev || n == s.focus {
 		s.opMu.Unlock()
 		return false
 	}
-	changed := s.setFocusedNodeLocked(n)
+	blurEvents, focusEvents := s.setFocusedNodeLocked(n)
 	s.opMu.Unlock()
-	return changed
+	s.dispatchFocusEvents(blurEvents, focusEvents, n)
+	return true
 }
 
-func (s *Session) setFocusedNodeLocked(n *dom.Node) bool {
+// trustedEvent is one page-visible event collected while opMu is held. Events
+// are dispatched only after the lock is released: a listener may call back
+// into the session (getComputedStyle, focus, submit), and taking opMu again
+// from inside a dispatch would self-deadlock.
+type trustedEvent struct {
+	target *dom.Node
+	event  *dom.Event
+}
+
+func dispatchTrustedEvents(events []trustedEvent) {
+	for _, e := range events {
+		dom.DispatchEvent(e.target, e.event)
+	}
+}
+
+// dispatchFocusEvents fires the blur phase, then the focus phase only if focus
+// still rests on n: a blur listener may have moved focus itself, and its
+// decision wins.
+func (s *Session) dispatchFocusEvents(blurEvents, focusEvents []trustedEvent, n *dom.Node) {
+	dispatchTrustedEvents(blurEvents)
+	s.opMu.Lock()
+	still := s.focus == n
+	s.opMu.Unlock()
+	if still {
+		dispatchTrustedEvents(focusEvents)
+	}
+}
+
+// setFocusedNodeUnlocked moves focus to n without opMu held. The focus state
+// changes before the blur events fire, matching the browser's focus manager,
+// so a blur listener that refocuses does not re-blur the same node.
+func (s *Session) setFocusedNodeUnlocked(n *dom.Node) bool {
+	s.opMu.Lock()
 	if n == s.focus {
+		s.opMu.Unlock()
 		return false
 	}
+	blurEvents, focusEvents := s.setFocusedNodeLocked(n)
+	s.opMu.Unlock()
+	s.dispatchFocusEvents(blurEvents, focusEvents, n)
+	return true
+}
+
+// setFocusedNodeLocked applies the whole focus change while the caller holds
+// opMu and returns the blur-phase and focus-phase events for dispatch after
+// the lock is released.
+func (s *Session) setFocusedNodeLocked(n *dom.Node) ([]trustedEvent, []trustedEvent) {
+	blurEvents := s.focusBlurEventsLocked()
+	focusEvents := s.applyFocusLocked(n)
+	return blurEvents, focusEvents
+}
+
+// focusBlurEventsLocked retires the old focus target's state and collects its
+// blur-phase events. The caller holds opMu and must dispatch the returned
+// events after releasing it.
+func (s *Session) focusBlurEventsLocked() []trustedEvent {
 	prev := s.focus
-	// Fire blur and change on the old control.
-	if prev != nil {
-		s.noteControlBlur(prev)
-		previousHost := s.delegatesFocusHost(prev)
-		css.SetFocus(prev, false)
-		css.SetFocusVisible(prev, false)
-		if previousHost != nil {
-			css.SetFocus(previousHost, false)
-			css.SetFocusVisible(previousHost, false)
-		}
-		dom.DispatchEvent(prev, dom.NewTrustedEvent("blur", false, false))
-		if previousHost != nil {
-			dom.DispatchEvent(previousHost, dom.NewTrustedEvent("blur", false, false))
-		}
-		dom.DispatchEvent(prev, dom.NewTrustedEvent("focusout", true, false))
-		if previousHost != nil {
-			dom.DispatchEvent(previousHost, dom.NewTrustedEvent("focusout", true, false))
-		}
-		if controlEditable(prev) && s.focusUserChanged && s.controlValue(prev) != s.focusValue {
-			dom.DispatchEvent(prev, dom.NewTrustedEvent("change", true, true))
-		}
+	if prev == nil {
+		return nil
 	}
+	var events []trustedEvent
+	s.noteControlBlur(prev)
+	previousHost := s.delegatesFocusHost(prev)
+	css.SetFocus(prev, false)
+	css.SetFocusVisible(prev, false)
+	if previousHost != nil {
+		css.SetFocus(previousHost, false)
+		css.SetFocusVisible(previousHost, false)
+	}
+	events = append(events, trustedEvent{prev, dom.NewTrustedEvent("blur", false, false)})
+	if previousHost != nil {
+		events = append(events, trustedEvent{previousHost, dom.NewTrustedEvent("blur", false, false)})
+	}
+	events = append(events, trustedEvent{prev, dom.NewTrustedEvent("focusout", true, false)})
+	if previousHost != nil {
+		events = append(events, trustedEvent{previousHost, dom.NewTrustedEvent("focusout", true, false)})
+	}
+	if controlEditable(prev) && s.focusUserChanged && s.controlValue(prev) != s.focusValue {
+		events = append(events, trustedEvent{prev, dom.NewTrustedEvent("change", true, true)})
+	}
+	return events
+}
+
+// applyFocusLocked installs n as the focused node and collects its focus-phase
+// events. The caller holds opMu and must dispatch the returned events after
+// releasing it.
+func (s *Session) applyFocusLocked(n *dom.Node) []trustedEvent {
 	s.focus = n
 	s.focusState.Store(n)
 	s.marked = ""
@@ -450,48 +511,32 @@ func (s *Session) setFocusedNodeLocked(n *dom.Node) bool {
 	s.imeComposing = false
 	s.controlSelectionActive = false
 	s.focusUserChanged = false
-	nextHost := s.delegatesFocusHost(n)
 	if controlEditable(n) {
 		s.caret = len([]rune(s.controlValue(n)))
-		s.controlSelectionActive = false
 		s.controlSelectionAnchor = s.caret
 		s.focusValue = s.controlValue(n)
-		css.SetFocus(n, true)
-		css.SetFocusVisible(n, focusVisibleByDefault(n))
-		if nextHost != nil {
-			css.SetFocus(nextHost, true)
-			css.SetFocusVisible(nextHost, focusVisibleByDefault(nextHost))
-		}
-		dom.DispatchEvent(n, dom.NewTrustedEvent("focus", false, false))
-		if nextHost != nil {
-			dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focus", false, false))
-		}
-		dom.DispatchEvent(n, dom.NewTrustedEvent("focusin", true, false))
-		if nextHost != nil {
-			dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focusin", true, false))
-		}
 	} else {
 		s.caret = 0
 		s.controlSelectionAnchor = 0
 		s.focusValue = ""
-		if n != nil {
-			css.SetFocus(n, true)
-			css.SetFocusVisible(n, focusVisibleByDefault(n))
-			if nextHost != nil {
-				css.SetFocus(nextHost, true)
-				css.SetFocusVisible(nextHost, focusVisibleByDefault(nextHost))
-			}
-			dom.DispatchEvent(n, dom.NewTrustedEvent("focus", false, false))
-			if nextHost != nil {
-				dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focus", false, false))
-			}
-			dom.DispatchEvent(n, dom.NewTrustedEvent("focusin", true, false))
-			if nextHost != nil {
-				dom.DispatchEvent(nextHost, dom.NewTrustedEvent("focusin", true, false))
-			}
-		}
 	}
-	return true
+	if n == nil {
+		return nil
+	}
+	nextHost := s.delegatesFocusHost(n)
+	css.SetFocus(n, true)
+	css.SetFocusVisible(n, focusVisibleByDefault(n))
+	events := []trustedEvent{{n, dom.NewTrustedEvent("focus", false, false)}}
+	if nextHost != nil {
+		css.SetFocus(nextHost, true)
+		css.SetFocusVisible(nextHost, focusVisibleByDefault(nextHost))
+		events = append(events, trustedEvent{nextHost, dom.NewTrustedEvent("focus", false, false)})
+	}
+	events = append(events, trustedEvent{n, dom.NewTrustedEvent("focusin", true, false)})
+	if nextHost != nil {
+		events = append(events, trustedEvent{nextHost, dom.NewTrustedEvent("focusin", true, false)})
+	}
+	return events
 }
 
 // focusVisibleByDefault follows the browser heuristic for pointer or
@@ -538,10 +583,10 @@ func programmaticallyFocusable(n *dom.Node) bool {
 	}
 }
 
-// clearDetachedFocusLocked drops focus when its node is no longer connected to
-// this document. DOM removal can happen inside a script before the next style
-// pass; retaining that node would leave :focus and :focus-within stale.
-func (s *Session) clearDetachedFocusLocked() bool {
+// focusDetachedLocked reports whether the focused node is no longer connected
+// to this document. DOM removal can happen inside a script before the next
+// style pass; retaining that node would leave :focus and :focus-within stale.
+func (s *Session) focusDetachedLocked() bool {
 	if s.focus == nil || s.Doc == nil {
 		return false
 	}
@@ -550,7 +595,18 @@ func (s *Session) clearDetachedFocusLocked() bool {
 			return false
 		}
 	}
-	return s.setFocusedNodeLocked(nil)
+	return true
+}
+
+// clearDetachedFocus drops focus when its node left the document. The blur
+// events dispatch without opMu held so listeners can reenter the engine.
+func (s *Session) clearDetachedFocus() {
+	s.opMu.Lock()
+	detached := s.focusDetachedLocked()
+	s.opMu.Unlock()
+	if detached {
+		s.setFocusedNodeUnlocked(nil)
+	}
 }
 
 // Focused returns the focused control node, or nil.
@@ -1089,29 +1145,16 @@ func (s *Session) commitTextWithInputType(text, requestedInputType string) bool 
 // It fires a cancelable "cancel" event; if not canceled, it removes the open attribute,
 // clears the modal flag, and fires a "close" event.
 func (s *Session) CloseTopmostModalDialog() bool {
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	return s.closeTopmostModalDialogLocked()
+	return s.closeTopmostModalDialog()
 }
 
-func (s *Session) closeTopmostModalDialogLocked() bool {
-	if s.Doc == nil {
-		return false
-	}
-	var topmost *dom.Node
-	var walk func(n *dom.Node)
-	walk = func(n *dom.Node) {
-		if n == nil {
-			return
-		}
-		if n.Element() && n.Data == "dialog" && n.IsModal && n.HasAttribute("open") {
-			topmost = n
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
-	}
-	walk(&s.Doc.Node)
+// closeTopmostModalDialog runs the cancel gate and the close steps without
+// opMu held across any page-visible dispatch, so cancel and focus listeners
+// can reenter the engine.
+func (s *Session) closeTopmostModalDialog() bool {
+	s.opMu.Lock()
+	topmost := topmostModalDialog(s.Doc)
+	s.opMu.Unlock()
 	if topmost == nil {
 		return false
 	}
@@ -1119,16 +1162,29 @@ func (s *Session) closeTopmostModalDialogLocked() bool {
 	if !dom.DispatchEvent(topmost, cancelEv) {
 		return false // preventDefault was called
 	}
+	s.opMu.Lock()
+	if !topmost.IsModal || !topmost.HasAttribute("open") {
+		// A cancel listener already closed the dialog.
+		s.opMu.Unlock()
+		return true
+	}
 	topmost.RemoveAttribute("open")
 	topmost.IsModal = false
-	s.restoreDialogFocusLocked(topmost)
+	previous := s.dialogFocusReturnLocked(topmost)
+	s.opMu.Unlock()
+	if previous != nil {
+		s.setFocusedNodeUnlocked(previous)
+	}
 	s.queueDialogClose(topmost)
 	return true
 }
 
-func (s *Session) restoreDialogFocusLocked(dialog *dom.Node) {
+// dialogFocusReturnLocked computes the node that should regain focus when a
+// dialog closes. The caller holds opMu and applies the focus change after
+// releasing it.
+func (s *Session) dialogFocusReturnLocked(dialog *dom.Node) *dom.Node {
 	if s == nil || dialog == nil {
-		return
+		return nil
 	}
 	var previous *dom.Node
 	var hasReturnFocus bool
@@ -1136,7 +1192,7 @@ func (s *Session) restoreDialogFocusLocked(dialog *dom.Node) {
 		previous, hasReturnFocus = s.jsRT.TakeDialogFocusReturn(dialog)
 	}
 	if !hasReturnFocus {
-		return
+		return nil
 	}
 	if previous == nil || !previous.IsConnected() {
 		if s.Doc != nil {
@@ -1146,9 +1202,7 @@ func (s *Session) restoreDialogFocusLocked(dialog *dom.Node) {
 			}
 		}
 	}
-	if previous != nil {
-		s.setFocusedNodeLocked(previous)
-	}
+	return previous
 }
 
 // Edit applies one keyboard edit to the focused control. It returns whether
@@ -1232,37 +1286,75 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			}
 		}
 	}
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	s.syncControlSelectionFromRuntimeLocked()
+	if action == EditEnter {
+		// Implicit submission dispatches a cancelable submit event; run it
+		// without opMu so the listener can reenter the engine.
+		s.opMu.Lock()
+		s.syncControlSelectionFromRuntimeLocked()
+		host := s.focus
+		var form *dom.Node
+		if controlEditable(host) && host.DataAtom == dom.AtomInput && !isRangeInput(host) {
+			form = FindForm(host)
+		}
+		s.opMu.Unlock()
+		if form != nil {
+			s.submitForm(form, FirstSubmitButton(form))
+			return true
+		}
+	}
 	if action == EditEscape {
-		if s.closeTopmostAutoPopoverLocked() {
-			return true
-		}
-		closedDialog := s.closeTopmostModalDialogLocked()
-		if s.focus != nil {
-			prev := s.focus
-			if s.imeComposing && controlEditable(prev) {
-				s.replaceControlCompositionLocked(prev, s.markedOffset, s.marked, "")
-			}
-			s.focus = nil
-			s.focusState.Store(nil)
-			s.marked = ""
-			s.markedHasNode = false
-			s.imeComposing = false
-			s.noteControlBlur(prev)
-			css.SetFocus(prev, false)
-			css.SetFocusVisible(prev, false)
-			dom.DispatchEvent(prev, dom.NewTrustedEvent("blur", false, false))
-			return true
-		}
+		return s.editEscape()
+	}
+	s.opMu.Lock()
+	changed, events := s.editControlLocked(action, r, shift)
+	s.opMu.Unlock()
+	dispatchTrustedEvents(events)
+	return changed
+}
+
+// editEscape dismisses the topmost popover or modal dialog, then blurs the
+// focused control. The dismissal and the blur dispatch run without opMu so
+// their listeners can reenter the engine.
+func (s *Session) editEscape() bool {
+	s.opMu.Lock()
+	s.syncControlSelectionFromRuntimeLocked()
+	s.opMu.Unlock()
+	if s.CloseTopmostAutoPopover() {
+		return true
+	}
+	closedDialog := s.closeTopmostModalDialog()
+	s.opMu.Lock()
+	if s.focus == nil {
+		s.opMu.Unlock()
 		return closedDialog
 	}
+	prev := s.focus
+	if s.imeComposing && controlEditable(prev) {
+		s.replaceControlCompositionLocked(prev, s.markedOffset, s.marked, "")
+	}
+	s.focus = nil
+	s.focusState.Store(nil)
+	s.marked = ""
+	s.markedHasNode = false
+	s.imeComposing = false
+	s.noteControlBlur(prev)
+	css.SetFocus(prev, false)
+	css.SetFocusVisible(prev, false)
+	s.opMu.Unlock()
+	dom.DispatchEvent(prev, dom.NewTrustedEvent("blur", false, false))
+	return true
+}
+
+// editControlLocked applies one keyboard edit to the focused control while the
+// caller holds opMu. Page-visible events are collected and returned for
+// dispatch after the lock is released.
+func (s *Session) editControlLocked(action EditAction, r rune, shift bool) (bool, []trustedEvent) {
+	s.syncControlSelectionFromRuntimeLocked()
 	if isRangeInput(s.focus) {
-		return s.adjustRangeLocked(s.focus, action)
+		return s.adjustRangeLocked(s.focus, action), nil
 	}
 	if !controlEditable(s.focus) {
-		return false
+		return false, nil
 	}
 	runes := []rune(s.controlValue(s.focus))
 	if s.caret > len(runes) {
@@ -1292,28 +1384,12 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 	switch action {
 	case EditRune:
 		if r < 0x20 {
-			return false
+			return false, nil
 		}
 		if insert(string(r)) {
-			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
-			return true
+			return true, []trustedEvent{{s.focus, dom.NewTrustedEvent("input", true, true)}}
 		}
-		return false
-	case EditEnter:
-		if s.focus.DataAtom == dom.AtomTextarea {
-			if insert("\n") {
-				dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
-				return true
-			}
-			return false
-		}
-		if s.focus.DataAtom == dom.AtomInput {
-			if form := FindForm(s.focus); form != nil {
-				s.submitFormLocked(form, FirstSubmitButton(form))
-				return true
-			}
-		}
-		return false
+		return false, nil
 	case EditBackspace:
 		if hasSelection {
 			out := append([]rune{}, runes[:selectionStart]...)
@@ -1322,11 +1398,10 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionActive = false
 			s.setControlValue(s.focus, string(out))
 			s.syncControlSelectionLocked()
-			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
-			return true
+			return true, []trustedEvent{{s.focus, dom.NewTrustedEvent("input", true, true)}}
 		}
 		if s.caret == 0 || len(runes) == 0 {
-			return false
+			return false, nil
 		}
 		out := append([]rune{}, runes[:s.caret-1]...)
 		out = append(out, runes[s.caret:]...)
@@ -1334,8 +1409,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 		s.controlSelectionActive = false
 		s.setControlValue(s.focus, string(out))
 		s.syncControlSelectionLocked()
-		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
-		return true
+		return true, []trustedEvent{{s.focus, dom.NewTrustedEvent("input", true, true)}}
 	case EditDelete:
 		if hasSelection {
 			out := append([]rune{}, runes[:selectionStart]...)
@@ -1344,19 +1418,17 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionActive = false
 			s.setControlValue(s.focus, string(out))
 			s.syncControlSelectionLocked()
-			dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
-			return true
+			return true, []trustedEvent{{s.focus, dom.NewTrustedEvent("input", true, true)}}
 		}
 		if s.caret >= len(runes) {
-			return false
+			return false, nil
 		}
 		out := append([]rune{}, runes[:s.caret]...)
 		out = append(out, runes[s.caret+1:]...)
 		s.controlSelectionActive = false
 		s.setControlValue(s.focus, string(out))
 		s.syncControlSelectionLocked()
-		dom.DispatchEvent(s.focus, dom.NewTrustedEvent("input", true, true))
-		return true
+		return true, []trustedEvent{{s.focus, dom.NewTrustedEvent("input", true, true)}}
 	case EditLeft:
 		if shift {
 			if !s.controlSelectionActive {
@@ -1379,7 +1451,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionAnchor = s.caret
 		}
 		s.syncControlSelectionLocked()
-		return false
+		return false, nil
 	case EditRight:
 		if shift {
 			if !s.controlSelectionActive {
@@ -1402,7 +1474,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionAnchor = s.caret
 		}
 		s.syncControlSelectionLocked()
-		return false
+		return false, nil
 	case EditHome:
 		if shift {
 			if !s.controlSelectionActive {
@@ -1417,7 +1489,7 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionAnchor = s.caret
 		}
 		s.syncControlSelectionLocked()
-		return false
+		return false, nil
 	case EditEnd:
 		if shift {
 			if !s.controlSelectionActive {
@@ -1432,15 +1504,9 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			s.controlSelectionAnchor = s.caret
 		}
 		s.syncControlSelectionLocked()
-		return false
-	case EditEscape:
-		s.focus = nil
-		s.focusState.Store(nil)
-		s.marked = ""
-		s.imeComposing = false
-		return true
+		return false, nil
 	}
-	return false
+	return false, nil
 }
 
 func (s *Session) deleteTextControlContent(forward bool) bool {

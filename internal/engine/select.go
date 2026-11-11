@@ -64,16 +64,23 @@ func (s *Session) MoveSelect(action EditAction) bool {
 	}
 
 	s.opMu.Lock()
-	defer s.opMu.Unlock()
+	consumed, events := s.moveSelectLocked(action)
+	s.opMu.Unlock()
+	dispatchTrustedEvents(events)
+	return consumed
+}
 
+// moveSelectLocked steps the selection while the caller holds opMu and returns
+// the input/change events for dispatch after the lock is released.
+func (s *Session) moveSelectLocked(action EditAction) (bool, []trustedEvent) {
 	sel := s.focusedSelectLocked()
 	if sel == nil {
-		return false
+		return false, nil
 	}
 
 	opts := selectOptionNodes(sel)
 	if len(opts) == 0 {
-		return true
+		return true, nil
 	}
 	cur := -1
 	dom.NormalizeSelectSelectedness(sel)
@@ -96,7 +103,7 @@ func (s *Session) MoveSelect(action EditAction) bool {
 			}
 		}
 		if cur < 0 {
-			return true
+			return true, nil
 		}
 	}
 
@@ -112,15 +119,16 @@ func (s *Session) MoveSelect(action EditAction) bool {
 		target = lastEnabledOption(opts)
 	}
 	if target < 0 || target == cur {
-		return true
+		return true, nil
 	}
 
 	setSelectedOption(opts, target)
 	// input before change: a page listening to both sees the value already
 	// settled by the time change fires.
-	dom.DispatchEvent(sel, dom.NewTrustedEvent("input", true, true))
-	dom.DispatchEvent(sel, dom.NewTrustedEvent("change", true, true))
-	return true
+	return true, []trustedEvent{
+		{sel, dom.NewTrustedEvent("input", true, true)},
+		{sel, dom.NewTrustedEvent("change", true, true)},
+	}
 }
 
 func nextEnabledOption(opts []*dom.Node, from int) int {
