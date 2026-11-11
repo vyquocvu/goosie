@@ -376,6 +376,27 @@ func TestPlaceholderShownPseudoClassUpdatesAfterEdit(t *testing.T) {
 	}
 }
 
+func TestHoverWithoutPseudoClassDoesNotRepaint(t *testing.T) {
+	f := newNavTestPath(t)
+	f.config = config{width: 800, height: 600, dpr: 1}
+	sess, err := engine.NewSession(`<html><body style="margin:0">
+		<p id="a">This domain is for use in documentation examples without needing permission.</p>
+		<p id="b">This is not a service; avoid relying on it for testing and monitoring purposes.</p>
+	</body></html>`, nil, 800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sess.Close() })
+	f.tabMgr.Active().SetSession(sess)
+	_, x1, y1 := inputNodeAndCenter(t, sess, "a")
+	_, x2, y2 := inputNodeAndCenter(t, sess, "b")
+	before := sess.WorkCounts()
+	f.hoverContent(x1, y1)
+	f.hoverContent(x2, y2)
+	f.hoverContent(x1, y1)
+	assertWorkDelta(t, "hover across text without :hover", sess.WorkCounts(), before, engine.WorkCounts{})
+}
+
 func TestHoverPseudoClassUpdatesAfterPointerMove(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}

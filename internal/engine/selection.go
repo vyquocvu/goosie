@@ -129,16 +129,66 @@ func (s *Session) selWords() []*layout.Object {
 	return words
 }
 
-// HasTextAt reports whether a laid-out word box contains the document-space
-// point. Hover uses it to ask for the text cursor over selectable text.
+// HasTextAt reports whether a document-space point lies on a selectable text
+// line. Hover uses it to ask for the I-beam.
+//
+// The hit is the line box, not the glyph box. line-height adds leading above
+// and below the glyphs and between wrapped lines; testing only BorderRect
+// flips the cursor to the arrow in every one of those gaps, and each flip
+// asks AppKit to update the pointer over a layer it does not own.
 func (s *Session) HasTextAt(x, y float32) bool {
-	for _, w := range s.selWords() {
-		x0, y0, x1, y1 := w.BorderRect()
+	words := s.selWords()
+	for i := 0; i < len(words); {
+		x0, y0, x1, y1 := textLineRect(words[i])
+		j := i + 1
+		for j < len(words) {
+			ox0, oy0, ox1, oy1 := textLineRect(words[j])
+			if oy0 >= y1 || oy1 <= y0 {
+				break
+			}
+			if ox0 < x0 {
+				x0 = ox0
+			}
+			if ox1 > x1 {
+				x1 = ox1
+			}
+			if oy0 < y0 {
+				y0 = oy0
+			}
+			if oy1 > y1 {
+				y1 = oy1
+			}
+			j++
+		}
 		if x >= x0 && x < x1 && y >= y0 && y < y1 {
 			return true
 		}
+		i = j
 	}
 	return false
+}
+
+// textLineRect is the word's border box grown to its line box. An explicit
+// line-height taller than the glyph box leaves leading outside BorderRect;
+// half of that difference sits above the glyphs and half below, which is the
+// strip the caret and the I-beam share. A normal line-height (LineHeight <= 0)
+// already matches the font's own box, so the border rect stands.
+func textLineRect(w *layout.Object) (x0, y0, x1, y1 float32) {
+	if w == nil {
+		return
+	}
+	x0, y0, x1, y1 = w.BorderRect()
+	if w.Style == nil || w.Style.LineHeight <= 0 {
+		return
+	}
+	h := y1 - y0
+	if w.Style.LineHeight <= h {
+		return
+	}
+	extra := (w.Style.LineHeight - h) / 2
+	y0 -= extra
+	y1 += extra
+	return
 }
 
 // posAt maps a document-space point to a selection position. It picks the

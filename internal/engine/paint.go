@@ -94,6 +94,16 @@ func (s *Session) Paint(scale float32) *paint.List {
 		}
 	}
 	b.Build(layout.ObjectID(1))
+	// Track per-node paint counts for debug phase tracking
+	if tracker := s.PhaseTracker(); tracker != nil && s.Arena != nil {
+		nodeIDs := make([]dom.NodeID, 0, len(s.Arena.Objects))
+		for _, obj := range s.Arena.Objects {
+			if obj.Node != nil {
+				nodeIDs = append(nodeIDs, obj.Node.ID)
+			}
+		}
+		tracker.TrackPaintBatch(nodeIDs)
+	}
 	// z-index is resolved into DisplayCmd.Z by the builder; sorting once per
 	// content version keeps that out of the frame path, and the stable sort
 	// leaves the all-zero flow in document order.

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+body {
+  margin: 20px;
+  font-family: sans-serif;
+}
+
+.container {
+  display: grid;
+  grid-template-columns: repeat(5, 150px);
+  gap: 10px;
+  margin: 20px 0;
+}
+
+.box {
+  width: 150px;
+  height: 150px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: 2px solid #333;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.box:hover {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  transform: scale(1.05);
+  box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+}
+
+.box:active {
+  transform: scale(0.95);
+}
+
+input[type="text"] {
+  padding: 10px;
+  margin: 5px;
+  border: 2px solid #ccc;
+  border-radius: 4px;
+  font-size: 16px;
+  width: 300px;
+}
+
+input[type="text"]:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 8px rgba(102, 126, 234, 0.5);
+}
+
+.text-block {
+  margin: 20px 0;
+  padding: 15px;
+  background: #f5f5f5;
+  border-left: 4px solid #667eea;
+  line-height: 1.6;
+}
+
+.selection-test {
+  user-select: text;
+  cursor: text;
+}
+
+h1 {
+  color: #333;
+  border-bottom: 2px solid #667eea;
+  padding-bottom: 10px;
+}
+
+h2 {
+  color: #555;
+  margin-top: 30px;
+}
+</style>
+</head>
+<body>
+  <h1>Goosie Debug Render Test</h1>
+  
+  <p>This page tests various rendering scenarios:</p>
+  <ul>
+    <li><strong>Hover effects</strong> - Move mouse over boxes below</li>
+    <li><strong>Focus effects</strong> - Click on input fields</li>
+    <li><strong>Selection</strong> - Select text in the paragraph below</li>
+    <li><strong>Grid layout</strong> - 25 boxes in a 5x5 grid</li>
+  </ul>
+
+  <h2>Hover Test (25 boxes)</h2>
+  <div class="container">
+    <div class="box">1</div>
+    <div class="box">2</div>
+    <div class="box">3</div>
+    <div class="box">4</div>
+    <div class="box">5</div>
+    <div class="box">6</div>
+    <div class="box">7</div>
+    <div class="box">8</div>
+    <div class="box">9</div>
+    <div class="box">10</div>
+    <div class="box">11</div>
+    <div class="box">12</div>
+    <div class="box">13</div>
+    <div class="box">14</div>
+    <div class="box">15</div>
+    <div class="box">16</div>
+    <div class="box">17</div>
+    <div class="box">18</div>
+    <div class="box">19</div>
+    <div class="box">20</div>
+    <div class="box">21</div>
+    <div class="box">22</div>
+    <div class="box">23</div>
+    <div class="box">24</div>
+    <div class="box">25</div>
+  </div>
+
+  <h2>Focus Test (input fields)</h2>
+  <div>
+    <input type="text" placeholder="Input 1 - click to focus">
+    <input type="text" placeholder="Input 2 - click to focus">
+    <input type="text" placeholder="Input 3 - click to focus">
+  </div>
+
+  <h2>Selection Test</h2>
+  <div class="text-block selection-test">
+    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+    <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+    <p>Try selecting this text to test selection rendering and damage tracking.</p>
+  </div>
+
+  <h2>Instructions</h2>
+  <div class="text-block">
+    <p><strong>With debug-render tool:</strong></p>
+    <pre>go run ./cmd/debug-render -overlay -profile testdata/render/debug-test.html</pre>
+    
+    <p><strong>With test-render tool:</strong></p>
+    <pre>go run ./cmd/test-render -profile -iterations 10 testdata/render/debug-test.html</pre>
+    
+    <p><strong>What to observe:</strong></p>
+    <ul>
+      <li>Hover over boxes → should see cyan hover rect, red damage rect</li>
+      <li>Click inputs → should see yellow focus rect</li>
+      <li>Select text → should see blue selection rect</li>
+      <li>Profile output → timing for style, layout, paint, damage stages</li>
+    </ul>
+  </div>
+</body>
+</html>

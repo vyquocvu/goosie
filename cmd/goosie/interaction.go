@@ -197,44 +197,33 @@ func (f *framePath) hoverContent(contentX, contentY int32) {
 	}
 	sess := tab.Session()
 	dx, dy := f.docPoint(contentX, contentY)
-
-	// Compute damage rect BEFORE changing hover state
-	prevHoverRect := sess.HoverDamageRect()
-
 	if !sess.SetHover(dx, dy) {
 		return
 	}
-
-	// Compute new hover damage rect
-	newHoverRect := sess.HoverDamageRect()
-
-	// Union of old and new hover areas
-	damageRect := prevHoverRect.Union(newHoverRect)
-
+	// An author sheet that never mentions :hover cannot change paint when the
+	// hit element changes. Repainting anyway invalidates tiles for a document
+	// that did not change. The box used for that was a CSS-pixel border rect,
+	// so crossing text lines — the hit target flips between each paragraph and
+	// the body — marked a viewport-sized region stale and the window flashed
+	// until those tiles were rasterized again. A pending DOM mutation is
+	// painted by the next PumpJS turn; a partial repaint here would land
+	// before that restyle.
 	if !sess.HasPseudoClassRule("hover") || sess.CanDeferControlEditReflow() {
-		// No :hover rules or can defer - just repaint the damage
-		if !damageRect.Empty() {
-			f.repaintTab(tab, damageRect)
-		}
 		return
 	}
-
-	// Has :hover rules - need to re-style
-	// Check if hover change is geometry-neutral (only affects paint, not layout)
 	if sess.IsHoverGeometryNeutral() {
-		// Geometry-neutral: skip reflow, only re-style and repaint
 		if err := sess.RestyleForHover(); err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: restyle:", err)
 		}
 	} else {
-		// Geometry changed: need full reflow
 		if err := sess.RestyleAndReflow(float32(f.contentWidth())); err != nil {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		}
 	}
-
-	// Repaint with accurate damage rect
-	f.repaintTab(tab, damageRect)
+	// Empty damage diffs the display lists in device pixels. The hovered
+	// element's border box is the wrong rect: it is CSS pixels, it misses
+	// descendant ink, and for body/html it is the whole document.
+	f.repaintTab(tab, frame.Rect{})
 }
 
 // setContentActive updates :active from primary-pointer input. Restyling is
