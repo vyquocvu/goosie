@@ -221,6 +221,26 @@ The two halves are coupled: a formatting context can only be laid out or invalid
 - No `*layout.Object` held across an allocating call: grep/archtest rule plus review of the three current re-fetch sites.
 - The 80 render fixtures produce a zero pixel diff before and after the keying change.
 
+**Status (2026-11-12, SP-4) — L1 landed.** The `BoxKey` type and its accessors
+already existed before this sprint; SP-4 added the missing identity machinery.
+`Arena` now carries `byKey map[BoxKey]ObjectID` plus monotonic `wordSeq`/`anonSeq`
+ordinals, and every key site (root, element, pseudo, first-letter, word,
+anonymous block/row/cell) routes through `a.setKey` (`internal/layout/arena.go`,
+`inline.go`, `anonymous.go`). Paint selection and find marks are keyed by
+`BoxKey`, not `*layout.Object` (`paint.SelSpan.Key`, `paint.FindMark.Key`). The
+false pointer-stability comment on `Alloc` is corrected, and the re-fetch rule is
+enforced by `archtest.ArenaPointerMaps` (`internal/archtest/rules.go`), which
+forbids any `map[*layout.Object]…` in `internal/` and `cmd/`. Bijection oracle:
+`test/layout/boxkey_bijection_test.go`. Zero-diff verified on the **105**-fixture
+corpus (the corpus grew past the 80 cited above): 105/105, average 96.39%,
+known gaps 4 fixtures / 6 bands unchanged. Correction to §2.2/§4.1: the
+pseudo-background maps are keyed by `*style.ComputedStyle`
+(`internal/engine/engine.go:90-91`), **not** `*layout.Object` — a separate
+identity surface that the arena-pointer archtest rule does not cover and that
+SP-4 did not migrate; it remains an open liability. The cross-reflow
+`Session map[BoxKey]BoxSlot` persistence and copy-forward are still target-only
+(SP-5+); L1 ships within-generation identity.
+
 ### 4.2 Formatting contexts as layout roots
 
 **Definition.** A formatting context (FC) is a layout root with its own measure/arrange contract. The existing algorithms are wrapped, not rewritten:
@@ -244,6 +264,27 @@ The second landing makes FC boundaries authoritative: the block pass descends in
 
 - Registry landing: 80/80 fixture diff is zero; the same style/layout/work counters are recorded per FC.
 - FC-root landing: float and margin containment tests pass without the local `floatBottomL/R` merge; a deliberately nested float/margin fixture matches Chromium.
+
+**Status (2026-11-12, SP-4) — L2 first landing landed; second landing deferred.**
+The display `else-if` chain is now a pass registry: `fcRegistry` + `lookupPass`
+(`internal/layout/fc.go`) dispatch the used display value to the same pass
+functions, with the block-flow body kept byte-for-byte. The dispatch site is
+`internal/layout/block.go:253-271` (the `ContentVisibility` branch, then the
+`lookupPass` branch at 261, then the block-flow `else`), not the stale
+`248-256` cited above. Each pass increments `Arena.PassCounts [5]uint64` indexed
+by `FCKind` (`FCBlockFlow`, `FCTable`, `FCGrid`, `FCFlexRow`, `FCFlexColumn`),
+surfaced via `Arena.FCCount` and `Session.LayoutPassCounts` (read under `opMu`).
+The registry is populated in `init` to avoid a static initialization cycle (every
+pass calls back into `lookupPass`). Oracles: `test/layout/fc_registry_test.go`,
+`test/engine/fc_counts_test.go`. Zero-diff verified: 105/105, 96.39%, gate
+counters unchanged. Correction: `startsNewFC` is at `internal/layout/block.go:2887`
+(not `2659`); it still answers only the margin-collapse question. The second
+landing (authoritative FC roots) is **deferred to SP-5** with measured evidence:
+the `scripts/verify-fc-containment-geometry.js` anchor + `testdata/fc-containment/`
+fixture show Goosie already matches every containment **height**; the residual
+divergence is **positioning** (an inline-block sole-child-of-flow-root lands at
+the origin; a flow-root group margin is dropped), which is a different root cause
+than the containment refactor drafted here and needs its own re-scoped plan.
 
 ### 4.3 Dependency-tier invalidation
 
@@ -418,12 +459,30 @@ is deferred with its own re-baseline budget.
 
 **Acceptance:** bijection test; no held `*Object` across allocation; zero fixture diff.
 
+**L1 status (2026-11-12, SP-4):** landed within-generation identity — `byKey`
+index, monotonic word/anonymous ordinals, all key sites via `setKey`,
+`BoxKey`-keyed paint selection/find, the corrected `Alloc` lifetime rule, and the
+`archtest.ArenaPointerMaps` guard. Bijection oracle
+`test/layout/boxkey_bijection_test.go`; zero diff on 105/105 fixtures (96.39%).
+Cross-reflow slot persistence and copy-forward remain target-only (SP-5+). See
+§4.1 for the pseudo-background-map correction (keyed by `*style.ComputedStyle`,
+not migrated here).
+
 ### L2 — Formatting contexts as layout roots
 
 - Add the pass registry and wrap the existing algorithms.
 - First landing is behavior-preserving; second landing makes FC roots authoritative for float/margin containment.
 
 **Acceptance:** zero fixture diff at the registry landing; per-FC counters; nested float/margin fixture matches Chromium.
+
+**L2 status (2026-11-12, SP-4):** first landing landed — `fcRegistry`/`lookupPass`
+dispatch (`internal/layout/fc.go`), per-FC `PassCounts` surfaced via
+`Session.LayoutPassCounts`, zero diff on 105/105 (96.39%), gate counters
+unchanged. Second landing **deferred to SP-5** with evidence: the
+`testdata/fc-containment/` anchor shows containment heights already match
+Chromium and the residual gap is positioning (inline-block-in-flow-root placement
+and a dropped flow-root group margin), a different root cause needing a re-scoped
+plan. See §4.2.
 
 ### L3 — Dependency-tier invalidation
 
