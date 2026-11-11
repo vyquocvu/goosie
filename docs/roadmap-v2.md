@@ -201,6 +201,16 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 
 Ưu tiên sau khi P0–P2 ổn định: menu ngữ cảnh cho liên kết/ảnh/văn bản, bookmark bar, Reader Mode, in/xuất PDF, giao diện xem nguồn/kiểm tra phần tử, quản lý nhiều cửa sổ. Chỉ đưa từng mục vào sprint khi có hành trình người dùng, thiết kế tương tác và tiêu chí nghiệm thu cụ thể. Autofill mật khẩu và đồng bộ đám mây cần thiết kế dữ liệu/bảo mật riêng; chưa nằm trong phạm vi roadmap này.
 
+**Trạng thái P3 (khảo sát 2026-11-12, SP-6):** danh sách trên đã lỗi thời — 5/6 mục **đã có trong mã và có test**, chỉ còn multi-window vắng mặt:
+- **Menu ngữ cảnh — đã có:** `cmd/goosie/context_menu.go` (link/ảnh/selection/editable + Back/Forward/Reload + View Source/Inspect/Print), chuột phải deliver qua `shim_darwin.m` → `surface.Button`; menu tab-strip riêng. Test `context_menu_test.go`, `tab_menu_test.go`.
+- **Bookmark bar — đã có:** `internal/bookmarks/bookmarks.go` (Toggle/Delete/Rename/Search/Save atomic, cap 10000) + băng 28px `drawBookmarksBar` (`toolbar_window.go`), Cmd+Shift+B ẩn/hiện, Cmd+D thêm, trang `goosie://bookmarks`. Test `bookmarks_bar_test.go` (qc:BR-047). Khoảng trống: ẩn mặc định, chưa folder/drag-reorder/nút star trên toolbar.
+- **Reader Mode — đã có:** `cmd/goosie/reader.go` (ExtractArticle + readability scoring + theme), `goosie://reader?url=…`, Cmd+Shift+R. Test `reader_test.go`. Khoảng trống: chưa nút toolbar/context-menu.
+- **In/xuất PDF — đã có:** `cmd/goosie/pdf_export.go` (PaintChecked → A4 → raster → PDF 1.4), Cmd+P / context-menu / `-print-pdf`. Test `pdf_export_test.go`. Khoảng trống: PDF ảnh (chưa text selectable), chưa print dialog.
+- **View-source / inspect — đã có:** `internal/viewsource/viewsource.go` + `goosie://inspect` (DOM tree + highlight qua `engine.SetInspectHighlight`), Cmd+Option+U / Cmd+Option+I. Test `view_source_test.go`, `journey_inspector_test.go`. Khoảng trống: inspector là internal-page, chưa docked DevTools sửa style.
+- **Multi-window — VẮNG MẶT (mục P3 còn lại duy nhất):** một `framePath`/`openWindow` (`main.go:746`), `internal/tabs` chỉ tabs, không `WindowManager`/`NewWindow`, Cmd+N thường chưa xử lý (chỉ Cmd+Shift+N incognito tab), `applicationShouldTerminateAfterLastWindowClosed=YES`. → SP-6a.
+
+Các khoảng trống polish (bookmark mặc định, nút star/reader, PDF text) là enhancement riêng, không phải mục P3 vắng mặt; chỉ đưa vào sprint khi có hành trình + tiêu chí nghiệm thu. L3/L4 (incremental invalidation) vẫn hoãn sang SP-7+ theo bằng chứng địa hình ở mục SP-5.
+
 ## Quy tắc triển khai và kiểm chứng
 
 - Giữ kiến trúc Parse → Style → Layout → Paint và giới hạn nhận đầu vào. Các binary xử lý nội dung không tin cậy phải dùng `Session.PaintChecked`; ảnh phải được kiểm tra metadata trước giải mã. Thêm giao diện không được bỏ qua các giới hạn này.
