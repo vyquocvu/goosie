@@ -13,6 +13,8 @@ import (
 // and asserts the toolbar geometry contract holds at each size, the chrome
 // accessibility nodes stay within the window and never overlap, and the address
 // bar still navigates (BR-143).
+//
+// qc:BR-143
 func TestJourneyResizeKeepsControlsReachable(t *testing.T) {
 	srvURL := findJourneyPage(t, "<p>resize journey</p>", "")
 	b := newBrowserE2E(t)

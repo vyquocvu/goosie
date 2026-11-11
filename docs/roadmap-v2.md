@@ -178,6 +178,11 @@ Không lên lại các phần đã có như một tính năng mới. Mỗi mục
 
 **Cổng P2:** các luồng đã công bố chạy lặp lại được trong bộ kiểm thử tự động và qua ứng dụng native. Không dùng tỷ lệ WPT chung để thay cho kết quả hành trình người dùng.
 
+**Trạng thái "Ba hành trình P2 còn lại" (cập nhật 2026-11-12, SP-3):**
+- **Đã kiểm chứng và ký nhận PASS (INT):** `BR-052` (main menu → bookmark/history), `BR-142` (Inspector chọn node → highlight không đổi DOM) và `BR-143` (resize cửa sổ → toolbar/tab/address còn truy cập, không chồng lấn) đã đóng bằng journey tự động chạy qua `platform/headless` kèm mutation đỏ→xanh; chi tiết oracle/lệnh/bằng chứng ở `docs/qa-test-catalog.md` (249 PASS, 2 NOT RUN còn BR-085/BR-180). `BR-052` dùng nút menu vẽ từ tập visible của `ComputeLayout` + popup `ContextMenu` route qua handler action của context-menu sẵn có. `BR-143` lấy `toolbar.ComputeLayout(width)` làm owner geometry duy nhất: menu neo phải, Downloads/Reload/Forward/Back collapse dần để address giữ `MinAddressWidth` và không control nào chồng nhau. `BR-142` vẽ overlay paint-only SAU document walk, chỉ lưu `inspectNode` rồi re-resolve box trong `Paint`, cây DOM thành link `?tab=&select=` với repaint tab-background xếp hàng chờ drain trên chrome tick.
+- **Đã sửa trong lượt này:** hai data race giữa surface-loop (`Present`) và chrome pump (`intercept`) mà journey BR-052 để lộ — các trường `ContextMenu` và `lastWinW/lastWinH` cùng con trỏ bitmap bị đọc không khóa cross-goroutine; nay `ContextMenu` có mutex + `IsVisible`/`Snapshot`, geometry có `extentMu`, và journey quan sát menu qua snapshot có khóa. `go test -race ./cmd/goosie -count=1` sạch (0 data race).
+- **Còn thiếu / chưa kiểm chứng:** nửa native CUA của cả ba hành trình chưa chạy do phiên không có display; mới ký nhận phần oracle tự động (INT). Không còn hàng P2 NOT RUN nào trong catalog, nên nửa tự động của Cổng P2 đã thoả; nửa native vẫn chờ và không được tuyên bố đạt.
+
 ### P3 — Tiện ích và hoàn thiện sản phẩm
 
 Ưu tiên sau khi P0–P2 ổn định: menu ngữ cảnh cho liên kết/ảnh/văn bản, bookmark bar, Reader Mode, in/xuất PDF, giao diện xem nguồn/kiểm tra phần tử, quản lý nhiều cửa sổ. Chỉ đưa từng mục vào sprint khi có hành trình người dùng, thiết kế tương tác và tiêu chí nghiệm thu cụ thể. Autofill mật khẩu và đồng bộ đám mây cần thiết kế dữ liệu/bảo mật riêng; chưa nằm trong phạm vi roadmap này.

@@ -673,8 +673,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_main_menu_test.go:TestJourneyMainMenuOpensManagers"
+    ],
     "enforced": false
   },
   {
@@ -3081,10 +3083,20 @@
     "id": "BR-142",
     "priority": "P2",
     "methods": [
-      "CUA"
+      "CUA",
+      "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_inspector_test.go:TestInspectorSelectDefersRepaintAndPaintsOverlay",
+      "cmd/goosie/journey_inspector_test.go:TestInspectorSelectIgnoresUnknownNode",
+      "cmd/goosie/journey_inspector_test.go:TestJourneyInspectorHighlightsBackgroundTab",
+      "test/engine/inspect_highlight_test.go:TestInspectHighlightDoesNotMutateDOM",
+      "test/engine/inspect_highlight_test.go:TestInspectHighlightSkipsDetachedNode",
+      "test/paint/inspect_highlight_test.go:TestInspectHighlightAbsentByDefault",
+      "test/paint/inspect_highlight_test.go:TestInspectHighlightClearRemovesOverlay",
+      "test/paint/inspect_highlight_test.go:TestInspectHighlightCoversNodeBorderRect"
+    ],
     "enforced": false
   },
   {
@@ -3094,8 +3106,10 @@
       "CUA",
       "INT"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/journey_resize_test.go:TestJourneyResizeKeepsControlsReachable"
+    ],
     "enforced": false
   },
   {
