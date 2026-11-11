@@ -69,3 +69,66 @@ func TestManagerSpawnTwoWindows(t *testing.T) {
 		t.Fatal("a spawned window has no loop")
 	}
 }
+
+func TestManagerCloseOneKeepsOthers(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 1: %v", err)
+	}
+	f2, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 2: %v", err)
+	}
+	waitWindows(t, m, 2)
+
+	m.closeWindow(f1)
+	waitWindows(t, m, 1)
+
+	select {
+	case <-m.done:
+		t.Fatal("manager signalled done while a window is still open")
+	default:
+	}
+	// f2 is still registered and its loop has not been torn down.
+	m.mu.Lock()
+	stillThere := len(m.windows) == 1 && m.windows[0] == f2
+	m.mu.Unlock()
+	if !stillThere {
+		t.Fatal("closing window 1 removed window 2")
+	}
+}
+
+func TestManagerQuitOnLastWindow(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 1: %v", err)
+	}
+	f2, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 2: %v", err)
+	}
+	waitWindows(t, m, 2)
+
+	m.closeWindow(f1)
+	waitWindows(t, m, 1)
+	m.closeWindow(f2)
+
+	select {
+	case <-m.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("manager never signalled done after the last window closed")
+	}
+	waitWindows(t, m, 0)
+}
