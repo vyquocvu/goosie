@@ -137,6 +137,10 @@ func spliceAnonymousBlock(a *Arena, parent ObjectID, kids []ObjectID, s *style.C
 
 	id, _ := a.Alloc()
 	*a.Get(id) = Object{Style: s, Parent: parent, FirstKid: first, LastKid: last, flags: flagAnonymous}
+	if a.anonSeq < ^uint16(0) {
+		a.setKey(id, NewBoxKey(a.anonNodeID(parent), BoxKindAnonymous, a.anonSeq))
+		a.anonSeq++
+	}
 	for _, kid := range kids {
 		a.Get(kid).Parent = id
 	}

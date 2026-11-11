@@ -344,6 +344,18 @@ func (a *Arena) ForKey(k BoxKey) (ObjectID, bool) {
 	return id, ok
 }
 
+// anonNodeID returns the DOM node ID of the nearest keyed ancestor of id, or 0.
+// Anonymous boxes borrow it for their key's node field; uniqueness comes from
+// the per-generation anonSeq ordinal, not from this node ID.
+func (a *Arena) anonNodeID(id ObjectID) uint32 {
+	for cur := id; cur != 0; cur = a.Objects[cur].Parent {
+		if n := a.Objects[cur].Node; n != nil && n.ID != 0 {
+			return uint32(n.ID)
+		}
+	}
+	return 0
+}
+
 // RefreshComputedStyles replaces per-node style pointers without rebuilding
 // the arena. It is safe only when there are no anonymous boxes: those styles
 // are derived during layout and need the parent context to be rebuilt.

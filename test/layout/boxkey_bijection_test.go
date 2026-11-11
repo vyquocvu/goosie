@@ -96,3 +96,30 @@ func TestBoxKeyBijectionTextHeavy(t *testing.T) {
 		t.Fatal("no BoxKindWord boxes after laying out text")
 	}
 }
+
+func TestBoxKeyBijectionAnonymousAndTable(t *testing.T) {
+	a := buildBijectionArena(t,
+		`<div>text<span>inline</span>more<p>block</p></div>`+
+			`<table><td>a</td><td>b</td></table>`, ``)
+	ids := keyedBoxes(a)
+	seen := map[layout.BoxKey]layout.ObjectID{}
+	for _, id := range ids {
+		k := a.Get(id).Key
+		if prev, dup := seen[k]; dup {
+			t.Fatalf("key %v shared by %d and %d", k, prev, id)
+		}
+		seen[k] = id
+		if got, ok := a.ForKey(k); !ok || got != id {
+			t.Fatalf("ForKey(%v)=(%d,%v) want (%d,true)", k, got, ok, id)
+		}
+	}
+	anon := 0
+	for i := 1; i < len(a.Objects); i++ {
+		if a.Objects[i].Key.Kind() == layout.BoxKindAnonymous {
+			anon++
+		}
+	}
+	if anon == 0 {
+		t.Fatal("no BoxKindAnonymous boxes after laying out mixed content + table")
+	}
+}
