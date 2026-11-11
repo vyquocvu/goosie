@@ -725,6 +725,10 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 			nodeCopy := *k.Node
 			nodeCopy.DataContent = word
 			wordObj.Node = &nodeCopy
+			if a.wordSeq < ^uint16(0) {
+				a.setKey(wordID, NewBoxKey(uint32(nodeCopy.ID), BoxKindWord, a.wordSeq))
+				a.wordSeq++
+			}
 			wordObj.Style = k.Style
 			wordObj.Parent = a.Get(nodeID).Parent
 			if lastWordID == 0 {
