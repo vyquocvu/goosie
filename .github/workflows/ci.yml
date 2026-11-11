@@ -44,7 +44,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run tests with race detector
-        run: go test -race ./...
+        run: go test -race -count=1 ./...
 
   darwin:
     name: macOS native path (darwin + cgo)
@@ -77,11 +77,14 @@ jobs:
         run: go build ./...
       - name: go vet (all analyzers)
         run: go vet -all ./...
+      - name: Install jq for the gate-check contract tests
+        run: brew install jq
       - name: Native and chrome tests under the race detector
         # internal/platform/darwin owns the only tests in the repo that prove a real
         # decode happened; they need no display and no window, so a runner with nobody
-        # logged in can still run them.
-        run: go test -race -count=1 -v ./internal/platform/darwin/ ./test/platform/ ./internal/archtest/ ./cmd/goosie/
+        # logged in can still run them. test/engine and test/gatecheck join so the
+        # race-scoped QSA timeout and the oracle gates run on macOS ARM64 as well.
+        run: go test -race -count=1 -v ./internal/platform/darwin/ ./test/platform/ ./internal/archtest/ ./cmd/goosie/ ./test/engine/ ./test/gatecheck/
 
   audit:
     name: Dependency vulnerability scan
