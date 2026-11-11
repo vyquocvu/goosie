@@ -1,0 +1,63 @@
+name: Nightly
+
+# Timing budgets gate here, not on per-PR CI (AGENTS.md): the macOS runner
+# exercises scripts/v2-gate-check.sh, and the WPT conformance suite reports
+# against its pinned upstream commit with the min_pass_rate ratchet.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+jobs:
+  macos-gate:
+    name: macOS pacing gate
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install jq
+        run: brew install jq
+      - name: Run the gate scene
+        run: go run ./cmd/goosie -gate -scene checkerboard -frames 600 -out /tmp/gate.json
+      - name: Assert the pacing budgets
+        run: bash scripts/v2-gate-check.sh /tmp/gate.json
+      - name: Upload gate artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-json
+          path: /tmp/gate.json
+
+  wpt-conformance:
+    name: WPT conformance (pinned upstream)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache the pinned WPT checkout
+        uses: actions/cache@v4
+        with:
+          path: /tmp/goosie-wpt
+          key: wpt-${{ hashFiles('testdata/wpt-config.json') }}
+      - name: Build goosie
+        run: go build -o goosie ./cmd/goosie
+      - name: Run the conformance suite
+        run: >
+          WPT_RUN_SUITE=1 WPT_DIR=/tmp/goosie-wpt WPT_GOOSIE_BINARY=./goosie
+          go test -timeout 40m -run TestWPTSuite ./test/wpt/
+      - name: Upload WPT report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wpt-report
+          path: |
+            /tmp/wpt-results/results.json
+            /tmp/wpt-results/report.html
