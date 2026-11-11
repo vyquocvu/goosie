@@ -1,0 +1,52 @@
+{
+  "goldens": [
+    {
+      "family": "block",
+      "fixture": "basic/01-headings-paragraphs.html",
+      "file": "block.png",
+      "sha256": "4a9b0387518d4f09d96d4c8be5eb4b92a47b94b371238d2aec42512ab666bc15"
+    },
+    {
+      "family": "inline",
+      "fixture": "basic/02-inline-elements.html",
+      "file": "inline.png",
+      "sha256": "9f597c1baf2d173f8a9e3758a6a68e582a26f65d64f139c7e282407ac1f30540"
+    },
+    {
+      "family": "float",
+      "fixture": "floats/01-clear-directions.html",
+      "file": "float.png",
+      "sha256": "8d2da877c5c66e8843033710c7c3132370f51d63db8e52cd9273326a25e03a0a"
+    },
+    {
+      "family": "flex",
+      "fixture": "flex/01-flex-row.html",
+      "file": "flex.png",
+      "sha256": "ec3188363358f4609b8dfbcfcb2e12a9386f0605f930569023d71a42549f681a"
+    },
+    {
+      "family": "grid",
+      "fixture": "grid/01-basic-grid.html",
+      "file": "grid.png",
+      "sha256": "bf87fd6b76be5d23e67ba0febe1d9fea8b086632047d09dba5a34c432ffc340e"
+    },
+    {
+      "family": "table",
+      "fixture": "tables/01-basic-table.html",
+      "file": "table.png",
+      "sha256": "65cbe0c3dc81c22c0f9169c703c6265c6aedbff3ee90d5dd0530c9f28dbe789b"
+    },
+    {
+      "family": "positioning",
+      "fixture": "positioning/02-absolute.html",
+      "file": "positioning.png",
+      "sha256": "0e7fed1dd64bf44a6747c77359b713ccdaec0c3b6c0985a1956bdf8d01aa7332"
+    }
+  ],
+  "render": {
+    "width": 800,
+    "height": 600,
+    "dpr": 1,
+    "systemFonts": "off"
+  }
+}
