@@ -2618,9 +2618,11 @@ const maxFindMatches = 1000
 
 // findMark ties one Match rect to the word box whose paint emits the
 // highlight. match is the index into the Find result, so the active match can
-// switch color without re-running the search.
+// switch color without re-running the search. The box is held by Key, not a
+// pointer: an arena *Object is only valid until the next allocating call, and
+// these marks live from Find until the next Paint or Reflow.
 type findMark struct {
-	obj   *layout.Object
+	key   layout.BoxKey
 	rect  Match
 	match int
 }
@@ -2676,7 +2678,7 @@ func (s *Session) Find(query string) []Match {
 			}
 			start := at + idx
 			rect, first := matchRect(words, off, start, start+len(q))
-			marks = append(marks, findMark{obj: words[first], rect: rect, match: len(matches)})
+			marks = append(marks, findMark{key: words[first].Key, rect: rect, match: len(matches)})
 			matches = append(matches, rect)
 			at = start + 1
 		}
