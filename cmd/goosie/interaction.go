@@ -901,6 +901,14 @@ func (f *framePath) handleContextMenuAction(action, data string) {
 		f.viewSourceCurrentTab()
 	case "inspect":
 		f.navigateTab("goosie://inspect")
+	case "bookmarks":
+		f.navigateTab("goosie://bookmarks")
+	case "history":
+		f.navigateTab("goosie://history")
+	case "downloads":
+		f.navigateTab("goosie://downloads")
+	case "settings":
+		f.navigateTab("goosie://settings")
 	case "print_pdf":
 		f.printActiveTabToPDF()
 	}

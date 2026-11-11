@@ -66,6 +66,7 @@ type chromeWindow struct {
 
 	// Context menu
 	contextMenu             *ContextMenu
+	mainMenu                *ContextMenu
 	onContextMenu           func(contentX, contentY, winX, winY int32)
 	onContextMenuAction     func(action, data string)
 	onTabMenuAction         func(action, data string)
@@ -166,6 +167,10 @@ func newChromeWindow(w surface.Window, tb *toolbar.State, mgr *tabs.TabManager,
 		fonts:         fonts,
 		hoverBookmark: -1,
 		contextMenu:   NewContextMenu(),
+		mainMenu:      NewContextMenu(),
+	}
+	if tb != nil {
+		tb.OnMenu = cw.openMainMenu
 	}
 	go cw.pump()
 	return cw
@@ -176,6 +181,29 @@ func (cw *chromeWindow) sc() int32 {
 		return 1
 	}
 	return cw.scale
+}
+
+// openMainMenu shows the chrome menu anchored below the menu button. The
+// overflow Back/Forward/Reload entries keep those actions reachable at narrow
+// widths where ComputeLayout collapses the standalone buttons into this menu.
+func (cw *chromeWindow) openMainMenu() {
+	sc := cw.sc()
+	w := cw.toolbar.BoundsWidth() / sc
+	r := toolbar.ButtonRect(toolbar.ButtonMenu, w)
+	items := []ContextMenuItem{
+		{Label: "Bookmarks", Action: "bookmarks"},
+		{Label: "History", Action: "history"},
+		{Label: "Downloads", Action: "downloads"},
+		{Label: "Settings", Action: "settings"},
+		{Separator: true},
+		{Label: "Back", Action: "back"},
+		{Label: "Forward", Action: "forward"},
+		{Label: "Reload", Action: "reload"},
+	}
+	x := r.X0 * sc
+	y := (int32(tabs.TabBarHeight) + r.Y1) * sc
+	maxW, maxH := cw.windowExtent()
+	cw.mainMenu.Show(x, y, maxW, maxH, items, sc)
 }
 
 // ChooseFiles forwards the optional file-picker capability of the platform
@@ -334,6 +362,7 @@ func (cw *chromeWindow) accessibilityChrome() []ax.Node {
 		downloadValue = strconv.Itoa(activeDownloads) + " active"
 	}
 	appendTool(ax.RoleButton, "goosie.downloads", "Downloads", downloadValue, toolbar.ButtonRect(toolbar.ButtonDownloads, width), false, false)
+	appendTool(ax.RoleButton, "goosie.menu", "Menu", "", toolbar.ButtonRect(toolbar.ButtonMenu, width), false, false)
 	roots = append(roots, ax.Node{Role: ax.RoleGroup, ID: "goosie.toolbar", Label: "Browser toolbar",
 		X0: 0, Y0: float32(toolY), X1: float32(width), Y1: float32(toolY + toolbar.ToolbarHeight), Children: toolChildren})
 	return roots
@@ -375,12 +404,16 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 		cw.lastWinW = int32(buf.W)
 		cw.lastWinH = int32(buf.H)
 		copy(cw.outBitmap.RGBA, buf.RGBA)
-		merged := damage
+		merged := append(make([]frame.Rect, 0, len(damage)+2), damage...)
 		if cw.contextMenu != nil && cw.contextMenu.Visible {
 			cw.contextMenu.Draw(cw.outBitmap, cw.fonts, cw.sc())
-			mRect := cw.contextMenu.Rect()
-			if !mRect.Empty() {
-				merged = append(make([]frame.Rect, 0, len(damage)+1), damage...)
+			if mRect := cw.contextMenu.Rect(); !mRect.Empty() {
+				merged = append(merged, mRect)
+			}
+		}
+		if cw.mainMenu != nil && cw.mainMenu.Visible {
+			cw.mainMenu.Draw(cw.outBitmap, cw.fonts, cw.sc())
+			if mRect := cw.mainMenu.Rect(); !mRect.Empty() {
 				merged = append(merged, mRect)
 			}
 		}
@@ -469,6 +502,12 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 		cw.contextMenu.Draw(out, cw.fonts, cw.sc())
 		mRect := cw.contextMenu.Rect()
 		if !mRect.Empty() {
+			merged = append(merged, mRect)
+		}
+	}
+	if cw.mainMenu != nil && cw.mainMenu.Visible {
+		cw.mainMenu.Draw(out, cw.fonts, cw.sc())
+		if mRect := cw.mainMenu.Rect(); !mRect.Empty() {
 			merged = append(merged, mRect)
 		}
 	}
@@ -638,6 +677,28 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 					return true
 				}
 				cw.contextMenu.Hide()
+				if ev.Button == surface.ButtonLeft {
+					return true
+				}
+			}
+		}
+		if cw.mainMenu != nil && cw.mainMenu.Visible {
+			if ev.Action == surface.PointerMotion {
+				cw.mainMenu.UpdateHover(ev.Pos, cw.sc())
+				mRect := cw.mainMenu.Rect()
+				if ev.Pos.X >= mRect.X0 && ev.Pos.X < mRect.X1 && ev.Pos.Y >= mRect.Y0 && ev.Pos.Y < mRect.Y1 {
+					return true
+				}
+			}
+			if ev.Action == surface.PointerPress {
+				if it, ok := cw.mainMenu.HitItem(ev.Pos, cw.sc()); ok {
+					cw.mainMenu.Hide()
+					if cw.onContextMenuAction != nil {
+						cw.onContextMenuAction(it.Action, it.Data)
+					}
+					return true
+				}
+				cw.mainMenu.Hide()
 				if ev.Button == surface.ButtonLeft {
 					return true
 				}
@@ -822,6 +883,12 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		if cw.contextMenu != nil && cw.contextMenu.Visible {
 			if ev.Key == 0x1B { // Escape
 				cw.contextMenu.Hide()
+				return true
+			}
+		}
+		if cw.mainMenu != nil && cw.mainMenu.Visible {
+			if ev.Key == 0x1B { // Escape
+				cw.mainMenu.Hide()
 				return true
 			}
 		}

@@ -254,6 +254,7 @@ type State struct {
 	ActiveDownloads  int
 	DownloadProgress float64
 	OnDownloads      func()
+	OnMenu           func()
 	Incognito        bool
 
 	Zoom           float64
@@ -902,6 +903,12 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 			cb := s.OnDownloads
 			fire(func() { cb() })
 		}
+	case rectContains(ButtonRect(ButtonMenu, w), lp):
+		s.dragging = false
+		if s.OnMenu != nil {
+			cb := s.OnMenu
+			fire(func() { cb() })
+		}
 	case rectContains(AddressBarRect(w), lp):
 		r := frame.Rect4(AddressBarRect(w).X0*sc, AddressBarRect(w).Y0*sc, AddressBarRect(w).X1*sc, AddressBarRect(w).Y1*sc)
 		if zRect, ok := s.zoomBadgeRect(r, sc); ok && rectContains(zRect, pos) {
@@ -1251,10 +1258,10 @@ func (s *State) Draw(backing *frame.Bitmap, oy int32) {
 
 	backing.FillRect(frame.Rect4(0, oy+barH-1, int32(backing.W), oy+barH), sepCol, nil)
 
-	s.drawButton(backing, ButtonBack, w, clip, oy)
-	s.drawButton(backing, ButtonForward, w, clip, oy)
-	s.drawButton(backing, ButtonReload, w, clip, oy)
-	s.drawButton(backing, ButtonDownloads, w, clip, oy)
+	lay := ComputeLayout(w)
+	for _, btn := range lay.Buttons {
+		s.drawButton(backing, btn, w, clip, oy)
+	}
 	s.drawAddressBar(backing, w, clip, oy)
 
 	if s.Loading {
@@ -1302,6 +1309,22 @@ func (s *State) drawButton(backing *frame.Bitmap, btn Button, toolbarW int32, cl
 		}
 	case ButtonDownloads:
 		s.drawDownloads(backing, ox, oyd, cx, cy, sc, fg, clip)
+	case ButtonMenu:
+		s.drawMenuIcon(backing, ox, oyd, cx, cy, sc, fg, clip)
+	}
+}
+
+func (s *State) drawMenuIcon(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c frame.Color, clip frame.Rect) {
+	fcx := float64(ox) + float64(cx)*float64(sc)
+	fcy := float64(oy) + float64(cy)*float64(sc)
+	thick := 1.8 * float64(sc)
+	if thick < 1.5 {
+		thick = 1.5
+	}
+	halfW := 7.0 * float64(sc)
+	for _, dy := range []float64{-5, 0, 5} {
+		y := fcy + dy*float64(sc)
+		drawLineAA(backing, fcx-halfW, y, fcx+halfW, y, thick, c)
 	}
 }
 
