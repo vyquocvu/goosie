@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -131,4 +132,54 @@ func TestManagerQuitOnLastWindow(t *testing.T) {
 		t.Fatal("manager never signalled done after the last window closed")
 	}
 	waitWindows(t, m, 0)
+}
+
+func TestManagerRunSavesAndTearsDown(t *testing.T) {
+	c := testManagerConfig(t)
+	m, err := newWindowManager(c)
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	// Seed a bookmark so the shared history/bookmark save path has state.
+	if m.profile.bookmarks != nil {
+		m.profile.bookmarks.Toggle("https://example.test/", "Example")
+	}
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- m.run() }()
+
+	// Wait for the primary window to exist, then close it to end the run.
+	var primary *framePath
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		primary = m.primary
+		m.mu.Unlock()
+		if primary != nil {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if primary == nil {
+		t.Fatal("run never spawned a primary window")
+	}
+	m.closeWindow(primary)
+
+	select {
+	case err := <-runErr:
+		if err != nil {
+			t.Fatalf("run returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return after the window closed")
+	}
+
+	if _, err := os.Stat(c.sessionFile); err != nil {
+		t.Fatalf("session file not saved on clean exit: %v", err)
+	}
+	if _, err := os.Stat(c.sessionActiveFile); !os.IsNotExist(err) {
+		t.Fatalf("crash journal not removed on clean exit: %v", err)
+	}
 }

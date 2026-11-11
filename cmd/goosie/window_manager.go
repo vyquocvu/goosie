@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/platform"
 	"github.com/vyquocvu/goosie/internal/session"
 )
@@ -171,8 +171,86 @@ func (m *windowManager) cleanup() {
 	m.profile.close()
 }
 
-var _ = frame.Rect{}
-var _ = session.Save
-var _ = signal.Notify
-var _ = syscall.SIGTERM
-var _ = platform.Headless
+// run drives the interactive browser: spawn the primary window, load its URL,
+// hand the main thread to a native run loop if the backend owns one, wait for
+// every window to close, then save once and report. Paced/screenshot/private
+// runs do not come here — run() keeps their existing single-window path.
+func (m *windowManager) run() error {
+	signal.Notify(m.sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(m.sig)
+	defer m.cancel()
+
+	// One signal handler quits the whole app: cancelling m.ctx cancels every
+	// per-window context, so each loop stops and each teardown runs. Distributing
+	// the shared signal channel across per-window teardowns would wake only one
+	// window and strand the rest.
+	go func() {
+		select {
+		case <-m.sig:
+			m.cancel()
+		case <-m.done:
+		}
+	}()
+
+	if _, err := m.spawn(m.config.url); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	primary := m.primary
+	errs := m.errs
+	m.mu.Unlock()
+	if m.config.url == "" && primary.restoredActiveURL != "" {
+		primary.navigateTabNoHistory(primary.restoredActiveURL)
+	}
+
+	if r, ok := primary.window.(platform.Runner); ok {
+		r.Run()
+	}
+	<-m.done
+
+	m.save()
+
+	var firstErr error
+	for _, ec := range errs {
+		if err := <-ec; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return fmt.Errorf("goosie: %w", firstErr)
+	}
+	return primary.report(nil)
+}
+
+// save persists the primary window's session plus the shared history/flags once,
+// after every window is gone, and removes the crash journal. This is the
+// non-private interactive save (run() routes private runs elsewhere). Window-aware
+// session grouping is deferred to SP-6b.
+func (m *windowManager) save() {
+	m.mu.Lock()
+	primary := m.primary
+	m.mu.Unlock()
+	if primary == nil {
+		return
+	}
+	primary.sessionMu.Lock()
+	if !primary.sessionDisabled.Load() {
+		if err := session.Save(m.config.sessionFile, sessionState(primary)); err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: save session: %v\n", err)
+		}
+	}
+	primary.sessionMu.Unlock()
+	if m.profile.history != nil {
+		if err := m.profile.history.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: save history: %v\n", err)
+		}
+	}
+	if m.profile.flags != nil {
+		if err := m.profile.flags.Save(); err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: save flags: %v\n", err)
+		}
+	}
+	if m.config.sessionActiveFile != "" {
+		_ = os.Remove(m.config.sessionActiveFile)
+	}
+}
