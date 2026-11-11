@@ -942,11 +942,13 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	evalExpr := ""
 	action := ""
 	device := ""
+	sel := ""
 	if u != nil {
 		targetIDStr = u.Query().Get("tab")
 		evalExpr = u.Query().Get("eval")
 		action = u.Query().Get("action")
 		device = u.Query().Get("device")
+		sel = u.Query().Get("select")
 	}
 
 	if action == "emulate" {
@@ -1038,6 +1040,35 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	nodeCount, maxDepth := sess.DOMStats()
 	sheets := sess.Stylesheets()
 
+	// A select link in the DOM tree outlines that node in the inspected tab.
+	// Only the highlight is set here; the repaint is deferred to the chrome
+	// thread because this builder runs before the inspector tab commits, and a
+	// synchronous repaint would publish a half-built accessibility tree.
+	var selectedID dom.NodeID
+	if sess.Doc != nil {
+		switch {
+		case sel == "clear":
+			sess.ClearInspectHighlight()
+			f.scheduleInspectRepaint(targetTab)
+		case sel != "":
+			if id, err := strconv.ParseUint(sel, 10, 32); err == nil {
+				selectedID = dom.NodeID(id)
+				var found *dom.Node
+				sess.Doc.Node.Walk(func(n *dom.Node) bool {
+					if n.ID == selectedID {
+						found = n
+						return false
+					}
+					return true
+				})
+				if found != nil {
+					sess.SetInspectHighlight(found)
+					f.scheduleInspectRepaint(targetTab)
+				}
+			}
+		}
+	}
+
 	var b strings.Builder
 
 	// Header card with tab picker
@@ -1094,9 +1125,10 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	// DOM Elements Tree Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Elements (DOM Tree)</h2>`)
+	b.WriteString(fmt.Sprintf(`<p style="font-size: 12px; color: #5f6368;">Click a tag name to highlight that node in the inspected tab. <a href="goosie://inspect?tab=%d&amp;select=clear" style="color: #1a73e8;">Clear highlight</a></p>`, targetTab.ID()))
 	b.WriteString(`<div style="background-color: #282c34; color: #abb2bf; font-family: monospace; font-size: 13px; padding: 16px; border-radius: 6px; overflow-x: auto; line-height: 1.6;">`)
 	if sess.Doc != nil {
-		renderDOMTreeHTML(&b, &sess.Doc.Node, 0, 150)
+		renderDOMTreeHTML(&b, &sess.Doc.Node, 0, 150, selectedID, targetTab.ID())
 	} else {
 		b.WriteString(`<em>Empty Document</em>`)
 	}
@@ -1810,7 +1842,10 @@ func buildFlagsPageHTML(f *framePath, rawURL string) (title, htmlContent string)
 }
 
 // renderDOMTreeHTML serializes the DOM hierarchy into syntax-highlighted HTML.
-func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int) int {
+// Each element's opening tag name is a link that selects the node for
+// highlighting in the inspected tab (tabID); selected marks the row currently
+// outlined. A zero selected means nothing is highlighted.
+func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int, selected dom.NodeID, tabID uint64) int {
 	if n == nil || limit <= 0 {
 		return limit
 	}
@@ -1819,7 +1854,12 @@ func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int) int {
 	switch n.Type {
 	case dom.NodeElement:
 		b.WriteString(indent)
-		b.WriteString(fmt.Sprintf(`&lt;<span style="color: #e06c75; font-weight: bold;">%s</span>`, html.EscapeString(n.Data)))
+		href := fmt.Sprintf("goosie://inspect?tab=%d&select=%d", tabID, n.ID)
+		style := "color: #e06c75; font-weight: bold;"
+		if selected != 0 && n.ID == selected {
+			style += " background-color: #1a73e8; color: #ffffff;"
+		}
+		b.WriteString(fmt.Sprintf(`&lt;<a href="%s" style="text-decoration:none;"><span style="%s">%s</span></a>`, href, style, html.EscapeString(n.Data)))
 		if len(n.Attr) > 0 {
 			for _, a := range n.Attr {
 				b.WriteString(fmt.Sprintf(` <span style="color: #d19a66;">%s</span>=<span style="color: #98c379;">&quot;%s&quot;</span>`, html.EscapeString(a.Name), html.EscapeString(a.Value)))
@@ -1836,7 +1876,7 @@ func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int) int {
 				b.WriteString(indent + `&nbsp;&nbsp;<span style="color: #5c6370;">... (more child nodes truncated)</span><br>`)
 				break
 			}
-			limit = renderDOMTreeHTML(b, child, depth+1, limit)
+			limit = renderDOMTreeHTML(b, child, depth+1, limit, selected, tabID)
 		}
 		b.WriteString(fmt.Sprintf(`%s&lt;/<span style="color: #e06c75; font-weight: bold;">%s</span>&gt;<br>`, indent, html.EscapeString(n.Data)))
 	case dom.NodeText:
@@ -1853,7 +1893,7 @@ func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int) int {
 		}
 	case dom.NodeDocument:
 		for child := n.FirstChild; child != nil; child = child.NextSibling {
-			limit = renderDOMTreeHTML(b, child, depth, limit)
+			limit = renderDOMTreeHTML(b, child, depth, limit, selected, tabID)
 		}
 	}
 	return limit

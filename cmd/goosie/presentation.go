@@ -333,6 +333,49 @@ func (f *framePath) publishAccessibility() {
 		float32(vp.Offset.X)/effectiveDPR, float32(vp.Offset.Y)/effectiveDPR))
 }
 
+// scheduleInspectRepaint queues a tab whose inspector highlight changed for a
+// repaint on the chrome thread. It is called from the inspector page builder,
+// which runs on a navigation worker before the inspector tab's own session is
+// committed, so it must not repaint synchronously: repaintTab publishes the
+// active tab's accessibility tree, and mid-commit that tree is half-built. The
+// chrome tick drains the queue once the navigation has committed.
+func (f *framePath) scheduleInspectRepaint(tab *tabs.Tab) {
+	if tab == nil {
+		return
+	}
+	f.inspectRepaintMu.Lock()
+	for _, t := range f.inspectRepaintPending {
+		if t == tab {
+			f.inspectRepaintMu.Unlock()
+			return
+		}
+	}
+	f.inspectRepaintPending = append(f.inspectRepaintPending, tab)
+	f.inspectRepaintMu.Unlock()
+}
+
+// drainInspectRepaints repaints the tabs queued by scheduleInspectRepaint. It
+// runs on the chrome thread (pumpChrome), the same thread as every input
+// callback and repaintTab, after the inspector navigation has committed. The
+// queue is swapped out under the lock and released before any repaint, so no
+// queue, tab or engine lock is held across repaintTab.
+func (f *framePath) drainInspectRepaints() {
+	f.inspectRepaintMu.Lock()
+	pending := f.inspectRepaintPending
+	f.inspectRepaintPending = nil
+	f.inspectRepaintMu.Unlock()
+	if f.tabMgr == nil {
+		return
+	}
+	for _, tab := range pending {
+		// The tab may have closed or been replaced since it was queued.
+		if tab == nil || f.tabMgr.TabByID(tab.ID()) != tab || tab.Session() == nil {
+			continue
+		}
+		f.repaintTab(tab, frame.Rect{})
+	}
+}
+
 // shiftAx copies the tree with every rect translated by (dx, dy).
 func shiftAx(nodes []ax.Node, dx, dy float32) []ax.Node {
 	out := make([]ax.Node, len(nodes))

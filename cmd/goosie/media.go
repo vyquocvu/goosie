@@ -57,6 +57,7 @@ func (f *framePath) pumpChrome() {
 	if f.toolbar != nil {
 		f.toolbar.RefreshSuggestions(time.Now())
 	}
+	f.drainInspectRepaints()
 }
 
 // pumpMedia advances the active tab's video elements and repaints what changed.

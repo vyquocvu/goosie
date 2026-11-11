@@ -217,6 +217,14 @@ type framePath struct {
 	perms          *perms.Manager
 	preferences    preferences.Settings
 	preferencesMu  sync.RWMutex
+	// inspectRepaintPending holds background tabs whose inspector highlight
+	// changed. The page builder runs on a navigation worker before the inspector
+	// tab commits, so it queues a repaint here instead of painting synchronously;
+	// the chrome tick drains it (drainInspectRepaints) once the navigation has
+	// committed. Guarded by inspectRepaintMu, which is never held across a
+	// repaint.
+	inspectRepaintMu      sync.Mutex
+	inspectRepaintPending []*tabs.Tab
 }
 
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
