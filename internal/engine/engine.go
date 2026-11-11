@@ -372,6 +372,18 @@ func (s *Session) WorkCounts() WorkCounts {
 	}
 }
 
+// LayoutPassCounts returns a concurrency-safe snapshot of the per-formatting-
+// context dispatch counts from the current arena generation, indexed by
+// layout.FCKind. It reads s.Arena under opMu, the same lock SelectionBounds uses.
+func (s *Session) LayoutPassCounts() [5]uint64 {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if s.Arena == nil {
+		return [5]uint64{}
+	}
+	return s.Arena.PassCounts
+}
+
 // CSSLinker fetches one linked style sheet. base is the document URL the href
 // resolves against; the returned string is the sheet's CSS text. A linker that
 // fails simply contributes no rules for that href; document rendering does not
