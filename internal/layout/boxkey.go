@@ -29,6 +29,7 @@ const (
 	BoxKindTableCaption
 	BoxKindListItem
 	BoxKindPseudoFirstLetter
+	BoxKindWord
 )
 
 const (

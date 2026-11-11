@@ -255,6 +255,13 @@ type Arena struct {
 	Objects []Object
 	byNode  map[dom.NodeID]ObjectID
 
+	// byKey indexes the object that carries each document-lifetime BoxKey within
+	// this arena generation. wordSeq and anonSeq are per-generation monotonic
+	// ordinals that keep generated word and anonymous box keys unique.
+	byKey   map[BoxKey]ObjectID
+	wordSeq uint16
+	anonSeq uint16
+
 	// Metrics is optional; see the Metrics interface. Set it before the
 	// inline pass runs, which is where text is measured.
 	Metrics Metrics
@@ -292,6 +299,7 @@ func NewArena() *Arena {
 	a := &Arena{
 		Objects: make([]Object, 1, 64),
 		byNode:  make(map[dom.NodeID]ObjectID),
+		byKey:   make(map[BoxKey]ObjectID),
 	}
 	// Pre-allocate the root slot so rootID (1) is the first valid ID.
 	a.Objects = append(a.Objects, Object{})
@@ -318,6 +326,22 @@ func (a *Arena) Get(id ObjectID) *Object {
 func (a *Arena) ForNode(id dom.NodeID) (ObjectID, bool) {
 	oid, ok := a.byNode[id]
 	return oid, ok
+}
+
+// setKey assigns a box's document-lifetime key and indexes it. The key must be
+// unique within this arena generation; callers pass a non-zero key.
+func (a *Arena) setKey(id ObjectID, k BoxKey) {
+	a.Objects[id].Key = k
+	if a.byKey == nil {
+		a.byKey = make(map[BoxKey]ObjectID)
+	}
+	a.byKey[k] = id
+}
+
+// ForKey returns the object indexed for k, if any.
+func (a *Arena) ForKey(k BoxKey) (ObjectID, bool) {
+	id, ok := a.byKey[k]
+	return id, ok
 }
 
 // RefreshComputedStyles replaces per-node style pointers without rebuilding
@@ -427,7 +451,7 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 	}
 	// Use the pre-allocated root at index 1 for the document node.
 	a.Objects[rootID].Node = &doc.Node
-	a.Objects[rootID].Key = NewBoxKey(uint32(doc.Node.ID), BoxKindBlock, 0)
+	a.setKey(rootID, NewBoxKey(uint32(doc.Node.ID), BoxKindBlock, 0))
 	if s, ok := styles[doc.Node.ID]; ok {
 		a.Objects[rootID].Style = s
 	}
@@ -506,7 +530,7 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 		obj.Style = s
 	}
 	if n.ID != 0 {
-		obj.Key = NewBoxKey(uint32(n.ID), boxKindForStyle(obj.Style), 0)
+		a.setKey(id, NewBoxKey(uint32(n.ID), boxKindForStyle(obj.Style), 0))
 	}
 
 	// CSS counters apply in document order: the element's own reset/set
@@ -674,7 +698,7 @@ func buildPseudoElement(a *Arena, doc *dom.Document, nodeID dom.NodeID, kind Box
 	id, obj := a.Alloc()
 	obj.flags |= flagAnonymous
 	obj.Style = pseudoStyle
-	obj.Key = NewBoxKey(uint32(nodeID), kind, 0)
+	a.setKey(id, NewBoxKey(uint32(nodeID), kind, 0))
 
 	// Create a synthetic text node with the generated content.
 	text := pseudoStyle.Content
@@ -696,7 +720,7 @@ func buildFirstLetterPseudoElement(a *Arena, doc *dom.Document, nodeID dom.NodeI
 		st = &stCopy
 	}
 	obj.Style = st
-	obj.Key = NewBoxKey(uint32(nodeID), BoxKindPseudoFirstLetter, 0)
+	a.setKey(id, NewBoxKey(uint32(nodeID), BoxKindPseudoFirstLetter, 0))
 	obj.Node = doc.NewText(letter)
 	return id
 }
