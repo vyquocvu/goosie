@@ -613,6 +613,58 @@ func ArenaPointerMaps(dir string) ([]ArenaPointerMap, error) {
 	return found, nil
 }
 
+// ArenaPointerField is a struct field that holds a *layout.Object. Engine state
+// must name boxes by BoxKey, not hold arena pointers that dangle after a reflow.
+type ArenaPointerField struct {
+	File string
+	Line int
+}
+
+func (f ArenaPointerField) String() string {
+	return fmt.Sprintf("%s:%d: struct field holds *layout.Object", filepath.ToSlash(f.File), f.Line)
+}
+
+// ArenaPointerFields flags struct fields typed *layout.Object under dir. It is
+// scoped to engine state by the caller; paint's walk-local overlays are not
+// scanned. Func-typed fields and parameters are not fields and are not flagged.
+func ArenaPointerFields(dir string) ([]ArenaPointerField, error) {
+	pkgs, err := goFilesByPackage(dir)
+	if err != nil {
+		return nil, err
+	}
+	dirs := make([]string, 0, len(pkgs))
+	for d := range pkgs {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	var found []ArenaPointerField
+	for _, d := range dirs {
+		for _, path := range pkgs[d] {
+			fset, file, err := parseGo(path)
+			if err != nil {
+				return nil, err
+			}
+			aliases := layoutImportNames(file)
+			if len(aliases) == 0 {
+				continue
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				st, ok := n.(*ast.StructType)
+				if !ok || st.Fields == nil {
+					return true
+				}
+				for _, fld := range st.Fields.List {
+					if isLayoutObjectPointer(fld.Type, aliases) {
+						found = append(found, ArenaPointerField{File: path, Line: fset.Position(fld.Pos()).Line})
+					}
+				}
+				return true
+			})
+		}
+	}
+	return found, nil
+}
+
 // layoutImportNames returns the local names this file binds to the layout package.
 func layoutImportNames(file *ast.File) map[string]bool {
 	names := map[string]bool{}
