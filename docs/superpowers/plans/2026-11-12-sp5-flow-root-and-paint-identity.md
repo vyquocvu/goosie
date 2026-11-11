@@ -583,3 +583,43 @@ Expected: SP-5 spec + task commits, clean tree. No push.
 - **Type consistency:** `FlowRoot bool` on ComputedStyle used in `applyDisplay`, `startsNewFC`, `layoutStyleKey`; `findMark.key layout.BoxKey` replaces `.obj` in Find + paint; `ArenaPointerField`/`ArenaPointerFields` mirror `ArenaPointerMap`/`ArenaPointerMaps`.
 - **Read-before-edit points:** real `test/style` resolver helpers (T1), `buildBijectionArena`/`findNodeByID` (T2), `PaintChecked` signature (T5), `writePackageGo`/`moduleRoot` (T6). Each step says to confirm against neighboring tests.
 - **Risk gates:** Component A is behavior-changing but zero-diff-safe (no corpus fixture uses flow-root) and gated by the promoted Chromium fixture. L5 is behavior-preserving. Both require the full matrix + zero-diff parity.
+
+## Execution record (2026-11-12, completed)
+
+All 8 tasks landed on `main` (no push). Commits: `21c0edf5` (T1 parse),
+`2475d244` (T2 startsNewFC + key), `b552976d` (T3 fixture promotion), `1ab706f0`
+(T5 findMark→BoxKey), `54598216` (T6 archtest fields), `2319a683` (T8 docs).
+T4/T7 were verification-only (no commit).
+
+**Deviations from the plan (all justified, behavior unchanged):**
+- T1: `applyDisplay` routes only the main `ComputedStyle` cascade (`applyProperty`).
+  The `@starting-style` site operates on `*StartingStyle` (a distinct type with no
+  `FlowRoot`), so it keeps `parseDisplay`; that rare transition edge is residual.
+  Added `TestFlowRootDoesNotInheritToChild` to lock non-inheritance (display is
+  non-inherited; `inheritFromParent` copies neither `Display` nor `FlowRoot`).
+- T2: the layout test uses a local `arenaObjectByID` walker instead of
+  `findNodeByID(a, …)` — `findNodeByID` takes a `*dom.Node`, but
+  `buildBijectionArena` returns only the arena. The key test lives in
+  `internal/engine/style_diff_flow_root_test.go` (`package engine`), not
+  `test/engine/` (uniformly `engine_test`), to reach `makeLayoutStyleKey`; it
+  compares via `reflect.DeepEqual` (the key holds a non-comparable
+  `DeferredLength`), matching the production seam at `style_diff.go:157`.
+- T5: no new `find_identity_test.go` — `TestFindHighlightsPainted`
+  (`test/engine/find_test.go:200`) already guards Find→SetFindActive→PaintChecked
+  →ClearFind with fill/color assertions, so a baseline-green duplicate was skipped
+  (DRY). `PaintChecked` takes a `scale float32` arg. The structural red is T6.
+- T6: `writePackageGo` takes `map[string]string`, not `(name, body)`; the fixture
+  test mirrors `pointer_map_test.go` and adds a renamed-import (`alias.go`) case,
+  expecting 2 flagged fields (held + heldAlias), BoxKey/func-typed exempt.
+
+**Verification:** full matrix green — `go build`, `gofmt -l` (0), `go vet -all`,
+`go test ./...`, archtest, gate, qc all 0; `-race` on `internal/engine`,
+`test/engine`, `internal/archtest` 0. `make parity` 105/105 (100%), average
+96.39%, known gaps 4/6 — exact SP-3/SP-4 baseline (zero-diff). `layout-parity`
+now 9 fixtures (added `float-containment-001`), all green at 1px. Mutations red→
+restored→green: drop `FlowRoot` branch in `startsNewFC` (`#flowroot h=22 want 82`);
+drop `FlowRoot` from key builder; re-add `findMark.obj` (archtest flags
+`engine.go:2626`). One load-induced flake (`test/raster
+TestUpdateLayerCoalescesDamage`) under the concurrent full suite confirmed green
+in isolation ×5 and package ×3, and on a full-suite re-run — not a regression.
+L3/L4 deferred to SP-6+ with terrain evidence (see roadmap/review).
