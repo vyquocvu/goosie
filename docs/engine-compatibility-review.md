@@ -341,9 +341,9 @@ The current reports blur these. In particular:
 
 - The "WPT pilot" is 8 locally authored test/reference pairs under `testdata/wpt-pilot` (16 HTML files; Appendix B, command B9). It is a useful smoke test, not upstream WPT conformance evidence.
 - **Reftests are same-browser by design.** A WPT reftest renders the test page and its reference page with the browser under test; that is the methodology, not a flaw. The runner follows it (`test/wpt/wpt_runner.go:177-212`). The flaw is the evidence claim: the pilot is local and tiny, and the docs present it as conformance. The runner already has a Chromium reference-directory option (`test/wpt/wpt.go:165-169`); reports must state which mode produced them.
-- Every `testharness.js` test is skipped with the reason "requires JS DOM" (`test/wpt/curate.go:370-373`), even though a goja runtime exists. This is the largest untested conformance surface, and the stated reason is stale.
+- The blanket `testharness.js` skip is gone: `test/wpt/curate.go` curates ~25 `Type: TestHarness` directories and `test/wpt/testharness.go` executes them in Goosie's real document (corrected 2026-11-12, SP-2 audit). What remained open was running the upstream subset in CI — the nightly `wpt-conformance` job now does this against the pinned commit.
 - On a dimension mismatch, the WPT comparator scores only the overlapping region (`test/wpt/wpt_runner.go:303-304`). A page can be the wrong size and still pass. That must become a failure, or a separately reported error.
-- Render parity renders Chromium live through Playwright (`testdata/parity.py:95-128`) at a 30/channel tolerance and 90% pixel pass (`testdata/parity.py:36-37`). CI pins `playwright==1.49.*` (`.github/workflows/ci.yml:94-97`), but the script records no browser build and launches whatever is installed locally. The interaction references were captured with Playwright 1.63.0 / Chrome 153.0.8010.12 (`testdata/interaction-parity/reference-meta.json`). A local run and a CI run are therefore not the same oracle.
+- Render parity renders Chromium live through Playwright (`testdata/parity.py`) at a 30/channel tolerance and 90% pixel pass. Since SP-2 (2026-11-12) the report records the Chromium build, CI installs exact pins from `testdata/requirements.txt`, and both oracles are asserted at test start against `testdata/oracle-pins.json` (render: playwright 1.49.1 / Chromium 131; interaction: playwright 1.63.0 / Chromium 153, matching `testdata/interaction-parity/reference-meta.json`). The two-oracle split is deliberate and documented; unifying it needs its own re-baseline of the parity corpus or the interaction references.
 
 ### 5.2 Target: conformance
 
@@ -351,13 +351,13 @@ The current reports blur these. In particular:
 - **Unskip testharness.js** by binding it to the goja DOM. Report pass/fail/unsupported/error/timeout with a reason from a closed taxonomy. Do not mark a failing test "unsupported" to improve the rate (`docs/engine-compat-roadmap.md:52` already states this rule).
 - Keep the local pilot as a smoke test, labeled as such.
 - Fail or separately report dimension mismatches; do not score the overlap as a pass.
-- The full suite is included in `go test ./...` via `TestWPTSuite`, which downloads or reuses the pinned WPT tarball (`test/wpt/wpt_checkout.go:15-73`). Both the checks and race CI jobs include it, so any checkout it performs is paid for twice. Move it to a dedicated job with an explicit checkout cache.
+- `TestWPTSuite` is opt-in (`WPT_RUN_SUITE=1`, `test/wpt/wpt_test.go:63-66`); `go test ./...` never starts it, and per-PR CI runs only the 8-pair local pilot (corrected 2026-11-12, SP-2 audit). The nightly `wpt-conformance` job owns the conformance run with an explicit checkout cache keyed by the pinned commit.
 
 ### 5.3 Target: regression goldens
 
 - Commit goosie-rendered PNGs for the fixture corpus and key journey pages, with SHA-256, engine commit, platform, DPR, and font-set metadata.
 - Regenerate only through an explicit, reviewable command (for example `make goldens`), never implicitly in CI.
-- Zero committed PNG goldens exist today (`find testdata -name '*.png'` returns 0; Appendix B, command B10). This is the cheapest guard against layout and raster regressions.
+- Since SP-2 (2026-11-12) seven goosie-rendered PNG goldens are committed (`testdata/render-goldens/`, one per layout family) with SHA-256 manifest entries, recorded with `GOOSIE_SYSTEM_FONTS=0` so the pixels are a function of the binary alone; `test/goldens/` compares pixel-exact and re-records only via `GOOSIE_RECORD_GOLDENS=1`. The corpus-wide Chromium-referenced goldens remain open.
 
 ### 5.4 Target: parity
 
@@ -401,6 +401,15 @@ The sequence is dependency-ordered capability work, not a schedule. Each milesto
 **Acceptance:** the full CI matrix is green on the snapshot commit; at least one upstream testharness test passes through goja; a parity report records its Chromium build; a golden diff is produced by a deliberate one-pixel change; the macOS job is green.
 
 V0 is a gate, not the spine. Without it, every later claim is unverifiable.
+
+**V0 status (2026-11-12, SP-2):** license pin, QSA race timeout, Go 1.26.10,
+macOS ARM64 job, testharness unskip (in code), and Chromium-build recording
+were already done before SP-2. SP-2 adds: pinned+asserted oracles
+(`testdata/oracle-pins.json`), seven committed embedded-font goldens
+(`testdata/render-goldens/`), fail-closed `run-wpt.sh`, the nightly macOS
+pacing gate and WPT conformance job, the 105-fixture floor ratchet, and the
+docs authority alignment. Oracle unification (one Chromium for both corpora)
+is deferred with its own re-baseline budget.
 
 ### L1 — `BoxKey` identity
 
