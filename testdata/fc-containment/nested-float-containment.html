@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Nested float / margin formatting-context containment</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; color: #000;
+    font: 16px/20px Arial, Helvetica, sans-serif; }
+  /* Each group is a flow-root so a float that escapes a non-containing box
+     cannot leak into the next group and corrupt its geometry. */
+  .grp { display: flow-root; margin: 10px; }
+  .clr { clear: both; }
+  .box { width: 300px; border: 1px solid #000; }
+  .fr { display: flow-root; }
+  .oh { overflow: hidden; }
+  .float { float: left; width: 100px; height: 80px; background: #cfe; }
+  .tall { float: left; width: 120px; height: 100px; background: #fec; }
+  .small { float: left; width: 80px; height: 60px; background: #ccf; }
+  .itemfloat { float: left; width: 80px; height: 50px; background: #fcf; }
+
+  /* A: a plain in-flow block does NOT contain its float; an FC root does. */
+  /* B: a later sibling's clear must drop below a float merged from an
+     earlier sibling that did not contain it. */
+  #clearparent { width: 300px; border: 1px solid #000; }
+  #sib2 { clear: left; height: 20px; background: #eee; }
+
+  /* C: an inline-block establishes its own FC and contains its float. */
+  #ib { display: inline-block; width: 200px; border: 1px solid #000; }
+
+  /* D: a flex item establishes its own FC and contains its float. */
+  #flex { display: flex; width: 300px; border: 1px solid #000; }
+  #item { width: 200px; }
+</style>
+</head>
+<body>
+  <div class="grp">
+    <div id="plain" class="box"><div class="float"></div>text</div>
+    <div class="clr"></div>
+    <div id="flowroot" class="box fr"><div class="float"></div>text</div>
+    <div class="clr"></div>
+    <div id="overflow" class="box oh"><div class="float"></div>text</div>
+  </div>
+
+  <div class="grp">
+    <div id="clearparent">
+      <div id="sib1"><div class="tall"></div>one</div>
+      <div id="sib2">two</div>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div id="ib"><div class="small"></div>text</div>
+  </div>
+
+  <div class="grp">
+    <div id="flex"><div id="item"><div class="itemfloat"></div>text</div></div>
+  </div>
+</body>
+</html>

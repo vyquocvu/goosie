@@ -814,6 +814,35 @@ git add scripts/verify-fc-containment-geometry.js testdata/render/edge-cases/08-
 git commit -m "test(layout): anchor nested float/margin FC containment vs Chromium (SP-4 L2)"
 ```
 
+### Execution record (Task 11, 2026-11-12)
+
+**Placement deviation (zero-diff gate).** The fixture was NOT placed in
+`testdata/render/edge-cases/` as drafted. Both scored corpora are gated:
+`testdata/render/` is scored by `parity.py` (a new fixture must hit ≥90% AND
+`blank_rows == 0`, since it is absent from the exact-ratchet known-gaps file),
+and `testdata/layout-parity/` is enumerated by `TestLayoutParityWithChromium`
+(every `.html` needs a `.reference.json` and must match within 1px). The fixture
+diverges, so entering either corpus breaks the gate. It lives instead in the
+non-gated `testdata/fc-containment/` with a layout-parity-format
+`.reference.json`; SP-5 promotes it into `layout-parity/` once Goosie matches.
+Verified: with the fixture removed from both gated dirs, `make parity` is back
+to 105/105 and `TestLayoutParityWithChromium` is green.
+
+**Chromium oracle (recorded, `FC CONTAINMENT ORACLE OK`):** plain h22 (collapses
+to text, float overflows); flow-root h82 and overflow h82 (both contain the 80px
+float); clearparent h122 with sib1 h20 and sib2 clearing to y366 (the tall
+float's bottom); inline-block h62 (contains the 60px float); flex h52 / item h50
+(flex item contains the 50px float).
+
+**Goosie current behavior (measured via the layout-parity harness):** every
+containment HEIGHT already matches Chromium — no `h` mismatch on any box. The
+divergence is vertical POSITIONING: (1) a uniform −10px offset because the
+`.grp { display:flow-root; margin:10px }` group margin is dropped (#plain y0 vs
+10, and every later box inherits the offset); (2) #ib — an inline-block that is
+the sole child of a flow-root group — lands at (0,0) instead of in flow (y0 vs
+397), which also pulls the following flex group up ~82px (#flex y387 vs 469).
+That misposition is what produces the parity blank band at rows (469,520).
+
 ---
 
 ## Task 12: L2 second landing — authoritative FC roots
@@ -823,6 +852,23 @@ git commit -m "test(layout): anchor nested float/margin FC containment vs Chromi
 - Test: the Task-11 anchor + existing float/clearance fixtures
 
 **This landing changes behavior. It is gated on the Chromium anchor, not zero-diff. If it cannot match Chromium without regressing the corpus within budget, STOP and defer to SP-5 with evidence (spec §3.2); SP-4 ships L1 + L2-first.**
+
+### Deferral decision (Task 12, 2026-11-12) — DEFERRED to SP-5
+
+Deferred with evidence, per the gate above. The Task-11 measurement shows the
+plan's premise is partly inaccurate: float-containment HEIGHTS already match
+Chromium on every box, so "make containment authoritative via `establishesFC`"
+would not, by itself, close the measured gap. The actual divergence is
+positioning — an inline-block that is the sole child of a flow-root group lands
+at the origin, and a flow-root group's margin is dropped. Those are distinct
+root causes (inline-block-in-flow placement and flow-root margin handling) that
+need their own investigation and a re-scoped plan, not the containment refactor
+drafted here. Attempting a behavior-changing layout refactor now would risk the
+105-fixture zero-diff corpus for no measured gain. SP-4 therefore ships L1
+(BoxKey identity) + L2-first (pass registry + per-FC counters), both zero-diff
+verified. SP-5 picks up the second landing with the `testdata/fc-containment/`
+anchor as its oracle and promotes the fixture into `layout-parity/` when green.
+No engine files were changed for Task 12; nothing to revert.
 
 - [ ] **Step 1: Separate establishesFC from the margin predicate**
 
