@@ -1,3 +1,4 @@
+require('./oracle.js').assertOracle('interaction');
 const { chromium } = require('playwright');
 
 (async () => {

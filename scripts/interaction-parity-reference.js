@@ -1,3 +1,4 @@
+require('./oracle.js').assertOracle('interaction');
 const { chromium } = require('playwright');
 const crypto = require('crypto');
 const fs = require('fs');

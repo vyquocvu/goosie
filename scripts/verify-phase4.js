@@ -3,6 +3,7 @@
  * against real websites using Playwright.
  */
 
+require('./oracle.js').assertOracle('interaction');
 const { chromium } = require('playwright');
 
 const TEST_SITES = [

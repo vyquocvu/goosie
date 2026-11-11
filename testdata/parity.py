@@ -77,6 +77,7 @@ FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
 KNOWN_GAPS = Path("testdata/render-known-gaps.json")
+ORACLE_PINS = Path("testdata/oracle-pins.json")
 MIN_INK = 200
 INK_CUTOFF = 245
 BAND_GAP = 6
@@ -803,6 +804,27 @@ def print_summary(results: list[FixtureResult], threshold: int,
 
 
 # ---------------------------------------------------------------------------
+# Oracle pin
+# ---------------------------------------------------------------------------
+
+def load_oracle_pins() -> dict:
+    with ORACLE_PINS.open() as f:
+        return json.load(f)
+
+
+def check_oracle_version(installed: str, pins: dict) -> str | None:
+    """Return an error message when the installed playwright is not the
+    pinned render oracle, else None. The parity baseline is only meaningful
+    against the Chromium build this playwright ships."""
+    want = pins["render"]["playwright"]
+    if installed != want:
+        return (f"oracle mismatch: installed playwright {installed} != pinned "
+                f"{want} (testdata/oracle-pins.json); install with "
+                f"pip install -r testdata/requirements.txt")
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -855,6 +877,11 @@ def main() -> int:
             return 1
 
     if args.render_chromium:
+        from importlib.metadata import version as _pkg_version
+        err = check_oracle_version(_pkg_version("playwright"), load_oracle_pins())
+        if err:
+            print(f"ERROR: {err}", file=sys.stderr)
+            return 2
         try:
             _, browser_version = render_chromium(args.width, args.height)
         except RenderError as exc:

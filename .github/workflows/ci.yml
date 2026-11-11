@@ -128,7 +128,7 @@ jobs:
         run: go build -o goosie ./cmd/goosie
       - name: Install Playwright Chromium and scoring deps
         run: |
-          pip install playwright==1.49.1 pillow numpy
+          pip install -r testdata/requirements.txt
           python -m playwright install chromium --with-deps
       - name: Render both sides fresh and score (fail-closed)
         run: python3 testdata/parity.py --render --render-chromium --binary ./goosie --junit /tmp/parity-junit.xml --json /tmp/parity.json

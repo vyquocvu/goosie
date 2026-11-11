@@ -1,0 +1,10 @@
+{
+  "render": {
+    "playwright": "1.49.1",
+    "chromium": "131.0.6778.33"
+  },
+  "interaction": {
+    "playwright": "1.63.0",
+    "chromium": "153.0.8010.12"
+  }
+}

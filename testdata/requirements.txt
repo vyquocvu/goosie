@@ -1,0 +1,6 @@
+# Render-parity oracle and scoring libs. Exact pins: the parity baseline was
+# recorded against these versions (see oracle-pins.json). Installable on
+# Python 3.9 (local) and 3.12 (CI).
+playwright==1.49.1
+pillow==11.3.0
+numpy==1.26.4
