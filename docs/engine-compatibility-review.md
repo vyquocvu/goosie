@@ -239,7 +239,7 @@ pseudo-background maps are keyed by `*style.ComputedStyle`
 identity surface that the arena-pointer archtest rule does not cover and that
 SP-4 did not migrate; it remains an open liability. The cross-reflow
 `Session map[BoxKey]BoxSlot` persistence and copy-forward are still target-only
-(SP-5+); L1 ships within-generation identity.
+(SP-6+, deferred behind L3/L4); L1 ships within-generation identity.
 
 ### 4.2 Formatting contexts as layout roots
 
@@ -258,7 +258,7 @@ type LayoutPass interface {
 
 A pass registry maps the used `display` value to a `LayoutPass` implementation. The first landing dispatches to exactly the same functions in exactly the same order as the current `else-if` chain (`internal/layout/block.go:248-256`). This is a behavior-preserving refactor, and its acceptance test is a zero diff on the fixture corpus and the WPT reftest subset.
 
-The second landing makes FC boundaries authoritative: the block pass descends into FC roots and merges their float extents, instead of patching containment locally. `startsNewFC` (`internal/layout/block.go:2659`) is the seed for FC-root detection, but its predicate must be widened to the CSS rule set (floats, absolutely positioned boxes, inline-blocks, flex/grid items, table cells, overflow not visible, `flow-root`).
+The second landing makes FC boundaries authoritative: the block pass descends into FC roots and merges their float extents, instead of patching containment locally. `startsNewFC` (`internal/layout/block.go:2887`) is the seed for FC-root detection, but its predicate must be widened to the CSS rule set (floats, absolutely positioned boxes, inline-blocks, flex/grid items, table cells, overflow not visible, `flow-root`).
 
 **Acceptance evidence.**
 
@@ -285,6 +285,28 @@ fixture show Goosie already matches every containment **height**; the residual
 divergence is **positioning** (an inline-block sole-child-of-flow-root lands at
 the origin; a flow-root group margin is dropped), which is a different root cause
 than the containment refactor drafted here and needs its own re-scoped plan.
+
+**Status (2026-11-12, SP-5) — L2 second landing landed via `flow-root`.** The
+positioning divergence above traced to a single root cause: `parseDisplay`
+(`internal/style/style.go`) had no `flow-root` case, so it fell through to
+`DisplayInline` and every `.grp{display:flow-root}` wrapper became inline,
+breaking block flow and margin handling. SP-5 parses `flow-root` to `DisplayBlock`
+plus a `FlowRoot bool` flag (`applyDisplay`), and `startsNewFC`
+(`internal/layout/block.go:2887`) honors the flag. Correction to the SP-4 note:
+`startsNewFC` already drives **both** float containment (`block.go:603`,
+`if floatBottom > y && startsNewFC(...)`) and the margin-collapse boundary — not
+only margin collapse — so honoring `FlowRoot` there lands containment without the
+full authoritative-FC-root refactor drafted above (which remains target-only).
+`layoutStyleKey` (`internal/engine/style_diff.go`) carries `FlowRoot` so a toggle
+is layout-affecting. The anchor fixture is promoted to
+`testdata/layout-parity/float-containment-001.html` + `.reference.json` (9 boxes,
+gated by `TestLayoutParityWithChromium` at 1px); Goosie now matches Chromium on
+every box, height **and** position. The non-gated `testdata/fc-containment/`
+copies are removed and `scripts/verify-fc-containment-geometry.js` points at the
+promoted fixture. Oracles: `test/style/flow_root_parse_test.go` (parse +
+non-inheritance), `test/layout/fc_flow_root_test.go`,
+`internal/engine/style_diff_flow_root_test.go`. Zero-diff preserved: 105/105,
+96.39%, gaps 4/6; layout-parity now 9 fixtures green.
 
 ### 4.3 Dependency-tier invalidation
 
@@ -326,6 +348,23 @@ With identity and FC roots in place, a mutation becomes:
 ### 4.5 Paint identity
 
 Paint currently imports `layout` directly (`internal/paint/builder.go:3`) and keys selection by `*layout.Object` (`internal/paint/builder.go:16`). Replace those keys with `BoxKey`. A fully independent display-list IR is not required for this design; the goal is that a display command can name its box without holding a pointer into the arena.
+
+**Status (2026-11-12, SP-5) — paint identity complete.** The display-list side
+landed in SP-4 (`paint.SelSpan`/`paint.FindMark` carry `Key layout.BoxKey`). SP-5
+removed the last long-lived held arena pointer on the engine side: `findMark`
+(`internal/engine/engine.go`) now stores `key layout.BoxKey` instead of
+`obj *layout.Object`, the `Find` producer records `words[first].Key`, and
+`internal/engine/paint.go` emits `m.key`. The transient overlays (focus, select
+listbox, validation bubble, inspect highlight) are **not** held pointers: each is
+re-fetched per paint via `Session.objectFor` from a DOM-node anchor
+(`internal/engine/paint.go`), so they are walk-local and exempt by design. The
+archtest guard is widened from maps to fields: `ArenaPointerMaps` (SP-4) forbids
+`map[*layout.Object]…` across `internal/`+`cmd/`, and `ArenaPointerFields` (SP-5,
+`internal/archtest/rules.go`) forbids `*layout.Object` struct fields in
+`internal/engine`; func-typed fields and parameters are not flagged. Oracles:
+`internal/archtest/pointer_field_test.go`; behavior guarded by the existing
+`TestFindHighlightsPainted` (`test/engine/find_test.go`). Mutation (re-add the
+`obj` field) turns the archtest red. Zero-diff preserved: 105/105, 96.39%.
 
 ### 4.6 Admission and teardown
 
@@ -468,6 +507,16 @@ Cross-reflow slot persistence and copy-forward remain target-only (SP-5+). See
 §4.1 for the pseudo-background-map correction (keyed by `*style.ComputedStyle`,
 not migrated here).
 
+**L1 status (2026-11-12, SP-5):** paint identity completed — the engine's last
+long-lived held arena pointer (`findMark.obj`) is migrated to `key layout.BoxKey`,
+and `archtest.ArenaPointerFields` now forbids `*layout.Object` struct fields in
+`internal/engine` (maps were already forbidden by `ArenaPointerMaps`). Transient
+paint overlays stay walk-local (re-fetched via `objectFor`). See §4.5.
+Cross-reflow slot persistence and copy-forward are now **deferred to SP-6+**: the
+terrain (hard anon/pseudo-veto test assertions, no per-rule `Deps`, full-rebuild
+`Reflow`, stub partial `Refresh`, unused `Plan.Subtree`) means L3/L4 must land
+before cross-reflow reuse can be measured. Zero diff preserved: 105/105, 96.39%.
+
 ### L2 — Formatting contexts as layout roots
 
 - Add the pass registry and wrap the existing algorithms.
@@ -483,6 +532,17 @@ unchanged. Second landing **deferred to SP-5** with evidence: the
 Chromium and the residual gap is positioning (inline-block-in-flow-root placement
 and a dropped flow-root group margin), a different root cause needing a re-scoped
 plan. See §4.2.
+
+**L2 status (2026-11-12, SP-5):** second landing landed via `flow-root` — the
+positioning gap traced to `parseDisplay` lacking a `flow-root` case (fell through
+to inline). `flow-root` now parses to `DisplayBlock` + a `FlowRoot` flag,
+`startsNewFC` (`internal/layout/block.go:2887`) honors it for both float
+containment and margin collapse, and `layoutStyleKey` carries the flag. The
+anchor fixture is promoted to `testdata/layout-parity/float-containment-001.*`
+(gated, 9 boxes match Chromium at 1px); the non-gated copies are removed. Zero
+diff preserved: 105/105, 96.39%, gaps 4/6; layout-parity now 9 fixtures. The full
+authoritative-FC-root refactor (descend-and-merge float extents) remains
+target-only. See §4.2.
 
 ### L3 — Dependency-tier invalidation
 
