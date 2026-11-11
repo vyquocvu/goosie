@@ -84,6 +84,39 @@ func TestFileDataTransferInputFilesAndFormDataPreserveIdentity(t *testing.T) {
 	}
 }
 
+func TestBlobFromDetachedBufferSourceDoesNotPanic(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	body := doc.NewElement("body")
+	html.AppendChild(body)
+	doc.Node.AppendChild(html)
+	doc.HTML, doc.Body = html, body
+	runtime, err := New(Options{DOM: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	if err := runtime.Run(`
+		var channel = new MessageChannel();
+		var buffer = new ArrayBuffer(8);
+		var view = new Uint8Array(buffer);
+		view[0] = 7;
+		channel.port1.postMessage(buffer, {transfer: [buffer]});
+		var blob = new Blob([view, buffer]);
+		window.detachedBlobSize = blob.size;
+		var live = new Blob([new Uint8Array([1, 2, 3])]);
+		window.liveBlobSize = live.size;
+	`, "blob-detached-buffer-source"); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := runtime.Global("detachedBlobSize"); !ok || got.Num != 0 {
+		t.Fatalf("Blob size from detached buffer sources = %+v (present %v), want 0", got, ok)
+	}
+	if got, ok := runtime.Global("liveBlobSize"); !ok || got.Num != 3 {
+		t.Fatalf("Blob size from a live typed array = %+v (present %v), want 3", got, ok)
+	}
+}
+
 func TestDataTransferItemListPreservesMixedInsertionOrder(t *testing.T) {
 	doc := dom.NewDocument()
 	html := doc.NewElement("html")

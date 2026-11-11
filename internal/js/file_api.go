@@ -935,7 +935,7 @@ func (r *Runtime) bufferSourceDetached(obj *goja.Object) bool {
 		return false
 	}
 	buffer := obj
-	if !isArrayBufferObject(obj) {
+	if !isArrayBufferObject(r.vm, obj) {
 		var ok bool
 		buffer, ok = obj.Get("buffer").(*goja.Object)
 		if !ok {

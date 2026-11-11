@@ -117,7 +117,7 @@ func (r *Runtime) transferPortsTo(target *Runtime, transfer goja.Value) ([]any, 
 			return nil, errors.New("invalid or duplicate transferable")
 		}
 		seenObjects[obj] = true
-		if isArrayBufferObject(obj) {
+		if isArrayBufferObject(r.vm, obj) {
 			continue
 		}
 		if canvas := r.offscreenCanvases[obj]; canvas != nil {
@@ -147,7 +147,7 @@ func (r *Runtime) transferPortsTo(target *Runtime, transfer goja.Value) ([]any, 
 		port := messagePortFromObject(r.vm, value)
 		if port == nil {
 			if obj, ok := value.(*goja.Object); ok {
-				if isArrayBufferObject(obj) {
+				if isArrayBufferObject(r.vm, obj) {
 					continue
 				}
 				if canvas := r.offscreenCanvases[obj]; canvas != nil && !canvas.detached {

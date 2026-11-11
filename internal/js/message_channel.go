@@ -155,7 +155,7 @@ func (r *Runtime) newMessagePort(state *messageChannelState, endpoint *messagePo
 			validated[obj] = true
 			port := messagePortFromObject(r.vm, value)
 			if port == nil {
-				if isArrayBufferObject(obj) {
+				if isArrayBufferObject(r.vm, obj) {
 					buffer, ok := obj.Export().(goja.ArrayBuffer)
 					if ok && !buffer.Detached() {
 						continue
@@ -201,7 +201,7 @@ func (r *Runtime) newMessagePort(state *messageChannelState, endpoint *messagePo
 				if !ok {
 					continue
 				}
-				if isArrayBufferObject(transferObject) {
+				if isArrayBufferObject(r.vm, transferObject) {
 					buffer, ok := transferObject.Export().(goja.ArrayBuffer)
 					if !ok || buffer.Detached() {
 						panic(r.dataCloneError("ArrayBuffer is detached or invalid"))
@@ -244,7 +244,7 @@ func (r *Runtime) newMessagePort(state *messageChannelState, endpoint *messagePo
 			}
 			seen[obj] = true
 			if port == nil {
-				if isArrayBufferObject(obj) {
+				if isArrayBufferObject(r.vm, obj) {
 					buffer, ok := obj.Export().(goja.ArrayBuffer)
 					if !ok || buffer.Detached() {
 						panic(r.dataCloneError("ArrayBuffer is detached or invalid"))
@@ -379,12 +379,29 @@ func (r *Runtime) newMessagePort(state *messageChannelState, endpoint *messagePo
 	return obj
 }
 
-func isArrayBufferObject(obj *goja.Object) bool {
+func isArrayBufferObject(vm *goja.Runtime, obj *goja.Object) bool {
 	if obj == nil {
 		return false
 	}
-	buffer, ok := obj.Export().(goja.ArrayBuffer)
-	return ok && !buffer.Shared()
+	ctor := vm.Get("ArrayBuffer")
+	if ctor == nil || goja.IsUndefined(ctor) {
+		return false
+	}
+	proto, ok := ctor.ToObject(vm).Get("prototype").(*goja.Object)
+	if !ok {
+		return false
+	}
+	// Identify the buffer by its prototype chain rather than by exporting it:
+	// exporting a detached typed-array view panics inside goja, and a view's
+	// chain never reaches ArrayBuffer.prototype. Only a real ArrayBuffer is
+	// exported below, which is safe even when detached.
+	for p := obj.Prototype(); p != nil; p = p.Prototype() {
+		if p == proto {
+			buffer, ok := obj.Export().(goja.ArrayBuffer)
+			return ok && !buffer.Shared()
+		}
+	}
+	return false
 }
 
 func transferList(vm *goja.Runtime, value goja.Value) []goja.Value {
