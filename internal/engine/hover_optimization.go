@@ -6,31 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// HoverDamageRect returns the bounding rect of the currently hovered element.
-// This is used to pre-compute damage rects before changing hover state.
-func (s *Session) HoverDamageRect() frame.Rect {
-	if s == nil || s.Arena == nil || s.hovered == nil {
-		return frame.Rect{}
-	}
-
-	// Find the layout object for the hovered node
-	for i := range s.Arena.Objects {
-		obj := &s.Arena.Objects[i]
-		if obj.Node == s.hovered {
-			// Return the border rect (includes padding and border)
-			x0, y0, x1, y1 := obj.BorderRect()
-			return frame.Rect{
-				X0: int32(x0),
-				Y0: int32(y0),
-				X1: int32(x1),
-				Y1: int32(y1),
-			}
-		}
-	}
-
-	return frame.Rect{}
-}
-
 // IsHoverGeometryNeutral checks if the current hover change only affects
 // paint properties (color, background, opacity, etc.) and not layout
 // properties (width, height, margin, padding, display, position, etc.).

@@ -1099,11 +1099,9 @@ GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err) {
 		GoosieContentView *view = [[GoosieContentView alloc] initWithFrame:content];
 		[view setGoosieOwner:(void *)gw];
 		[view setWantsLayer:YES];
-		// The frame path replaces layer.contents itself. The default redraw
-		// policy asks the view to repaint on cursor changes and accessibility
-		// updates; with wantsUpdateLayer and no drawing of our own, that pass
-		// clears the layer and the whole window flashes until the next present.
-		// Hovering text toggles the I-beam once per line, which is that pass.
+		// The frame path owns layer.contents; the default redraw policy clears
+		// the layer on cursor/accessibility updates and flashes the window
+		// until the next present.
 		[view setLayerContentsRedrawPolicy:NSViewLayerContentsRedrawNever];
 		[win setContentView:view];
 		gw->view = view;

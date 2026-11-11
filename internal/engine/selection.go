@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -130,49 +131,59 @@ func (s *Session) selWords() []*layout.Object {
 }
 
 // HasTextAt reports whether a document-space point lies on a selectable text
-// line. Hover uses it to ask for the I-beam.
-//
-// The hit is the line box, not the glyph box. line-height adds leading above
-// and below the glyphs and between wrapped lines; testing only BorderRect
-// flips the cursor to the arrow in every one of those gaps, and each flip
-// asks AppKit to update the pointer over a layer it does not own.
+// line. The hit is the line box, not the glyph box: line-height leading
+// between wrapped lines must keep the I-beam down instead of flickering.
 func (s *Session) HasTextAt(x, y float32) bool {
-	words := s.selWords()
-	for i := 0; i < len(words); {
-		x0, y0, x1, y1 := textLineRect(words[i])
-		j := i + 1
-		for j < len(words) {
-			ox0, oy0, ox1, oy1 := textLineRect(words[j])
-			if oy0 >= y1 || oy1 <= y0 {
-				break
-			}
-			if ox0 < x0 {
-				x0 = ox0
-			}
-			if ox1 > x1 {
-				x1 = ox1
-			}
-			if oy0 < y0 {
-				y0 = oy0
-			}
-			if oy1 > y1 {
-				y1 = oy1
-			}
-			j++
-		}
-		if x >= x0 && x < x1 && y >= y0 && y < y1 {
+	for _, b := range s.textLineBands() {
+		if x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1 {
 			return true
 		}
-		i = j
 	}
 	return false
 }
 
-// textLineRect is the word's border box grown to its line box. An explicit
-// line-height taller than the glyph box leaves leading outside BorderRect;
-// half of that difference sits above the glyphs and half below, which is the
-// strip the caret and the I-beam share. A normal line-height (LineHeight <= 0)
-// already matches the font's own box, so the border rect stands.
+type textBand struct{ x0, y0, x1, y1 float32 }
+
+// textLineBands merges word line-rects into visual lines. Document order is
+// not vertical order (absolute/float/flex content), so sort first; merge only
+// when bands overlap vertically and touch horizontally, keeping the gutter
+// between side-by-side columns out of the hit area.
+func (s *Session) textLineBands() []textBand {
+	words := s.selWords()
+	bands := make([]textBand, 0, len(words))
+	for _, w := range words {
+		x0, y0, x1, y1 := textLineRect(w)
+		bands = append(bands, textBand{x0, y0, x1, y1})
+	}
+	sort.Slice(bands, func(i, j int) bool { return bands[i].y0 < bands[j].y0 })
+	merged := bands[:0]
+	for _, b := range bands {
+		if n := len(merged); n > 0 {
+			last := &merged[n-1]
+			if b.y0 < last.y1 && b.y1 > last.y0 && b.x0 <= last.x1 && b.x1 >= last.x0 {
+				if b.x0 < last.x0 {
+					last.x0 = b.x0
+				}
+				if b.x1 > last.x1 {
+					last.x1 = b.x1
+				}
+				if b.y0 < last.y0 {
+					last.y0 = b.y0
+				}
+				if b.y1 > last.y1 {
+					last.y1 = b.y1
+				}
+				continue
+			}
+		}
+		merged = append(merged, b)
+	}
+	return merged
+}
+
+// textLineRect grows the border box by half the explicit line-height leading.
+// line-height:normal (LineHeight <= 0) keeps the border rect; its font leading
+// is handled with the shaping work.
 func textLineRect(w *layout.Object) (x0, y0, x1, y1 float32) {
 	if w == nil {
 		return

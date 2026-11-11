@@ -70,3 +70,49 @@ func TestHasTextAtIncludesLineLeading(t *testing.T) {
 		t.Fatalf("HasTextAt(%v, %v) = true in the margin between paragraphs", x0, gap)
 	}
 }
+
+// TestHasTextAtExcludesColumnGutter keeps side-by-side columns from fusing
+// into one band: the gutter between them is not text. The old merge unioned
+// any vertically overlapping words regardless of x distance.
+func TestHasTextAtExcludesColumnGutter(t *testing.T) {
+	s := newFocusSession(t, `<html><body style="margin:0">
+		<p style="position:absolute;left:0;top:0;margin:0">Left</p>
+		<p style="position:absolute;left:200px;top:0;margin:0">Right</p>
+	</body></html>`)
+	lx, ly := textCenter(t, s, "Left")
+	rx, ry := textCenter(t, s, "Right")
+	if ly != ry {
+		t.Fatalf("fixture columns are not side by side: left y=%v right y=%v", ly, ry)
+	}
+	gutter := (lx + rx) / 2
+	if s.HasTextAt(gutter, ly) {
+		t.Fatalf("HasTextAt(%v, %v) = true in the gutter between columns", gutter, ly)
+	}
+	if !s.HasTextAt(lx, ly) || !s.HasTextAt(rx, ry) {
+		t.Fatal("HasTextAt lost the column text itself")
+	}
+}
+
+// TestHasTextAtOutOfDocumentOrder guards words whose document order is not
+// vertical order (absolute content): every line must hit and the empty gap
+// between lines must not, regardless of the order selWords returns them in.
+func TestHasTextAtOutOfDocumentOrder(t *testing.T) {
+	s := newFocusSession(t, `<html><body style="margin:0">
+		<p style="margin:0">Top</p>
+		<p style="position:absolute;left:0;top:100px;margin:0">Bottom</p>
+		<p style="position:absolute;left:0;top:50px;margin:0">Middle</p>
+	</body></html>`)
+	x, topY := textCenter(t, s, "Top")
+	_, midY := textCenter(t, s, "Middle")
+	_, botY := textCenter(t, s, "Bottom")
+	if !(topY < midY && midY < botY) {
+		t.Fatalf("fixture not stacked: top=%v mid=%v bot=%v", topY, midY, botY)
+	}
+	gap := (topY + midY) / 2
+	if s.HasTextAt(x, gap) {
+		t.Fatalf("HasTextAt(%v, %v) = true in the empty gap between lines", x, gap)
+	}
+	if !s.HasTextAt(x, topY) || !s.HasTextAt(x, midY) || !s.HasTextAt(x, botY) {
+		t.Fatal("HasTextAt lost one of the three lines")
+	}
+}

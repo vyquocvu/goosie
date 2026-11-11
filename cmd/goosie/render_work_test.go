@@ -379,10 +379,23 @@ func TestPlaceholderShownPseudoClassUpdatesAfterEdit(t *testing.T) {
 func TestHoverWithoutPseudoClassDoesNotRepaint(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}
+	rt, err := js.New(js.Options{URL: "https://example.test/"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sess, err := engine.NewSession(`<html><body style="margin:0">
 		<p id="a">This domain is for use in documentation examples without needing permission.</p>
 		<p id="b">This is not a service; avoid relying on it for testing and monitoring purposes.</p>
-	</body></html>`, nil, 800)
+		<script>
+			window.enters = 0;
+			document.querySelectorAll('p').forEach(function (p) {
+				p.addEventListener('mouseenter', function () {
+					window.enters++;
+					document.body.setAttribute('data-enters', String(window.enters));
+				});
+			});
+		</script>
+	</body></html>`, nil, 800, engine.WithJS(rt))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,6 +408,15 @@ func TestHoverWithoutPseudoClassDoesNotRepaint(t *testing.T) {
 	f.hoverContent(x2, y2)
 	f.hoverContent(x1, y1)
 	assertWorkDelta(t, "hover across text without :hover", sess.WorkCounts(), before, engine.WorkCounts{})
+	// The zero delta must mean "hover changed but painted nothing", not
+	// "hit-testing never fired": a→b→a dispatches three mouseenter events.
+	got, err := sess.EvaluateJS(`document.body.getAttribute('data-enters')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "3" {
+		t.Fatalf("mouseenter count = %q, want 3 (hover state never changed?)", got)
+	}
 }
 
 func TestHoverPseudoClassUpdatesAfterPointerMove(t *testing.T) {

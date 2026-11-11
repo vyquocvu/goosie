@@ -200,14 +200,9 @@ func (f *framePath) hoverContent(contentX, contentY int32) {
 	if !sess.SetHover(dx, dy) {
 		return
 	}
-	// An author sheet that never mentions :hover cannot change paint when the
-	// hit element changes. Repainting anyway invalidates tiles for a document
-	// that did not change. The box used for that was a CSS-pixel border rect,
-	// so crossing text lines — the hit target flips between each paragraph and
-	// the body — marked a viewport-sized region stale and the window flashed
-	// until those tiles were rasterized again. A pending DOM mutation is
-	// painted by the next PumpJS turn; a partial repaint here would land
-	// before that restyle.
+	// No :hover rules means no paint change; repainting anyway flashed the
+	// window over viewport-sized CSS-pixel damage. Pending DOM mutations are
+	// painted by the next PumpJS turn, not by a partial repaint here.
 	if !sess.HasPseudoClassRule("hover") || sess.CanDeferControlEditReflow() {
 		return
 	}
@@ -220,9 +215,8 @@ func (f *framePath) hoverContent(contentX, contentY int32) {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		}
 	}
-	// Empty damage diffs the display lists in device pixels. The hovered
-	// element's border box is the wrong rect: it is CSS pixels, it misses
-	// descendant ink, and for body/html it is the whole document.
+	// Empty damage diffs display lists in device pixels; the hovered border
+	// box is CSS pixels, misses descendant ink, and spans the document for body.
 	f.repaintTab(tab, frame.Rect{})
 }
 
