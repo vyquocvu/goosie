@@ -559,6 +559,90 @@ func goFilesByPackage(dir string) (map[string][]string, error) {
 	return pkgs, nil
 }
 
+// ArenaPointerMap is one map keyed by *layout.Object at file:line. A *Object is
+// invalidated by the next arena growth, so a map of them silently keys stale
+// memory across a reflow: paint and engine must name boxes by BoxKey or ObjectID
+// instead (SP-4 L1).
+type ArenaPointerMap struct {
+	File string
+	Line int
+}
+
+// String renders one violation as a single locator line.
+func (m ArenaPointerMap) String() string {
+	return fmt.Sprintf("%s:%d: map keyed by *layout.Object", filepath.ToSlash(m.File), m.Line)
+}
+
+// ArenaPointerMaps walks the non-test .go files under dir and reports every map
+// type whose key is *layout.Object, resolving the layout import alias per file so
+// a renamed import does not hide the map. Test files are excluded for the same
+// reason MutableGlobals excludes them: a test may stage an arena freely.
+func ArenaPointerMaps(dir string) ([]ArenaPointerMap, error) {
+	pkgs, err := goFilesByPackage(dir)
+	if err != nil {
+		return nil, err
+	}
+	dirs := make([]string, 0, len(pkgs))
+	for d := range pkgs {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	var found []ArenaPointerMap
+	for _, d := range dirs {
+		for _, path := range pkgs[d] {
+			fset, file, err := parseGo(path)
+			if err != nil {
+				return nil, err
+			}
+			aliases := layoutImportNames(file)
+			if len(aliases) == 0 {
+				continue
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
+				mt, ok := n.(*ast.MapType)
+				if !ok {
+					return true
+				}
+				if isLayoutObjectPointer(mt.Key, aliases) {
+					found = append(found, ArenaPointerMap{File: path, Line: fset.Position(mt.Pos()).Line})
+				}
+				return true
+			})
+		}
+	}
+	return found, nil
+}
+
+// layoutImportNames returns the local names this file binds to the layout package.
+func layoutImportNames(file *ast.File) map[string]bool {
+	names := map[string]bool{}
+	for _, imp := range file.Imports {
+		if strings.Trim(imp.Path.Value, `"`) != ModulePrefix+"internal/layout" {
+			continue
+		}
+		if imp.Name != nil {
+			names[imp.Name.Name] = true
+		} else {
+			names["layout"] = true
+		}
+	}
+	return names
+}
+
+// isLayoutObjectPointer reports whether e is *layout.Object under one of aliases.
+func isLayoutObjectPointer(e ast.Expr, aliases map[string]bool) bool {
+	star, ok := e.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := star.X.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Object" {
+		return false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	return ok && aliases[ident.Name]
+}
+
 func parseGo(path string) (*token.FileSet, *ast.File, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, 0)

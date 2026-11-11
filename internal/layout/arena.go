@@ -5,11 +5,11 @@
 // place as each layout pass runs. The paint builder walks the arena and emits
 // display commands; nothing in the frame path ever sees the DOM directly.
 //
-// Layout algorithms run in a fixed order: block, then inline, then float, then
-// flex, then grid, then table. Each pass reads the style and the box geometry
-// produced by earlier passes and writes positions and sizes. The order is the
-// dependency order: floats position inside their containing block before inline
-// content flows around them, for example.
+// Layout runs as Block, then Inline, then Positioning. The Block pass dispatches
+// each box to its formatting-context pass (block flow, flex, grid, table) by used
+// display; float placement happens inside block flow. See block.go for the
+// dispatch. Each pass reads the style and the box geometry produced by earlier
+// passes and writes positions and sizes.
 package layout
 
 import (
@@ -307,8 +307,9 @@ func NewArena() *Arena {
 }
 
 // Alloc reserves a new ObjectID and returns a pointer to the object. The pointer
-// is stable across further Alloc calls because the arena grows by doubling; a
-// pass that needs to read a sibling while writing a kid can hold both pointers.
+// is valid ONLY until the next call that can allocate: growing the Objects slice
+// reallocates the backing array and invalidates earlier pointers. Hold the
+// ObjectID and re-fetch with Get at use; never keep a *Object across an Alloc.
 func (a *Arena) Alloc() (ObjectID, *Object) {
 	id := ObjectID(len(a.Objects))
 	a.Objects = append(a.Objects, Object{})
