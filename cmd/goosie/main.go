@@ -21,7 +21,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -230,54 +229,25 @@ type framePath struct {
 // build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
 // frame path sized for c.
 func build(c config) (*framePath, error) {
+	p, err := buildProfile(c)
+	if err != nil {
+		return nil, err
+	}
+	return buildWindow(c, p)
+}
+
+// buildWindow assembles the per-window machinery over a shared profile: the
+// scene/layer, worker pool, recorder, composer, scheduler, toolbar and tab
+// manager. The profile stores (clients, fonts, bookmarks, history, downloads,
+// storage, prefs) come from p so every window of one invocation shares them.
+func buildWindow(c config, p *profile) (*framePath, error) {
 	dev := c.devSize()
 	scale := float32(c.dpr)
-	profilePreferences, prefErr := preferences.Load(c.preferencesFile)
-	if prefErr != nil {
-		fmt.Fprintf(os.Stderr, "goosie: preferences: %v\n", prefErr)
-	}
-	effectiveDir, err := effectiveDownloadDir(c.downloadDir, c.downloadDirExplicit, profilePreferences.DownloadDir)
-	if err != nil {
-		return nil, fmt.Errorf("goosie: download directory: %w", err)
-	}
-	c.downloadDir = effectiveDir
-	profilePreferences.DownloadDir = c.downloadDir
-
-	fonts, err := raster.NewFonts()
-	if err != nil {
-		return nil, fmt.Errorf("goosie: %w", err)
-	}
-
-	var client net.HTTP
-	if c.private {
-		client = net.DefaultPrivateClient()
-	} else {
-		persistent, err := net.DefaultClientWithCookies(c.cookieFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "goosie: cookies: %v\n", err)
-			client = net.DefaultClient()
-		} else {
-			client = persistent
-		}
-	}
-
-	var bookmarkStore *bookmarks.Store
-	var historyStore *history.Store
-	if !c.private {
-		bookmarkStore, err = bookmarks.Load(c.bookmarkFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "goosie: bookmarks: %v\n", err)
-			bookmarkStore = nil
-		}
-		historyStore, err = history.Load(c.historyFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "goosie: history: %v\n", err)
-			historyStore = nil
-		}
-	}
+	c.downloadDir = p.preferences.DownloadDir
 
 	var layer *frame.Layer
 	var spec paint.SceneSpec
+	var err error
 
 	// The synthetic scenes are test documents: a paced run measures the frame
 	// path against them, and an explicit -scene asks for one by name. An
@@ -287,7 +257,7 @@ func build(c config) (*framePath, error) {
 	if c.url == "" && (c.paced() || c.sceneSet) {
 		spec, err = sceneSpec(c.scene)
 		if err != nil {
-			_ = client.Close()
+			_ = p.client.Close()
 			return nil, err
 		}
 		cols := spec.Cols
@@ -308,7 +278,7 @@ func build(c config) (*framePath, error) {
 		_, layer = blankLayer(dev)
 	}
 
-	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts)))
+	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(p.fonts, raster.NewGlyphAtlas(glyphAtlasBudget, p.fonts)))
 	wp.Start(context.Background())
 
 	capacity := ringFrames
@@ -329,36 +299,24 @@ func build(c config) (*framePath, error) {
 		rec:                   rec,
 		spec:                  spec,
 		config:                c,
-		client:                client,
-		privateClient:         net.DefaultPrivateClient(),
-		fonts:                 fonts,
-		bookmarks:             bookmarkStore,
-		history:               historyStore,
-		downloads:             download.NewManager(c.downloadDir),
+		client:                p.client,
+		privateClient:         p.privateClient,
+		fonts:                 p.fonts,
+		bookmarks:             p.bookmarks,
+		history:               p.history,
+		downloads:             p.downloads,
 		navResults:            make(chan navResult, 16),
 		imgResults:            make(chan imgResult, 16),
 		zoom:                  1.0,
-		storage:               js.NewOriginStorageRegistry(filepath.Join(c.stateDir(), "storage"), false),
-		incognitoStorage:      js.NewOriginStorageRegistry("", true),
-		broadcastHub:          js.NewBroadcastHub(),
-		incognitoBroadcastHub: js.NewBroadcastHub(),
-		theme:                 c.theme,
-		userscripts:           userscript.NewManager(c.userscriptDir),
-		flags:                 flags.NewManager(c.flagsFile),
-		perms:                 perms.NewManager(c.permsFile),
-		preferences:           profilePreferences,
-	}
-	if f.theme == "" {
-		f.theme = "system"
-	}
-	if !c.paced() && f.userscripts != nil {
-		_ = f.userscripts.Load()
-	}
-	if !c.paced() && f.flags != nil {
-		_ = f.flags.Load()
-	}
-	if !c.paced() && f.perms != nil {
-		_ = f.perms.Load()
+		storage:               p.storage,
+		incognitoStorage:      p.incognitoStorage,
+		broadcastHub:          p.broadcastHub,
+		incognitoBroadcastHub: p.incognitoBroadcastHub,
+		theme:                 p.theme,
+		userscripts:           p.userscripts,
+		flags:                 p.flags,
+		perms:                 p.perms,
+		preferences:           p.preferences,
 	}
 	if !c.paced() {
 		f.drainWG.Add(2)
@@ -372,7 +330,7 @@ func build(c config) (*framePath, error) {
 		}()
 	}
 	if !c.paced() {
-		f.toolbar = toolbar.NewState(dev.W, fonts)
+		f.toolbar = toolbar.NewState(dev.W, p.fonts)
 		f.toolbar.SetScale(int32(c.dpr + 0.5))
 		f.toolbar.SetTheme(f.theme)
 		f.tabMgr = tabs.NewManager(func() {
@@ -395,13 +353,13 @@ func build(c config) (*framePath, error) {
 			}
 		}
 		if c.url != "" {
-			firstTab.SetURL(normalizeAddress(c.url, profilePreferences.SearchURLTemplate))
+			firstTab.SetURL(normalizeAddress(c.url, p.preferences.SearchURLTemplate))
 			firstTab.SetTitle(firstTab.URL())
 		} else if f.crashedSessionState() != nil {
 			firstTab.SetURL("goosie://restore")
 			firstTab.SetTitle("Restore Session - Goosie")
 			f.restoredActiveURL = "goosie://restore"
-		} else if shouldRestoreSession(c.private, profilePreferences.StartupMode) {
+		} else if shouldRestoreSession(c.private, p.preferences.StartupMode) {
 			if st, err := session.Load(c.sessionFile); err != nil {
 				fmt.Fprintf(os.Stderr, "goosie: session: %v\n", err)
 			} else if len(st.Tabs) > 0 {
