@@ -262,6 +262,10 @@ type Arena struct {
 	wordSeq uint16
 	anonSeq uint16
 
+	// PassCounts records how many times each formatting-context pass, indexed by
+	// FCKind, was dispatched during this arena generation's layout.
+	PassCounts [5]uint64
+
 	// Metrics is optional; see the Metrics interface. Set it before the
 	// inline pass runs, which is where text is measured.
 	Metrics Metrics
@@ -356,6 +360,10 @@ func (a *Arena) anonNodeID(id ObjectID) uint32 {
 	}
 	return 0
 }
+
+// FCCount returns how many times the formatting-context pass k was dispatched
+// during this arena generation's layout.
+func (a *Arena) FCCount(k FCKind) uint64 { return a.PassCounts[k] }
 
 // RefreshComputedStyles replaces per-node style pointers without rebuilding
 // the arena. It is safe only when there are no anonymous boxes: those styles

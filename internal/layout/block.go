@@ -258,17 +258,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 			obj.H = obj.Style.ContainIntrinsicHeight
 			y = obj.H
 		}
-	} else if obj.Style != nil && (obj.Style.Display == style.DisplayTable || obj.Style.Display == style.DisplayInlineTable) {
-		y = layoutTable(a, id, containingW)
-	} else if obj.Style != nil && (obj.Style.Display == style.DisplayGrid || obj.Style.Display == style.DisplayInlineGrid) {
-		y = layoutGrid(a, id, containingW)
-	} else if obj.Style != nil && (obj.Style.Display == style.DisplayFlex || obj.Style.Display == style.DisplayInlineFlex) {
-		if obj.Style.FlexDirection == style.FlexColumn || obj.Style.FlexDirection == style.FlexColumnReverse {
-			y = layoutFlexColumn(a, id, containingW)
-		} else {
-			y = layoutFlexRow(a, id, containingW)
-		}
+	} else if pass, kind, ok := lookupPass(obj.Style); ok {
+		a.PassCounts[kind]++
+		y = pass(a, id, containingW)
 	} else {
+		a.PassCounts[FCBlockFlow]++
 		for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 			k := a.Get(kid)
 			if k.Style == nil || k.Style.Display == style.DisplayNone {
