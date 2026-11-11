@@ -252,6 +252,7 @@ type ComputedStyle struct {
 	Custom      map[string]string
 	Starting    *StartingStyle
 	Display     Display
+	FlowRoot    bool
 	Position    Position
 	Float       Float
 	Clear       Clear
@@ -2686,7 +2687,7 @@ func applyBorderImageShorthand(cs *ComputedStyle, value string) {
 func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, parentFontSize float32, fonts *CustomFonts) {
 	switch prop {
 	case "display":
-		cs.Display = parseDisplay(value)
+		applyDisplay(cs, value)
 	case "position":
 		cs.Position = parsePosition(value)
 	case "float":
@@ -4258,6 +4259,16 @@ func resolveLineHeight(v css.Value, fontSize float32) float32 {
 		}
 	}
 	return fontSize * 1.2
+}
+
+// applyDisplay sets the used display and records flow-root, which is block-level
+// but establishes a formatting context. parseDisplay alone cannot carry the flag.
+func applyDisplay(cs *ComputedStyle, value string) {
+	cs.FlowRoot = value == "flow-root"
+	cs.Display = parseDisplay(value)
+	if cs.FlowRoot {
+		cs.Display = DisplayBlock
+	}
 }
 
 func parseDisplay(v string) Display {
