@@ -883,3 +883,41 @@ EOF
 **2. Placeholder scan:** the only intentional fill-ins are commit short hashes (`<task1-short-hash>` etc.) in Task 6, which cannot be known until the commits exist; every code step has complete literal code, every run step has an exact command and expected output. No "TBD"/"handle edge cases"/"similar to Task N". ✓
 
 **3. Type consistency:** `InlineFragments []frame.RectF` used identically in arena.go (Task 1 Step 3), the layout test (Task 1 Step 1), `finalizeInlineFragments` (Step 8), and paint `paintInlineBorderFragments` (Task 2 Step 3, `.ToDevice(b.scale)` → `frame.Rect`). `recordInlineFrag(gen ObjectID, line int, r frame.RectF)`, `inlineFragmentGenerator(a *Arena, frag *Object) (ObjectID, bool)`, `unionRectF(a, b frame.RectF) frame.RectF`, `finalizeInlineFragments(id ObjectID)`, `paintBorderFragment(obj *layout.Object, rect frame.Rect, opacity float32, first, last, rtl bool)`, `paintInlineBorderFragments(obj *layout.Object, opacity float32)` — signatures match across all call sites. `minF`/`maxF` exist (block.go:3046/3053). `sort` added to inline.go imports. ✓
+
+---
+
+## Execution record (SP-7, 2026-11-12)
+
+| Task | Commit | Result |
+|------|--------|--------|
+| 1 layout capture | `1a0b47ef` | `InlineFragments []frame.RectF`; layout oracle green |
+| 2 paint fragments | `c9bb914e` | edge-masked `CmdBorder` per fragment; display-list oracle green |
+| 3 fixture + floor | `588ec17d` | `borders/04-inline-fragment.html` 98.86% PASS; 105→106; prior 105 byte-identical |
+| 4 mutants | (no commit) | M1/M2/M3 each red → restored by re-edit; tree byte-clean |
+| 5 matrix | (no commit) | build/vet/test/race/archtest green; parity 106/106, 96.41%, gaps 4/6 |
+| 6 docs | (this commit) | ledger closed, roadmap + spec/plan records |
+
+Deviations from the plan as written:
+
+1. **Field type** `[]frame.Rect` → `[]frame.RectF` (float32 CSS px), applied in
+   Task 1 and reconciled in spec §3.1 during planning. Paint converts with
+   `.ToDevice(b.scale)`.
+2. **Border resolution + map reset moved to `Block` entry.** Task 1 Step 6 reset
+   the scratch map in `Inline`; execution discovered `inlineInto` first runs
+   inside the `Block` pass (`block.go` call sites) and `flagInlineLaidOut` blocks
+   a re-run in `Inline`, so capture happens during `Block`. Added
+   `resolveInlineEdges(a, root, viewportW)` + `a.inlineFragLines = make(...)` at
+   `Block` entry; `Inline` re-resolves edges (for percentage padding against the
+   now-known block width) **without** resetting the map. Pure inline children
+   never receive `resolveBoxSizes`, so their arena `Border*`/`Padding*` were zero
+   until this explicit resolution.
+3. **nil-`Style` root recursion.** `resolveInlineEdges` prunes only on
+   `DisplayNone` and guards the resolution block with `obj.Style != nil`, always
+   recursing — the arena root (ID 1, the document) has nil `Style` and an early
+   `Style == nil` return would have stopped the walk before any inline element.
+4. **`frame` import added to `block.go`** for the `map[ObjectID]map[int]frame.RectF`
+   reset at `Block` entry.
+
+`BorderRect()` stays the bare content union regardless of border/padding values,
+which is why resolving inline edges leaves the corpus byte-identical (verified by
+a per-fixture score diff against the pre-SP-7 baseline: zero drift on 105). NO push.

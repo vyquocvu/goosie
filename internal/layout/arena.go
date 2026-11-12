@@ -302,10 +302,11 @@ type Arena struct {
 	FirstLineStyles map[dom.NodeID]*style.ComputedStyle
 
 	// inlineFragLines accumulates per-line fragment rects during the inline pass,
-	// keyed by generating inline element then line index. Scratch space: Inline
-	// resets it, the positioning loop unions word-fragment content rects into it,
-	// and inlineSelfRects folds it into each box's InlineFragments (storing the
-	// expanded border boxes back so a parent inline can union them).
+	// keyed by generating inline element then line index. Scratch space: Block
+	// resets it (inlineInto first runs inside the Block pass), the positioning
+	// loop unions word-fragment content rects into it, and inlineSelfRects folds
+	// it into each box's InlineFragments (storing the expanded border boxes back
+	// so a parent inline can union them).
 	inlineFragLines map[ObjectID]map[int]frame.RectF
 }
 

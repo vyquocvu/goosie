@@ -75,3 +75,34 @@ SP-7 ships when: an inline element's border paints fragmented per line (top/bott
 - **Color emoji / CJK tofu (`GOOSIE-COVERAGE-001`)**: font-library limitation (sbix/COLR unsupported by `golang.org/x/image/font/opentype`; Apple Color Emoji exceeds `MaxFallbackFontBytes`), not a bounded engine slice.
 - **QC ledger re-measure/closure of stale `GOOSIE-PSEUDO-001`**: docs hygiene, separate from this feature; recorded here so future planning does not re-implement `::first-line`.
 - **Native visual sign-off**: no display; headless pixel read-back + Chromium parity remain the visual evidence, consistent with all prior work.
+
+## 9. Execution record (SP-7, 2026-11-12)
+
+Shipped on `main`, no push. The field is `[]frame.RectF` (float32 CSS px); paint
+converts each fragment with `.ToDevice(b.scale)`, mirroring `paintContextFor`.
+
+Commits: `1a0b47ef` (layout capture), `c9bb914e` (paint fragments), `588ec17d`
+(fixture + floor 105→106), and the docs commit closing GOOSIE-INLINEBORDER-001.
+
+Oracles green: `test/layout/inline_border_fragment_test.go` (fragment count,
+line order, single-line edge expansion) and `test/paint/inline_border_fragment_test.go`
+(one `CmdBorder` per fragment, start/end edge mask, single-line four edges,
+borderless none). Mutants M1 (suppress guard), M2 (four edges per fragment),
+M3 (union-rect-only) each killed a named oracle and were reverted by re-edit;
+the working tree is byte-clean of mutants.
+
+Matrix: build / vet / full `go test ./...` / race (layout+paint) / archtest all
+green. Parity **106/106**, average **96.41%**, known gaps **4 fixtures / 6 bands**;
+the new `borders/04-inline-fragment.html` scores **98.86% PASS** with no blank
+band, and a per-fixture diff against the pre-SP-7 baseline confirms all **105
+prior fixtures byte-identical** (zero score/status drift).
+
+Deviation from the plan: inline borders/padding are resolved at **`Block` entry**
+(`resolveInlineEdges`), not in `Inline`, because `inlineInto` first runs inside
+the `Block` pass (`flagInlineLaidOut` blocks a re-run in `Inline`); the scratch
+map is reset there too, and `Inline` re-resolves edges for percentage padding
+without resetting the capture. Pure inline children never receive
+`resolveBoxSizes`, so their arena `Border*`/`Padding*` were zero until this
+explicit resolution. The nil-`Style` arena root is recursed through (pruned only
+on `DisplayNone`). `BorderRect()` stays the bare content union, which is why
+resolving inline edges leaves the corpus byte-identical. Deferred per §8.
