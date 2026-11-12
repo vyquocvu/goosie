@@ -18,10 +18,36 @@
         .line-height-30px { line-height: 30px; }
         .line-height-40px { line-height: 40px; }
         .line-height-normal { line-height: normal; }
+        .solid { width: 400px; height: 30px; background: #2c3e50; }
     </style>
 </head>
 <body>
     <h2>Line Height</h2>
+
+    <h3>normal from the class, 34px from the element</h3>
+    <!-- GOOSIE-LHENORMAL-001's shape. `normal` is not a length: it is the
+         height this element's own face reports, so it has to inherit as the
+         keyword. Resolving it to a number where it was declared froze the 16px
+         body's height - the size arrives later, from an inline style - and the
+         box below laid out three lines of 19.2px instead of ~40px each. The
+         solid band is the oracle: it sits right under the box, so a frozen
+         line height drags it and the rest of the page up by 60px. It is here
+         rather than at the bottom of the page because parity compares a 800x600
+         viewport only, and evidence below the fold is evidence never scored. -->
+    <div class="box line-height-normal" style="font-size:34px">
+        Normal at a size the rule does not carry.
+    </div>
+    <div class="solid"></div>
+
+    <h3>font shorthand resets line-height</h3>
+    <!-- The shorthand resets every longhand it leaves out, so the span's
+         height comes from its own 32px face and not from the 50px block above
+         it. Chromium computes `normal` (37px) for it; keeping the inherited
+         50px was the bug. The unit oracles in test/style and test/layout carry
+         the measured numbers for this one. -->
+    <div class="box" style="line-height:50px">
+        Fifty pixels here, <span style="font:32px sans-serif">and a shorthand that carries none</span>.
+    </div>
 
     <h3>Line-height: 1 (tight)</h3>
     <div class="box line-height-1">

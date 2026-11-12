@@ -36,7 +36,12 @@ func (chromiumLineMetrics) LineMetrics(sizePx int32, slot frame.FontSlot) (int32
 	return 14, 4, 18
 }
 
-func strutSession(t *testing.T, html string, viewportW float32) *layout.Arena {
+// metricsSession lays a document out the way the line-box oracles need it: the
+// page's own <style> blocks reach the cascade (`session` passes no sheets at
+// all) and the arena gets a Metrics implementation, because a line box is built
+// from the face's ascent, descent and normal height and a test host has no
+// raster font to read them from.
+func metricsSession(t *testing.T, html string, viewportW float32) *layout.Arena {
 	t.Helper()
 	doc := domtest.Parse(html)
 	var sheets []*css.Stylesheet
@@ -95,7 +100,7 @@ body { font: 16px sans-serif; }
 
 // qc:BR-270
 func TestAtomicOnlyLinePaysTheStrutBelowTheBaseline(t *testing.T) {
-	arena := strutSession(t, atomicStrutHTML, 800)
+	arena := metricsSession(t, atomicStrutHTML, 800)
 	type want struct{ y, h float32 }
 	for _, c := range []struct {
 		id string
@@ -142,7 +147,7 @@ func TestAtomicOnlyLinePaysTheStrutBelowTheBaseline(t *testing.T) {
 // control-sizing gap, not this one), so this asserts the rule, not the number.
 // qc:BR-270
 func TestLoneControlDoesNotGainTheStrutAgain(t *testing.T) {
-	arena := strutSession(t, atomicStrutHTML, 800)
+	arena := metricsSession(t, atomicStrutHTML, 800)
 	row, in := findByID(arena, "i"), findByID(arena, "in")
 	if row == nil || in == nil {
 		t.Fatalf("missing #i or #in")
@@ -157,7 +162,7 @@ func TestLoneControlDoesNotGainTheStrutAgain(t *testing.T) {
 
 // qc:BR-270
 func TestAtomicOnlyLinePlacesEachBoxAgainstTheBaseline(t *testing.T) {
-	arena := strutSession(t, atomicStrutHTML, 800)
+	arena := metricsSession(t, atomicStrutHTML, 800)
 	kidsOf := func(id string) []*layout.Object {
 		row := findByID(arena, id)
 		if row == nil {

@@ -1507,6 +1507,24 @@
     "enforced": false
   },
   {
+    "id": "BR-271",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/line_height_normal_test.go:TestNormalLineHeightDoesNotReachIntoAnExplicitLength",
+      "test/layout/line_height_normal_test.go:TestNormalLineHeightFollowsTheElementsOwnFont",
+      "test/layout/line_height_normal_test.go:TestStrutUnderANormalLineHeightStillHoldsAnAtomicRow",
+      "test/style/line_height_normal_test.go:TestFontShorthandResetsAnInheritedLineHeight",
+      "test/style/line_height_normal_test.go:TestNormalLineHeightInheritsAsTheKeywordNotAsAnAncestorsNumber",
+      "test/style/line_height_normal_test.go:TestNormalLineHeightStaysTheKeywordWhereverItIsDeclared"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

@@ -436,7 +436,11 @@ type ComputedStyle struct {
 	rootFontSize  float32
 	FontWeight    FontWeight
 	FontStyle     FontStyle
-	LineHeight    float32
+	// LineHeight is a declared length, percentage or ratio in px, or -1 for
+	// "the height this element's own face reports" - which is both the initial
+	// value and the `normal` keyword, so neither depends on the font size the
+	// cascade happened to have applied when the declaration ran.
+	LineHeight float32
 	// LineHeightRatio is the number or percentage form of a declared
 	// line-height, which is what actually inherits: each element re-derives its
 	// own height from its own font size, so a 1.6 on the body gives a 32px
@@ -759,10 +763,11 @@ func DefaultStyle() ComputedStyle {
 		FontSize:     16,
 		rootFontSize: 16,
 		FontWeight:   WeightNormal,
-		// -1 means unset: a declared line-height resolves to a px value in
-		// resolveLineHeight, but the initial value cannot be one because a
-		// unitless multiplier recomputes per element's font size. Consumers
-		// fall back to fontSize * 1.2 when they see a value at or below zero.
+		// -1 means "let the face decide, per element": it is both the initial
+		// value and the `normal` keyword, and it cannot be a px value because a
+		// unitless multiplier recomputes against each element's own font size.
+		// A consumer with metrics reads Metrics.LineMetrics; the 1.2 multiplier
+		// is the fallback for a host that has no face at all.
 		LineHeight: -1,
 		// Serif, not the embedded sans: a document that names no family is
 		// drawn in the engine's standard font, and Blink's on macOS is Times
@@ -3574,6 +3579,14 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "font":
 		parseFontShorthand(cs, value, parentFontSize, cs.rootFontSize, fonts)
 	case "line-height":
+		// This runs before a `font-size` declared after the line, or winning
+		// from a higher-priority rule, has been applied, so the size here may
+		// not be the element's final one. Every form that depends on the size
+		// defers it: a number or percentage through LineHeightRatio, an em
+		// through LineHeightEm, both re-resolved once the size is final, and
+		// `normal` through the sentinel it answers now. That ordering is what
+		// used to lay a 64px block whose `normal` came from a class out at the
+		// 16px parent's height.
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
 		cs.LineHeightRatio = lineHeightRatio(parsed)
 		cs.LineHeightEm = lineHeightEm(parsed)
@@ -4255,7 +4268,15 @@ func resolveLineHeight(v css.Value, fontSize float32) float32 {
 		return v.ToLengthWithEm(fontSize)
 	case css.ValueKeyword:
 		if v.Str == "normal" {
-			return fontSize * 1.2
+			// `normal` is not a length: it is the height the face itself
+			// reports, per element, so it has to inherit as the keyword rather
+			// than as a number. Resolving it here would freeze the font size the
+			// cascade happened to have applied at this moment (64px when the
+			// size shares the declaration block, the parent's 16px when the size
+			// arrives later or from an inline style) and every descendant would
+			// then lay out with that number. -1 is the same state as the initial
+			// value, which is what `normal` is.
+			return -1
 		}
 	}
 	return fontSize * 1.2
@@ -5557,6 +5578,13 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSiz
 		// this is already right; storing the em count keeps an earlier
 		// `line-height` declaration from overriding the shorthand.
 		cs.LineHeightEm = lineHeightEm(parsed)
+	} else {
+		// The shorthand resets every longhand it leaves out, so a `font` without
+		// a `/line-height` part drops the inherited height: Chromium computes
+		// `normal` and a 37px line for `<span style="font:32px sans-serif">`
+		// inside a `line-height:50px` block. Leaving the three fields alone
+		// would keep the ancestor's 50px here.
+		cs.LineHeight, cs.LineHeightRatio, cs.LineHeightEm = -1, 0, 0
 	}
 	if fam := strings.TrimSpace(strings.Join(parts[sizeIdx+1:], " ")); fam != "" {
 		cs.FontFamily, cs.CustomFamily = parseFontFamily(fam, fonts)
