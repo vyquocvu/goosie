@@ -77,7 +77,10 @@ PASS_AT = 90.0
 # 106: borders/04-inline-fragment.html (SP-7, GOOSIE-INLINEBORDER-001) - a
 # bordered inline span wraps over a translucent block; its border fragments
 # per line instead of vanishing behind the non-inline paint guard.
-MIN_SCORED_FIXTURES = 106
+# 107: css-features/18-group-opacity-overlap.html (SP-8, GOOSIE-COMPOSITE-001) -
+# two translucent boxes overlapping inside one opacity:0.5 group composite against
+# each other and fade once, not twice, against the tile.
+MIN_SCORED_FIXTURES = 107
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

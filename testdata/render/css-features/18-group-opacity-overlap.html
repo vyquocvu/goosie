@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Overlapping translucent layers in one faded group (GOOSIE-COMPOSITE-001)</title>
+    <style>
+        /* A container at opacity:0.5 holding two rgba(0,0,255,0.5) boxes that
+           overlap 60px, on white.  Measured against Chromium (viewport 320x200,
+           DPR 1): a single box reads (191,191,255) - 0.5 color x 0.5 group = 0.25
+           over white.  The overlap must read (158,158,255): blue composited twice
+           at 0.5 = 0.75, then the group faded once at 0.5 = 0.375.  The per-command
+           defect produced (143,143,255) because each box was pre-faded to 0.25 and
+           the two fades compounded.  The container carries no background of its own,
+           so the ONLY disagreement the harness can see is the overlap - exactly the
+           pixels offscreen compositing changes. */
+        html, body { margin: 0; padding: 0; }
+        body { background: #ffffff; font-family: sans-serif; color: #222; }
+        h1 { font-size: 16px; margin: 8px 12px 2px 12px; }
+        p  { font-size: 12px; line-height: 16px; margin: 2px 12px; }
+        .scene { position: relative; width: 260px; height: 130px; margin: 12px; }
+        .fade  { opacity: 0.5; position: absolute; left: 0; top: 0; width: 260px; height: 130px; }
+        .box   { position: absolute; width: 90px; height: 90px; background: rgba(0,0,255,0.5); }
+        .a { left: 10px; top: 10px; }
+        .b { left: 40px; top: 10px; } /* overlaps .a by 60px */
+        .row { margin: 10px 12px; }
+        .solo { opacity: 0.5; width: 90px; height: 24px; background: rgba(0,0,255,0.5); }
+    </style>
+</head>
+<body>
+    <h1>two fades inside one group composite before the group fade</h1>
+    <p>The overlap must be the brighter (158,158,255), never the twice-darkened (143,143,255).</p>
+
+    <div class="scene">
+        <div class="fade">
+            <div class="box a"></div>
+            <div class="box b"></div>
+        </div>
+    </div>
+
+    <div class="row"><div class="solo"></div></div>
+    <p>A lone faded box (191,191,255) sits below so the corpus also proves the
+       non-overlapping case is unchanged by moving opacity onto a group.</p>
+    <p>filler line so the document has ink the harness compares on both engines.</p>
+</body>
+</html>
