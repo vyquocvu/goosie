@@ -130,3 +130,15 @@ SP-6b ships when: Cmd+N and File→New Window spawn a second window through the 
 - **Shared raster pool / window cap (S11)**, **drag-tab-between-windows**, **per-window sheet-modal dialogs**: independent enhancements.
 - **Native multi-window runtime/visual sign-off**: needs a display + CUA harness; deferred consistent with all prior native work.
 - **L3/L4 (incremental style/layout invalidation)**: still deferred to SP-7+ per the SP-5 terrain evidence; unchanged by SP-6.
+
+## 8. Execution record (2026-11-12, completed)
+
+Implemented Tasks 1–6 of `docs/superpowers/plans/2026-11-12-sp6b-native-multiwindow.md` on `main`, no push.
+
+**Refinement to §2.1 (one atomic):** the registry and `_appQuit` remain main-thread-confined ObjC ivars (no lock). The create trampoline additionally reads one file-scope `static _Atomic int g_appLoopRunning` (set/cleared only on main in `GoosieAppRun`) so an off-main create never `dispatch_sync`s into a main queue that nothing drains once the loop has returned. archtest scans `.go` only, so this C atomic in the cgo-confined `.m` adds no mutable Go global. Residual narrow TOCTOU (loop exits between the flag read and the dispatch) is accepted: appQuit implies every window is closing and every pump detaching, so a late Cmd+N is already unlikely; the flag is the belt-and-braces.
+
+**Commits:** `9e0480d5` Task 1 (manager `newWindow` link + registry-wide `drainLoopErrs`); `dae83698` Task 2 (chrome Cmd+N split + File→New Window menu/action); `5ffcbfdd` Task 3 (one shared delegate + main-thread registry + app-wide quit + retained `gw->window` + order-out close); `6047dd0d` Task 4 (`GoosieWindowCreateOnMain` trampoline + `g_appLoopRunning` + `darwin.Open` bridge + `ErrAppQuitting` code 6 + Run/Close docs); Task 5 no fix-forward (matrix green on first run); Task 6 docs (this record). Plan `28de361f`, spec `a96c2989`.
+
+**Verification:** headless TDD green + mutation evidence (drain primary-only mutant red; Cmd+N no-op mutant red); `go build ./...`, `go vet -all ./...`, `go test ./...`, `go test -race` (cmd/goosie + platform + surface), archtest, gate, `make parity` 105/105 ≥96.39% gaps 4/6 — all green. Native: `go build`/`go vet ./internal/platform/darwin/` + existing native tests (media/accept/AX/translate) green.
+
+**Verification limit:** no automated test creates an NSWindow (needs `GoosieHasDisplay()`); the changed C functions are compile-verified + N=1 equivalence reasoned, not runtime-exercised. Native multi-window visual sign-off deferred (no display), consistent with SP-6a and all prior native work.

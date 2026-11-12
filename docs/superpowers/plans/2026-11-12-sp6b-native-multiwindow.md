@@ -1464,3 +1464,30 @@ Use superpowers:finishing-a-development-branch. Normal repo, on `main`, gates wa
 - Test helpers reused: `testManagerConfig`, `waitWindows` (existing); `surface.ModCommand`/`ModShift`, `tabs.Tab.Incognito()`, `ContextMenu.Snapshot()`, `surface.Loop.Stats().Frames` all verified present. ✓
 
 **Ordering note verified:** `m.spawn` installs `f.newWindow` BEFORE `f.openWindow()` (which reads it to wire `cw.onNewWindow`). Installing after would capture nil — the plan installs before. ✓
+
+---
+
+## Execution record (2026-11-12, completed)
+
+All six tasks executed inline on `main`, no push. TDD red-green + mutation evidence for the Go wiring (Tasks 1–2); native C compile-verified (Tasks 3–4); full matrix green on first run (Task 5).
+
+| Task | Commit | Result |
+|------|--------|--------|
+| Plan | `28de361f` | this plan written + self-reviewed |
+| Spec | `a96c2989` | approved design |
+| 1 — manager link + drain | `9e0480d5` | `f.newWindow` installed by `m.spawn`; `drainLoopErrs` snapshots errs after `<-m.done`; 3 headless tests green; drain primary-only mutant red |
+| 2 — chrome Cmd+N / menu | `dae83698` | `handleTabShortcut` Cmd+N split, `onNewWindow` field + wire, File→New Window item + `new_window` action; 4 headless tests green; Cmd+N no-op mutant red |
+| 3 — shared delegate / registry | `5ffcbfdd` | one `GoosieAppDelegate` + main-thread registry + app-wide quit + retained `gw->window` + order-out close; build/vet/native green |
+| 4 — trampoline + Go bridge | `6047dd0d` | `GoosieWindowCreateOnMain` + `g_appLoopRunning`; `darwin.Open` drops gate, decodes code 6 → `ErrAppQuitting`; Run/Close docs; build/vet/native/media green |
+| 5 — no-regression matrix | (none) | all green first run, nothing to fix-forward |
+| 6 — docs | (this commit) | roadmap SP-6 complete + SP-7 next; spec §8 + this record |
+
+**Deviations from the plan (all minor, all verified):**
+1. **`surface` import timing:** the plan put `surface` in the Task 1 test import block, but Task 1's tests do not use it (unused-import compile error). Removed it in Task 1 and added it in Task 2 Step 1 where `surface.ModCommand`/`ModShift` are first used.
+2. **`@interface` selector declarations:** the four delegate methods (`registerWindow:`/`unregisterWindow:`/`quitAll`/`appQuit`) were also declared in `@interface GoosieAppDelegate` (shim_darwin.m:325), not only in `@implementation`, because `windowWillClose:` (in `GoosieWindowDelegate`, defined before the delegate `@implementation`) calls `unregisterWindow:` and clang needs a visible selector. Build/vet confirmed clean.
+3. **`found`-guard in `unregisterWindow:`:** `_appQuit` is set only when the pointer was actually found AND `_count == 0`, so a failed create or a double unregister cannot quit a live app.
+4. **One-atomic refinement:** `g_appLoopRunning` (see spec §8) — the registry/`_appQuit` stay main-thread-confined ivars; the trampoline reads one C atomic for loop liveness. archtest scans `.go` only, so no mutable-Go-global violation.
+
+**Verification:** `go build -o /dev/null ./...`, `go vet -all ./...`, `go test ./internal/archtest/`, `go test ./...`, `go test -race ./cmd/goosie/ ./internal/platform/... ./internal/surface/`, `go test ./test/gate -run TestGate -v`, `make parity` (105/105, average 96.39%, gaps 4 fixtures / 6 bands — unchanged from SP-6a) — all exit 0, no DATA RACE, no FAIL. Native: `go build`/`go vet ./internal/platform/darwin/` + `go test ./internal/platform/darwin/` + `go test ./test/engine/ -run Media` green.
+
+**Verification limit:** no automated test creates an NSWindow (needs `GoosieHasDisplay()`); the changed C functions are compile-verified + N=1 equivalence reasoned, not runtime-exercised. Native multi-window visual sign-off deferred (no display), consistent with SP-6a and all prior native work.
