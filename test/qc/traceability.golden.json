@@ -2804,6 +2804,22 @@
     "enforced": false
   },
   {
+    "id": "BR-267",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/screen_test.go:TestScreenIsDefinedWithoutADOM",
+      "test/js/screen_test.go:TestScreenOrientationIsAbsent",
+      "test/js/screen_test.go:TestScreenReportsTheConfiguredViewport",
+      "test/js/screen_test.go:TestScreenTracksAViewportChange",
+      "test/js/screen_test.go:TestScreenWidthIsReadOnly"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
