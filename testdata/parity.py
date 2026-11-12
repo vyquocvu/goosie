@@ -117,7 +117,15 @@ PASS_AT = 90.0
 # the controls that align on an interior baseline instead - a text field, a
 # button and a select - so a rule that reaches past the widgets moves a band this
 # corpus compares.
-MIN_SCORED_FIXTURES = 113
+# 114: layout-features/10-middle-script-align.html (GOOSIE-VALIGNMIDDLE-001,
+# GOOSIE-VALIGNSUB-001) - the two values that resolve against the containing font
+# rather than against an edge of the line: `middle` puts a box's centre half the
+# parent's x-height above the baseline, and `super`/`sub` shift a box's own
+# baseline by the parent's script numbers, so the line grows instead of the box
+# leaving it. Chips, runs of text and three different parent sizes are all in the
+# rows, each followed by a solid band, and every one of those bands sat 6 to 30px
+# somewhere else before the rules were measured.
+MIN_SCORED_FIXTURES = 114
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

@@ -519,7 +519,8 @@ func inlineInto(a *Arena, id ObjectID) {
 	if obj.Style != nil {
 		asc, desc, strutLine := fontHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
 		strut = strutLine
-		sm = ofStrut(asc, desc, strutLine)
+		sm = ofStrut(asc, desc, strutLine,
+			faceXHeight(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot()), obj.Style.FontSize)
 	}
 	// Floats intruding into this container shorten the lines overlapping
 	// them. Siblings of the container's own text and uncles of nested blocks
@@ -698,10 +699,8 @@ func inlineInto(a *Arena, id ObjectID) {
 				dx := (x + k.MarginLeft) - run.srcX
 				d := demandForRun(demands, line.runs, run.obj)
 				dy := (y + fr.atomicTop(d.box) + k.MarginTop) - run.srcY
-				if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
+				if isRubyAnnotation(k, a) {
 					dy -= line.h * 0.4
-				} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
-					dy += line.h * 0.2
 				}
 				shiftSubtree(a, run.obj, dx, dy)
 				x += run.w
@@ -729,10 +728,8 @@ func inlineInto(a *Arena, id ObjectID) {
 				// reach above the baseline rather than by its whole box.
 				d := demandForRun(demands, line.runs, run.obj)
 				baseY := y + fr.atomicTop(d.box) + d.half
-				if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
+				if isRubyAnnotation(runObj, a) {
 					baseY -= run.contentH * 0.5
-				} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
-					baseY += run.contentH * 0.3
 				}
 				runObj.Y = baseY
 			}
@@ -1058,6 +1055,7 @@ const (
 	atomicToTextTop           // the box's top edge on the parent font's content top
 	atomicToTextBottom        // the box's bottom edge on the parent font's content bottom
 	atomicToLength            // vertical-align: <length>, the box's baseline shifted
+	atomicToScript            // vertical-align: super/sub, the same shift at the parent's script offset
 	atomicToMiddle            // the box's centre on the parent's x-height over the baseline
 )
 
@@ -1074,17 +1072,17 @@ type atomicBox struct {
 }
 
 // atomicAlign sorts a vertical-align value into the classes above and takes the
-// length out of it when there is one. `middle` is the one value in the set that
-// still cannot be resolved here: it needs the parent font's x-height, which no
-// metric of this engine reports (GOOSIE-VALIGNMIDDLE-001), so it rides the line
-// box's bottom edge as `bottom` does.
+// length out of it when there is one. `super` and `sub` carry their sign here
+// and their amount in resolveScript, because the shift belongs to the parent's
+// font rather than to the declaration.
 func atomicAlign(va string) (int, float32) {
 	switch va {
-	case "", "baseline", "super", "sub":
-		// `super` and `sub` raise or lower their own baseline rather than
-		// replacing it, so they sort here as the default and the offset
-		// placement already on the call site rides it.
+	case "", "baseline":
 		return atomicOnBaseline, 0
+	case "super":
+		return atomicToScript, 1
+	case "sub":
+		return atomicToScript, -1
 	case "top":
 		return atomicToTop, 0
 	case "bottom":
@@ -1117,11 +1115,48 @@ func alignLength(va string) (float32, bool) {
 	return float32(n), true
 }
 
+// resolveScript gives `super` and `sub` the shift of their own baseline that the
+// reference measures, then lets them ride the length path: both move the box's
+// baseline, so both sides of the box move with it and the line grows instead of
+// the box being lifted out of one that stayed put.
+//
+// Measured on Chromium 2026-11-12 over fourteen font sizes from 8 to 80px: the
+// shift is the *parent's* size over 3 raised, over 5 lowered, plus one pixel,
+// each truncated to 1/64 px - 6.328125 and 4.1875 at 16px, 5 and 3.390625 at
+// 12px, 22.328125 and 13.796875 at 64px. It does not belong to the box's own
+// size: a 24px run of text in a 64px block is lowered by 13.796875px, the 64px
+// number, and a 64px run in a 16px block raised by 6.328125px, the 16px one.
+// The same pair answers for an atomic box - a 4px chip supered on a 16px parent
+// sits at 3.671875 where its baseline puts it at 10.
+func resolveScript(a *Arena, k *Object, b *atomicBox, sm strutMetrics) {
+	if b.align != atomicToScript {
+		return
+	}
+	if isRubyAnnotation(k, a) {
+		// The UA sheet asks for `vertical-align: super` on an <rt> because that
+		// is the closest declaration to what ruby does, but the reference lays
+		// ruby out with its own algorithm and the shift above is much smaller
+		// than that raise: on a 16px line with an 8px annotation the script
+		// answer is 6.328125px, which leaves the annotation inside the base
+		// text it belongs above. Ruby keeps its proportional raise at placement
+		// and takes no shift here.
+		b.align, b.length = atomicOnBaseline, 0
+		return
+	}
+	if b.length > 0 {
+		b.length = sm.sup
+	} else {
+		b.length = -sm.sub
+	}
+	b.align = atomicToLength
+}
+
 // boxOfAtomic records what one atomic box demands of its line. It takes the
 // arena and id rather than an object pointer because it walks the box's subtree,
 // and the arena grows during layout: a pointer captured earlier can address the
-// slice it grew out of.
-func boxOfAtomic(a *Arena, id ObjectID) atomicBox {
+// slice it grew out of. The strut comes along because two of the values this
+// reads resolve against the parent's font rather than the box's own.
+func boxOfAtomic(a *Arena, id ObjectID, sm strutMetrics) atomicBox {
 	k := a.Get(id)
 	va := ""
 	if k.Style != nil {
@@ -1129,6 +1164,7 @@ func boxOfAtomic(a *Arena, id ObjectID) atomicBox {
 	}
 	b := atomicBox{extent: k.MarginTop + k.BorderH() + k.MarginBottom}
 	b.align, b.length = atomicAlign(va)
+	resolveScript(a, k, &b, sm)
 	// A control's text lives in a shadow tree the arena never sees, so the
 	// subtree walk cannot answer "does it have line boxes" for one: it does.
 	// A length-aligned box needs the same number: the shift is applied to its
@@ -1249,12 +1285,43 @@ func hasInFlowLineBoxes(a *Arena, id ObjectID) bool {
 type strutMetrics struct {
 	above, below float32
 	asc, desc    float32
+	// xh is the parent face's x-height: `vertical-align: middle` puts a box's
+	// centre half of it above the baseline, and a run of text measures against
+	// the same number however tall its own box is (measured 2026-11-12 - a 64px
+	// run centred on a 16px parent's 8.375px x-height, not its own 33.5px one).
+	xh float32
+	// sup and sub are the baseline shifts `super` and `sub` ask for, read from
+	// resolveScript. They are sizes, not edges: the reference truncates each to
+	// 1/64 px, which is why the arithmetic keeps the fraction.
+	sup, sub float32
 }
 
-// ofStrut builds the pair from a font's heights and its line height.
-func ofStrut(asc, desc, lineH float32) strutMetrics {
+// ofStrut builds the pair from a font's heights and its line height, plus the
+// two numbers the edge-aligned values measure against: the x-height the face
+// reports, and the parent's script offsets.
+func ofStrut(asc, desc, lineH, xh, sizePx float32) strutMetrics {
 	above, below := strutSplit(asc, desc, lineH)
-	return strutMetrics{above: above, below: below, asc: asc, desc: desc}
+	// size/3 raised, size/5 lowered, one pixel each, truncated to the 1/64 px
+	// the layout currency works in - see resolveScript.
+	trunc := func(v float32) float32 { return float32(int64(v*64)) / 64 }
+	return strutMetrics{
+		above: above, below: below, asc: asc, desc: desc, xh: xh,
+		sup: trunc(sizePx/3) + 1, sub: trunc(sizePx/5) + 1,
+	}
+}
+
+// faceXHeight reports the x-height in px. A face that gives none - a host with
+// no font backend at all - answers half the size, the same shape as the
+// proportional fallback in fontHeights; no reference number exists for that
+// state, and it is a fallback rather than a measurement.
+func faceXHeight(m Metrics, size float32, slot frame.FontSlot) float32 {
+	if m == nil || size <= 0 {
+		return 0
+	}
+	if v := m.XHeightFixed(int32(size), slot); v > 0 {
+		return float32(v) / 64
+	}
+	return size * 0.5
 }
 
 // lineFrame is a resolved line: where its baseline sits, how tall it is, and the
@@ -1292,9 +1359,9 @@ type runDemand struct {
 // spans 0..18): `baseline` puts the top at 10, `top` and `text-top` at 0,
 // `bottom` and `text-bottom` at 14, `5px` at 5, `-5px` at 15 - and the `-5px`
 // line is 19 tall, because the lowered box hangs below the strut's descent and
-// the line has to contain it. `middle` is the one value that cannot be answered
-// here: the reference puts it at 7.81, which is the parent's x-height over the
-// baseline, and no metric of this engine reports an x-height.
+// the line has to contain it. `middle` answers 7.8125 on that same row: half
+// the parent's 8.375px x-height plus half the box is what rises above the
+// baseline, which is the one number this used to have to leave out.
 func atomicDemand(b atomicBox, sm strutMetrics) runDemand {
 	d := runDemand{box: b, atomic: true}
 	switch b.align {
@@ -1308,9 +1375,18 @@ func atomicDemand(b atomicBox, sm strutMetrics) runDemand {
 		d.above, d.below = sm.asc, b.extent-sm.asc
 	case atomicToTextBottom:
 		d.above, d.below = b.extent-sm.desc, sm.desc
+	case atomicToMiddle:
+		// The box's centre sits half an x-height above the baseline, so each of
+		// its sides is that point moved by half the extent - and either side can
+		// be the one that stretches the line. Measured on Chromium 2026-11-12
+		// for chips centred on the 16px strut (x-height 8.375, baseline 14): a
+		// 4px box answers an unchanged 18px line at offset 7.8125, a 20px box a
+		// 20px line with the block's own text 0.1875px down it, a 40px box a
+		// 40px line with that text at 10.1875.
+		d.above, d.below = sm.xh/2+b.extent/2, b.extent/2-sm.xh/2
 	default:
-		// `top`, `bottom` and the `middle` fallback measure against the line's own
-		// edges: they stretch the box rather than move the baseline under it.
+		// `top` and `bottom` measure against the line's own edges: they stretch
+		// the box rather than move the baseline under it.
 		d.edge = true
 		d.bottom = b.align != atomicToTop
 	}
@@ -1333,29 +1409,25 @@ func atomicDemand(b atomicBox, sm strutMetrics) runDemand {
 // for a box 40px tall whose content area starts 11px inside its top edge, so a
 // run is measured as one box and placed by box top plus half-leading - the class
 // it carries comes from the element the run belongs to, not from the block.
-// `middle` is the one value this cannot answer yet; see the note below.
 func demandOfRun(a *Arena, r textRun, sm strutMetrics) runDemand {
 	if r.atomic {
-		return atomicDemand(boxOfAtomic(a, r.obj), sm)
+		return atomicDemand(boxOfAtomic(a, r.obj, sm), sm)
 	}
 	asc, desc, lineH := fontHeights(a.Metrics, r.size, r.slot, r.lineH)
+	k := a.Get(r.obj)
 	va := ""
-	if k := a.Get(r.obj); k.Style != nil {
+	if k.Style != nil {
 		va = k.Style.VerticalAlign
 	}
 	b := atomicBox{extent: lineH}
 	b.align, b.length = atomicAlign(va)
-	// `middle` on a text run stays on the baseline. Chromium centres its box on
-	// the parent font's x-height, which no metric of this engine reports
-	// (GOOSIE-VALIGNMIDDLE-001), and the two stand-ins are not equally close:
-	// measured 2026-11-12 in the 50px strut, the reference answers 16.8125 for a
-	// 16px run where the baseline gives 16 and the line's bottom edge gives 21.
-	// The gap is half the x-height minus half the descent, so it does not depend
-	// on the run's line height - the baseline is the answer that stays within a
-	// pixel of it however the box is sized.
-	if b.align == atomicToMiddle {
-		b.align, b.length = atomicOnBaseline, 0
-	}
+	resolveScript(a, k, &b, sm)
+	// Both of the values that resolve against the parent rather than the run
+	// read the same strut: the shift `super`/`sub` moves the run's baseline by
+	// belongs to the parent's size - a 64px run in a 16px block is raised
+	// 6.328125px, not 22.328125px - and `middle` centres the run's box on the
+	// parent's x-height, which is what puts a 64px run's box top at 0 on a line
+	// grown to 74px by that very centring.
 	b.below = lineH - (asc + (lineH-(asc+desc))/2)
 	d := atomicDemand(b, sm)
 	d.asc, d.half, d.box = asc, (lineH-(asc+desc))/2, b
@@ -1455,10 +1527,10 @@ func lineExtent(sm strutMetrics, ds []runDemand) lineFrame {
 }
 
 // atomicTop is where one box's margin box starts inside the line. Baseline and
-// length-aligned boxes put a baseline of their own on the line's, `top` and
-// `bottom` ride the line's own edges, `text-top`/`text-bottom` ride the parent
-// font's, and `middle` rides the bottom edge because the x-height it centres on
-// is not a metric this engine has (GOOSIE-VALIGNMIDDLE-001).
+// length-aligned boxes put a baseline of their own on the line's - `super` and
+// `sub` being lengths taken from the parent's size - `top` and `bottom` ride the
+// line's own edges, `text-top`/`text-bottom` ride the parent font's, and
+// `middle` centres the box on half the parent's x-height above the baseline.
 func (f lineFrame) atomicTop(b atomicBox) float32 {
 	switch b.align {
 	case atomicOnBaseline:
@@ -1469,6 +1541,8 @@ func (f lineFrame) atomicTop(b atomicBox) float32 {
 		return f.base - f.sm.asc
 	case atomicToTextBottom:
 		return f.base + f.sm.desc - b.extent
+	case atomicToMiddle:
+		return f.base - f.sm.xh/2 - b.extent/2
 	case atomicToTop:
 		return 0
 	default:

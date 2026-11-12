@@ -36,6 +36,14 @@ func (chromiumLineMetrics) LineMetrics(sizePx int32, slot frame.FontSlot) (int32
 	return 14, 4, 18
 }
 
+// XHeightFixed reports the same face's x-height, which Chromium measures at
+// 0.5234375em (8.375px at 16px, 33.5px at 64px - the OS/2 value, not the ink
+// box, which reads 8.3672px). `vertical-align: middle` halves it, so the
+// fraction is what the oracle expects.
+func (chromiumLineMetrics) XHeightFixed(sizePx int32, slot frame.FontSlot) int32 {
+	return sizePx * 67 / 2
+}
+
 // metricsSession lays a document out the way the line-box oracles need it: the
 // page's own <style> blocks reach the cascade (`session` passes no sheets at
 // all) and the arena gets a Metrics implementation, because a line box is built

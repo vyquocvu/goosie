@@ -1571,6 +1571,22 @@
     "enforced": false
   },
   {
+    "id": "BR-275",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/middle_script_align_test.go:TestMiddleCentersARunOfTextTheSameWay",
+      "test/layout/middle_script_align_test.go:TestMiddleCentersAnAtomicBoxOnTheParentsXHeight",
+      "test/layout/middle_script_align_test.go:TestScriptShiftMovesTheBaselineOfEveryKindOfBox",
+      "test/layout/middle_script_align_test.go:TestScriptShiftScalesWithTheParentSize"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

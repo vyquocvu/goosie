@@ -1163,6 +1163,24 @@ func (f *Fonts) LineMetrics(size int32, slot frame.FontSlot) (int32, int32, int3
 	return round(m.Ascent), round(m.Descent), round(m.Height)
 }
 
+// XHeightFixed reports the face's x-height in 1/64 px. It is the one line-box
+// metric the face already carries in this currency and must keep: LineMetrics
+// rounds its three numbers to device pixels because a content area is drawn on
+// whole pixels, while `vertical-align: middle` only ever halves the x-height and
+// adds it to another half, so the fraction is the answer rather than noise.
+//
+// A slot the host cannot serve answers 0 and the caller falls back, as for
+// LineMetrics.
+func (f *Fonts) XHeightFixed(size int32, slot frame.FontSlot) int32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e := f.faceLocked(size, slot)
+	if e == nil {
+		return 0
+	}
+	return int32(e.face.Metrics().XHeight)
+}
+
 // renderGlyph copies one glyph's coverage out of a face.
 //
 // The copy is mandatory rather than defensive: a face's own mask buffer is

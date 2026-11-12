@@ -44,6 +44,13 @@ func (controlLineMetrics) LineMetrics(sizePx int32, slot frame.FontSlot) (int32,
 	return 14, 4, 18
 }
 
+// XHeightFixed reports the same face's x-height at the ratio Chromium measures
+// (0.5234375em: 8.375px at 16px, 33.5px at 64px). Only `vertical-align: middle`
+// reads it, and it halves it, so the fraction has to survive the interface.
+func (controlLineMetrics) XHeightFixed(sizePx int32, slot frame.FontSlot) int32 {
+	return sizePx * 67 / 2
+}
+
 // controlMetricsSession is metricsSession with that face installed: the page's
 // own <style> blocks reach the cascade, which matters here because part of what
 // is under test is the UA margin on a widget, and the arena gets the metrics a

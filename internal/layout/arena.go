@@ -250,6 +250,13 @@ type Metrics interface {
 	// area; the normal height is the font's own leading, which differs by family
 	// by more than a pixel.
 	LineMetrics(sizePx int32, slot frame.FontSlot) (ascent, descent, normalLineHeight int32)
+	// XHeightFixed reports the distance from the baseline to the top of a
+	// lowercase letter that neither ascends nor descends, in 26.6 fixed-point
+	// units (1/64 px). `vertical-align: middle` centres a box on half of it
+	// (CSS 2.1 10.8), and the halving is why the fraction has to survive: the
+	// reference puts a 4px box 7.8125px down an 18px line because its parent's
+	// x-height is 8.375px, where the same metric rounded to 8px answers 8.
+	XHeightFixed(sizePx int32, slot frame.FontSlot) int32
 }
 
 // Arena is the flat box tree.

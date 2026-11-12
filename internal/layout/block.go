@@ -264,7 +264,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 		// how far it has to travel.
 		boxes := make([]runDemand, len(rowKids))
 		for i, rk := range rowKids {
-			boxes[i] = atomicDemand(boxOfAtomic(a, rk), sm)
+			boxes[i] = atomicDemand(boxOfAtomic(a, rk, sm), sm)
 		}
 		fr := lineExtent(sm, boxes)
 		for i, rk := range rowKids {
@@ -484,7 +484,8 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						rowTop = y
 						if st := a.Get(id).Style; st != nil {
 							asc, desc, strutLine := fontHeights(a.Metrics, st.FontSize, st.FontSlot(), st.LineHeight)
-							sm = ofStrut(asc, desc, strutLine)
+							sm = ofStrut(asc, desc, strutLine,
+								faceXHeight(a.Metrics, st.FontSize, st.FontSlot()), st.FontSize)
 						}
 					}
 					k.X = contentX + rowCursor + k.MarginLeft

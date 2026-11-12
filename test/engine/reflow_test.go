@@ -23,6 +23,12 @@ func (m *fixedMetrics) LineMetrics(size int32, _ frame.FontSlot) (int32, int32, 
 	return size * 4 / 5, size / 5, size * 6 / 5
 }
 
+// XHeightFixed keeps the same proportional shape as the rest of this fake: no
+// reference face stands behind it, so half the size is as good as anything.
+func (m *fixedMetrics) XHeightFixed(size int32, _ frame.FontSlot) int32 {
+	return size * 32
+}
+
 func reflow(t *testing.T, s *engine.Session, w float32) error {
 	t.Helper()
 	r, ok := any(s).(interface{ Reflow(float32) error })

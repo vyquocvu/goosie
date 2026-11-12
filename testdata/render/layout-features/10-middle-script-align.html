@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vertical-align middle and the script pair measure the containing font (GOOSIE-VALIGNMIDDLE-001, GOOSIE-VALIGNSUB-001)</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; }
+    .label { font-size: 12px; color: #666; margin: 0 0 2px 0; }
+    .row { width: 460px; }
+    /* A 50px line-height builds a strut that reaches 30px above and 20px below
+       its baseline, which is what makes the `middle` rows below non-degenerate:
+       on an 18px line the strut already covers a small box on both sides, so the
+       line does not grow and only the box moves. */
+    .st { line-height: 50px; width: 460px; background: #f7f7f7; }
+    .f64 { font-size: 64px; }
+    /* middle puts the centre of the box half the containing face's x-height
+       (8.375px at 16px) above the baseline, so a 4px box starts 7.8125px down an
+       18px line where the old bottom-edge fallback started 14px down. The boxes
+       carry no border on purpose: their extent is what the rule reads, and these
+       rows are the 4px and 40px boxes test/layout/middle_script_align_test.go
+       pins. */
+    .chip { display: inline-block; width: 90px; background: #9ecae1; }
+    .c4 { height: 4px; }
+    .c40 { height: 40px; }
+    .mid { vertical-align: middle; }
+    .sup { vertical-align: super; }
+    .sub { vertical-align: sub; }
+    /* 74px of line height on a 64px face is that font's own box, so the run is
+       59px above its baseline and 15px below: centred on the PARENT's 8.375px
+       x-height it asks 41.1875px above the baseline and grows the line. */
+    .big74 { font-size: 64px; line-height: 74px; color: #0b5394; }
+    .band { height: 6px; margin: 0 0 6px 0; }
+    .b1 { background: #238b45; }
+    .b2 { background: #a63603; }
+</style>
+</head>
+<body>
+    <!-- All the evidence sits above the fold on purpose: parity scores an 800x600
+         viewport screenshot, so a shape that starts below y=600 is a shape no run
+         ever compares. -->
+    <div class="label">a 4px and a 40px chip centred on half the 16px x-height - 7.8125px down an 18px line, the tall one grows it to 40px</div>
+    <div class=row>words <span class="chip c4 mid"></span> more</div>
+    <div class="band b1"></div>
+    <div class=row>words <span class="chip c40 mid"></span> more</div>
+    <div class="band b2"></div>
+
+    <div class="label">the same boxes on a 50px strut - its baseline is 30px down, so half x-height plus half the box decides</div>
+    <div class=st>words <span class="chip c4 mid"></span> more</div>
+    <div class="band b1"></div>
+
+    <div class="label">a 64px face centres on its own x-height, four times the 16px one, so the chip lands high in a 74px line</div>
+    <div class="row f64">words <span class="chip c4 mid"></span> more</div>
+    <div class="band b2"></div>
+
+    <div class="label">a run centres on its line-height box and the parent's x-height - line 74px, the block's text 27.1875px down</div>
+    <div class=row>words <span class="big74 mid">Big</span> more</div>
+    <div class="band b1"></div>
+
+    <div class="label">super and sub shift the run's own baseline - 6.328125px up, 4.1875px down here - so the line grows to 28.515625px</div>
+    <div class=row>aa <span class=sup>bb</span> <span class=sub>cc</span> dd</div>
+    <div class="band b2"></div>
+
+    <div class="label">the same two values on a 40px inline-block: raised it asks 46.328125px above the baseline, lowered the line is 40px</div>
+    <div class=row>words <span class="chip c40 sup"></span> more</div>
+    <div class="band b1"></div>
+    <div class=row>words <span class="chip c40 sub"></span> more</div>
+    <div class="band b2"></div>
+</body>
+</html>
