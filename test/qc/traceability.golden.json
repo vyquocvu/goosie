@@ -1540,6 +1540,21 @@
     "enforced": false
   },
   {
+    "id": "BR-273",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/vertical_align_text_test.go:TestEdgeAlignedBoxesMoveTheBaselineOnlyWhenTheyStretchTheLine",
+      "test/layout/vertical_align_text_test.go:TestTextRunVerticalAlignClassesGrowTheLineAroundABiggerFont",
+      "test/layout/vertical_align_text_test.go:TestTextRunVerticalAlignClassesPlaceTheRunWhereChromiumPutsIt"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

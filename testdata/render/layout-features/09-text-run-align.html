@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vertical-align classes resolve for runs of text (GOOSIE-VALIGNTEXT-001)</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; }
+    .label { font-size: 12px; color: #666; margin: 0 0 2px 0; }
+    /* A 50px line-height builds a strut that reaches 30px above and 20px below
+       its baseline, and every run below asks numbers different from that, so no
+       row here is degenerate: on a line whose only font is 16px the strut already
+       fills both edges and `top` answers exactly what `baseline` answers. */
+    .st { line-height: 50px; width: 460px; background: #f7f7f7; }
+    .row { width: 460px; }
+    /* 40px of line height on a 16px face leaves 11px of half-leading above the
+       ink: the box is what an edge value aligns, not the glyphs. */
+    .run40 { line-height: 40px; color: #b30000; }
+    /* 74px of line height on a 64px face is the font's own height, so its box
+       reaches 59px above its baseline and 15px below it. */
+    .big74 { font-size: 64px; line-height: 74px; color: #0b5394; }
+    /* And 10px on the same 64px face takes 32px OUT of each side, so pinning the
+       box to an edge puts the ink above the line's top edge rather than inside
+       what the line grew to contain. */
+    .tiny10 { font-size: 64px; line-height: 10px; color: #38761d; }
+    .chip { display: inline-block; width: 90px; height: 74px; background: #9ecae1; }
+    .band { height: 6px; margin: 0 0 8px 0; }
+    .b1 { background: #238b45; }
+    .b2 { background: #a63603; }
+</style>
+</head>
+<body>
+    <!-- All the evidence sits above the fold on purpose: parity scores an 800x600
+         viewport screenshot, so a shape that starts below y=600 is a shape no run
+         ever compares. -->
+    <div class="label">a 40px-tall run of text on a 50px strut - text-bottom hangs the box above the line, so the line grows to 56px and the block's own text rides 6px lower down it</div>
+    <div class="st">words <span class=run40 style="vertical-align:text-bottom">tail</span> more</div>
+    <div class="band b1"></div>
+
+    <div class="label">a 64px run on the same strut - top keeps the baseline at 30px and bottom moves it to 54px, so the surrounding text drops 24px while the run's own box stays put</div>
+    <div class="st">words <span class=big74 style="vertical-align:top">Big</span> more</div>
+    <div class="band b1"></div>
+    <div class="st">words <span class=big74 style="vertical-align:bottom">Big</span> more</div>
+    <div class="band b2"></div>
+
+    <div class="label">the same two answers for an empty inline-block - a top-pinned box of this height answers the same 74px line with the surrounding text still at 16px, a bottom-pinned one takes it to 40px</div>
+    <div class="st">words <span class=chip style="vertical-align:bottom"></span> more</div>
+    <div class="band b2"></div>
+
+    <div class="label">leading taken out of the box: a 64px run under line-height 10px, pinned to each edge of an 18px line - the ink starts 32px above the top and 24px above the bottom</div>
+    <div class=row>words <span class=tiny10 style="vertical-align:top">Big</span> more</div>
+    <div class="band b1"></div>
+    <div class=row>words <span class=tiny10 style="vertical-align:bottom">Big</span> more</div>
+    <div class="band b2"></div>
+</body>
+</html>

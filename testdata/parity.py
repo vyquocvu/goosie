@@ -105,7 +105,12 @@ PASS_AT = 90.0
 # alone on its line and once after a word, each row followed by a solid band; the
 # classes move the baseline or stretch the line, so a placement that ignores them
 # slides every band below the row it follows.
-MIN_SCORED_FIXTURES = 111
+# 112: layout-features/09-text-run-align.html (GOOSIE-VALIGNTEXT-001) - the same
+# classes on a run of *text*, where the box an edge value pins is the run's own
+# line height rather than a margin box: a 64px run with `vertical-align: bottom`
+# takes the line's baseline 24px down with it, and a 64px run under
+# `line-height: 10px` starts its ink 32px above the line it belongs to.
+MIN_SCORED_FIXTURES = 112
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

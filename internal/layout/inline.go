@@ -650,7 +650,6 @@ func inlineInto(a *Arena, id ObjectID) {
 		demands := runDemands(a, line.runs, sm)
 		fr := lineExtent(sm, demands)
 		line.h = fr.height
-		baseline := fr.base
 		justifyExtra = 0
 		// A line overlapping floats lays out inside the shortened span, so
 		// alignment centers within what the floats leave, not the full box.
@@ -718,15 +717,18 @@ func inlineInto(a *Arena, id ObjectID) {
 			}
 			if runObj.X == 0 && runObj.Y == 0 {
 				runObj.X = x
-				// The run's content area starts its own ascent above the line's
-				// baseline, wherever that baseline ended up: on a line of one
-				// size this is exactly the centring it used to do, and on a line
-				// of mixed sizes it is the placement the reference measures - a
-				// 64px run beside 16px text sits 12px above the block that owns
-				// it, overflowing, because the line grew by the run's reach
-				// above the baseline rather than by its whole box.
+				// The run's box goes wherever its `vertical-align` class puts it -
+				// its own baseline on the line's for the default, the line's top or
+				// bottom edge for `top`/`bottom`, the parent font's content edges for
+				// `text-top`/`text-bottom`, a shift of its own baseline for a length -
+				// and its content area starts one half-leading inside that box. On a
+				// line of one size the default is exactly the centring this path used
+				// to do, and on a line of mixed sizes it is the placement the
+				// reference measures: a 64px run beside 16px text sits 12px above the
+				// block that owns it, overflowing, because the line grew by the run's
+				// reach above the baseline rather than by its whole box.
 				d := demandForRun(demands, line.runs, run.obj)
-				baseY := y + baseline - d.asc
+				baseY := y + fr.atomicTop(d.box) + d.half
 				if (runObj.Style != nil && runObj.Style.VerticalAlign == "super") || isRubyAnnotation(runObj, a) {
 					baseY -= run.contentH * 0.5
 				} else if runObj.Style != nil && runObj.Style.VerticalAlign == "sub" {
@@ -1237,12 +1239,17 @@ type runDemand struct {
 	above  float32   // reach from the baseline up to the run's box top
 	below  float32   // reach from the baseline down to the run's box bottom
 	asc    float32   // text only: its content area starts this far above the baseline
-	box    atomicBox // atomic only: what lineFrame.atomicTop needs to place the box
+	half   float32   // text only: the leading half that sits above the content area
+	box    atomicBox // what lineFrame.atomicTop needs to place the box
 	atomic bool
 	// edge marks a box measured against the line's own top or bottom edge
 	// (`vertical-align: top`/`bottom`, and the values that still fall back to
 	// it): it stretches the line box rather than moving the baseline under it.
 	edge bool
+	// bottom narrows that to the boxes pinned to the line's *bottom* edge. When
+	// one of them stretches the line, the extra height lands above the baseline
+	// instead of below it, carrying every other box on the line down with it.
+	bottom bool
 }
 
 // atomicDemand turns one box's margin geometry into the same currency, given the
@@ -1271,6 +1278,7 @@ func atomicDemand(b atomicBox, sm strutMetrics) runDemand {
 		// `top`, `bottom` and the `middle` fallback measure against the line's own
 		// edges: they stretch the box rather than move the baseline under it.
 		d.edge = true
+		d.bottom = b.align != atomicToTop
 	}
 	return d
 }
@@ -1280,13 +1288,44 @@ func atomicDemand(b atomicBox, sm strutMetrics) runDemand {
 // 64px run under a 50px declared height reaches 47px above the baseline and only
 // 3px below it: the line box grows by the run without the run's content area
 // fitting inside it.
+//
+// The same box is what its `vertical-align` moves. Measured on Chromium
+// 2026-11-12 for a 16px run with `line-height: 40px` (half-leading 11px) on a
+// 50px strut (baseline 30px down), the content area starts at 16 for `baseline`,
+// 11 for `top` and for `5px`, 21 for `bottom` and for `-5px`, and 27 on a 56px
+// line for `text-top`; `text-bottom` answers 11 on that same 56px line with the
+// block's own text 6px lower down it, because that box hangs above the line's
+// top edge and the line has to grow to contain it. Those are the atomic answers
+// for a box 40px tall whose content area starts 11px inside its top edge, so a
+// run is measured as one box and placed by box top plus half-leading - the class
+// it carries comes from the element the run belongs to, not from the block.
+// `middle` is the one value this cannot answer yet; see the note below.
 func demandOfRun(a *Arena, r textRun, sm strutMetrics) runDemand {
 	if r.atomic {
 		return atomicDemand(boxOfAtomic(a, r.obj), sm)
 	}
 	asc, desc, lineH := fontHeights(a.Metrics, r.size, r.slot, r.lineH)
-	m := ofStrut(asc, desc, lineH)
-	return runDemand{above: m.above, below: m.below, asc: asc}
+	va := ""
+	if k := a.Get(r.obj); k.Style != nil {
+		va = k.Style.VerticalAlign
+	}
+	b := atomicBox{extent: lineH}
+	b.align, b.length = atomicAlign(va)
+	// `middle` on a text run stays on the baseline. Chromium centres its box on
+	// the parent font's x-height, which no metric of this engine reports
+	// (GOOSIE-VALIGNMIDDLE-001), and the two stand-ins are not equally close:
+	// measured 2026-11-12 in the 50px strut, the reference answers 16.8125 for a
+	// 16px run where the baseline gives 16 and the line's bottom edge gives 21.
+	// The gap is half the x-height minus half the descent, so it does not depend
+	// on the run's line height - the baseline is the answer that stays within a
+	// pixel of it however the box is sized.
+	if b.align == atomicToMiddle {
+		b.align, b.length = atomicOnBaseline, 0
+	}
+	b.below = lineH - (asc + (lineH-(asc+desc))/2)
+	d := atomicDemand(b, sm)
+	d.asc, d.half, d.box = asc, (lineH-(asc+desc))/2, b
+	return d
 }
 
 // runDemands measures every run of a line, in the logical order the runs were
@@ -1341,13 +1380,42 @@ func lineExtent(sm strutMetrics, ds []runDemand) lineFrame {
 		}
 	}
 	height := base + below
+	// Edge boxes resolve in two steps rather than one pass, because only the one
+	// that actually stretched the line gets to move the baseline: a `top` box
+	// growing the line must not push it down for an unrelated `bottom` box.
+	topStretch, bottomStretch := height, height
 	for _, d := range ds {
-		// A box measured against the line's own edges stretches it instead of
-		// moving the baseline down under it: a 58px `top` box beside a 36px
-		// baseline box gives a 58px line, not 62 (measured).
-		if d.edge && d.box.extent > height {
-			height = d.box.extent
+		if !d.edge {
+			continue
 		}
+		if d.bottom {
+			if d.box.extent > bottomStretch {
+				bottomStretch = d.box.extent
+			}
+			continue
+		}
+		if d.box.extent > topStretch {
+			topStretch = d.box.extent
+		}
+	}
+	// A box measured against the line's own edges stretches it instead of
+	// moving the baseline down under it: a 58px `top` box beside a 36px
+	// baseline box gives a 58px line, not 62 (measured).
+	if bottomStretch > height {
+		// A box pinned to the *bottom* edge stretches the line upward, so the
+		// baseline moves down with the stretch and carries everything else on the
+		// line with it. Measured 2026-11-12: a 74px `bottom` inline-block on a
+		// 50px strut gives a 74px line whose baseline sits 54px down, so the
+		// block's own text starts 40px into it where `top` on the same box leaves
+		// the baseline at 30 and the text at 16; in an 18px strut the same
+		// `bottom` box answers a 40px line and a 36px baseline.
+		height = bottomStretch
+		if b := height - below; b > base {
+			base = b
+		}
+	}
+	if topStretch > height {
+		height = topStretch
 	}
 	return lineFrame{base: base, height: height, sm: sm}
 }
