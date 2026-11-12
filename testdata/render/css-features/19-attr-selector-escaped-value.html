@@ -31,15 +31,16 @@
            scan that stops at the first `]` reads the needle as `a`, so the box
            following it holds exactly `a`, and a list split that cuts at the comma
            hands the parser `.q[data-x="a` plus a broken alternative. */
-        /* vertical-align: top is load-bearing for the evidence, not decoration:
-           a line of atomic inline-blocks still owes the block's own font a
-           descent below the baseline, and Goosie's line box leaves that 4px out -
-           a row measures 36 where Chromium measures 40, so this fixture's first
-           version scored 84.59% FAIL with the tail band a whole row high. With
-           top alignment both engines put the line at 36, which keeps the colour
-           differences attributable to the selector rather than to line-box
-           assembly. The gap itself is registered as GOOSIE-INLINESTRUT-001. */
-        .q { display: inline-block; vertical-align: top; width: 180px; height: 24px; margin: 0 10px 10px 0; background: #fff; border: 1px solid #ccc; }
+        /* These boxes are baseline-aligned, which used to cost this fixture its
+           evidence: a line of atomic inline-blocks owes the block's own font a
+           descent below the baseline, and while Goosie's line box left that 4px
+           out a row measured 36 where Chromium measured 40, so this fixture's
+           first version scored 84.59% FAIL with the tail band a whole row high.
+           The workaround was `vertical-align: top`, which put both engines at 36.
+           GOOSIE-INLINESTRUT-001 fixed the line box instead (layout-features/
+           07-atomic-line-strut.html now owns that rule), so the workaround is
+           gone and every colour difference here belongs to the selector again. */
+        .q { display: inline-block; width: 180px; height: 24px; margin: 0 10px 10px 0; background: #fff; border: 1px solid #ccc; }
         .q[data-x="a\"b"]   { background: #8e44ad; }
         .q[data-x='a\'b']   { background: #16a085; }
         .q[data-x="a\ b"]   { background: #2980b9; }

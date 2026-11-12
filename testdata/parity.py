@@ -96,7 +96,11 @@ PASS_AT = 90.0
 # a url() payload is a string too, so `url("…xmlns=\"…\"…")` denotes a URI whose
 # quotes are plain; the blue band only paints once the escapes decode before the
 # image loader sees the payload.
-MIN_SCORED_FIXTURES = 109
+# 110: layout-features/07-atomic-line-strut.html (GOOSIE-INLINESTRUT-001) - a line
+# of nothing but inline-blocks and images still owes the block's font a strut, and
+# that strut reaches below the baseline; the green and rust bands sit under nine
+# such rows, so a line box sized only from the tallest margin box drops them ~30px.
+MIN_SCORED_FIXTURES = 110
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

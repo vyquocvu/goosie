@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Atomic-only lines pay the strut (GOOSIE-INLINESTRUT-001)</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; }
+    .label { font-size: 12px; color: #666; margin: 0 0 4px 0; }
+    .rows { width: 420px; }
+    /* Every row below is written with no whitespace between its tags on purpose:
+       the line must carry nothing but atomic inline-level boxes, which is the
+       shape whose line box used to be only the tallest margin box. A single
+       space would put a text run on the line and take the other path. */
+    .chip { display: inline-block; width: 90px; height: 24px; border: 1px solid #333; margin: 0 10px 10px 0; background: #9ecae1; }
+    .txt { display: inline-block; width: 120px; border: 1px solid #000; padding: 4px; margin: 0 10px 10px 0; background: #fdd0a2; }
+    .img { margin: 0 10px 10px 0; }
+    .tail { height: 24px; margin: 0 0 6px 0; }
+    .g1 { background: #238b45; }
+    .g2 { background: #a63603; }
+</style>
+</head>
+<body>
+    <div class="label">five rows of empty inline-block chips - 40px each, the strut's descent under the baseline</div>
+    <div class=rows><span class=chip></span><span class=chip></span></div>
+    <div class=rows><span class=chip></span><span class=chip></span></div>
+    <div class=rows><span class=chip></span><span class=chip></span></div>
+    <div class=rows><span class=chip></span><span class=chip></span></div>
+    <div class=rows><span class=chip></span><span class=chip></span></div>
+
+    <div class="label">a text chip beside an empty one - the line grows below the baseline only</div>
+    <div class=rows><span class=txt>hello</span><span class=chip style="margin-bottom:0"></span></div>
+
+    <div class="label">one image, aligned top, middle and bottom</div>
+    <div class=rows><img class=img width=40 height=24 src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2240%22%20height%3D%2224%22%3E%3Crect%20width%3D%2240%22%20height%3D%2224%22%20fill%3D%22%236a51a3%22%2F%3E%3C%2Fsvg%3E"></div>
+    <div class=rows><img class=img style="vertical-align:top" width=40 height=24 src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2240%22%20height%3D%2224%22%3E%3Crect%20width%3D%2240%22%20height%3D%2224%22%20fill%3D%22%233182bd%22%2F%3E%3C%2Fsvg%3E"></div>
+    <div class=rows><img class=img style="vertical-align:bottom" width=40 height=24 src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2240%22%20height%3D%2224%22%3E%3Crect%20width%3D%2240%22%20height%3D%2224%22%20fill%3D%22%23e6550d%22%2F%3E%3C%2Fsvg%3E"></div>
+
+    <div class="label">the bands below move with every row above them</div>
+    <div class="tail g1"></div>
+    <div class="tail g2"></div>
+</body>
+</html>

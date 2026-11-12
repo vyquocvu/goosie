@@ -1492,6 +1492,21 @@
     "enforced": false
   },
   {
+    "id": "BR-270",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/strut_atomic_line_test.go:TestAtomicOnlyLinePaysTheStrutBelowTheBaseline",
+      "test/layout/strut_atomic_line_test.go:TestAtomicOnlyLinePlacesEachBoxAgainstTheBaseline",
+      "test/layout/strut_atomic_line_test.go:TestLoneControlDoesNotGainTheStrutAgain"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

@@ -198,9 +198,17 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	prevBottomMargin := float32(0)
 	firstChild := true
 	// Inline-block kids flow as rows: they sit side by side from the current
-	// vertical cursor, and the tallest of them reserves the row's height.
-	var rowTop, rowH, rowCursor float32
+	// vertical cursor, and the row's height is settled when it closes.
+	var rowTop, rowCursor float32
 	rowActive := false
+	// What a row owes the container's own font, read when the first row opens.
+	// A row is a line whose content is only atomic inline-level boxes, and such
+	// a line still has to contain the strut (atomicLineExtent, CSS 2.1 10.6.1).
+	// The tallest margin box alone leaves out whatever the strut reaches below
+	// the baseline, so a row of chips or icons is short by that much and every
+	// block under it drifts up by the same amount per row. Reading it here keeps
+	// the metrics call off every block that has no inline-block kid at all.
+	var strutAbove, strutBelow float32
 	// Once the container has inline text of its own, though, its inline-blocks
 	// belong to that text's line list: the inline pass flows them as one
 	// unbreakable word each, which is what lets a title, its tag pills and its
@@ -247,13 +255,29 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				}
 			}
 		}
+		// The row is a line whose content is only atomic inline-level boxes, so
+		// it takes the strut's shape rather than just the tallest margin box:
+		// baseline-aligned kids put their own baseline on the line's, which sits
+		// at the taller of those baselines and the strut's ascent, and the strut's
+		// descent still belongs below it. Each kid is currently placed with its
+		// margin box at the row top, so the offset its class asks for is exactly
+		// how far it has to travel.
+		boxes := make([]atomicBox, len(rowKids))
+		for i, rk := range rowKids {
+			boxes[i] = boxOfAtomic(a, rk)
+		}
+		base, rowBox := atomicLineExtent(strutAbove, strutBelow, boxes)
+		for i, rk := range rowKids {
+			if d := atomicLineTop(boxes[i], base, rowBox); d != 0 {
+				shiftSubtree(a, rk, 0, d)
+			}
+		}
 		rowKids = rowKids[:0]
-		if bottom := rowTop + rowH; bottom > y {
+		if bottom := rowTop + rowBox; bottom > y {
 			y = bottom
 		}
 		rowActive = false
 		rowTop = 0
-		rowH = 0
 		rowCursor = 0
 	}
 	if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
@@ -458,6 +482,10 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					if !rowActive {
 						rowActive = true
 						rowTop = y
+						if st := a.Get(id).Style; st != nil {
+							asc, desc, strutLine := fontHeights(a.Metrics, st.FontSize, st.FontSlot(), st.LineHeight)
+							strutAbove, strutBelow = strutSplit(asc, desc, strutLine)
+						}
 					}
 					k.X = contentX + rowCursor + k.MarginLeft
 					k.Y = contentY + rowTop + k.MarginTop
@@ -489,9 +517,6 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						blockInto(a, kid, own)
 						inlineInto(a, kid)
 						k = a.Get(kid)
-					}
-					if mh := k.MarginTop + k.BorderH() + k.MarginBottom; mh > rowH {
-						rowH = mh
 					}
 					rowCursor += k.MarginLeft + boxW + k.MarginRight
 					continue

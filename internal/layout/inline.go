@@ -515,8 +515,11 @@ func inlineInto(a *Arena, id ObjectID) {
 	// The block's own font and line-height form the strut; it is needed before
 	// the first line breaks (float overlap tests) as well as at placement.
 	strut := float32(0)
+	strutAbove, strutBelow := float32(0), float32(0)
 	if obj.Style != nil {
-		strut, _ = runHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
+		asc, desc, strutLine := fontHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
+		strut = strutLine
+		strutAbove, strutBelow = strutSplit(asc, desc, strutLine)
 	}
 	// Floats intruding into this container shorten the lines overlapping
 	// them. Siblings of the container's own text and uncles of nested blocks
@@ -640,6 +643,20 @@ func inlineInto(a *Arena, id ObjectID) {
 		if line.h < strut {
 			line.h = strut
 		}
+		// A line carrying nothing but atomic boxes pays the block its strut in
+		// full, including the part of it below the baseline (atomicLineExtent,
+		// CSS 2.1 10.6.1). baseline is the line's own, measured down from the
+		// top of the line box, and each box lands on it with its baseline -
+		// bottom margin edge for the boxes that have no text. It is asked
+		// before the float span so the shortened line is measured against the
+		// height the line actually gets. A line with any text on it keeps the
+		// old heuristic: baseline then stays at the line box's own bottom edge,
+		// exactly where every atomic sat before.
+		boxes := atomicBoxes(a, line.runs)
+		baseline := line.h
+		if len(boxes) > 0 {
+			baseline, line.h = atomicLineExtent(strutAbove, strutBelow, boxes)
+		}
 		justifyExtra = 0
 		// A line overlapping floats lays out inside the shortened span, so
 		// alignment centers within what the floats leave, not the full box.
@@ -684,13 +701,18 @@ func inlineInto(a *Arena, id ObjectID) {
 		for _, run := range lineRuns {
 			runObj := a.Get(run.obj)
 			if run.atomic {
-				// The box's bottom margin edge sits on the line's baseline. This
-				// model centres text runs rather than sitting them on a baseline,
-				// and the line's own descent is a few pixels, so bottom-aligning
-				// against the line box puts it where Chromium puts it.
 				k := a.Get(run.obj)
 				dx := (x + k.MarginLeft) - run.srcX
+				// On a line that also carries glyphs this model has no baseline
+				// for the text to sit on, so the box's bottom margin edge goes
+				// to the line box's bottom edge, which lands it where Chromium
+				// puts it for the common case. On an atomic-only line the
+				// baseline the strut rule just resolved decides the offset.
 				dy := (y + line.h - k.BorderH() - k.MarginBottom) - run.srcY
+				if len(boxes) > 0 {
+					b := atomicBoxFor(a, boxes, line.runs, run.obj)
+					dy = (y + atomicLineTop(b, baseline, line.h) + k.MarginTop) - run.srcY
+				}
 				if (k.Style != nil && k.Style.VerticalAlign == "super") || isRubyAnnotation(k, a) {
 					dy -= line.h * 0.4
 				} else if k.Style != nil && k.Style.VerticalAlign == "sub" {
@@ -1027,6 +1049,211 @@ type textRun struct {
 	srcY   float32
 }
 
+// The three ways this model can place an atomic inline-level box vertically,
+// sorted from its vertical-align. Measured on Chromium 2026-11-12 over rows of
+// 26px inline-blocks with 10px bottom margins in a 16px sans-serif block: the
+// default baseline alignment gives a 40px line - 36 above the baseline plus the
+// strut's 4px descent below it - while `top`, `bottom` and `middle` each give
+// exactly 36, the boxes' own margin height and no descent.
+const (
+	atomicOnBaseline = iota // its own baseline on the line's (the default)
+	atomicToTop             // vertical-align: top
+	atomicToBottom          // bottom, and every value this model cannot resolve
+)
+
+// atomicBox is one atomic inline-level box's demand on its line: the height of
+// its margin box, how it is aligned, and how much of that height hangs below
+// the baseline it aligns on.
+type atomicBox struct {
+	extent float32
+	align  int
+	below  float32
+}
+
+// atomicAlignClass sorts a vertical-align value into the classes above.
+// `middle`, a length, text-top and text-bottom need an x-height or a per-box
+// baseline this line model does not keep, so they ride the line box's bottom
+// edge - which is where every atomic box rode before the strut existed here.
+func atomicAlignClass(va string) int {
+	switch va {
+	case "", "baseline":
+		return atomicOnBaseline
+	case "top":
+		return atomicToTop
+	default:
+		return atomicToBottom
+	}
+}
+
+// boxOfAtomic records what one atomic box demands of its line. It takes the
+// arena and id rather than an object pointer because it walks the box's subtree,
+// and the arena grows during layout: a pointer captured earlier can address the
+// slice it grew out of.
+func boxOfAtomic(a *Arena, id ObjectID) atomicBox {
+	k := a.Get(id)
+	va := ""
+	if k.Style != nil {
+		va = k.Style.VerticalAlign
+	}
+	b := atomicBox{extent: k.MarginTop + k.BorderH() + k.MarginBottom, align: atomicAlignClass(va)}
+	// A control's text lives in a shadow tree the arena never sees, so the
+	// subtree walk cannot answer "does it have line boxes" for one: it does.
+	if b.align != atomicOnBaseline || k.Style == nil ||
+		(!isFormControl(k) && (isReplacedElement(k) || !hasInFlowLineBoxes(a, id))) {
+		return b
+	}
+	// CSS 2.1 10.8: an inline-block with in-flow line boxes and visible overflow
+	// aligns its LAST LINE's baseline, not its bottom margin edge, so the descent
+	// of that line plus everything under it (padding, border, margin) sits below
+	// the parent's baseline. Goosie does not record the interior baseline - text
+	// runs are centred, not baselined (GOOSIE-INLINEBASELINE-001) - so the line's
+	// own strut stands in for it. Measured on Chromium 2026-11-12: a 202x62
+	// inline-block holding a float and text, in a 16px/20px block, gives a 62px
+	// line - its 5.5px of descent under the baseline covers the strut's, so the
+	// line neither grows nor moves.
+	asc, desc, lineH := fontHeights(a.Metrics, k.Style.FontSize, k.Style.FontSlot(), k.Style.LineHeight)
+	_, below := strutSplit(asc, desc, lineH)
+	b.below = below + k.PaddingBottom + k.BorderBottom + k.MarginBottom
+	if b.below > b.extent {
+		b.below = b.extent
+	}
+	return b
+}
+
+// isFormControl reports one of the boxes whose visible text is not a DOM child:
+// they align on that text's baseline like any inline-block with line boxes, which
+// is what keeps a lone control from gaining the strut's descent on top of its own.
+// Measured on Chromium 2026-11-12, each control alone on a line in a 16px block:
+// text input line 21 for a 21px box, colour picker 27 for 27, select 19 for 19,
+// textarea 40 for a 36px box plus its own descent, button 21 for 21 - while a 20px
+// image on the same strut takes 24, the whole descent added.
+func isFormControl(k *Object) bool {
+	if k.Node == nil || !k.Node.Element() {
+		return false
+	}
+	switch k.Node.Data {
+	case "input", "select", "textarea", "button":
+		return true
+	}
+	return false
+}
+
+// hasInFlowLineBoxes reports whether the subtree holds text that survives
+// whitespace collapse, which is what gives an atomic box a baseline of its own
+// instead of its bottom margin edge. The walk stops at the first such text and
+// gives up past a bound, so a row of many deep subtrees cannot turn layout into
+// a quadratic scan; giving up answers "no line boxes", which is the shape every
+// icon, sprite and control on a strip of atoms already has.
+func hasInFlowLineBoxes(a *Arena, id ObjectID) bool {
+	left := 256
+	var found bool
+	var walk func(ObjectID)
+	walk = func(cur ObjectID) {
+		if found || left <= 0 {
+			return
+		}
+		left--
+		k := a.Get(cur)
+		if k.Style != nil && k.Style.Display == style.DisplayNone {
+			return
+		}
+		if k.Node != nil && k.Node.Text() {
+			if strings.TrimSpace(k.Node.DataContent) != "" {
+				found = true
+				return
+			}
+		}
+		for c := k.FirstKid; c != 0; c = a.Get(c).NextSibling {
+			walk(c)
+		}
+	}
+	walk(id)
+	return found
+}
+
+// atomicBoxes returns the line's boxes when every run on it is atomic, and nil
+// as soon as a text run appears. A line mixing glyphs with atomic boxes keeps
+// the centring heuristic it has always used, because giving it the strut needs
+// a baseline for text first (GOOSIE-INLINEBASELINE-001 measures that gap).
+func atomicBoxes(a *Arena, runs []textRun) []atomicBox {
+	if len(runs) == 0 {
+		return nil
+	}
+	boxes := make([]atomicBox, 0, len(runs))
+	for _, r := range runs {
+		if !r.atomic {
+			return nil
+		}
+		boxes = append(boxes, boxOfAtomic(a, r.obj))
+	}
+	return boxes
+}
+
+// atomicBoxFor finds the box one run carries. `boxes` is parallel to the
+// logical line.runs while placement walks the bidi-resolved order, so this looks
+// the run up by object rather than by index.
+func atomicBoxFor(a *Arena, boxes []atomicBox, runs []textRun, id ObjectID) atomicBox {
+	for i, r := range runs {
+		if r.obj == id && i < len(boxes) {
+			return boxes[i]
+		}
+	}
+	return boxOfAtomic(a, id)
+}
+
+// atomicLineExtent is CSS 2.1 10.6.1 for a line whose content is only atomic
+// inline-level boxes: the line box must still contain the strut built from the
+// block's own font, and the strut reaches below the baseline. Both sides of the
+// baseline resolve on their own - base is the offset of the baseline from the
+// line's top edge, height the line box's height - because a box's own baseline
+// can sit anywhere inside it: the empty 36px chip puts its bottom margin edge on
+// the baseline, so the strut's 4px descent still hangs under it (a 40px line),
+// while a 62px inline-block whose last line's baseline sits 5.5px above its own
+// bottom edge covers that descent itself and the line stays 62px.
+//
+// The scalar strut clamp in inlineInto cannot say either of these: for a 36px row
+// the strut's whole height (18px) is smaller than the box, so nothing moves there,
+// yet 3.5px of the strut still belongs below the baseline - which is every row of
+// icon strips, sprite rows and chip lists shifting up as it stacks.
+func atomicLineExtent(strutAbove, strutBelow float32, boxes []atomicBox) (base, height float32) {
+	base, below := strutAbove, strutBelow
+	for _, b := range boxes {
+		if b.align != atomicOnBaseline {
+			continue
+		}
+		if above := b.extent - b.below; above > base {
+			base = above
+		}
+		if b.below > below {
+			below = b.below
+		}
+	}
+	height = base + below
+	for _, b := range boxes {
+		// A box measured against the line's own edges stretches it instead of
+		// moving the baseline down under it: a 58px `top` box beside a 36px
+		// baseline box gives a 58px line, not 62 (measured).
+		if b.align != atomicOnBaseline && b.extent > height {
+			height = b.extent
+		}
+	}
+	return base, height
+}
+
+// atomicLineTop is where one box's margin box starts inside the line: baseline
+// boxes put their own baseline on the line's, `top` boxes ride the line's top
+// edge, and the rest ride its bottom.
+func atomicLineTop(b atomicBox, base, height float32) float32 {
+	switch b.align {
+	case atomicOnBaseline:
+		return base - (b.extent - b.below)
+	case atomicToTop:
+		return 0
+	default:
+		return height - b.extent
+	}
+}
+
 // atomicInlineBlock lays out an inline-block and adds it to the line being
 // built. The box behaves as a single unbreakable word whose glyph is a nested
 // layout: it takes part in the line's horizontal flow and grows the line box,
@@ -1146,7 +1373,17 @@ func atomicInlineReplaced(a *Arena, id ObjectID, lines *[]lineBox, current *line
 // same size. An explicit line-height replaces it, and the content area stays
 // ascent+descent so the half-leading can be split around the baseline.
 func runHeights(m Metrics, size float32, slot frame.FontSlot, styleLineHeight float32) (lineH, contentH float32) {
-	asc, desc, normal := float32(0), float32(0), float32(0)
+	asc, desc, lineH := fontHeights(m, size, slot, styleLineHeight)
+	return lineH, asc + desc
+}
+
+// fontHeights reads the three numbers a line box is built from: the face's own
+// ascent and descent, and the line box height the style asks for. It is the
+// same reading runHeights takes, broken out because the strut needs the
+// ascent and descent separately — a line of atomic boxes has to know what the
+// block owes below the baseline, not just how tall its own line box is.
+func fontHeights(m Metrics, size float32, slot frame.FontSlot, styleLineHeight float32) (asc, desc, lineH float32) {
+	normal := float32(0)
 	if m != nil {
 		a, d, h := m.LineMetrics(int32(size), slot)
 		asc, desc, normal = float32(a), float32(d), float32(h)
@@ -1158,7 +1395,21 @@ func runHeights(m Metrics, size float32, slot frame.FontSlot, styleLineHeight fl
 	if styleLineHeight > 0 {
 		lineH = styleLineHeight
 	}
-	return lineH, asc + desc
+	return asc, desc, lineH
+}
+
+// strutSplit divides the containing block's strut around its baseline: half of
+// the leading goes above the ascent and half below the descent (CSS 2.1
+// 10.6.1). With line-height: normal the two parts sum to the font's own line
+// box height, and an explicit line-height widens both sides equally, which is
+// what makes a 36px inline-block row 51px tall at line-height:40px rather
+// than 40.
+func strutSplit(asc, desc, lineH float32) (above, below float32) {
+	half := lineH - (asc + desc)
+	if half < 0 {
+		half = 0
+	}
+	return asc + half/2, desc + half/2
 }
 
 // measureWord returns the width of word at fontSize. With metrics it is the
