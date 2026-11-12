@@ -261,4 +261,58 @@ rounding noise; any fixture that does move is one the fix should improve.
   `go test ./internal/archtest/` all green. Native (darwin) untouched; no cgo.
 - Warm-scroll allocation invariant preserved: group scratches are pooled tile-sized
   buffers, no package globals, no per-frame non-pooled pixel allocation.
-</content>
+
+## 10. Execution record
+
+Shipped 2026-11-12 across commits e472d1a2, 658cdcdd, a9f9bdc5, 96b736d3, af39907f,
+edae05a3 (fixture + floor). The design held; running it surfaced four things worth
+recording.
+
+1. **Sort survival via `Seq`.** §3.2 requires a group's members stay contiguous through
+   `List.SortStable`. They do only if every member carries the group's single Z, which
+   the clean-group rule (`isCleanFadedGroup`: no descendant with a lifting `z-index`)
+   guarantees. The `[Start,End)` ordinal is captured *before* the sort, so the ranges
+   are recovered after `SortStable` from a per-command `Seq int32` rather than trusted
+   from build order.
+
+2. **Same-head nested group is skipped, and its withheld fade folds back.** When an
+   enclosing faded box and a nested faded child share the same command head, only the
+   enclosing group is recorded; the child is not recorded, so its own fraction (already
+   withheld from `effective`) would vanish. `builder_box.go` restores it —
+   `if groupOpacity > 0 && !recordThis { effective *= groupOpacity; groupOpacity = 0 }`
+   — so the child paints per-command inside the enclosing buffer. Pinned by
+   `TestNestedFadedChildSharingHeadFadesOnce`.
+
+3. **`GroupAt(grp.Start)` returns the group itself.** `compositeGroup` must probe for a
+   nested child only at `i > grp.Start`, or it recurses on itself and overflows the
+   stack. The builder never records a group that shares its enclosing group's head, so a
+   child always starts strictly after the head.
+
+4. **Raster oracle tolerance.** Integer premultiplication rounds one unit away from
+   Chromium on a multiply-composited pixel, so the overlap oracle asserts
+   `(158,158,255)` within a per-channel tolerance of 2 (`pixClose`) — tight enough that
+   the pre-fix `(143,143,255)` and the no-fade `(63,63,255)` are both rejected. Same
+   reason `color_idle_scroll` carries `tol:1` for composited groups.
+
+**Mutants (each red, then reverted by re-edit).** M1 disable the offscreen composite
+(members straight to `dst`, no fade/blit) → `TestGroupOpacityOverlapComposite` red.
+M2 fade twice (record the group *and* multiply into `effective`) → caught by the
+builder-driven `TestGroupOpacityCountedOncePerElement`, red on all seven shapes — **not**
+by the hand-built raster test, which constructs its list directly and never runs the
+builder; the plan's Step 7 mis-named that oracle and this record corrects it.
+M3 force `isCleanFadedGroup` to `true` → `TestFadedBoxWithZDescendantIsNotGrouped` red
+(a group recorded where none belongs).
+
+**Parity.** `css-features/18-group-opacity-overlap.html` scored 98.37% PASS
+(`worst_region_iou 1.0`, no blank bands); corpus 107/107 (100.0%), average 96.43%, known
+gaps unchanged at 4 fixtures / 6 bands. The prior 106 fixtures stayed PASS.
+
+**Matrix.** `go build -o /dev/null ./...`, `go vet -all`, `go test ./...`,
+`go test -race` on {test,internal}/{raster,paint}, `go test ./internal/archtest/`,
+`go test ./test/gate -run TestGate` (ScratchAllocs 0), and `make parity` all green.
+Native (darwin) untouched; no new cgo; no package-level globals added.
+
+**Execution-order deviation.** Tasks ran 3 → 4 → 2 rather than 2 → 3 → 4 so each commit
+stayed green: the raster consumer (Task 4) is backward-compatible with a builder that
+emits no groups yet, whereas making the builder withhold the group fade (Task 2) first
+would have broken the raster output until a consumer existed.

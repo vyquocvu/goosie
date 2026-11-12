@@ -1333,4 +1333,43 @@ git commit -m "docs(qa): close GOOSIE-COMPOSITE-001 with the offscreen group-fad
 
 ## Execution Record
 
-(to be filled by the executing session)
+Completed 2026-11-12 on `main`. Commits, in the order they landed (tasks ran 3 → 4 → 2
+to keep every commit green, then 1, 5, 6):
+
+- e472d1a2 — Task 1: `feat(paint)` carry faded groups through the sorted display list
+  (`Group`, `firstGroupAt`/`Seq`, `GroupAt`/`Groups`).
+- 658cdcdd — Task 3: `refactor(raster)` extract `drawCommand` so tiles and groups share
+  one path.
+- a9f9bdc5 — Task 4: `feat(raster)` composite faded opacity groups offscreen with a
+  pooled tile scratch (`compositeGroup`, `fadePixels`, `acquireScratch`, `Job.Scratch`,
+  `Scheduler.groupScratch`); pixel oracle `TestGroupOpacityOverlapComposite`.
+- 96b736d3 — Task 2: `feat(paint)` record clean faded boxes as composable opacity groups
+  (`isCleanFadedGroup`, `groupHeadStack`, the same-head fold-back); reworked
+  `opacity_paint_test.go` and added `group_paint_test.go`.
+- af39907f — Task 5: `fix(paint)` repaint the region a group-opacity-only change fades
+  differently (`groupDamage` in `ContentDamage`); `group_damage_test.go`.
+- edae05a3 — Task 6: `test(render)` score `css-features/18-group-opacity-overlap.html`,
+  `MIN_SCORED_FIXTURES` 106 → 107.
+
+**Parity (Task 6/8).** 107/107 PASS (100.0%), average 96.43%, the new fixture 98.37%
+(`worst_region_iou 1.0`, no blank bands), prior 106 unchanged, known gaps still 4
+fixtures / 6 bands.
+
+**Deviations from the plan.**
+1. Execution order flipped to 3 → 4 → 2: the raster consumer is backward-compatible with
+   a builder that emits no groups, whereas withholding the fade at the builder first
+   would break raster output until a consumer existed.
+2. Task 7 Step 2 named `TestGroupOpacityOverlapComposite` for the fade-twice mutant, but
+   that test builds its display list by hand and never runs the builder, so a
+   `builder_box.go` mutation cannot turn it red. The live gate is the builder-driven
+   `TestGroupOpacityCountedOncePerElement` (red on all 7 shapes under M2); the mutant was
+   verified there instead.
+3. Two invariants discovered while running the raster composite: `GroupAt(grp.Start)`
+   returns the group itself (child probe guarded to `i > grp.Start`), and the overlap
+   oracle needs a per-channel tolerance of 2 for integer rounding. Both are recorded in
+   spec §10.
+
+**Verification matrix (Task 8).** `go build -o /dev/null ./...`, `go vet -all ./...`,
+`go test ./...`, `go test -race` on {test,internal}/{raster,paint},
+`go test ./internal/archtest/`, `go test ./test/gate -run TestGate` (ScratchAllocs 0) and
+`make parity` — all exit 0. Tree byte-clean after the mutants were reverted.
