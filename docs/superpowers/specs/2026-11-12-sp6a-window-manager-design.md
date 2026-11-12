@@ -57,13 +57,14 @@ Each window runs its own `loop.Run(ctx)` goroutine and its own shutdown goroutin
 **New file `cmd/goosie/window_manager.go`** (owned value):
 
 - `type windowManager struct` holding the shared profile stores, `windows []*framePath`, a `sync.Mutex` guarding the slice, the run-level `config`, and a `quitOnce`/done signal.
-- `func (m *windowManager) spawn(initialURL string) (*framePath, error)`: build a fresh per-window `framePath` (reusing `build`/`openWindow` machinery), wire the shared profile pointers, create its `tabMgr` with `onCloseLast → m.closeWindow(f)`, append under lock, start its loop + shutdown goroutines. Returns the window. The first window is spawned by `run` exactly as today's single window is built.
-- `func (m *windowManager) closeWindow(f *framePath)`: remove `f` from the slice under lock; trigger that window's teardown (its shutdown goroutine). When the slice becomes empty, signal the manager done so `run` proceeds to final save + exit. Idempotent (a window closes once).
+- `func (m *windowManager) spawn(initialURL string) (*framePath, error)`: build a fresh per-window `framePath` (reusing `buildWindow`/`openWindow` machinery), wire the shared profile pointers, keep its `tabMgr`'s `onCloseLast → f.window.Close()` unchanged, append under lock, and start its loop + teardown goroutines (`startWindow`). The teardown observes the loop stop and calls `removeWindow`. Returns the window. The first window is the primary (keeps the crash journal); later windows get `sessionActiveFile=""`.
+- `func (m *windowManager) closeWindow(f *framePath)`: the explicit close entry (tests, and the native close path in SP-6b). It only calls `f.window.Close()`; the teardown goroutine started by `startWindow` does the join and removal.
+- `func (m *windowManager) removeWindow(f *framePath)`: drop `f` from the slice under lock; when the slice becomes empty, signal the manager done (`doneOnce`) so `run` proceeds to final save + exit. Idempotent (a window is removed once).
 - `func (m *windowManager) run(ctx) error`: spawn the first window, run N loops, on native hand the main thread to the `Runner`, wait for all loops / manager-done, then perform the existing final save (session/history/flags). Quit-on-last-window is the manager-done signal.
 
 **Refactor `run` (`main.go:902-1126`)** to construct a `windowManager` and delegate the **interactive browser path** to it. The existing single-window orchestration becomes the manager's N=1 case. The paced/screenshot/private driver paths (`c.paced()`, `c.screenshot`, `c.private`) **bypass the manager** and keep their existing single-window orchestration and frame-count finish semantics unchanged — they are diagnostic drivers, not the interactive browser, and SP-6a does not multi-window them.
 
-**Last-tab-close → close-window.** Today `tabs.NewManager(onCloseLast)` wires `onCloseLast → f.window.Close()` (`main.go:378-382`), and `TabManager.CloseTab` fires it in a goroutine when the last tab closes (`internal/tabs/manager.go:154-161`). SP-6a rewires `onCloseLast → m.closeWindow(f)` so closing a window's last tab closes **that window**; the app quits only when the **last window** closes. `showActiveTabAfterBatch` already no-ops at `Count()==0` (`interaction.go:1391`), so no empty-window repaint is introduced.
+**Last-tab-close → close-window (indirect).** Today `tabs.NewManager(onCloseLast)` wires `onCloseLast → f.window.Close()` (`main.go:378-382`), and `TabManager.CloseTab` fires it in a goroutine when the last tab closes (`internal/tabs/manager.go:154-161`). SP-6a **keeps `onCloseLast` unchanged**: closing the last tab still calls `f.window.Close()`. The manager's per-window teardown goroutine (`startWindow`) waits on the loop's `stopped` signal — which fires when `window.Close()` ends the loop — then runs the teardown order and calls `m.removeWindow(f)`. So closing a window's last tab closes **that window** and removes it from the registry; the app quits only when `removeWindow` empties the slice (the **last window**). `showActiveTabAfterBatch` already no-ops at `Count()==0` (`interaction.go:1391`), so no empty-window repaint is introduced.
 
 ## 4. Component B — headless multi-window verification harness
 
@@ -77,9 +78,9 @@ No production change; a test harness in `cmd/goosie` (package `goosie`, internal
 
 **Spawn:** `run` → `m.spawn(url)` → build per-window machinery + share profile pointers → `tabMgr.NewTab` → `openWindow` (headless: `platform.Select` → `headless.New`) → `surface.NewLoop` → start loop + shutdown goroutines → append to `m.windows`.
 
-**Close one (others live):** user closes window's last tab (or window close button) → `onCloseLast`/close → `m.closeWindow(f)` → remove from slice → f's shutdown goroutine tears down (cancel/join/closeAllSessions/window.Close) → other windows' loops keep running.
+**Close one (others live):** user closes window's last tab (or window close button) → `onCloseLast`/close → `f.window.Close()` → the loop stops → f's teardown goroutine runs the order (wcancel/runCancel/navWg.Wait/closeAllSessions/window.Close/pool.Close) → `m.removeWindow(f)` drops it from the slice → other windows' loops keep running.
 
-**Quit on last:** `m.closeWindow` empties the slice → manager-done signal → `m.run` stops waiting → final save (session/history/flags) → return. On native (N=1 in SP-6a) this is identical to today: the single window's close ends `GoosieAppRun` and `run` saves + exits.
+**Quit on last:** `m.removeWindow` empties the slice → manager-done signal (`doneOnce`) → `m.run` stops waiting → final save (session/history/flags) → return. On native (N=1 in SP-6a) this is identical to today: the single window's close ends `GoosieAppRun` and `run` saves + exits.
 
 ## 6. Error handling / edge cases
 

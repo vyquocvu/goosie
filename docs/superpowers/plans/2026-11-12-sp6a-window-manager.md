@@ -1099,3 +1099,51 @@ git commit -m "docs(sp6a): record the window-manager foundation complete, SP-6b 
 - **Placeholder scan:** the Task 2 `var _ = ...` import placeholders are explicitly removed in Task 4 (called out in both tasks). No TBD/TODO. Every code step shows code. The `buildWindow` profile-local substitutions (`p.fonts`, `p.client`, `p.preferences`) are enumerated explicitly with line numbers; the bookmark API is the verified `Toggle`/`Contains` (no `Add`). Remaining NOTEs confirm only test-name patterns at run time.
 - **Type consistency:** `windowManager` fields (`config`, `profile`, `mu`, `windows`, `primary`, `errs`, `ctx`, `cancel`, `sig`, `done`, `doneOnce`) used consistently across T2/T3/T4. `newWindowManager(c)`, `m.spawn(url) (*framePath, error)`, `m.startWindow(f) <-chan error`, `m.removeWindow(f)`, `m.closeWindow(f)`, `m.cleanup()`, `m.run() error`, `m.save()` — names match across tasks and tests. `buildProfile(c) (*profile, error)`, `buildWindow(c, p) (*framePath, error)`, `build(c)` wrapper, `profile.close()` — consistent T1→T2→T4.
 - **Risk gates:** T1 is a pure refactor guarded by the full existing suite (7 build callers). T5 leaves paced/screenshot/private byte-for-byte unchanged. Native interactive N=1 is structurally equivalent to the prior orchestration (Runner handoff → wait → save → report) and compile-verified; the manager logic is proven on headless N=1 and N=2 under race.
+
+---
+
+## Execution record (2026-11-12, completed)
+
+Executed inline (executing-plans), TDD red-green with mutation checks, all commits on `main`, **no push**.
+
+### Commits (Tasks 1–8)
+
+| Task | Commit | Subject |
+|------|--------|---------|
+| T1 | `e44fd150` | refactor(goosie): split build into shared profile + per-window machinery (SP-6a) |
+| T2 | `fd3a4cb6` | feat(goosie): windowManager spawns N headless windows over a shared profile (SP-6a) |
+| T3 | `46d5426a` | test(goosie): pin close-one-keeps-others and quit-on-last-window (SP-6a) |
+| T4 | `7796a98c` | feat(goosie): windowManager.run drives N loops with one final save (SP-6a) |
+| T5 | `fb1a2d5c` | feat(goosie): route interactive runs through the windowManager (SP-6a) |
+| T6 | `0eac84b2` | test(goosie): last-tab-close closes its window, keeps the others (SP-6a) |
+| — | `fa3bf2c2` | fix(deps): clear govulncheck — Go 1.26.11 + x/net v0.62.0 (mid-execution interruption) |
+| T7 | `869c3bd7` | test(goosie): profile stores shared, tabs isolated per window (SP-6a) |
+| T8 | (none) | race + full matrix + parity all green with no fix needed → no commit |
+| T9 | (this) | docs(sp6a): record the window-manager foundation complete, SP-6b next |
+
+### Deviations from the plan
+
+- **T1 — `buildWindow` locals.** Added `var err error` (the old `err` came from the profile section that moved into `buildProfile`; `spec, err = sceneSpec(...)` must stay an assignment, not `:=`, to avoid shadowing `spec`). Added `c.downloadDir = p.preferences.DownloadDir` to preserve the original `build`'s mutation of `c.downloadDir` before it is stored on `f.config` (`p.preferences.DownloadDir == effectiveDir`). Removed the now-unused `path/filepath` import.
+- **T2/T4 — Option B signal handling (fixes a plan bug).** The plan's per-teardown `select { <-stopped; <-m.sig }` distributes one shared signal channel across N teardowns, so a signal wakes only **one** window for N>1 and strands the rest, hanging `<-m.done`. Implemented instead: `run()` owns **one** signal goroutine `select { <-m.sig: m.cancel(); <-m.done: }`; `m.cancel()` cancels `m.ctx` → every per-window `wctx` child → every loop stops → every teardown runs → `done`. Each teardown waits **only** on `<-stopped`.
+- **T4 — mutex snapshots.** `run()` snapshots `primary`/`errs` and `save()` snapshots `primary` under `m.mu` (reads included), so the registry is never read unguarded.
+- **T7 — test strengthened after a surviving mutation.** The `bookmarks: nil` mutation initially **survived**: both `f1`/`f2` got nil → pointer equality held → the test's `t.Skip` guard fired and masked the regression. Changed `t.Skip("no bookmark store…")` → `t.Fatal("bookmark store is nil; a non-private config with a writable HOME must load one")`. Re-ran the mutation → **FAIL (caught)** → restored `bookmarks: p.bookmarks` → green. Bookmark API used is the verified `Toggle`/`Contains` (no `Add`).
+- **Last-tab-close is indirect (spec §3 aligned in T9).** `onCloseLast → f.window.Close()` is unchanged; the `startWindow` teardown observes the loop stop → `removeWindow` → quit-on-last. The spec's §3/§5 and the roadmap were corrected to describe this.
+
+### Mid-execution interruption — govulncheck (`fa3bf2c2`)
+
+User request "fix govulncheck ./..." handled between T6 and T7:
+- **Toolchain:** `go 1.26.11` (clears stdlib vulns; `GOTOOLCHAIN=auto`).
+- **Deps:** `x/net v0.62.0`, `x/text v0.43.0` (direct), `x/sys v0.49.0` (indirect); `x/image v0.45.0` unchanged.
+- **License gate 8:** re-audited the LICENSE text of each bumped module (all BSD-3-Clause) and amended `test/gatecheck/testdata/dependency-licenses.txt` **and** every per-target row in `licenses_test.go` (`x/net`/`x/text` on all 5 targets; `x/sys` on the 3 amd64 rows) in the same commit. `permittedLicenses` not relaxed.
+- **Latent test race:** `test/js/fetch_cancel_test.go` `cancelTrackingFetcher.cancelled` `bool` → `atomic.Bool` (write on the fetch goroutine, read on the test goroutine, only a sleep between) — a test-harness race exposed by go1.26.11, not production code.
+
+### Verification (T8)
+
+- **Manager race:** `go test -race ./cmd/goosie/ -run TestManager -count=1` → `ok 2.009s`, no DATA RACE.
+- **Full matrix (all exit 0):** `go test ./...` (71 pkgs ok), `go test -race ./...` (71 pkgs ok), `go vet -all ./...` (clean), `go test ./internal/archtest/` (ok), `go test ./test/gate -run TestGate` (ok), `go test ./test/qc/` (ok).
+- **Parity:** `make parity` → **105/105 passing, 96.39% average, gaps 4 fixtures / 6 bands** — byte-identical to the SP-3/SP-4/SP-5 baseline (SP-6a touches no engine/layout/paint code).
+- **Mutation evidence:** quit-on-last (T3), last-tab-close (T6), profile-sharing (T7, after strengthening) each caught red then restored green.
+
+### Verification limit
+
+Native interactive N=1 is **compile-verified** and structurally equivalent to the prior single-window orchestration (Runner handoff → wait → save → report); the manager logic is proven on headless N=1 and N=2 under race. Native multi-window **visual sign-off belongs to SP-6b** (no display), consistent with all prior native CUA work.
