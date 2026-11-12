@@ -88,7 +88,11 @@ PASS_AT = 90.0
 # 107: css-features/18-group-opacity-overlap.html (SP-8, GOOSIE-COMPOSITE-001) -
 # two translucent boxes overlapping inside one opacity:0.5 group composite against
 # each other and fade once, not twice, against the tile.
-MIN_SCORED_FIXTURES = 107
+# 108: css-features/19-attr-selector-escaped-value.html (GOOSIE-CSSSELECT-001) -
+# a quoted attribute-selector value is a string, so `[data-x="a\"b"]` names `a"b`;
+# the band only paints once the escapes decode and ']' and ',' stay inside the
+# value instead of ending the condition or splitting the list.
+MIN_SCORED_FIXTURES = 108
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

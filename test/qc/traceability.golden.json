@@ -1444,6 +1444,26 @@
     "enforced": false
   },
   {
+    "id": "BR-268",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/attr_selector_value_test.go:TestAttributeSelectorThrowsForAQuotedValueWithTrailingBytes",
+      "test/css/attr_selector_value_test.go:TestAttributeSelectorValueIsUnescapedBeforeMatching",
+      "test/css/attr_selector_value_test.go:TestAttributeSelectorValueThatIsAbsentMatchesNothing",
+      "test/css/attr_selector_value_test.go:TestCommaInsideQuotedAttributeValueIsOneSelector",
+      "test/css/attr_selector_value_test.go:TestStylesheetRuleWithCommaInAttributeValueKeepsItsDeclarations",
+      "test/js/attr_selector_value_test.go:TestQueryAPIUnescapesQuotedAttributeValues",
+      "test/style/attr_selector_value_test.go:TestCascadeAppliesRuleWhoseAttributeValueHoldsAnEscapedQuote",
+      "test/style/attr_selector_value_test.go:TestCascadeAppliesRuleWithHexEscapeAndCommaInAttributeValue"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

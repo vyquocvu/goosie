@@ -1808,12 +1808,21 @@ func ExpandSingleNestedSelector(parent, nested string) string {
 	return parent + " " + trimmed
 }
 
+// splitSelectors cuts a stylesheet selector list at its top-level commas. A
+// comma inside a quoted attribute value, or escaped in an identifier, belongs to
+// that selector: `.d[data-x="a,b"]` is one rule Chromium matches against the
+// value `a,b` (measured 2026-11-12), so both are stepped over rather than
+// counted as separators.
 func splitSelectors(s string) []string {
 	var parts []string
 	depth := 0
 	start := 0
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
+		case '\\':
+			i++
+		case '"', '\'':
+			i = quotedRunEnd(s, i) - 1
 		case '(':
 			depth++
 		case ')':

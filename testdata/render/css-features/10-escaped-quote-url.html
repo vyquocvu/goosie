@@ -17,9 +17,9 @@
         .u{background-image:url(data:image/svg+xml;charset=UTF-8,%3csvg\ width=\'26\' height=\'26\' viewBox=\'0 0 26 26\'%3e%3crect width=\'26\' height=\'26\' fill=\'%23A57F0B\'/%3e%3c/svg%3e);width:26px;height:26px}.bar{height:24px;background:#3498db;margin:10px 0}.mono{font:16px monospace}.label{font-size:12px;color:#666;margin-bottom:4px}.grid-row{display:flex;gap:10px}.grid-cell{flex:1;background:#ecf0f1;padding:8px}.rule{border-top:2px solid #2c3e50;margin:16px 0}
 
         /* An attribute selector keeps the sheet honest about quote state on the
-           selector side too. Its value carries no escape here on purpose: matching
-           an escaped quote inside a selector is a separate measured gap
-           (GOOSIE-CSSSELECT-001), and a fixture must not enshrine it. */
+           selector side too. Its value carries no escape here on purpose: that
+           shape belongs to css-features/19-attr-selector-escaped-value.html, and
+           this fixture is about url-token state alone. */
         .s[data-x="ab"] { background: #8e44ad; height: 24px; }
 
         /* The control: an *unescaped* apostrophe in an unquoted url is a bad-url,

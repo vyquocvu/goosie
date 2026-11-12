@@ -550,8 +550,11 @@ func validAttrCondition(c Condition, raw string) bool {
 	}
 	if val[0] == '"' || val[0] == '\'' {
 		// An empty quoted value is legal and matches a present, empty
-		// attribute; a quoted value is never checked further.
-		return true
+		// attribute. A string must be the whole value: bytes after its closing
+		// quote are a syntax error, and Chromium throws for both `[a="x"y]` and
+		// `[a="x\"y"c]` (measured 2026-11-12). A string that never closes is
+		// recovered at end of input, so it stays valid and matches nothing.
+		return strings.TrimSpace(val[quotedRunEnd(val, 0):]) == ""
 	}
 	// An unquoted value is an identifier: "[a=1]" is a syntax error.
 	return validIdent(val)
@@ -686,6 +689,71 @@ func nthHasOfClause(arg string) bool {
 	return false
 }
 
+// unquoteCSSValue turns the source spelling of an attribute-selector value into
+// the string it denotes: a matched quote pair comes off, and CSS escapes decode
+// (CSS Syntax L3 4.3.7 strings, 4.3.10 identifiers for the unquoted form).
+//
+// A cutset Trim cannot do this job. It eats the closing quote of `"a\""` - the
+// exact spelling that carries an escaped quote - because that character is in
+// the cutset, and it strips a mismatched pair like `"a'` down to `a`. So the
+// payload is what the string's own run covers: the pair comes off only when the
+// run started at the opening quote ends exactly at the last byte.
+//
+// Anything else decodes as an identifier would, which leaves text without
+// escapes byte-identical - the common case, and the reason this is safe to apply
+// to every attribute value.
+func unquoteCSSValue(v string) string {
+	if n := len(v); n >= 2 && (v[0] == '"' || v[0] == '\'') && v[n-1] == v[0] && quotedRunEnd(v, 0) == n {
+		return DecodeEscapes(v[1 : n-1])
+	}
+	return DecodeEscapes(v)
+}
+
+// quotedRunEnd returns the index just past the string that starts at s[i],
+// which must be its opening quote. Each \X pair belongs to the string, so a
+// quote carrying an escape can neither open nor close a run (CSS Syntax L3
+// 4.3.7). An unterminated string runs past the end of the input, which is how
+// CSS error recovery treats it: Chromium parses `[a="b]` and matches nothing
+// rather than throwing (measured 2026-11-12).
+func quotedRunEnd(s string, i int) int {
+	quote := s[i]
+	i++
+	for i < len(s) && s[i] != quote {
+		if s[i] == '\\' {
+			i++
+		}
+		i++
+	}
+	if i < len(s) {
+		i++
+	}
+	return i
+}
+
+// attrConditionEnd returns the index of the ']' that closes the attribute
+// condition starting at s[i], or len(s) when there is none. A ']' inside a
+// quoted value is a byte of that value, not the end of the condition:
+// `[data-x="a]b"]` is one condition matching the value `a]b`, which Chromium
+// matches (measured 2026-11-12), so the scan steps over escape pairs and whole
+// quoted runs. An unterminated quote runs to the end of the input, which is how
+// error recovery closes the condition; Chromium parses that shape too and finds
+// no match rather than throwing.
+func attrConditionEnd(s string, i int) int {
+	for i < len(s) {
+		switch c := s[i]; c {
+		case '\\':
+			i += 2
+		case '"', '\'':
+			i = quotedRunEnd(s, i)
+		case ']':
+			return i
+		default:
+			i++
+		}
+	}
+	return len(s)
+}
+
 func parseCondition(s string, i int) (Condition, int) {
 	if i >= len(s) {
 		return Condition{}, i
@@ -705,9 +773,7 @@ func parseCondition(s string, i int) (Condition, int) {
 	case '[':
 		i++
 		start := i
-		for i < len(s) && s[i] != ']' {
-			i++
-		}
+		i = attrConditionEnd(s, i)
 		attr := s[start:i]
 		if i < len(s) {
 			i++
@@ -729,7 +795,7 @@ func parseCondition(s string, i int) (Condition, int) {
 			} else if strings.HasSuffix(valStr, " s") || strings.HasSuffix(valStr, " S") {
 				valStr = strings.TrimSpace(valStr[:len(valStr)-2])
 			}
-			valStr = strings.Trim(valStr, "\"' ")
+			valStr = unquoteCSSValue(valStr)
 			return Condition{Type: CondAttr, Attr: name, Op: op, Value: valStr, CaseInsensitive: caseInsensitive}, i
 		}
 		return Condition{Type: CondAttr, Attr: strings.TrimSpace(attr)}, i
@@ -2212,6 +2278,14 @@ func splitSelectorListExact(s string) ([]string, bool) {
 			continue
 		}
 		switch ch {
+		case '"', '\'':
+			// A quoted attribute value carries the whole run: the comma inside
+			// `[data-x="a,b"]` is a byte of the value, not a list separator, and
+			// Chromium matches that one selector (measured 2026-11-12). Its
+			// parentheses must not move the functional-notation depth either.
+			end := quotedRunEnd(s, i)
+			current.WriteString(s[i:end])
+			i = end - 1
 		case '(':
 			depth++
 			current.WriteByte(ch)

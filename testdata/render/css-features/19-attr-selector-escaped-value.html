@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Escaped quotes and list bytes in attribute-selector values (GOOSIE-CSSSELECT-001)</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .mono { font: 16px monospace; }
+
+        /* CSS Syntax L3 4.3.7 makes a quoted attribute-selector value a
+           *string* and 4.3.10 makes an unquoted one an *identifier*, so in both
+           a backslash carries the byte that follows it: `[data-x="a\"b"]` names
+           the value `a"b`. Goosie kept the backslashes in the needle and
+           compared them against the DOM, so the rule sat in the stylesheet, the
+           cascade indexed it, and the band still never painted - the selector
+           matched a spelling instead of a string.
+
+           Every rule ends in a coloured attribute value, and the boxes below
+           alternate in DOM order: the string the selector denotes, then the
+           selector's own source text. At 800px the 182px boxes run three to a
+           line, so what carries the evidence is that order, not the geometry:
+           each string box must take its rule's colour and each spelling box must
+           stay white. Rendered by the build before this fix the fixture put the
+           purple, teal, blue, orange, amber and slate rules on the *spelling*
+           half and painted nothing at all for the `]` and `,` values (0 px of
+           #27ae60 and 0 px of #c0392b), which is the same rule text landing on a
+           different element - a match on how the selector was written.
+
+           Those last two are the shapes the *scans* get wrong rather than the
+           escapes: a `]` or `,` inside a quoted value is a byte of that value. A
+           scan that stops at the first `]` reads the needle as `a`, so the box
+           following it holds exactly `a`, and a list split that cuts at the comma
+           hands the parser `.q[data-x="a` plus a broken alternative. */
+        /* vertical-align: top is load-bearing for the evidence, not decoration:
+           a line of atomic inline-blocks still owes the block's own font a
+           descent below the baseline, and Goosie's line box leaves that 4px out -
+           a row measures 36 where Chromium measures 40, so this fixture's first
+           version scored 84.59% FAIL with the tail band a whole row high. With
+           top alignment both engines put the line at 36, which keeps the colour
+           differences attributable to the selector rather than to line-box
+           assembly. The gap itself is registered as GOOSIE-INLINESTRUT-001. */
+        .q { display: inline-block; vertical-align: top; width: 180px; height: 24px; margin: 0 10px 10px 0; background: #fff; border: 1px solid #ccc; }
+        .q[data-x="a\"b"]   { background: #8e44ad; }
+        .q[data-x='a\'b']   { background: #16a085; }
+        .q[data-x="a\ b"]   { background: #2980b9; }
+        .q[data-x="a\41 b"] { background: #d35400; }
+        .q[data-x="a\\b"]   { background: #f39c12; }
+        .q[data-x="a]b"]    { background: #27ae60; }
+        .q[data-x="a,b"]    { background: #c0392b; }
+        .q[data-x="\22"]    { background: #34495e; }
+
+        /* The tail is what a selector scan that loses its place takes away: a
+           rule left half-parsed shifts its declarations onto whatever follows,
+           and these two bands are the last thing in the sheet. */
+        .green { height: 24px; background: #16a085; margin: 10px 0; }
+        .last { height: 24px; background: #f1c40f; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <p class="label">Boxes alternate: the string the selector denotes (coloured), then that selector's own spelling (white).</p>
+
+    <div class="q" data-x='a"b'></div><div class="q" data-x='a\"b'></div>
+    <div class="q" data-x="a'b"></div><div class="q" data-x="a\'b"></div>
+    <div class="q" data-x="a b"></div><div class="q" data-x='a\ b'></div>
+    <div class="q" data-x="aAb"></div><div class="q" data-x='a\41 b'></div>
+    <div class="q" data-x='a\b'></div><div class="q" data-x='a\\b'></div>
+    <div class="q" data-x='a]b'></div><div class="q" data-x='a'></div>
+    <div class="q" data-x='a,b'></div><div class="q" data-x='a,'></div>
+    <div class="q" data-x='"'></div><div class="q" data-x='\22'></div>
+
+    <p class="mono">Every box shares one class, so only the attribute value can decide its colour.</p>
+    <div class="green"></div>
+
+    <div style="height:420px"></div>
+    <p class="label">Below the 600px fold: everything here is lost when a selector scan mis-tracks quotes and takes the sheet with it.</p>
+    <p class="mono">0123456789 abcdefghij KLMNOPQRST</p>
+    <div class="last"></div>
+    <p class="mono">Last paragraph, monospace only if the sheet reached the end.</p>
+</body>
+</html>
