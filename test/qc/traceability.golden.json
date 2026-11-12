@@ -3844,5 +3844,17 @@
       "cmd/goosie-headless/main_test.go:TestWithoutPumpTimersDoNotRun"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-264",
+    "priority": "P2",
+    "methods": [
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityWorkdirIsAccepted"
+    ],
+    "enforced": false
   }
 ]

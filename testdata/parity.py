@@ -7,6 +7,9 @@ content regions. Region similarity metrics are reported but are not gates.
 
 Modes:
     --render          Re-render fixtures with the local goosie binary first.
+    --workdir DIR     Render into and score from DIR/goosie + DIR/chromium, so
+                      concurrent runs on one host cannot read each other's PNGs.
+    --isolate         Like --workdir, with a fresh mkdtemp directory.
     --json FILE       Write a JSON report to FILE.
     --junit FILE      Write a JUnit XML report to FILE.
     --diffs DIR       Write per-fixture diff images to DIR.
@@ -22,6 +25,9 @@ This oracle is deliberately impossible to fool (GOOSIE-PARITYGATE-001):
       band count EQUALS the declared count, so inflating the baseline fails.
     * A corpus that has shrunk below MIN_SCORED_FIXTURES is treated as broken,
       not as a clean run.
+    * --render deletes each fixture's existing PNG before invoking the binary
+      (GOOSIE-PARITYTMP-001), so a build that stops rendering a fixture can
+      never be scored against the previous build's image of it.
 
 Exit codes:
     0  All scored fixtures passed the threshold and the corpus is at full size.
@@ -33,10 +39,12 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -100,6 +108,36 @@ class RenderError(Exception):
     """A render step produced an error that must not be silently skipped."""
 
 
+def binary_sha256(binary: str) -> str | None:
+    """Digest of the binary this run renders with, or None if it cannot be
+    read.  Provenance must never be the reason a run fails (GOOSIE-
+    PARITYTMP-001): which build produced a PNG belongs in the report, not in a
+    gate."""
+    try:
+        return hashlib.sha256(Path(binary).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def resolve_dirs(workdir: str | None, isolate: bool) -> tuple[Path, Path]:
+    """The (goosie, chromium) render roots this run reads and writes.
+
+    Both sides move together: a run that renders goosie into a private
+    directory must not score those PNGs against whatever Chromium reference
+    happens to sit in the shared one (GOOSIE-PARITYTMP-001).  With neither
+    flag the machine-global defaults are kept, which is what scripts/run-parity.sh
+    relies on - it scores against Chromium renders generated once per host and
+    never passes --render-chromium.
+    """
+    if isolate:
+        root = Path(tempfile.mkdtemp(prefix="goosie-parity-"))
+    elif workdir:
+        root = Path(workdir)
+    else:
+        return GOOSIE, CHROMIUM
+    return root / "goosie", root / "chromium"
+
+
 def render_goosie(binary: str, width: int = 800, height: int = 600) -> list[str]:
     """Render every fixture with the goosie binary.  Returns the list of
     relative PNG paths that were produced.  Raises RenderError if the binary
@@ -115,6 +153,10 @@ def render_goosie(binary: str, width: int = 800, height: int = 600) -> list[str]
         rel = html.relative_to(FIXTURES).with_suffix(".png")
         out = GOOSIE / rel
         out.parent.mkdir(parents=True, exist_ok=True)
+        # Anything already here is another run's evidence, and this binary may
+        # not produce a replacement at all: keep it and a render failure scores
+        # the previous build's PNG as if it were this one's output.
+        out.unlink(missing_ok=True)
 
         result = subprocess.run(
             [binary, "-backend", "headless", "-width", str(width),
@@ -170,6 +212,10 @@ def render_chromium(width: int = 800, height: int = 600) -> tuple[list[str], str
                 rel = html.relative_to(FIXTURES).with_suffix(".png")
                 out = CHROMIUM / rel
                 out.parent.mkdir(parents=True, exist_ok=True)
+                # Same rule as the goosie side: a fixture whose screenshot
+                # fails has to come back MISSING, not be scored against an
+                # older run's reference image.
+                out.unlink(missing_ok=True)
 
                 try:
                     page.goto("file://" + str(html.resolve()), wait_until="load")
@@ -212,7 +258,8 @@ class FixtureResult:
                  blank_region_rows: list[tuple[int, int]] | None = None,
                  known_blank_regions: int = 0,
                  truly_blank_region_rows: list[tuple[int, int]] | None = None,
-                 shifted_region_rows: list[tuple[int, int]] | None = None):
+                 shifted_region_rows: list[tuple[int, int]] | None = None,
+                 sources: tuple[str, str] | None = None):
         self.name = name
         self.pct = pct
         self.status = status          # "PASS", "FAIL", "ERROR", "MISSING"
@@ -231,6 +278,9 @@ class FixtureResult:
         self.shifted_region_rows = shifted_region_rows or []
         self.truly_blank_regions = len(self.truly_blank_region_rows)
         self.shifted_regions = len(self.shifted_region_rows)
+        # The two files this verdict was measured from, as the harness resolved
+        # them at scoring time (GOOSIE-PARITYTMP-001).
+        self.sources = sources
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -252,6 +302,8 @@ class FixtureResult:
             d["goosie_size"] = list(self.goosie_size)
         if self.chromium_size:
             d["chromium_size"] = list(self.chromium_size)
+        if self.sources:
+            d["goosie_render"], d["chromium_render"] = self.sources
         if self.error:
             d["error"] = self.error
         return d
@@ -423,22 +475,23 @@ def score_fixtures(threshold: int, pass_at: float,
         rel = str(html.relative_to(FIXTURES).with_suffix(".png"))
         gp = GOOSIE / rel
         pp = CHROMIUM / rel
+        sources = (str(gp), str(pp))
 
         if not gp.exists() and not pp.exists():
             results.append(FixtureResult(
-                rel, 0.0, "MISSING",
+                rel, 0.0, "MISSING", sources=sources,
                 error="neither goosie nor chromium render exists"))
             continue
 
         if not gp.exists():
             results.append(FixtureResult(
-                rel, 0.0, "MISSING",
+                rel, 0.0, "MISSING", sources=sources,
                 error="goosie render missing"))
             continue
 
         if not pp.exists():
             results.append(FixtureResult(
-                rel, 0.0, "MISSING",
+                rel, 0.0, "MISSING", sources=sources,
                 error="chromium render missing"))
             continue
 
@@ -449,7 +502,7 @@ def score_fixtures(threshold: int, pass_at: float,
 
         if g.shape != p.shape:
             results.append(FixtureResult(
-                rel, 0.0, "ERROR",
+                rel, 0.0, "ERROR", sources=sources,
                 goosie_size=(g.shape[1], g.shape[0]),
                 chromium_size=(p.shape[1], p.shape[0]),
                 error=f"dimension mismatch: goosie {g.shape[1]}x{g.shape[0]} "
@@ -476,7 +529,7 @@ def score_fixtures(threshold: int, pass_at: float,
         else:
             status = "PASS"
         results.append(FixtureResult(
-            rel, pct, status,
+            rel, pct, status, sources=sources,
             goosie_size=(g.shape[1], g.shape[0]),
             chromium_size=(p.shape[1], p.shape[0]),
             error=error,
@@ -843,6 +896,15 @@ def main() -> int:
                     help="re-render fixtures with goosie before scoring")
     ap.add_argument("--render-chromium", action="store_true",
                     help="re-render fixtures with Playwright/Chromium")
+    ap.add_argument("--workdir", metavar="DIR",
+                    help="render into and score from DIR/goosie and "
+                         "DIR/chromium instead of the machine-global /tmp "
+                         "roots, so two runs on one host cannot read each "
+                         "other's PNGs (GOOSIE-PARITYTMP-001)")
+    ap.add_argument("--isolate", action="store_true",
+                    help="like --workdir with a fresh mkdtemp root; combine "
+                         "with --render and --render-chromium, since an empty "
+                         "root has no Chromium reference to score against")
     ap.add_argument("--binary", default="./goosie",
                     help="path to goosie binary (default: ./goosie)")
     ap.add_argument("--width", type=int, default=800)
@@ -866,6 +928,28 @@ def main() -> int:
     ap.add_argument("--band", type=int, default=32,
                     help="band size for --inspect (default 32)")
     args = ap.parse_args()
+
+    if args.workdir and args.isolate:
+        print("parity: --workdir and --isolate are alternatives; pass one.",
+              file=sys.stderr)
+        return 2
+
+    # Publish this run's render roots before anything reads or writes them.
+    # These are the globals score_fixtures/render_*/inspect read, so the
+    # `global` declaration is what makes --workdir mean anything at all.
+    # With neither flag resolve_dirs hands back the current globals, so an
+    # embedding caller (testdata/parity_selftest.py) keeps its own corpus.
+    global GOOSIE, CHROMIUM
+    GOOSIE, CHROMIUM = resolve_dirs(args.workdir, args.isolate)
+    if args.workdir or args.isolate:
+        print(f"parity: per-run render corpus rooted at {GOOSIE.parent} "
+              f"({GOOSIE}/ + {CHROMIUM}/); delete it when you are done with "
+              f"this evidence.", file=sys.stderr)
+    elif args.render or args.render_chromium:
+        print(f"parity: NOTE --render writes the machine-global roots "
+              f"{GOOSIE} and {CHROMIUM}. Another run on this host reads those "
+              f"PNGs as its own evidence; use --workdir DIR or --isolate for a "
+              f"per-run corpus (GOOSIE-PARITYTMP-001).", file=sys.stderr)
 
     # --inspect is a standalone mode.
     if args.inspect:
@@ -924,6 +1008,17 @@ def main() -> int:
         "browser_version": browser_version,
         "python_version": sys.version,
         "platform": sys.platform,
+        # Which build and which directory this verdict came from.  Without
+        # these a green report is one HOST's evidence, not one build's
+        # (GOOSIE-PARITYTMP-001), and per-fixture paths in the report are
+        # meaningless because the root they hang off is unknown.
+        "render_provenance": {
+            "binary": str(Path(args.binary).resolve()),
+            "binary_sha256": binary_sha256(args.binary),
+            "goosie_dir": str(GOOSIE),
+            "chromium_dir": str(CHROMIUM),
+            "per_run_corpus": bool(args.workdir or args.isolate),
+        },
     }
     if args.json:
         write_json_report(results, Path(args.json), args.threshold,

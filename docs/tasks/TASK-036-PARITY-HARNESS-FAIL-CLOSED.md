@@ -315,3 +315,59 @@ bản golden cuối: 19 / 69, khớp `docs/qa-ratchet.json`.
 Ràng buộc §7 nêu và integrator xác nhận bằng chính phép đo CI ở 8.3: `make parity` xanh trên
 một host là bằng chứng *của host đó*. Trước khi gate này được dùng làm bằng chứng phát hành,
 cần một lần chạy trên ubuntu-latest (defect `GOOSIE-CIPARITY-001`).
+
+## 9. Follow-up: đóng `GOOSIE-PARITYTMP-001` (2026-11-12)
+
+§8.3 kết luận "parity xanh trên một host là bằng chứng của host đó". Defect này ở dưới một
+cấp nữa: trong cùng một host, nó thậm chí không phải bằng chứng của một **build**. Hai đường
+suy ra từ đúng một nguyên nhân — `GOOSIE = /tmp/goosie-renders` và `CHROMIUM =
+/tmp/playwright-renders` là thư mục máy, không có phiên bản, mọi checkout dùng chung:
+
+1. Hai chạy đồng thời đọc lẫn PNG của nhau (crash `PIL.UnidentifiedImageError` đã đo 02:10
+   2026-10-26 là *kết quả vô hại*; kết quả độc hại là ảnh của build A được chấm với reference
+   của build B và vẫn ra xanh).
+2. Build không render nổi một fixture thì `--render` không ghi file mới, ảnh của **lần chạy
+   trước** vẫn nằm đó và được chấm như thể build hiện tại tạo ra nó — mutation đã đo: binary
+   trả rc 1, không PNG, harness báo `PASS`.
+
+**Thiết kế tối thiểu.** `--workdir DIR` trỏ cả hai root sang `DIR/goosie` + `DIR/chromium`,
+dịch chuyển **đồng thời**: root goosie riêng mà reference vẫn lấy từ thư mục chung thì chỉ đổi
+một nửa bằng chứng. `--isolate` là `--workdir` với `mkdtemp`. Không có cờ thì vẫn là `/tmp` như
+cũ, vì `scripts/run-parity.sh` và job CI dựa trên model "reference Chromium sinh một lần per
+host" + `-skip-render`; `make parity` vì thế không đổi hành vi. `resolve_dirs` tách riêng để
+selftest driving được mà không cần subprocess. `--render`/`--render-chromium` xóa PNG đích
+**trước khi** gọi binary — sau khi failure mới dọn thì ảnh cũ vẫn được chấm, và selftest phân
+biệt được hai thứ tự nhờ một script giả binary ghi lại trạng thái đường dẫn lúc nó được gọi.
+Report giờ mang `metadata.render_provenance` (binary + `binary_sha256` + hai root +
+`per_run_corpus`) và mỗi fixture mang `goosie_render`/`chromium_render`: một dòng PASS phải nói
+được nó đo từ file nào.
+
+**Đã đo.**
+
+```
+$ python3 testdata/parity_selftest.py                       -> rc 0, 41 check PASS
+$ go test -count=1 ./test/qc ./test/gatecheck/ -run 'TestTraceability|TestParity'
+  ok test/qc        (golden + expectedCaseCount 263 -> 264)
+  ok test/gatecheck (5 test parity, gồm TestParityWorkdirIsAccepted mới)
+$ python3 testdata/parity.py --render --binary ./goosie      -> rc 0
+  107/107 passing (100.0%), 0 failing, 0 errors
+  average match: 96.43%   known gaps: 4 fixtures / 6 bands
+  (stderr) NOTE --render writes the machine-global roots /tmp/goosie-renders ...
+$ python3 testdata/parity.py --isolate --render --render-chromium --binary ./goosie -> rc 0
+  107/107 passing (100.0%), average match: 96.43%, known gaps: 4 fixtures / 6 bands
+```
+
+Hai lần chạy cuối là blast radius: corpus riêng render lại **cả hai phía** vẫn ra từng con số
+như corpus chung, tức cờ mới không nới gate và known-gaps baseline không phụ thuộc ảnh cũ.
+
+**Mutation (mỗi cái red đúng một oracle, rồi khôi phục).**
+
+| Mutation | Kết quả |
+| --- | --- |
+| xóa `out.unlink(missing_ok=True)` trong `render_goosie` | case 7 red 3 check, dòng cuối `[('PASS', None)]` — tái hiện đúng fraud path |
+| bỏ `global GOOSIE, CHROMIUM` trong `main()` | case 8 red: readers vẫn ở root cũ, `--workdir` thành cờ trang trí |
+| đổi tên `--workdir` thành `--workdirX` | `TestParityWorkdirIsAccepted` red (`unrecognized arguments`, không có dòng announce root) |
+
+**Còn mở, không liên quan tới cơ chế này.** CI vẫn dùng `/tmp` của runner (đúng, vì runner là
+một-use); việc parity chưa từng được đo trên ubuntu-latest là `GOOSIE-CIPARITY-001`, không đóng
+ở đây.

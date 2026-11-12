@@ -14,6 +14,11 @@ stay green under a mutation is a vacuous oracle — the exact failure mode the
 acceptance section of the task refuses to accept.  See
 docs/tasks/TASK-036-PARITY-HARNESS-FAIL-CLOSED.md.
 
+GOOSIE-PARITYTMP-001 added cases 6-8: a run's render roots can be moved off the
+machine-global /tmp directories, two runs then share no file at all, and a PNG
+left by an earlier run is deleted before the binary is invoked rather than being
+scored as this build's output.
+
 Run directly: ``python3 testdata/parity_selftest.py`` (exit 0 = green).
 """
 from __future__ import annotations
@@ -21,6 +26,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -314,6 +320,147 @@ def case_missing_gaps_file():
         h.close()
 
 
+# --- GOOSIE-PARITYTMP-001: one render directory per run --------------------
+# The harness used to read and write two machine-global /tmp roots, so two
+# concurrent runs scored each other's PNGs - and, one level worse, a binary
+# that stopped rendering a fixture at all was still scored 100% against the
+# PREVIOUS run's image.  A script that exits 1 without writing anything stands
+# in for that binary and records whether the output path was already gone when
+# it ran, which is the only way to tell "deleted before the render" from
+# "deleted after the failure".
+FAKE_FAIL_BINARY = """#!/usr/bin/env python3
+import os, pathlib, sys
+argv = sys.argv
+out = pathlib.Path(argv[argv.index("-out") + 1])
+marker = os.environ.get("PARITY_FAKE_MARKER")
+if marker:
+    pathlib.Path(marker).write_text("stale" if out.exists() else "clean")
+sys.exit(1)
+"""
+
+
+# --- case 6: two runs on one host cannot read each other's renders
+def case_workdir_isolation():
+    print("case 6: --workdir roots a run away from every other run's PNGs")
+    h = Harness()
+    try:
+        m = h.mod
+        default_g, default_c = m.GOOSIE, m.CHROMIUM
+        check("no flag keeps the machine-global roots (scripts/run-parity.sh "
+              "and the Makefile score pre-generated Chromium renders)",
+              m.resolve_dirs(None, False) == (default_g, default_c),
+              str(m.resolve_dirs(None, False)))
+        wa, wb = Path("/tmp/run-a"), Path("/tmp/run-b")
+        ga, ca = m.resolve_dirs(str(wa), False)
+        gb, cb = m.resolve_dirs(str(wb), False)
+        check("--workdir moves BOTH sides together",
+              (ga, ca) == (wa / "goosie", wa / "chromium"), f"{ga} {ca}")
+        check("two --workdir runs share no path",
+              {ga, ca}.isdisjoint({gb, cb}), f"{ga} {ca} vs {gb} {cb}")
+        i1, i2 = m.resolve_dirs(None, True), m.resolve_dirs(None, True)
+        # --isolate actually mkdtemp'd these, so the harness owns their cleanup.
+        h.track(str(i1[0].parent))
+        h.track(str(i2[0].parent))
+        check("--isolate gives each run its own root",
+              i1[0].parent != i2[0].parent, f"{i1[0].parent} == {i2[0].parent}")
+
+        # The measured half: run A's evidence must not be readable by run B.
+        tmp, fix, goos, chrom = _mkcorpus()
+        h.track(tmp)
+        tmp2, fix2, goos2, chrom2 = _mkcorpus()
+        h.track(tmp2)
+        gaps = empty_gaps_file(tmp)
+        h.use_corpus(fix, goos, chrom, gaps)
+        _fixture(tmp, fix, goos, chrom, "a.png", n_bands=1, goosie_bars=1)
+        rows = m.score_fixtures(m.THRESHOLD, m.PASS_AT, known_gaps={})
+        check("run A scores its own pair", len(rows) == 1 and rows[0].status == "PASS",
+              repr([(r.status, r.error) for r in rows]))
+        check("and records the exact files it measured (GOOSIE-PARITYTMP-001)",
+              rows[0].sources == (str(goos / "a.png"), str(chrom / "a.png")),
+              str(rows[0].sources))
+        # Same fixtures, run B's empty roots: it must come back MISSING and
+        # name its own paths, never A's.
+        h.use_corpus(fix, goos2, chrom2, gaps)
+        rows2 = m.score_fixtures(m.THRESHOLD, m.PASS_AT, known_gaps={})
+        r = rows2[0] if rows2 else None
+        check("a second run reads nothing from the first",
+              r is not None and r.status == "MISSING", repr(r.status if r else None))
+        check("naming the directory it looked in, not run A's",
+              r is not None and r.sources == (str(goos2 / "a.png"), str(chrom2 / "a.png")),
+              str(r.sources if r else None))
+    finally:
+        h.close()
+
+
+# --- case 7: a stale PNG is never scored as this run's output
+def case_render_deletes_stale_png():
+    print("case 7: --render deletes the previous run's PNG before invoking the binary")
+    h = Harness()
+    saved_env = os.environ.get("PARITY_FAKE_MARKER")
+    try:
+        tmp, fix, goos, chrom = _mkcorpus()
+        h.track(tmp)
+        h.use_corpus(fix, goos, chrom, empty_gaps_file(tmp))
+        (fix / "a.html").write_text("<html><body>synthetic</body></html>")
+        _save(_bars(1), chrom / "a.png")  # the reference this run scores against
+        _save(_bars(1), goos / "a.png")   # the PREVIOUS run's evidence
+        binary = Path(tmp) / "fake-goosie"
+        binary.write_text(FAKE_FAIL_BINARY)
+        binary.chmod(0o755)
+        marker = Path(tmp) / "invoked"
+        os.environ["PARITY_FAKE_MARKER"] = str(marker)
+
+        raised = False
+        try:
+            h.mod.render_goosie(str(binary))
+        except h.mod.RenderError:
+            raised = True
+        check("a binary that produces no PNG fails the render step", raised)
+        check("the output path was already deleted when the binary ran "
+              "(after-the-fact cleanup would still score the stale image)",
+              marker.exists() and marker.read_text() == "clean",
+              marker.read_text() if marker.exists() else "binary never invoked")
+        check("and the previous run's PNG is gone", not (goos / "a.png").exists())
+        results = h.mod.score_fixtures(h.mod.THRESHOLD, h.mod.PASS_AT,
+                                       known_gaps={})
+        check("scoring that directory reports MISSING, never a 100% pass",
+              len(results) == 1 and results[0].status == "MISSING"
+              and "goosie render missing" in (results[0].error or ""),
+              repr([(r.status, r.error) for r in results]))
+    finally:
+        if saved_env is None:
+            os.environ.pop("PARITY_FAKE_MARKER", None)
+        else:
+            os.environ["PARITY_FAKE_MARKER"] = saved_env
+        h.close()
+
+
+# --- case 8: main() publishes the roots every reader uses
+def case_main_applies_workdir():
+    print("case 8: main() publishes --workdir into the globals readers use")
+    h = Harness()
+    try:
+        tmp, fix, goos, chrom = _mkcorpus()
+        h.track(tmp)
+        gaps = empty_gaps_file(tmp)
+        h.use_corpus(fix, goos, chrom, gaps)
+        h.set_gaps_default(gaps)
+        work = Path(tmp) / "work"
+        rc = h.run_main(("parity.py", "--workdir", str(work)))
+        check("main() set the goosie root to WORK/goosie (the `global` statement "
+              "is not optional: a local assignment would leave readers on the old root)",
+              str(h.mod.GOOSIE) == str(work / "goosie"), str(h.mod.GOOSIE))
+        check("and the chromium root to WORK/chromium",
+              str(h.mod.CHROMIUM) == str(work / "chromium"), str(h.mod.CHROMIUM))
+        check("an empty private corpus is refused (rc 2), not scored as a pass",
+              rc == 2, f"rc={rc}")
+        rc = h.run_main(("parity.py", "--workdir", str(work), "--isolate"))
+        check("--workdir together with --isolate is a bad invocation (rc 2)",
+              rc == 2, f"rc={rc}")
+    finally:
+        h.close()
+
+
 # --- GOOSIE-BLANKMETRIC-001: drift-adjusted blank-band metric --------------
 # These cases drive score_regions_drift directly on synthetic images (no corpus,
 # no browser, no network) and prove the new signal adds a tolerance WITHOUT
@@ -440,6 +587,9 @@ def selftest(drift_only: bool = False) -> int:
     case_baseline_matches_passes()
     case_corpus_floor()
     case_missing_gaps_file()
+    case_workdir_isolation()
+    case_render_deletes_stale_png()
+    case_main_applies_workdir()
     run_drift_cases()
     print(f"\n{len(FAILURES)} selftest failure(s)" if FAILURES
           else "\nselftest green")

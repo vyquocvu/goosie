@@ -77,6 +77,32 @@ func TestParitySelftestIsGreen(t *testing.T) {
 	}
 }
 
+// TestParityWorkdirIsAccepted guards the CLI half of GOOSIE-PARITYTMP-001:
+// --workdir must exist, must be published as the run's render roots, and must
+// be announced so an operator can find the evidence afterwards.  It runs from
+// an empty directory, where the relative testdata/render corpus is absent, so
+// the only thing this proves is the contract - the harness accepts the flag,
+// names the per-run root, and still refuses to report success.  The in-process
+// cases 6-8 of testdata/parity_selftest.py carry the measurement.
+// qc:BR-264
+func TestParityWorkdirIsAccepted(t *testing.T) {
+	py := parityPython(t)
+	root := parityRepoRoot(t)
+	work := filepath.Join(t.TempDir(), "corpus")
+	cmd := exec.Command(py, parityScript(root), "--workdir", work)
+	cmd.Dir = t.TempDir() // no testdata/render here, so nothing can be scored
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("parity.py --workdir reported success on an empty corpus:\n%s", out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "per-run render corpus rooted at "+work) {
+		t.Fatalf("parity.py --workdir did not announce the per-run root %q;\n"+
+			"the flag is missing or is not published into the render roots\n%s",
+			work, text)
+	}
+}
+
 // TestParityDriftMetricIsGreen guards GOOSIE-BLANKMETRIC-001.  score_regions
 // calls a band blank on Chromium's exact rows with no vertical tolerance, so a
 // line painted a few rows away is reported as missing content.  The new
