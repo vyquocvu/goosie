@@ -200,7 +200,15 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 			b.paintBoxBackground(obj, paint)
 		}
 	}
-	if computed.Display != style.DisplayInline && computed.Display != style.DisplayNone {
+	switch {
+	case computed.Display == style.DisplayInline:
+		// An inline element fragments its border per line; the union box would
+		// draw a single rectangle across the line gaps. Outline on inline
+		// fragments stays deferred (GOOSIE-INLINEBORDER-001 §8).
+		if len(obj.InlineFragments) > 0 {
+			b.paintInlineBorderFragments(obj, paint.opacity)
+		}
+	case computed.Display != style.DisplayNone:
 		b.paintBorders(obj, paint.rect, paint.radius, paint.opacity)
 		b.paintOutline(computed, paint.rect, paint.opacity)
 	}

@@ -61,6 +61,64 @@ func (b *Builder) paintBorders(obj *layout.Object, rect frame.Rect, radius frame
 	}
 }
 
+// paintInlineBorderFragments draws one border per line fragment of a wrapping
+// display:inline element. The fragment rects are CSS px on the box; each is
+// scaled to device space here. border-image and border-radius on inline
+// fragments are deferred (normal solid path, zero radius).
+func (b *Builder) paintInlineBorderFragments(obj *layout.Object, opacity float32) {
+	s := obj.Style
+	if s == nil {
+		return
+	}
+	rtl := s.Direction == "rtl"
+	n := len(obj.InlineFragments)
+	for i, frag := range obj.InlineFragments {
+		rect := frag.ToDevice(b.scale)
+		b.paintBorderFragment(obj, rect, opacity, i == 0, i == n-1, rtl)
+	}
+}
+
+// paintBorderFragment draws the border edges one inline fragment owns: top and
+// bottom on every fragment, the physical left edge on the inline-start of the
+// run and the physical right edge on the inline-end, mapped by direction
+// (LTR start=left/end=right, RTL start=right/end=left). Widths and colours come
+// off the box exactly as paintBorders does; a nonzero width paints >= 1 device px.
+func (b *Builder) paintBorderFragment(obj *layout.Object, rect frame.Rect, opacity float32, first, last, rtl bool) {
+	s := obj.Style
+	toDevice := func(cssPx float32) int32 {
+		if cssPx <= 0 {
+			return 0
+		}
+		if w := int32(cssPx * b.scale); w > 0 {
+			return w
+		}
+		return 1
+	}
+	drawLeft := (first && !rtl) || (last && rtl)
+	drawRight := (last && !rtl) || (first && rtl)
+	border := BorderSpec{}
+	if obj.BorderTop > 0 {
+		border.Top = SideSpec{Width: toDevice(obj.BorderTop), Color: convertColor(s.BorderTopColor)}
+	}
+	if obj.BorderBottom > 0 {
+		border.Bottom = SideSpec{Width: toDevice(obj.BorderBottom), Color: convertColor(s.BorderBottomColor)}
+	}
+	if drawLeft && obj.BorderLeft > 0 {
+		border.Left = SideSpec{Width: toDevice(obj.BorderLeft), Color: convertColor(s.BorderLeftColor)}
+	}
+	if drawRight && obj.BorderRight > 0 {
+		border.Right = SideSpec{Width: toDevice(obj.BorderRight), Color: convertColor(s.BorderRightColor)}
+	}
+	if border.Top.Width > 0 || border.Right.Width > 0 || border.Bottom.Width > 0 || border.Left.Width > 0 {
+		b.list.Append(DisplayCmd{
+			Kind:    CmdBorder,
+			Rect:    rect,
+			Border:  border,
+			Opacity: opacity,
+		})
+	}
+}
+
 // paintOutline draws the outline ring around the border box as four strips
 // between the offset rect and the same rect grown by the outline width. The
 // ring takes no layout space, so a positive offset pushes it out over whatever
