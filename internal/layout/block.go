@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
@@ -19,6 +20,11 @@ func Block(a *Arena, root ObjectID, viewportW, viewportH float32) {
 	a.ViewportW = viewportW
 	a.ViewportH = viewportH
 	flattenDisplayContents(a, root)
+	// inlineInto first runs inside blockInto, so the inline border-fragment
+	// capture map must be fresh and inline element borders resolved before then.
+	// Percentage padding re-resolves in Inline once block widths are known.
+	a.inlineFragLines = make(map[ObjectID]map[int]frame.RectF)
+	resolveInlineEdges(a, root, viewportW)
 	blockInto(a, root, viewportW)
 }
 

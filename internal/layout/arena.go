@@ -67,6 +67,13 @@ type Object struct {
 	// levels to mirror bracket glyphs (GOOSIE-BIDIMIRROR-001).
 	BidiLevels []byte
 
+	// InlineFragments holds the per-line border-box rects (CSS px) of a
+	// display:inline element that wraps across lines, in line order. Paint draws
+	// one border per fragment with the inline-start edge only on the first and
+	// the inline-end edge only on the last (css-text-decor-3 §4.6). Empty for
+	// non-inline boxes and for inline boxes with no border.
+	InlineFragments []frame.RectF
+
 	// GridCols and GridRows record the resolved track sizes (in px) of a grid
 	// container so subgrids can inherit track slices from their parent.
 	GridCols    []float32
@@ -293,6 +300,13 @@ type Arena struct {
 	// FirstLineStyles holds the computed ::first-line style for each element
 	// that has one. Inline layout reads it to override the first line's runs.
 	FirstLineStyles map[dom.NodeID]*style.ComputedStyle
+
+	// inlineFragLines accumulates per-line fragment rects during the inline pass,
+	// keyed by generating inline element then line index. Scratch space: Inline
+	// resets it, the positioning loop unions word-fragment content rects into it,
+	// and inlineSelfRects folds it into each box's InlineFragments (storing the
+	// expanded border boxes back so a parent inline can union them).
+	inlineFragLines map[ObjectID]map[int]frame.RectF
 }
 
 // NaturalSize is the intrinsic width and height of a replaced element.

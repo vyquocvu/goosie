@@ -2,6 +2,7 @@ package layout
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -262,6 +263,11 @@ func (bc *breakCtx) nextLine(h float32) {
 // exceeds the containing block's width, it wraps to a new line. The pass runs
 // after block layout so every inline box knows its containing block's width.
 func Inline(a *Arena, root ObjectID) {
+	// The capture map was reset and inline borders resolved at Block entry,
+	// where inlineInto first runs. Re-resolve edges here so percentage padding
+	// picks up the now-known block widths before fragments are finalized; do not
+	// reset the map, which already holds the captured per-line rects.
+	resolveInlineEdges(a, root, a.Get(root).W)
 	inlineInto(a, root)
 	// Give display:inline element boxes a box of their own. The line pass above
 	// positions only the word/replaced fragments under an inline element, never
@@ -286,6 +292,9 @@ func inlineSelfRects(a *Arena, id ObjectID) {
 	if obj.Style.Display != style.DisplayInline {
 		return
 	}
+	// Fold per-line border fragments before sizing the union box: children are
+	// already finalized (post-order), so a nested inline's borders union in.
+	a.finalizeInlineFragments(id)
 	x0, y0, x1, y1, ok := inlineFragmentBounds(a, id)
 	if !ok {
 		return
@@ -349,6 +358,145 @@ func inlineFragmentBounds(a *Arena, id ObjectID) (minX, minY, maxX, maxY float32
 		}
 	}
 	return
+}
+
+// resolveInlineEdges populates the border and padding widths of display:inline
+// element boxes from their style. The block pass resolves only block-level
+// children, so a pure inline element's arena Border*/Padding* are otherwise zero
+// and its border could never paint. containingW is the nearest block container's
+// content width, which inline percentage padding resolves against. Borderless,
+// paddingless inline (the whole existing corpus) resolves to zero, so nothing
+// changes for it; BorderRect() stays the content union either way.
+func resolveInlineEdges(a *Arena, id ObjectID, containingW float32) {
+	obj := a.Get(id)
+	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
+		return
+	}
+	cw := containingW
+	if isBlock(obj) {
+		cw = obj.W
+	}
+	if obj.Style != nil && obj.Style.Display == style.DisplayInline && obj.Node != nil && obj.Node.Element() {
+		ubw := obj.Style.UsedBorderWidths()
+		obj.BorderTop, obj.BorderRight, obj.BorderBottom, obj.BorderLeft = ubw[0], ubw[1], ubw[2], ubw[3]
+		obj.PaddingTop = resolvePctLength(obj.Style.PaddingTop, cw)
+		obj.PaddingRight = resolvePctLength(obj.Style.PaddingRight, cw)
+		obj.PaddingBottom = resolvePctLength(obj.Style.PaddingBottom, cw)
+		obj.PaddingLeft = resolvePctLength(obj.Style.PaddingLeft, cw)
+	}
+	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		resolveInlineEdges(a, kid, cw)
+	}
+}
+
+// inlineFragmentGenerator resolves the display:inline element that owns a word
+// fragment, by DOM parent rather than arena parent: layout reparents runs into
+// anonymous boxes, so the box a run hangs off is frequently anonymous while the
+// element that owns the copied style is the text node's DOM parent. Mirrors
+// paint's fragmentOwnsBackground. Returns false when the generator is not an
+// inline element (e.g. text sitting directly in a block).
+func inlineFragmentGenerator(a *Arena, frag *Object) (ObjectID, bool) {
+	if frag.Node == nil || !frag.Node.Text() || frag.Node.Parent == nil {
+		return 0, false
+	}
+	gen, ok := a.ForNode(frag.Node.Parent.ID)
+	if !ok {
+		return 0, false
+	}
+	g := a.Get(gen)
+	if g.Style == nil || g.Style.Display != style.DisplayInline {
+		return 0, false
+	}
+	return gen, true
+}
+
+// recordInlineFrag unions a word fragment's content rect into the generating
+// element's per-line accumulation.
+func (a *Arena) recordInlineFrag(gen ObjectID, line int, r frame.RectF) {
+	if a.inlineFragLines == nil {
+		a.inlineFragLines = make(map[ObjectID]map[int]frame.RectF)
+	}
+	byLine := a.inlineFragLines[gen]
+	if byLine == nil {
+		byLine = make(map[int]frame.RectF)
+		a.inlineFragLines[gen] = byLine
+	}
+	if cur, ok := byLine[line]; ok {
+		byLine[line] = unionRectF(cur, r)
+	} else {
+		byLine[line] = r
+	}
+}
+
+// unionRectF returns the smallest rect covering both inputs (frame.RectF has no
+// Union method; the int32 frame.Rect one does not apply to CSS-px floats).
+func unionRectF(a, b frame.RectF) frame.RectF {
+	return frame.RectF4(minF(a.X0, b.X0), minF(a.Y0, b.Y0), maxF(a.X1, b.X1), maxF(a.Y1, b.Y1))
+}
+
+// finalizeInlineFragments folds the per-line accumulation into obj.InlineFragments.
+// Post-order: each inline child's fragments are already expanded border boxes, so
+// unioning them per line gives this box's content area including nested inline
+// borders. Each line's union is then expanded outward by this box's border and
+// padding: top/bottom on every fragment, the inline-start edge on the first and
+// the inline-end edge on the last, mapped to physical edges by direction.
+func (a *Arena) finalizeInlineFragments(id ObjectID) {
+	// Nothing captured anywhere (the whole borderless-inline corpus): return
+	// before allocating, so layout alloc counters stay identical for the gates.
+	if len(a.inlineFragLines) == 0 {
+		return
+	}
+	obj := a.Get(id)
+	merged := make(map[int]frame.RectF)
+	for line, r := range a.inlineFragLines[id] {
+		merged[line] = r
+	}
+	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		k := a.Get(kid)
+		if k.Style == nil || k.Style.Display != style.DisplayInline {
+			continue
+		}
+		for line, r := range a.inlineFragLines[kid] {
+			if cur, ok := merged[line]; ok {
+				merged[line] = unionRectF(cur, r)
+			} else {
+				merged[line] = r
+			}
+		}
+	}
+	if len(merged) == 0 {
+		return
+	}
+	lines := make([]int, 0, len(merged))
+	for line := range merged {
+		lines = append(lines, line)
+	}
+	sort.Ints(lines)
+
+	rtl := obj.Style.Direction == "rtl"
+	frags := make([]frame.RectF, 0, len(lines))
+	expanded := make(map[int]frame.RectF, len(lines))
+	for i, line := range lines {
+		r := merged[line]
+		first := i == 0
+		last := i == len(lines)-1
+		x0, y0, x1, y1 := r.X0, r.Y0, r.X1, r.Y1
+		y0 -= obj.PaddingTop + obj.BorderTop
+		y1 += obj.PaddingBottom + obj.BorderBottom
+		expandLeft := (first && !rtl) || (last && rtl)
+		expandRight := (last && !rtl) || (first && rtl)
+		if expandLeft {
+			x0 -= obj.PaddingLeft + obj.BorderLeft
+		}
+		if expandRight {
+			x1 += obj.PaddingRight + obj.BorderRight
+		}
+		f := frame.RectF4(x0, y0, x1, y1)
+		frags = append(frags, f)
+		expanded[line] = f
+	}
+	obj.InlineFragments = frags
+	a.inlineFragLines[id] = expanded
 }
 
 func inlineInto(a *Arena, id ObjectID) {
@@ -572,6 +720,17 @@ func inlineInto(a *Arena, id ObjectID) {
 			}
 			runObj.W = wordW
 			runObj.H = run.contentH
+			// Record this word's content rect under its generating inline
+			// element, keyed by line, so a wrapping span fragments its border.
+			// Only border-bearing generators are tracked; borderless inline
+			// content (the whole existing corpus) captures nothing.
+			if gen, ok := inlineFragmentGenerator(a, runObj); ok {
+				g := a.Get(gen)
+				if g.BorderTop > 0 || g.BorderRight > 0 || g.BorderBottom > 0 || g.BorderLeft > 0 {
+					fx0, fy0, fx1, fy1 := runObj.BorderRect()
+					a.recordInlineFrag(gen, li, frame.RectF4(fx0, fy0, fx1, fy1))
+				}
+			}
 			x += wordW
 			if justifyExtra > 0 && isSpaceWord(run.text) {
 				x += justifyExtra
