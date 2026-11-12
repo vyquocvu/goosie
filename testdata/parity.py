@@ -74,7 +74,10 @@ PASS_AT = 90.0
 # - registering an IntersectionObserver used to wedge the load; the gate is reaching a first frame.
 # 105: SP-2 (2026-11-12) locks the full corpus; the floor had 12 fixtures of
 # un-ratcheted slack (93 vs 105 scored).
-MIN_SCORED_FIXTURES = 105
+# 106: borders/04-inline-fragment.html (SP-7, GOOSIE-INLINEBORDER-001) - a
+# bordered inline span wraps over a translucent block; its border fragments
+# per line instead of vanishing behind the non-inline paint guard.
+MIN_SCORED_FIXTURES = 106
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
