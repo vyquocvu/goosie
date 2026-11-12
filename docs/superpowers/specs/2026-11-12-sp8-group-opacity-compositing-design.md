@@ -316,3 +316,57 @@ Native (darwin) untouched; no new cgo; no package-level globals added.
 stayed green: the raster consumer (Task 4) is backward-compatible with a builder that
 emits no groups yet, whereas making the builder withhold the group fade (Task 2) first
 would have broken the raster output until a consumer existed.
+
+## 11. Follow-up slice: the offscreen pass must cost the group, not the tile
+
+Shipped 2026-11-12. §3.3 faded and blended the **whole scratch buffer** per group, so
+`css-features/13-anonymous-group-opacity.html`'s nine faded boxes each paid a 65,536-pixel
+fade plus a 65,536-pixel blend — the group's cost was the tile's cost. The parity fixture
+scored 92.68% because it is correct, not because it is cheap.
+
+**Measured first.** `test/raster/group_bench_test.go` drives the exported frame-path entry
+(`raster.DefaultRaster` on one `Job` with a pooled `Scratch`), so no worker or channel is in
+the number. At `-benchtime 5000x` on an Apple M1 Pro, before this slice: a whole-tile fill
+list costs **26.6 µs**, and adding one 40×40 faded box on top costs **326.0 µs** — ~90% of
+the frame's group work was fading and blending pixels that were transparent when it started.
+A list of 25 faded boxes in one tile cost **7.37 ms**, which alone is more than a paced
+frame budget.
+
+**Change.** `compositeGroup` accumulates the boxes its members actually wrote (`wrote`)
+while drawing them, then runs `fadeRect` and `BlitOver` over exactly that region. The
+accumulator is threaded through `drawCommand` and `drawText` as an `ink *frame.Rect`; the
+flat tile path still passes `nil`, so an ungrouped command pays one nil check and nothing
+else. `fadePixels`' per-channel float multiply became a 256-entry `fadeScale` table, which
+is bit-identical because `applyOpacity` truncates with the same `uint32(float32(v) * o)`.
+
+**Why the region is accumulated and not read off `Group.Bounds`.** A text command's recorded
+bounds end at the baseline (`paint.TextRun.Bounds` sets `Y1 = glyph Y`), so descender ink
+lives outside the bounds a group's rectangle would supply. `drawText` therefore contributes
+the glyph's real mask box. The mutant that takes the shortcut is not hypothetical: it is the
+design §3.3 originally implied, and `TestGroupOpacityFadedTextKeepsDescenderInk` fails on it
+with `extent 29x35` against `29x49` and a descender pixel left at 255 instead of 127.
+
+**What stays whole-tile, on purpose.** `sc.Reset()` still clears the buffer: it comes back
+from the pool dirty at an unknown place, and a memset is ~17 ns against 288 µs for the fade it replaced, so refining it would trade ~20 ns/op for a per-buffer dirty-rect mechanism
+through `frame.Bitmap` (which the composer would then have to keep honest). Deferred with
+evidence rather than assumed; the same reasoning is why the 32-buffer scheduler-wide idle
+pool stays, since the benchmarks report `0 allocs/op` and the gate keeps `ScratchAllocs()
+== 0` as the hard floor.
+
+**Correctness evidence.** Pixel output is unchanged, proved rather than asserted: the same
+corpus rendered by HEAD (`0dca8516`) and by this tree is **108/108 PNGs byte-identical**, and
+the score is identical per fixture — 107/107 PASS, average 96.43%, known gaps 4 fixtures /
+6 bands, zero fixtures whose `match_pct` moved. `BlitOver` maps `srcRect`'s top-left to
+`dstOrigin`, so the region blit has to name the region's own corner as the origin: passing
+`(0,0)` shifted every faded group by its offset and dropped
+`css-features/13-anonymous-group-opacity.html` to 78.33%. The corpus caught that in one run;
+the unit tests did not, because a single-tile overlap fixture is symmetric about the mistake.
+
+| Case (one 256×256 tile) | Before | After | Factor |
+| --- | --- | --- | --- |
+| One faded 40×40 box | 326,003 ns/op | 45,293 ns/op | 7.2× |
+| 25 faded 40×40 boxes | 7,367,511 ns/op | 208,564 ns/op | 35.3× |
+| One faded box covering the tile (the floor) | 836,500 ns/op | 695,802 ns/op | 1.20× |
+| No group (control) | 26,629 ns/op | 27,988 ns/op | noise |
+
+All four report `0 B/op  0 allocs/op`. Catalog row: BR-266.

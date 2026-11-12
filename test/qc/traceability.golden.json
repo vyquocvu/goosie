@@ -3869,5 +3869,17 @@
       "test/gatecheck/parity_harness_test.go:TestParityBaselineRecordsItsHost"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-266",
+    "priority": "P2",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/raster/group_opacity_text_test.go:TestGroupOpacityFadedTextKeepsDescenderInk"
+    ],
+    "enforced": false
   }
 ]
