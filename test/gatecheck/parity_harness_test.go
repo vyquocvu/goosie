@@ -1,6 +1,7 @@
 package gatecheck
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,6 +101,56 @@ func TestParityWorkdirIsAccepted(t *testing.T) {
 		t.Fatalf("parity.py --workdir did not announce the per-run root %q;\n"+
 			"the flag is missing or is not published into the render roots\n%s",
 			work, text)
+	}
+}
+
+// TestParityBaselineRecordsItsHost guards the host half of GOOSIE-CIPARITY-001.
+// The known-gaps baseline is an equality ratchet over blank text bands, and a
+// band is partly a font-rasterisation fact of the machine that measured it, so
+// the file has to record which machine that was - and parity.py has to read the
+// same key the file carries.  Both halves are checked here against the REAL
+// committed file, because the in-process selftest (case 9) drives synthetic
+// baselines and would stay green if render-known-gaps.json forgot the field.
+//
+// What this test deliberately does NOT assert: that measured_on equals the
+// runtime GOOS.  The declared bands were measured on darwin and ubuntu-latest
+// scores them, which is the mismatch parity.py prints a NOTE about; pinning
+// equality here would turn that honest NOTE into a red gate.
+// qc:BR-265
+func TestParityBaselineRecordsItsHost(t *testing.T) {
+	root := parityRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "testdata", "render-known-gaps.json"))
+	if err != nil {
+		t.Fatalf("read render-known-gaps.json: %v", err)
+	}
+	var baseline struct {
+		MeasuredOn string `json:"measured_on"`
+	}
+	if err := json.Unmarshal(raw, &baseline); err != nil {
+		t.Fatalf("decode render-known-gaps.json: %v", err)
+	}
+	if strings.TrimSpace(baseline.MeasuredOn) == "" {
+		t.Fatal("render-known-gaps.json records no measured_on; its blank-band " +
+			"counts are then attributed to no host, so a 'known-gap baseline is " +
+			"stale' FAIL on a second platform cannot be told from an engine " +
+			"regression (GOOSIE-CIPARITY-001)")
+	}
+
+	py := parityPython(t)
+	cmd := exec.Command(py, "-c", `import importlib.util, sys
+spec = importlib.util.spec_from_file_location("parity_under_test", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+sys.stdout.write(str(mod.known_gap_provenance()))`, parityScript(root))
+	cmd.Dir = root // KNOWN_GAPS is repo-relative
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("parity.py known_gap_provenance(): %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != baseline.MeasuredOn {
+		t.Errorf("parity.py reports measured_on %q, render-known-gaps.json says %q; "+
+			"the accessor and the file no longer read the same key", got, baseline.MeasuredOn)
 	}
 }
 

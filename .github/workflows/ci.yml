@@ -134,20 +134,32 @@ jobs:
           pip install -r testdata/requirements.txt
           python -m playwright install chromium --with-deps
       - name: Render both sides fresh and score (fail-closed)
-        run: python3 testdata/parity.py --render --render-chromium --binary ./goosie --junit /tmp/parity-junit.xml --json /tmp/parity.json
+        # --workdir keeps this run's renders in a directory no other checkout
+        # can read or overwrite (GOOSIE-PARITYTMP-001), and both sides are
+        # rendered here, so nothing is borrowed from an earlier run. --diffs is
+        # the artifact that makes a failure triageable: CI run 40107385303
+        # listed 14 failing fixtures and said nothing about what they looked
+        # like, which is why GOOSIE-CIPARITY-001 is still open.
+        run: |
+          python3 testdata/parity.py --render --render-chromium --binary ./goosie \
+            --workdir "$RUNNER_TEMP/parity" \
+            --json "$RUNNER_TEMP/parity.json" \
+            --junit "$RUNNER_TEMP/parity-junit.xml" \
+            --diffs "$RUNNER_TEMP/parity-diffs"
+      - name: Upload the scored report (a green run is the baseline too)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-report
+          path: |
+            ${{ runner.temp }}/parity.json
+            ${{ runner.temp }}/parity-junit.xml
+            ${{ runner.temp }}/parity-diffs
       - name: Upload render outputs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: render-outputs
           path: |
-            /tmp/goosie-renders
-            /tmp/playwright-renders
-      - name: Upload parity report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: parity-report
-          path: |
-            /tmp/parity.json
-            /tmp/parity-junit.xml
+            ${{ runner.temp }}/parity/goosie
+            ${{ runner.temp }}/parity/chromium

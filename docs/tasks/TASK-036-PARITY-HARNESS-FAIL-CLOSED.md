@@ -368,6 +368,75 @@ như corpus chung, tức cờ mới không nới gate và known-gaps baseline kh
 | bỏ `global GOOSIE, CHROMIUM` trong `main()` | case 8 red: readers vẫn ở root cũ, `--workdir` thành cờ trang trí |
 | đổi tên `--workdir` thành `--workdirX` | `TestParityWorkdirIsAccepted` red (`unrecognized arguments`, không có dòng announce root) |
 
-**Còn mở, không liên quan tới cơ chế này.** CI vẫn dùng `/tmp` của runner (đúng, vì runner là
-một-use); việc parity chưa từng được đo trên ubuntu-latest là `GOOSIE-CIPARITY-001`, không đóng
-ở đây.
+**Còn mở, không liên quan tới cơ chế này.** Khi §9 viết, CI vẫn render vào `/tmp` của runner
+(đúng với runner một-use, nhưng không phải *per-run*); §10 đã đổi job CI sang
+`--workdir "$RUNNER_TEMP/parity"`. Việc parity chưa từng được đo trên ubuntu-latest là
+`GOOSIE-CIPARITY-001`, không đóng ở đây.
+
+## 10. Follow-up: làm cho lần đo Linux đầu tiên **diễn giải được** (`GOOSIE-CIPARITY-001`, 2026-11-12)
+
+§8.3 đã nêu đúng sự kiện: CI run 40107385303 chấm **66/80, avg 93,638 %** trên cùng corpus mà
+máy này cho 81/81. Phần đó *mô tả* host-dependence; phần chưa giải quyết là **bằng chứng** —
+một `parity.json` xanh/đỏ không nói nó đã so với baseline của máy nào, và một FAIL "known-gap
+baseline is stale" trên Linux đọc hệt một regression engine.
+
+**Vì sao baseline là theo host.** `blank_regions` đếm những dải Chromium có mực còn Goosie
+không: số đó phụ thuộc raster hoá font (hinting, subpixel, metric fallback) chứ không chỉ display
+list. Nên `render-known-gaps.json` không mô tả engine, nó mô tả **engine trên một máy**.
+
+**Thiết kế tối thiểu.** Không đổi verdict, chỉ làm cho điều kiện được nêu thành chữ:
+(1) file baseline mang `measured_on`; (2) `known_gap_provenance()` đọc global `KNOWN_GAPS` **tại
+lúc gọi** — không có tham số, vì `def load_known_gaps(path=KNOWN_GAPS)` bind default lúc định
+nghĩa và một accessor tham số hoá sẽ trả lời về file sai mà selftest không phát hiện ra;
+(3) khi `measured_on != sys.platform`, `main()` in một dòng NOTE nêu hai tên host, nêu cách chữa
+đúng (baseline đo lại trên host này) và nêu cách chữa **cấm** (sửa file cho khớp kết luận); NOTE
+đặt **sau** nhánh `--inspect` để chế độ inspect không đòi file baseline; (4) report mang
+`metadata.known_gaps_provenance = {file, measured_on, host_platform, matches_host}`.
+(5) Job CI: render **cả hai phía** vào `--workdir "$RUNNER_TEMP/parity"`, thêm `--diffs`, và
+upload `parity.json`/junit/diffs với `if: always()` — một lần xanh cũng phải là bằng chứng đọc
+lại được, không chỉ là ô xanh; PNG chỉ upload khi red.
+
+**Quy tắc cho lần đo Linux đầu tiên (decision record).** *Chưa host nào là authority.* File hiện
+tại tự nhãn là `darwin`, và gate Go **cố ý không** đòi `measured_on == GOOS` đang chạy. Trình tự
+đúng khi có run ubuntu-latest: (a) archive `parity.json` + `parity-diffs`; (b) với mỗi fixture
+lệch band, đọc diff image để phân loại *host* (font raster) hay *engine* (layout/paint) — lệch
+vài pixel text là host; (c) nếu là host, thêm baseline **theo platform** bằng số đo của chính
+Linux, giữ nguyên số của darwin; (d) chỉ sửa `render-known-gaps.json` từ số đo, **không bao giờ**
+từ kết luận — nới `blank_regions` hay `PASS_AT` để xanh là hành vi defect này cấm, và equality
+ratchet của §2 vẫn đỏ nếu số không tới từ một lần đo. (e) Sau (c) mới xét `PASS_AT = 90.0`: dải
+CI là pass-thấp-nhất 90,364 % / fail-tệ-nhất 89,900 %, tức ranh giới mỏng hơn spread giữa hai
+host, nên con số đó phải được đo lại chứ không được suy ra từ máy này.
+
+**Đã đo.**
+
+```
+$ python3 -m py_compile testdata/parity.py testdata/parity_selftest.py     -> ok
+$ python3 testdata/parity_selftest.py                                     -> rc 0, 48 check PASS
+  case 9: the known-gaps baseline records, and main() reports, its host  (7 check)
+$ go test -count=1 -run TestParity ./test/gatecheck/                      -> rc 0
+  ok test/gatecheck 6.735s (7 test, gồm TestParityBaselineRecordsItsHost mới)
+$ go test -count=1 ./test/qc -run TestTraceability -update && go test -count=1 ./test/qc/
+  ok test/qc (expectedCaseCount 264 -> 265, golden +13 dòng BR-265)
+$ python3 testdata/parity.py --render --binary ./goosie --json /tmp/ciparity.json -> rc 0
+  107/107 passing (100.0%), average match 96.43%, known gaps 4 fixtures / 6 bands
+  metadata.known_gaps_provenance = {"measured_on": "darwin", "host_platform": "darwin",
+                                    "matches_host": true}     (và không có NOTE trên host đã đo)
+$ python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"  -> parse ok
+```
+
+Blast radius là dòng `--render` cuối: thêm field + accessor + NOTE **không** đổi verdict trên
+chính host, và vì `matches_host: true` nên không có dòng mới nào in ra.
+
+**Mutation (mỗi cái red đúng oracle đã nêu, rồi khôi phục).**
+
+| Mutation | Kết quả |
+| --- | --- |
+| xóa `"measured_on"` khỏi `render-known-gaps.json` thật | case 9 red check cuối (`None`); chạy full parity in NOTE "an unrecorded platform" **1** lần, tức baseline không nhãn được báo chứ không bị giả là máy đang đo |
+| in NOTE vô điều kiện (`if True:`) | red check "a baseline measured on this host prints no stale-host NOTE" |
+| `known_gap_provenance()` trả `... or sys.platform` | red 2 check: unrecorded phải là `None`, và nó vẫn phải in NOTE |
+| đổi tên key trong file (`measuredOn`) | `TestParityBaselineRecordsItsHost` red với đúng thông điệp "records no measured_on" |
+
+**Chưa đạt, và không được tính là đạt.** Không có một con số Linux nào: máy này không có
+docker/podman/colima/qemu-x86_64 nên đường duy nhất là CI, tức cần một lần **push** chưa được ủy
+quyền. Những gì đóng ở đây là khả năng *diễn giải* lần chạy đó, không phải bản thân nó.
+`GOOSIE-CIPARITY-001` vẫn open; `docs/qa-test-catalog.md` ghi phần đã làm là `BR-265`.

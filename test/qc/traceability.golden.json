@@ -3856,5 +3856,18 @@
       "test/gatecheck/parity_harness_test.go:TestParityWorkdirIsAccepted"
     ],
     "enforced": false
+  },
+  {
+    "id": "BR-265",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/parity_harness_test.go:TestParityBaselineRecordsItsHost"
+    ],
+    "enforced": false
   }
 ]

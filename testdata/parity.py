@@ -453,6 +453,23 @@ def load_known_gaps(path: Path = KNOWN_GAPS) -> dict[str, int]:
             for entry in data["known_gaps"]}
 
 
+def known_gap_provenance() -> str | None:
+    """The platform the declared blank-band counts were measured on.
+
+    A blank band is partly a host fact: font rasterisation differs per OS, so
+    the counts in render-known-gaps.json describe the machine that produced
+    them, not the engine (GOOSIE-CIPARITY-001).  Recording that machine in the
+    file turns "the baseline is stale" on a second platform from an unexplained
+    verdict into a named condition.  None means the file records no host, which
+    is reported rather than assumed to be this one.
+
+    Reads the module global at call time, so a caller (or the selftest) that
+    repoints KNOWN_GAPS is answered about the file it actually points at.
+    """
+    with KNOWN_GAPS.open() as f:
+        return json.load(f).get("measured_on")
+
+
 def _category(name: str) -> str:
     """Extract the category from a fixture path like 'typography/01-font.png'."""
     parts = Path(name).parts
@@ -956,6 +973,19 @@ def main() -> int:
         inspect(args.inspect, args.band, args.threshold)
         return 0
 
+    # Which host declared these blank bands?  The counts are partly a font
+    # rasterisation fact, so borrowing them across platforms is a claim about
+    # an unmeasured machine (GOOSIE-CIPARITY-001).  This only names the
+    # condition; the verdict still comes from the equality ratchet below.
+    baseline_host = known_gap_provenance()
+    if baseline_host != sys.platform:
+        print(f"parity: NOTE the known-gaps baseline records bands measured on "
+              f"{baseline_host or 'an unrecorded platform'}, this host is "
+              f"{sys.platform}. A 'known-gap baseline is stale' FAIL here may be "
+              f"a HOST difference, not an engine regression; the answer is a "
+              f"baseline measured on this host, never an edit made here to match "
+              f"the verdict (GOOSIE-CIPARITY-001).", file=sys.stderr)
+
     t0 = time.monotonic()
 
     browser_version: str | None = None
@@ -1018,6 +1048,16 @@ def main() -> int:
             "goosie_dir": str(GOOSIE),
             "chromium_dir": str(CHROMIUM),
             "per_run_corpus": bool(args.workdir or args.isolate),
+        },
+        # The blank-band equality ratchet compares this run against counts
+        # some other machine measured.  An archived report has to say which,
+        # or a green Linux run is indistinguishable from a green darwin run
+        # scored against darwin's baseline (GOOSIE-CIPARITY-001).
+        "known_gaps_provenance": {
+            "file": str(KNOWN_GAPS),
+            "measured_on": baseline_host,
+            "host_platform": sys.platform,
+            "matches_host": baseline_host == sys.platform,
         },
     }
     if args.json:

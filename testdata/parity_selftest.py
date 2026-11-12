@@ -19,17 +19,23 @@ machine-global /tmp directories, two runs then share no file at all, and a PNG
 left by an earlier run is deleted before the binary is invoked rather than being
 scored as this build's output.
 
+GOOSIE-CIPARITY-001 added case 9: the known-gaps baseline must record the host
+its blank bands were measured on, and a run on a different host must say so
+instead of letting "known-gap baseline is stale" read as an engine regression.
+
 Run directly: ``python3 testdata/parity_selftest.py`` (exit 0 = green).
 """
 from __future__ import annotations
 
 import importlib.util
 import inspect
+import io
 import json
 import os
 import shutil
 import sys
 import tempfile
+from contextlib import redirect_stderr
 from pathlib import Path
 
 import numpy as np
@@ -461,6 +467,66 @@ def case_main_applies_workdir():
         h.close()
 
 
+# --- case 9: the baseline names the machine that measured it
+def case_baseline_records_its_host():
+    print("case 9: the known-gaps baseline records, and main() reports, its host")
+    h = Harness()
+    try:
+        m = h.mod
+        tmp, fix, goos, chrom = _mkcorpus()
+        h.track(tmp)
+        # The corpus stays empty, so every main() call below stops at the corpus
+        # floor (rc 2) after the provenance line has been decided.
+        def gaps_measured_on(value):
+            p = Path(tmp) / f"gaps-{value}.json"
+            body = {"version": 1, "known_gaps": []}
+            if value != "none":
+                body["measured_on"] = value
+            p.write_text(json.dumps(body))
+            h.use_corpus(fix, goos, chrom, p)
+            h.set_gaps_default(p)
+            return p
+
+        def run_main_stderr() -> str:
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                h.run_main(("parity.py",))
+            return buf.getvalue()
+
+        foreign = "win32" if sys.platform != "win32" else "linux"
+        gaps_measured_on(foreign)
+        check("known_gap_provenance() reads measured_on from the file KNOWN_GAPS "
+              "points at (not a hard-coded path)",
+              m.known_gap_provenance() == foreign, str(m.known_gap_provenance()))
+        text = run_main_stderr()
+        check("main() says the declared bands come from another host",
+              f"measured on {foreign}" in text and "known-gaps baseline" in text,
+              text)
+        check("and names the cure: a baseline measured here, never an edit of "
+              "the verdict's input",
+              "never an edit made here to match" in text, text)
+
+        gaps_measured_on(sys.platform)
+        check("a baseline measured on this host prints no stale-host NOTE "
+              "(kills both an unconditional print and an inverted condition)",
+              "known-gaps baseline" not in run_main_stderr(),
+              f"host={sys.platform}")
+
+        gaps_measured_on("none")
+        check("an unrecorded baseline is None, not silently this host",
+              m.known_gap_provenance() is None, str(m.known_gap_provenance()))
+        check("and it still prints the NOTE, as unrecorded",
+              "an unrecorded platform" in run_main_stderr())
+
+        m.KNOWN_GAPS = REAL_GAPS
+        real = m.known_gap_provenance()
+        check("the committed render-known-gaps.json records its measuring host "
+              "(asserted non-empty so the check is host-independent)",
+              isinstance(real, str) and real != "", repr(real))
+    finally:
+        h.close()
+
+
 # --- GOOSIE-BLANKMETRIC-001: drift-adjusted blank-band metric --------------
 # These cases drive score_regions_drift directly on synthetic images (no corpus,
 # no browser, no network) and prove the new signal adds a tolerance WITHOUT
@@ -590,6 +656,7 @@ def selftest(drift_only: bool = False) -> int:
     case_workdir_isolation()
     case_render_deletes_stale_png()
     case_main_applies_workdir()
+    case_baseline_records_its_host()
     run_drift_cases()
     print(f"\n{len(FAILURES)} selftest failure(s)" if FAILURES
           else "\nselftest green")

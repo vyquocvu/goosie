@@ -1,5 +1,6 @@
 {
   "version": 1,
+  "measured_on": "darwin",
   "min_ink": 200,
   "ink_cutoff": 245,
   "band_gap_rows": 6,
