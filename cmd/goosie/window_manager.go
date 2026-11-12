@@ -69,6 +69,14 @@ func (m *windowManager) spawn(initialURL string) (*framePath, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Install before openWindow, which wires cw.onNewWindow = f.newWindow: the
+	// closure captures only m, so a window opened later spawns through the same
+	// manager. A nil hook (legacy path) means "no manager" and the shortcut no-ops.
+	f.newWindow = func() {
+		if _, err := m.spawn(""); err != nil {
+			fmt.Fprintf(os.Stderr, "goosie: new window: %v\n", err)
+		}
+	}
 	if err := f.openWindow(); err != nil {
 		_ = f.pool.Close()
 		return nil, err
@@ -197,7 +205,6 @@ func (m *windowManager) run() error {
 	}
 	m.mu.Lock()
 	primary := m.primary
-	errs := m.errs
 	m.mu.Unlock()
 	if m.config.url == "" && primary.restoredActiveURL != "" {
 		primary.navigateTabNoHistory(primary.restoredActiveURL)
@@ -210,16 +217,30 @@ func (m *windowManager) run() error {
 
 	m.save()
 
+	// Snapshot errs only after every window is gone: a window spawned after the
+	// primary (Cmd+N) appends its loop-error channel here, and draining a
+	// primary-only snapshot would silently drop a later window's failure.
+	m.mu.Lock()
+	errs := m.errs
+	m.mu.Unlock()
+	if firstErr := drainLoopErrs(errs); firstErr != nil {
+		return fmt.Errorf("goosie: %w", firstErr)
+	}
+	return primary.report(nil)
+}
+
+// drainLoopErrs receives every window's loop-exit error and returns the first
+// non-nil one. Each channel is buffered and written exactly once by startWindow's
+// loop goroutine before that window's teardown removes it, so once the manager is
+// done every channel already holds its value and none blocks.
+func drainLoopErrs(errs []<-chan error) error {
 	var firstErr error
 	for _, ec := range errs {
 		if err := <-ec; err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
-	if firstErr != nil {
-		return fmt.Errorf("goosie: %w", firstErr)
-	}
-	return primary.report(nil)
+	return firstErr
 }
 
 // save persists the primary window's session plus the shared history/flags once,

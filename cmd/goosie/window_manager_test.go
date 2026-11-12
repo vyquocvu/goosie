@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -287,5 +289,85 @@ func TestManagerPerWindowTabIsolation(t *testing.T) {
 	}
 	if f2.tabMgr.Count() != before {
 		t.Fatalf("f2 tab count changed to %d; windows are not isolated", f2.tabMgr.Count())
+	}
+}
+
+func TestDrainLoopErrsCollectsAll(t *testing.T) {
+	first := make(chan error, 1)
+	first <- nil
+	later := make(chan error, 1)
+	later <- errors.New("window 2 loop failed")
+	last := make(chan error, 1)
+	last <- nil
+	got := drainLoopErrs([]<-chan error{first, later, last})
+	if got == nil || got.Error() != "window 2 loop failed" {
+		t.Fatalf("drainLoopErrs = %v, want window 2 loop failed", got)
+	}
+}
+
+func TestManagerSpawnInstallsNewWindow(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 1: %v", err)
+	}
+	waitWindows(t, m, 1)
+	if f1.newWindow == nil {
+		t.Fatal("spawn did not install a newWindow hook")
+	}
+	f1.newWindow()
+	waitWindows(t, m, 2)
+}
+
+func TestManagerCollectsLaterWindowError(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	runErr := make(chan error, 1)
+	go func() { runErr <- m.run() }()
+
+	// Wait for the primary window and its first presented frame. By then run()
+	// has taken its errs snapshot (in the old, primary-only code) and is blocked
+	// at <-m.done, so a channel appended now stands for a window spawned later.
+	var primary *framePath
+	deadline := time.Now().Add(3 * time.Second)
+	presented := false
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		primary = m.primary
+		m.mu.Unlock()
+		if primary != nil && primary.loop != nil && primary.loop.Stats().Frames > 0 {
+			presented = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !presented {
+		t.Fatal("primary window never presented a frame")
+	}
+
+	laterErr := make(chan error, 1)
+	laterErr <- errors.New("later window loop failed")
+	m.mu.Lock()
+	m.errs = append(m.errs, laterErr)
+	m.mu.Unlock()
+
+	m.closeWindow(primary)
+
+	select {
+	case err := <-runErr:
+		if err == nil || !strings.Contains(err.Error(), "later window loop failed") {
+			t.Fatalf("run() = %v, want the later window's loop error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return after the primary closed")
 	}
 }

@@ -128,6 +128,10 @@ type framePath struct {
 	rec      *frame.FrameRecorder
 	spec     paint.SceneSpec
 	config   config
+	// newWindow opens another window through the owning manager. spawn installs
+	// it; the legacy paced/screenshot/private path leaves it nil, so Cmd+N and
+	// the New Window menu item no-op there.
+	newWindow func()
 	// sizeMu guards config.width/height, the live content viewport. The chrome
 	// pump writes them on resize and zoom while navigation and prompt goroutines
 	// read them to size a load, so both sides go through the accessors.
