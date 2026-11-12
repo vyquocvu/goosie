@@ -323,6 +323,10 @@ static void goosieAXSetValue(GoosieContentView *view, NSRect rect, id value, BOO
 @end
 
 @interface GoosieAppDelegate : NSObject <NSApplicationDelegate>
+- (void)registerWindow:(GoosieWindow *)gw;
+- (void)unregisterWindow:(GoosieWindow *)gw;
+- (void)quitAll;
+- (int)appQuit;
 @end
 
 struct GoosieWindow {
@@ -911,18 +915,71 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 	return YES;
 }
 
-- (void)windowWillClose:(NSNotification *)note { pushQuit(_gw); }
+- (void)windowWillClose:(NSNotification *)note {
+	pushQuit(_gw);
+	[_gw->appDel unregisterWindow:_gw];
+}
 
 @end
 
+// One shared delegate owns every window. The registry and _appQuit are confined
+// to the main thread: register (create, via the trampoline), unregister
+// (windowWillClose:), quitAll (terminate:) and appQuit reads (GoosieAppRun) all
+// happen there, so no lock, atomic, or C static is needed for them.
 @implementation GoosieAppDelegate {
-	GoosieWindow *_gw;
+	GoosieWindow **_windows;
+	int _count;
+	int _cap;
+	int _appQuit;
 }
 
-- (instancetype)initWithWindow:(GoosieWindow *)gw {
-	if ((self = [super init])) _gw = gw;
+- (instancetype)init {
+	if ((self = [super init])) {
+		_windows = NULL;
+		_count = 0;
+		_cap = 0;
+		_appQuit = 0;
+	}
 	return self;
 }
+
+- (void)registerWindow:(GoosieWindow *)gw {
+	if (!gw) return;
+	for (int i = 0; i < _count; i++) {
+		if (_windows[i] == gw) return;  // idempotent
+	}
+	if (_count == _cap) {
+		int newCap = _cap ? _cap * 2 : 4;
+		GoosieWindow **grown = (GoosieWindow **)realloc(_windows, sizeof(GoosieWindow *) * newCap);
+		if (!grown) return;  // OOM: window still draws; quitAll may miss it (rare, fatal-ish)
+		_windows = grown;
+		_cap = newCap;
+	}
+	_windows[_count++] = gw;
+}
+
+- (void)unregisterWindow:(GoosieWindow *)gw {
+	if (!gw) return;
+	int found = 0;
+	for (int i = 0; i < _count; i++) {
+		if (_windows[i] == gw) {
+			_windows[i] = _windows[_count - 1];
+			_count--;
+			found = 1;
+			break;
+		}
+	}
+	// Only a real removal that empties the registry quits the app: a failed
+	// create's windowWillClose: (gw never registered) must not quit a live app.
+	if (found && _count == 0) _appQuit = 1;
+}
+
+- (void)quitAll {
+	for (int i = 0; i < _count; i++) pushQuit(_windows[i]);
+	_appQuit = 1;
+}
+
+- (int)appQuit { return _appQuit; }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return YES; }
 
@@ -942,7 +999,7 @@ static void pushIME(GoosieWindow *gw, int action, NSString *text) {
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
-	if (_gw) pushQuit(_gw);
+	[self quitAll];
 }
 
 @end
@@ -1070,8 +1127,21 @@ GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err) {
 	@autoreleasepool {
 		NSApplication *app = [NSApplication sharedApplication];
 		[app setActivationPolicy:NSApplicationActivationPolicyRegular];
-		gw->appDel = [[GoosieAppDelegate alloc] initWithWindow:gw];
-		[app setDelegate:gw->appDel];
+		// One delegate for the whole app: created on the first window, reused by
+		// every later one. NSApplication.delegate is assign, so the alloc's +1 is
+		// the process-lifetime retain (the shim never frees gw or its delegate).
+		GoosieAppDelegate *shared = (GoosieAppDelegate *)[app delegate];
+		if (![shared isKindOfClass:[GoosieAppDelegate class]]) {
+			shared = [[GoosieAppDelegate alloc] init];
+			[app setDelegate:shared];
+		}
+		gw->appDel = shared;
+		if ([shared appQuit]) {
+			// The app is already quitting; do not build a window into a dying app.
+			free(gw);
+			if (err) *err = 6;
+			return NULL;
+		}
 
 		// w and h are device pixels and a content rect is in points, so the window is
 		// built under the ratio its screen reports and corrected once the one it actually
@@ -1092,6 +1162,10 @@ GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err) {
 			return NULL;
 		}
 		[win setReleasedWhenClosed:NO];
+		// Retain the handle for the process: GoosieClose orders it out and the
+		// file/save panels attach to it. Without this it stayed NULL and both
+		// panels bailed with -1 (a latent bug), and close had nothing to order out.
+		gw->window = win;
 		gw->winDel = [[GoosieWindowDelegate alloc] initWithWindow:gw];
 		[win setDelegate:gw->winDel];
 		if (title) [win setTitle:[NSString stringWithUTF8String:title]];
@@ -1136,6 +1210,10 @@ GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err) {
 			if (err) *err = 5;  // a display, but no display link to pace it with
 			return NULL;
 		}
+		// Register only a fully built window. The failed-create [win close] above
+		// fires windowWillClose: -> unregisterWindow:, which is a no-op for a gw
+		// that was never registered (and cannot quit a live app).
+		[shared registerWindow:gw];
 	}
 	return gw;
 }
@@ -1150,12 +1228,13 @@ void GoosieAppRun(GoosieWindow *gw) {
 	// quit flag is checked here on a bounded wait instead. The cost is one wake-up per
 	// kGoosieIdlePoll while idle; frame pacing comes from the display link, not from
 	// this loop, so nothing about a drawn frame changes.
+	//
+	// The flag is the shared delegate's app-wide appQuit, not this window's quit:
+	// closing one window of several must leave the loop turning for the others. With
+	// one window its close empties the registry -> appQuit, exactly as before.
 	for (;;) {
 		@autoreleasepool {
-			pthread_mutex_lock(&gw->mu);
-			int quit = gw->quit;
-			pthread_mutex_unlock(&gw->mu);
-			if (quit) break;
+			if ([gw->appDel appQuit]) break;
 			NSEvent *e = [NSApp nextEventMatchingMask:NSEventMaskAny
 									untilDate:[NSDate dateWithTimeIntervalSinceNow:kGoosieIdlePoll]
 										inMode:NSDefaultRunLoopMode
@@ -1471,6 +1550,16 @@ void GoosieClose(GoosieWindow *gw) {
 	if (!gw) return;
 	stopDisplayLink(gw);
 	pushQuit(gw);
+	// Order the window out on the main thread (Close is called off-main). [win close]
+	// fires windowWillClose: -> unregisterWindow:, which empties the registry and sets
+	// appQuit when this was the last window, ending GoosieAppRun. setReleasedWhenClosed:NO
+	// means close orders out without freeing, honoring the no-GoosieWindowFree contract.
+	// gw is never freed, so the captured pointer stays valid; dispatch_async never blocks
+	// the caller. unregisterWindow: is idempotent, so the close button's windowWillClose:
+	// and this dispatched close cannot double-decrement.
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (gw->window) [gw->window close];
+	});
 }
 
 char *GoosieClipboardRead(void) {
