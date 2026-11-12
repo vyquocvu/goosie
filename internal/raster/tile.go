@@ -65,7 +65,7 @@ func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 	// so a single pass both selects and filters with no second walk.
 	for i := 0; i < dl.Len(); i++ {
 		if grp, ok := dl.GroupAt(i); ok {
-			if err := compositeGroup(dl, grp, b, out, dx, dy, clip, f, g, scratch); err != nil {
+			if err := compositeGroup(dl, grp, b, out, dx, dy, clip, f, g, scratch, nil); err != nil {
 				return err
 			}
 			i = grp.End - 1 // the loop's i++ lands on the first command past the group
@@ -74,7 +74,7 @@ func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 		if !dl.CachedIntersects(i, b) {
 			continue
 		}
-		if err := drawCommand(out, dl, i, dx, dy, clip, f, g); err != nil {
+		if err := drawCommand(out, dl, i, dx, dy, clip, f, g, nil); err != nil {
 			return err
 		}
 	}
@@ -89,7 +89,22 @@ func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 // compositor does, instead of each being pre-faded and double-darkening. Nested
 // groups recurse with their own scratch. A tile-sized scratch means a group that
 // straddles tiles is faded per-tile, which is per-pixel and so still exact.
-func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *frame.Bitmap, dx, dy int32, clip frame.Rect, f *Fonts, g *GlyphAtlas, pool *frame.BitmapPool) error {
+//
+// The fade and the blit cover only `wrote`, the union of the boxes the members
+// actually painted, accumulated during the draw rather than read off
+// grp.Bounds: a text command's recorded bounds end at the baseline
+// (paint.TextRun.Bounds sets Y1 = glyph Y), so a descender lies outside them and
+// a bounds-sized region would clip the bottom off faded text. Resetting the whole
+// scratch stays a whole-tile operation because the buffer comes out of a pool
+// dirty in an unknown place, and a memset is two orders of magnitude cheaper per
+// pixel than the fade it replaces there: before this, one 40x40 faded box cost
+// the same 65,536-pixel pass as a group covering the tile
+// (test/raster/group_bench_test.go).
+//
+// ink, when non-nil, receives this group's blit region so the enclosing group
+// fades and blits it too. The tile itself passes nil: its pixels are already the
+// thing being written.
+func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *frame.Bitmap, dx, dy int32, clip frame.Rect, f *Fonts, g *GlyphAtlas, pool *frame.BitmapPool, ink *frame.Rect) error {
 	if !grp.Bounds.Intersects(tile) {
 		return nil // whole group misses this tile (an empty Bounds rejects here too)
 	}
@@ -99,13 +114,14 @@ func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *fr
 	}
 	sc.Reset()
 	scClip := sc.Bounds()
+	var wrote frame.Rect
 	for i := grp.Start; i < grp.End; i++ {
 		// GroupAt(grp.Start) is this group itself, so only a command past the head
 		// can begin a nested child. The builder never records a group that shares its
 		// enclosing group's head, so a child always starts strictly after it.
 		if i > grp.Start {
 			if child, ok := dl.GroupAt(i); ok {
-				if err := compositeGroup(dl, child, tile, sc, dx, dy, scClip, f, g, pool); err != nil {
+				if err := compositeGroup(dl, child, tile, sc, dx, dy, scClip, f, g, pool, &wrote); err != nil {
 					return err
 				}
 				i = child.End - 1
@@ -115,12 +131,25 @@ func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *fr
 		if !dl.CachedIntersects(i, tile) {
 			continue
 		}
-		if err := drawCommand(sc, dl, i, dx, dy, scClip, f, g); err != nil {
+		if err := drawCommand(sc, dl, i, dx, dy, scClip, f, g, &wrote); err != nil {
 			return err
 		}
 	}
-	fadePixels(sc, grp.OwnOpacity)
-	dst.BlitOver(sc, frame.Point{X: 0, Y: 0}, sc.Bounds(), clip, nil)
+	if wrote.Empty() {
+		return nil // every member missed the tile: nothing to fade and nothing to blend
+	}
+	r := wrote.Intersection(scClip)
+	if r.Empty() {
+		return nil
+	}
+	fadeRect(sc, grp.OwnOpacity, r)
+	// r in scratch coordinates lands on r in dst coordinates: BlitOver maps
+	// srcRect's top-left to dstOrigin, so the origin has to be r's own corner -
+	// (0,0) here would shift the group by its offset.
+	dst.BlitOver(sc, frame.Point{X: r.X0, Y: r.Y0}, r, clip, nil)
+	if ink != nil {
+		*ink = ink.Union(r)
+	}
 	return nil
 }
 
@@ -134,28 +163,40 @@ func acquireScratch(dst *frame.Bitmap, pool *frame.BitmapPool) (*frame.Bitmap, b
 	return frame.NewBitmap(dst.W, dst.H), false
 }
 
-// fadePixels multiplies every pixel of b by o (the premultiplied scale
+// fadeScale is one opacity step as a byte table. A premultiplied fade scales all
+// four channels by the same factor, so the mapping depends on the byte value and
+// not on the pixel: building it once per group is bit-identical to doing
+// applyOpacity's float multiply per channel, for a quarter of the arithmetic.
+type fadeScale [256]byte
+
+func newFadeScale(o float32) fadeScale {
+	var t fadeScale
+	for i := range t {
+		t[i] = byte(float32(i) * o)
+	}
+	return t
+}
+
+// fadeRect multiplies every pixel of b inside r by o (the premultiplied scale
 // applyOpacity performs per command). A recorded group carries o in (0,1); the
 // guards keep 0 (drop) and >=1 (no-op) correct should a wider range ever reach
-// here.
-func fadePixels(b *frame.Bitmap, o float32) {
+// here. Pixels outside r are untouched, which is why the caller's region has to
+// be everything the group painted - see compositeGroup.
+func fadeRect(b *frame.Bitmap, o float32, r frame.Rect) {
 	if o >= 1 {
 		return
 	}
 	if o <= 0 {
-		b.Reset()
+		b.FillRect(r, frame.TransparentBlack, nil)
 		return
 	}
-	for y := 0; y < b.H; y++ {
+	t := newFadeScale(o)
+	x0, x1 := int(r.X0), int(r.X1)
+	for y := int(r.Y0); y < int(r.Y1); y++ {
 		base := y * b.Stride
-		for x := 0; x < b.W; x++ {
-			off := base + x*4
-			c := frame.Color(uint32(b.RGBA[off])<<24 | uint32(b.RGBA[off+1])<<16 | uint32(b.RGBA[off+2])<<8 | uint32(b.RGBA[off+3]))
-			c = applyOpacity(c, o)
-			b.RGBA[off] = byte(c >> 24)
-			b.RGBA[off+1] = byte(c >> 16)
-			b.RGBA[off+2] = byte(c >> 8)
-			b.RGBA[off+3] = byte(c)
+		row := b.RGBA[base+x0*4 : base+x1*4]
+		for i, v := range row {
+			row[i] = t[v]
 		}
 	}
 }
@@ -164,7 +205,14 @@ func fadePixels(b *frame.Bitmap, o float32) {
 // clipped to tileClip (dst's own bounds) intersected with the command's own
 // Clip. It is the single place a command's Kind becomes pixels, so an ordinary
 // tile draw and a group scratch draw are guaranteed identical.
-func drawCommand(dst *frame.Bitmap, dl *paint.LayerDL, i int, dx, dy int32, tileClip frame.Rect, f *Fonts, g *GlyphAtlas) error {
+//
+// ink, when non-nil, receives the box the command could paint, in dst's
+// coordinates. It over-approximates on purpose - the command's own box rather
+// than the clipped remainder, and for text the glyphs' real mask boxes, which is
+// the one Kind whose ink leaves its Rect - because a region too small clips
+// pixels and a region too large only costs fade work. Callers that paint
+// straight to a tile pass nil: nothing reads the answer.
+func drawCommand(dst *frame.Bitmap, dl *paint.LayerDL, i int, dx, dy int32, tileClip frame.Rect, f *Fonts, g *GlyphAtlas, ink *frame.Rect) error {
 	c := dl.At(i)
 	cmdClip := tileClip
 	if !c.Clip.Empty() {
@@ -172,6 +220,9 @@ func drawCommand(dst *frame.Bitmap, dl *paint.LayerDL, i int, dx, dy int32, tile
 		if cmdClip.Empty() {
 			return nil
 		}
+	}
+	if ink != nil && c.Kind != paint.CmdText {
+		*ink = ink.Union(c.Rect.Translate(dx, dy).Canon())
 	}
 	switch c.Kind {
 	case paint.CmdFill:
@@ -185,7 +236,7 @@ func drawCommand(dst *frame.Bitmap, dl *paint.LayerDL, i int, dx, dy int32, tile
 	case paint.CmdBorder:
 		drawBorder(dst, &c, dx, dy, cmdClip)
 	case paint.CmdText:
-		return drawText(dst, &c, dx, dy, cmdClip, f, g)
+		return drawText(dst, &c, dx, dy, cmdClip, f, g, ink)
 	case paint.CmdImage:
 		drawImage(dst, &c, dx, dy, cmdClip)
 	case paint.CmdGradient:
@@ -338,7 +389,7 @@ func clampW(width, extent int32) int32 {
 	return width
 }
 
-func drawText(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.Rect, f *Fonts, g *GlyphAtlas) error {
+func drawText(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.Rect, f *Fonts, g *GlyphAtlas, ink *frame.Rect) error {
 	if g == nil && f == nil {
 		return errors.New("raster: text command with neither a glyph atlas nor a font")
 	}
@@ -362,7 +413,14 @@ func drawText(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.R
 		// The pen sits on the baseline; the glyph's own bounds say where its ink
 		// falls relative to the pen.
 		pen := frame.Point{X: gl.X + dx, Y: gl.Y + dy}
-		out.BlitMask(glyph.Mask, pen.Translate(glyph.Bounds.X0, glyph.Bounds.Y0), col, clip, nil)
+		origin := pen.Translate(glyph.Bounds.X0, glyph.Bounds.Y0)
+		if ink != nil {
+			// The mask box, not the command rect: BlitMask writes exactly this, and
+			// below the baseline is where a faded 'p' or 'g' puts its ink.
+			mr := glyph.Mask.Bounds()
+			*ink = ink.Union(frame.RectAt(origin, frame.Size{W: int32(mr.Dx()), H: int32(mr.Dy())}))
+		}
+		out.BlitMask(glyph.Mask, origin, col, clip, nil)
 	}
 	return nil
 }
