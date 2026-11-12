@@ -1343,9 +1343,10 @@ type runDemand struct {
 	half   float32   // text only: the leading half that sits above the content area
 	box    atomicBox // what lineFrame.atomicTop needs to place the box
 	atomic bool
-	// edge marks a box measured against the line's own top or bottom edge
-	// (`vertical-align: top`/`bottom`, and the values that still fall back to
-	// it): it stretches the line box rather than moving the baseline under it.
+	// edge marks a box measured against the line's own top or bottom edge -
+	// `vertical-align: top`/`bottom`, the only two values of the property that
+	// work that way: they stretch the line box rather than moving the baseline
+	// under them.
 	edge bool
 	// bottom narrows that to the boxes pinned to the line's *bottom* edge. When
 	// one of them stretches the line, the extra height lands above the baseline
@@ -1408,7 +1409,11 @@ func atomicDemand(b atomicBox, sm strutMetrics) runDemand {
 // top edge and the line has to grow to contain it. Those are the atomic answers
 // for a box 40px tall whose content area starts 11px inside its top edge, so a
 // run is measured as one box and placed by box top plus half-leading - the class
-// it carries comes from the element the run belongs to, not from the block.
+// it carries comes from the element the run belongs to, not from the block. Two
+// values of the property then answer the block's font rather than the run's:
+// `middle` centres on the parent's x-height and `super`/`sub` shift by the
+// parent's script offset, whichever size the run turns out to have, and both are
+// settled before this function places anything.
 func demandOfRun(a *Arena, r textRun, sm strutMetrics) runDemand {
 	if r.atomic {
 		return atomicDemand(boxOfAtomic(a, r.obj, sm), sm)
@@ -1422,12 +1427,11 @@ func demandOfRun(a *Arena, r textRun, sm strutMetrics) runDemand {
 	b := atomicBox{extent: lineH}
 	b.align, b.length = atomicAlign(va)
 	resolveScript(a, k, &b, sm)
-	// Both of the values that resolve against the parent rather than the run
-	// read the same strut: the shift `super`/`sub` moves the run's baseline by
-	// belongs to the parent's size - a 64px run in a 16px block is raised
-	// 6.328125px, not 22.328125px - and `middle` centres the run's box on the
-	// parent's x-height, which is what puts a 64px run's box top at 0 on a line
-	// grown to 74px by that very centring.
+	// The box an edge value pins is the run's line-height box, and its baseline
+	// sits `asc` inside that box with the leading split around it. The half is
+	// left unclamped because a 64px face under `line-height: 10px` takes 32px out
+	// of each side, and the box that overflows the line is what the reference
+	// then measures against the line's edges.
 	b.below = lineH - (asc + (lineH-(asc+desc))/2)
 	d := atomicDemand(b, sm)
 	d.asc, d.half, d.box = asc, (lineH-(asc+desc))/2, b
