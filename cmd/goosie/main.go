@@ -891,6 +891,14 @@ func run(args []string) error {
 		fmt.Printf("goosie: exported %s to %s\n", c.url, c.printPDF)
 		return nil
 	}
+	if !c.paced() && !c.private {
+		m, err := newWindowManager(c)
+		if err != nil {
+			return err
+		}
+		defer m.cleanup()
+		return m.run()
+	}
 	f, err := build(c)
 	if err != nil {
 		return err
