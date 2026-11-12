@@ -341,7 +341,7 @@ func ContentDamage(before, after frame.Content) frame.Rect {
 				add(next.cmds[i])
 			}
 		}
-		return dirty
+		return dirty.Union(groupDamage(old, next))
 	}
 	start, oldEnd, newEnd := 0, len(old.cmds), len(next.cmds)
 	for start < oldEnd && start < newEnd && sameCommand(old.cmds[start], next.cmds[start]) {
@@ -356,6 +356,39 @@ func ContentDamage(before, after frame.Content) frame.Rect {
 	}
 	for _, cmd := range next.cmds[start:newEnd] {
 		add(cmd)
+	}
+	return dirty.Union(groupDamage(old, next))
+}
+
+// groupDamage unions the command-range bounds of every group whose description
+// changed between two frozen lists, so an opacity-only mutation repaints. A
+// membership change is already caught by the command diff (members move or their
+// per-command opacity changes), but a pure OwnOpacity change is invisible to
+// sameCommand and would otherwise read as undamaged and leave stale pixels. When
+// the group counts differ, conservatively paint every group's range in both.
+func groupDamage(a, b *LayerDL) frame.Rect {
+	var dirty frame.Rect
+	add := func(d *LayerDL, g Group) {
+		for i := g.Start; i < g.End; i++ {
+			if i >= 0 && i < len(d.cb) && d.cb[i].ok {
+				dirty = dirty.Union(d.cb[i].r)
+			}
+		}
+	}
+	if len(a.groups) != len(b.groups) {
+		for _, g := range a.groups {
+			add(a, g)
+		}
+		for _, g := range b.groups {
+			add(b, g)
+		}
+		return dirty
+	}
+	for k := range a.groups {
+		if a.groups[k] != b.groups[k] {
+			add(a, a.groups[k])
+			add(b, b.groups[k])
+		}
 	}
 	return dirty
 }
