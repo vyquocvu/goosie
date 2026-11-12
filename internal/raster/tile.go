@@ -36,25 +36,11 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 	return rasterizeTile(dl, bounds, out, f, g, bg, nil)
 }
 
-// rasterizeTile is the real work behind RasterizeTile. scratch is a tile-sized
-// buffer pool the composer borrows to fade a group offscreen; nil means each
-// group allocates a one-off buffer instead (a tool or test rasterizing a single
-// tile without building a pool).
-//
-// bounds is in layer content space; out is a TileSize-square buffer whose own
-// coordinate space starts at zero. Translating once at the top is what makes the
-// result position-independent: the same tile buffer is valid no matter where the
-// viewport happens to be, which is the property that lets a scrolled-back tile
-// be reused instead of re-rendered.
-//
-// The list is read through its frozen bounds sidecar, so a tile over
-// whitespace walks one cheap pass instead of re-walking glyphs per command.
-// Nothing here takes a lock: the display list is frozen, and the glyph caches
-// synchronize themselves.
-//
-// g is the glyph cache and is what a frame path passes. It may be nil, in which
-// case glyphs come straight from f unshared - a slower rendering that exists so a
-// one-off tool can rasterize a tile without building an atlas.
+// rasterizeTile is the real work behind RasterizeTile; see that method for the
+// bounds/coordinate, frozen-list, and glyph-cache contract, which it satisfies
+// unchanged. scratch is a tile-sized buffer pool the composer borrows to fade a
+// group offscreen; nil means each group allocates a one-off buffer instead (a
+// tool or test rasterizing a single tile without building a pool).
 func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *Fonts, g *GlyphAtlas, bg frame.Color, scratch *frame.BitmapPool) error {
 	if out == nil {
 		return ErrNilDestination
@@ -104,8 +90,8 @@ func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 // groups recurse with their own scratch. A tile-sized scratch means a group that
 // straddles tiles is faded per-tile, which is per-pixel and so still exact.
 func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *frame.Bitmap, dx, dy int32, clip frame.Rect, f *Fonts, g *GlyphAtlas, pool *frame.BitmapPool) error {
-	if !grp.Bounds.Empty() && !grp.Bounds.Intersects(tile) {
-		return nil // whole group misses this tile
+	if !grp.Bounds.Intersects(tile) {
+		return nil // whole group misses this tile (an empty Bounds rejects here too)
 	}
 	sc, pooled := acquireScratch(dst, pool)
 	if pooled {

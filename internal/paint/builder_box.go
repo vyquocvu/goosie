@@ -121,14 +121,14 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 	// outer buffer instead. Safe (never loses a fade); the only case it touches
 	// is a decoration-less faded container whose first command is an already-
 	// grouped faded child.
-	recordThis := groupOpacity > 0 && !(len(b.groupHeadStack) > 0 && b.groupHeadStack[len(b.groupHeadStack)-1] == int32(commandStart))
+	headConflict := len(b.groupHeadStack) > 0 && b.groupHeadStack[len(b.groupHeadStack)-1] == int32(commandStart)
+	recordThis := groupOpacity > 0 && !headConflict
 	// A clean faded box we decide not to record must still fade: its own fraction
 	// was withheld from effective above, so fold it back in here. It then paints
 	// per-command inside the enclosing group's buffer rather than vanishing (the
 	// enclosing group fades the whole buffer once by its own opacity on top).
-	if groupOpacity > 0 && !recordThis {
+	if groupOpacity > 0 && headConflict {
 		effective *= groupOpacity
-		groupOpacity = 0
 	}
 	if obj.Style != nil {
 		box := b.paintContextFor(obj, effective)

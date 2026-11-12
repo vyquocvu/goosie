@@ -29,15 +29,13 @@ type List struct {
 // [Start,End) in paint order that an opacity-declaring box emitted, to be faded
 // once by OwnOpacity and composited onto the destination by the rasterizer.
 // Bounds is the device-pixel union of the range's command bounds (a tile fast
-// reject and a damage hint). Parent is the enclosing group's index in Groups(),
-// or -1 for a top-level group. Only clean groups are recorded (builder isClean-
+// reject and a damage hint). Only clean groups are recorded (builder isClean-
 // FadedGroup), which is what keeps [Start,End) contiguous through SortStable.
 type Group struct {
 	OwnOpacity float32
 	Bounds     frame.Rect
 	Start      int
 	End        int
-	Parent     int
 }
 
 // pendingGroup is a group as the walk leaves it: its own opacity over the append
@@ -169,16 +167,13 @@ func (l *List) Build(version uint64) *LayerDL {
 // reconstructGroups maps every recorded ordinal span onto the sorted command
 // list. posOf[Seq] gives the sorted position of the command appended as ordinal
 // Seq; a clean group's span is contiguous there, so End = Start + (last-first).
-// Groups are ordered by Start then by End descending, so a parent is emitted
-// before each group it encloses; Parent and firstGroupAt fall out of a single
-// left-to-right pass with a stack of still-open ranges.
+// Groups are ordered by Start then by End descending, so a parent precedes each
+// group it encloses in the result; nesting itself is discovered by containment
+// via firstGroupAt, so no parent index is stored.
 func reconstructGroups(cmds []DisplayCmd, cb []cmdBounds, pending []pendingGroup) ([]Group, []int32) {
 	firstGroupAt := make([]int32, len(cmds))
 	for i := range firstGroupAt {
 		firstGroupAt[i] = -1
-	}
-	if len(pending) == 0 {
-		return nil, firstGroupAt
 	}
 	posOf := make([]int32, len(cmds))
 	for i := range cmds {
@@ -191,14 +186,10 @@ func reconstructGroups(cmds []DisplayCmd, cb []cmdBounds, pending []pendingGroup
 		var b frame.Rect
 		for i := start; i < end && i < len(cb); i++ {
 			if cb[i].ok {
-				if b.Empty() {
-					b = cb[i].r
-				} else {
-					b = b.Union(cb[i].r)
-				}
+				b = b.Union(cb[i].r)
 			}
 		}
-		mapped = append(mapped, Group{OwnOpacity: p.own, Bounds: b, Start: start, End: end, Parent: -1})
+		mapped = append(mapped, Group{OwnOpacity: p.own, Bounds: b, Start: start, End: end})
 	}
 	slices.SortStableFunc(mapped, func(a, b Group) int {
 		switch {
@@ -214,18 +205,9 @@ func reconstructGroups(cmds []DisplayCmd, cb []cmdBounds, pending []pendingGroup
 		return 0
 	})
 	groups := make([]Group, 0, len(mapped))
-	var stack []int
 	for idx := range mapped {
-		g := mapped[idx]
-		for len(stack) > 0 && groups[stack[len(stack)-1]].End <= g.Start {
-			stack = stack[:len(stack)-1]
-		}
-		if len(stack) > 0 {
-			g.Parent = stack[len(stack)-1]
-		}
-		groups = append(groups, g)
-		firstGroupAt[g.Start] = int32(len(groups) - 1)
-		stack = append(stack, len(groups)-1)
+		groups = append(groups, mapped[idx])
+		firstGroupAt[mapped[idx].Start] = int32(len(groups) - 1)
 	}
 	return groups, firstGroupAt
 }
@@ -360,34 +342,27 @@ func ContentDamage(before, after frame.Content) frame.Rect {
 	return dirty.Union(groupDamage(old, next))
 }
 
-// groupDamage unions the command-range bounds of every group whose description
-// changed between two frozen lists, so an opacity-only mutation repaints. A
-// membership change is already caught by the command diff (members move or their
+// groupDamage unions the bounds of every group whose description changed
+// between two frozen lists, so an opacity-only mutation repaints. A membership
+// change is already caught by the command diff (members move or their
 // per-command opacity changes), but a pure OwnOpacity change is invisible to
 // sameCommand and would otherwise read as undamaged and leave stale pixels. When
 // the group counts differ, conservatively paint every group's range in both.
 func groupDamage(a, b *LayerDL) frame.Rect {
 	var dirty frame.Rect
-	add := func(d *LayerDL, g Group) {
-		for i := g.Start; i < g.End; i++ {
-			if i >= 0 && i < len(d.cb) && d.cb[i].ok {
-				dirty = dirty.Union(d.cb[i].r)
-			}
-		}
-	}
 	if len(a.groups) != len(b.groups) {
 		for _, g := range a.groups {
-			add(a, g)
+			dirty = dirty.Union(g.Bounds)
 		}
 		for _, g := range b.groups {
-			add(b, g)
+			dirty = dirty.Union(g.Bounds)
 		}
 		return dirty
 	}
 	for k := range a.groups {
 		if a.groups[k] != b.groups[k] {
-			add(a, a.groups[k])
-			add(b, b.groups[k])
+			dirty = dirty.Union(a.groups[k].Bounds)
+			dirty = dirty.Union(b.groups[k].Bounds)
 		}
 	}
 	return dirty

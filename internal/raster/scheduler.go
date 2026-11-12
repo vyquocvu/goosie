@@ -192,9 +192,9 @@ func NewScheduler(l *frame.Layer, pool *Pool, vp frame.Viewport, scale float32, 
 			s.grid.SetBudget(prefs.Budget)
 		}
 	}
-	// Sizing the scratch here, where the geometry is known and nothing is being
-	// measured, is what lets ScratchAllocs stay at zero for the life of a
-	// steady-state frame path.
+	// The group-fade scratch is a tile-sized pool built once here, alongside the
+	// grid it must match, so the frame loop never allocates it. ts mirrors the
+	// grid's own tile size; a nil grid (no layer yet) keeps the default.
 	ts := int32(frame.TileSize)
 	if l != nil && l.Grid != nil {
 		if n := l.Grid.TileSize(); n > 0 {
@@ -202,6 +202,9 @@ func NewScheduler(l *frame.Layer, pool *Pool, vp frame.Viewport, scale float32, 
 		}
 	}
 	s.groupScratch = frame.NewBitmapPool(frame.Size{W: ts, H: ts}, 32)
+	// Sizing the scratch here, where the geometry is known and nothing is being
+	// measured, is what lets ScratchAllocs stay at zero for the life of a
+	// steady-state frame path.
 	s.reserveScratch(false)
 	return s
 }
