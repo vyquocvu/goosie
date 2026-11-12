@@ -33,6 +33,29 @@ var ErrNilDestination = errors.New("raster: nil tile destination")
 // case glyphs come straight from f unshared - a slower rendering that exists so a
 // one-off tool can rasterize a tile without building an atlas.
 func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *Fonts, g *GlyphAtlas, bg frame.Color) error {
+	return rasterizeTile(dl, bounds, out, f, g, bg, nil)
+}
+
+// rasterizeTile is the real work behind RasterizeTile. scratch is a tile-sized
+// buffer pool the composer borrows to fade a group offscreen; nil means each
+// group allocates a one-off buffer instead (a tool or test rasterizing a single
+// tile without building a pool).
+//
+// bounds is in layer content space; out is a TileSize-square buffer whose own
+// coordinate space starts at zero. Translating once at the top is what makes the
+// result position-independent: the same tile buffer is valid no matter where the
+// viewport happens to be, which is the property that lets a scrolled-back tile
+// be reused instead of re-rendered.
+//
+// The list is read through its frozen bounds sidecar, so a tile over
+// whitespace walks one cheap pass instead of re-walking glyphs per command.
+// Nothing here takes a lock: the display list is frozen, and the glyph caches
+// synchronize themselves.
+//
+// g is the glyph cache and is what a frame path passes. It may be nil, in which
+// case glyphs come straight from f unshared - a slower rendering that exists so a
+// one-off tool can rasterize a tile without building an atlas.
+func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *Fonts, g *GlyphAtlas, bg frame.Color, scratch *frame.BitmapPool) error {
 	if out == nil {
 		return ErrNilDestination
 	}
@@ -55,6 +78,13 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 	// command per tile). CachedIntersects answers the same predicate in O(1),
 	// so a single pass both selects and filters with no second walk.
 	for i := 0; i < dl.Len(); i++ {
+		if grp, ok := dl.GroupAt(i); ok {
+			if err := compositeGroup(dl, grp, b, out, dx, dy, clip, f, g, scratch); err != nil {
+				return err
+			}
+			i = grp.End - 1 // the loop's i++ lands on the first command past the group
+			continue
+		}
 		if !dl.CachedIntersects(i, b) {
 			continue
 		}
@@ -63,6 +93,85 @@ func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 		}
 	}
 	return nil
+}
+
+// compositeGroup renders grp's [Start,End) into a scratch buffer the size of dst,
+// letting overlapping members blend against each other (not against the tile),
+// applies grp's own opacity once across the buffer, then blends it onto dst. This
+// is what closes GOOSIE-COMPOSITE-001: two translucent layers inside one faded
+// group darken once against each other and then once as a group, exactly as a
+// compositor does, instead of each being pre-faded and double-darkening. Nested
+// groups recurse with their own scratch. A tile-sized scratch means a group that
+// straddles tiles is faded per-tile, which is per-pixel and so still exact.
+func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *frame.Bitmap, dx, dy int32, clip frame.Rect, f *Fonts, g *GlyphAtlas, pool *frame.BitmapPool) error {
+	if !grp.Bounds.Empty() && !grp.Bounds.Intersects(tile) {
+		return nil // whole group misses this tile
+	}
+	sc, pooled := acquireScratch(dst, pool)
+	if pooled {
+		defer pool.Release(sc)
+	}
+	sc.Reset()
+	scClip := sc.Bounds()
+	for i := grp.Start; i < grp.End; i++ {
+		// GroupAt(grp.Start) is this group itself, so only a command past the head
+		// can begin a nested child. The builder never records a group that shares its
+		// enclosing group's head, so a child always starts strictly after it.
+		if i > grp.Start {
+			if child, ok := dl.GroupAt(i); ok {
+				if err := compositeGroup(dl, child, tile, sc, dx, dy, scClip, f, g, pool); err != nil {
+					return err
+				}
+				i = child.End - 1
+				continue
+			}
+		}
+		if !dl.CachedIntersects(i, tile) {
+			continue
+		}
+		if err := drawCommand(sc, dl, i, dx, dy, scClip, f, g); err != nil {
+			return err
+		}
+	}
+	fadePixels(sc, grp.OwnOpacity)
+	dst.BlitOver(sc, frame.Point{X: 0, Y: 0}, sc.Bounds(), clip, nil)
+	return nil
+}
+
+// acquireScratch returns a buffer the same size as dst. With a matching pool it
+// is pooled (the steady-state frame path must not allocate); without one it is a
+// one-off NewBitmap for a tool or test rasterizing a single tile.
+func acquireScratch(dst *frame.Bitmap, pool *frame.BitmapPool) (*frame.Bitmap, bool) {
+	if pool != nil && pool.Size() == dst.Size() {
+		return pool.Acquire(), true
+	}
+	return frame.NewBitmap(dst.W, dst.H), false
+}
+
+// fadePixels multiplies every pixel of b by o (the premultiplied scale
+// applyOpacity performs per command). A recorded group carries o in (0,1); the
+// guards keep 0 (drop) and >=1 (no-op) correct should a wider range ever reach
+// here.
+func fadePixels(b *frame.Bitmap, o float32) {
+	if o >= 1 {
+		return
+	}
+	if o <= 0 {
+		b.Reset()
+		return
+	}
+	for y := 0; y < b.H; y++ {
+		base := y * b.Stride
+		for x := 0; x < b.W; x++ {
+			off := base + x*4
+			c := frame.Color(uint32(b.RGBA[off])<<24 | uint32(b.RGBA[off+1])<<16 | uint32(b.RGBA[off+2])<<8 | uint32(b.RGBA[off+3]))
+			c = applyOpacity(c, o)
+			b.RGBA[off] = byte(c >> 24)
+			b.RGBA[off+1] = byte(c >> 16)
+			b.RGBA[off+2] = byte(c >> 8)
+			b.RGBA[off+3] = byte(c)
+		}
+	}
 }
 
 // drawCommand paints one command into dst at the tile-local offset (dx,dy),

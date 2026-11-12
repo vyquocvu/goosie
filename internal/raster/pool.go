@@ -42,6 +42,11 @@ type Job struct {
 	Bounds     frame.Rect
 	Out        *frame.Bitmap
 	Background frame.Color
+	// Scratch is a tile-sized buffer pool the rasterizer borrows to composite a
+	// faded group offscreen, acquired/released per group so nothing is cached in a
+	// package global. nil means "allocate a one-off" (tools, tests that build a Job
+	// by hand); the frame path always supplies one sized to the tile.
+	Scratch *frame.BitmapPool
 }
 
 // Done is one job's result. Out is the same buffer the job carried, whether the
@@ -73,7 +78,7 @@ type RasterFunc func(j Job) error
 // DefaultRaster returns the RasterFunc the frame path uses.
 func DefaultRaster(f *Fonts, g *GlyphAtlas) RasterFunc {
 	return func(j Job) error {
-		return RasterizeTile(j.DL, j.Bounds, j.Out, f, g, j.Background)
+		return rasterizeTile(j.DL, j.Bounds, j.Out, f, g, j.Background, j.Scratch)
 	}
 }
 

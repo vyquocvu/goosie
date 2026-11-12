@@ -78,6 +78,12 @@ type Scheduler struct {
 	prevPix []*frame.Bitmap
 	doneLay []*frame.Layer
 
+	// groupScratch is the pool every raster job borrows one tile-sized buffer from
+	// to composite a faded group. It is created once in NewScheduler, so a warm
+	// scroll reuses buffers and the frame path allocates nothing (invariant 6).
+	// Named apart from the `scratch int64` alloc counter it sits next to.
+	groupScratch *frame.BitmapPool
+
 	// The damage decision is made against the last *composition*, not the last plan:
 	// a driver may resolve several plans per frame or draw one plan across several
 	// vsyncs, and the backing store only knows what it is holding.
@@ -189,6 +195,13 @@ func NewScheduler(l *frame.Layer, pool *Pool, vp frame.Viewport, scale float32, 
 	// Sizing the scratch here, where the geometry is known and nothing is being
 	// measured, is what lets ScratchAllocs stay at zero for the life of a
 	// steady-state frame path.
+	ts := int32(frame.TileSize)
+	if l != nil && l.Grid != nil {
+		if n := l.Grid.TileSize(); n > 0 {
+			ts = n
+		}
+	}
+	s.groupScratch = frame.NewBitmapPool(frame.Size{W: ts, H: ts}, 32)
 	s.reserveScratch(false)
 	return s
 }
@@ -505,7 +518,7 @@ func (s *Scheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
 		painting += tileBytes
 		w.Submitted++
 		s.submitted++
-		if err := s.pool.Submit(Job{Layer: s.layer, Coord: c, DL: dl, Bounds: c.Rect(ts), Out: out, Background: s.cur.Background}); err != nil {
+		if err := s.pool.Submit(Job{Layer: s.layer, Coord: c, DL: dl, Bounds: c.Rect(ts), Out: out, Background: s.cur.Background, Scratch: s.groupScratch}); err != nil {
 			s.grid.Release(c, out)
 			painting -= tileBytes
 			w.Refused++
