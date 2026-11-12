@@ -31,6 +31,7 @@ type chromeWindow struct {
 	onSwitch          func(uint64)
 	onNewTab          func()
 	onNewIncognitoTab func()
+	onNewWindow       func()
 	onCloseTab        func(uint64)
 	onReopenTab       func()
 	onResize          func(contentW, contentH int)
@@ -196,6 +197,7 @@ func (cw *chromeWindow) openMainMenu() {
 	w := cw.toolbar.BoundsWidth() / sc
 	r := toolbar.ButtonRect(toolbar.ButtonMenu, w)
 	items := []ContextMenuItem{
+		{Label: "New Window", Action: "new_window"},
 		{Label: "Bookmarks", Action: "bookmarks"},
 		{Label: "History", Action: "history"},
 		{Label: "Downloads", Action: "downloads"},
@@ -1228,6 +1230,11 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	case (key == 'n' || key == 'N') && shift:
 		if cw.onNewIncognitoTab != nil {
 			cw.onNewIncognitoTab()
+			return true
+		}
+	case (key == 'n' || key == 'N') && !shift:
+		if cw.onNewWindow != nil {
+			cw.onNewWindow()
 			return true
 		}
 	case key == 'p' || key == 'P':

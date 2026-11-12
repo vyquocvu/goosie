@@ -763,6 +763,7 @@ func (f *framePath) openWindow() error {
 			cw.onActiveStyle = f.refreshActiveContent
 			cw.onMediaControl = f.handleMediaControl
 			cw.onNewIncognitoTab = func() { f.newIncognitoTab() }
+			cw.onNewWindow = f.newWindow
 			cw.onInspect = func() { f.navigateTab("goosie://inspect") }
 			cw.onViewSource = f.viewSourceCurrentTab
 			cw.onDuplicateTab = func() { f.duplicateTab() }

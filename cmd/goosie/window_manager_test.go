@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vyquocvu/goosie/internal/platform"
+	"github.com/vyquocvu/goosie/internal/surface"
 )
 
 func testManagerConfig(t *testing.T) config {
@@ -369,5 +370,130 @@ func TestManagerCollectsLaterWindowError(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not return after the primary closed")
+	}
+}
+
+func TestManagerCmdNSpawnsWindow(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	waitWindows(t, m, 1)
+	cw, ok := f1.window.(*chromeWindow)
+	if !ok {
+		t.Fatal("primary window is not a chromeWindow")
+	}
+	tabsBefore := f1.tabMgr.Count()
+	if !cw.handleTabShortcut('n', surface.ModCommand) {
+		t.Fatal("Cmd+N was not handled")
+	}
+	waitWindows(t, m, 2)
+	if f1.tabMgr.Count() != tabsBefore {
+		t.Errorf("window 1 tab count = %d, want %d (Cmd+N must not touch window 1's tabs)",
+			f1.tabMgr.Count(), tabsBefore)
+	}
+}
+
+func TestManagerNewWindowMenuAction(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	waitWindows(t, m, 1)
+	cw, ok := f1.window.(*chromeWindow)
+	if !ok {
+		t.Fatal("primary window is not a chromeWindow")
+	}
+	cw.openMainMenu()
+	snap := cw.mainMenu.Snapshot()
+	found := false
+	for _, it := range snap.Items {
+		if it.Action == "new_window" {
+			found = true
+			if it.Label != "New Window" {
+				t.Errorf("new_window item label = %q, want New Window", it.Label)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("main menu has no New Window item")
+	}
+	f1.handleContextMenuAction("new_window", "")
+	waitWindows(t, m, 2)
+}
+
+func TestManagerCmdShiftNStillIncognito(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	waitWindows(t, m, 1)
+	cw, ok := f1.window.(*chromeWindow)
+	if !ok {
+		t.Fatal("primary window is not a chromeWindow")
+	}
+	before := f1.tabMgr.Count()
+	if !cw.handleTabShortcut('n', surface.ModCommand|surface.ModShift) {
+		t.Fatal("Cmd+Shift+N was not handled")
+	}
+	m.mu.Lock()
+	n := len(m.windows)
+	m.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("window count = %d, want 1 (Cmd+Shift+N opens a tab, not a window)", n)
+	}
+	if f1.tabMgr.Count() != before+1 {
+		t.Fatalf("tab count = %d, want %d", f1.tabMgr.Count(), before+1)
+	}
+	if active := f1.tabMgr.Active(); active == nil || !active.Incognito() {
+		t.Error("Cmd+Shift+N did not open an incognito tab")
+	}
+}
+
+func TestManagerNewWindowNilHookNoop(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	waitWindows(t, m, 1)
+	cw, ok := f1.window.(*chromeWindow)
+	if !ok {
+		t.Fatal("primary window is not a chromeWindow")
+	}
+	// Simulate the legacy paced/screenshot/private path, which never installs a
+	// manager link: both hooks nil, neither shortcut nor menu action spawns or
+	// panics. No key events are injected, so the idle pump never reads onNewWindow
+	// concurrently with these writes.
+	f1.newWindow = nil
+	cw.onNewWindow = nil
+	if cw.handleTabShortcut('n', surface.ModCommand) {
+		t.Error("Cmd+N was handled with a nil onNewWindow hook")
+	}
+	f1.handleContextMenuAction("new_window", "")
+	m.mu.Lock()
+	n := len(m.windows)
+	m.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("window count = %d, want 1", n)
 	}
 }

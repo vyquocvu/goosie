@@ -914,6 +914,10 @@ func (f *framePath) handleContextMenuAction(action, data string) {
 		f.navigateTab("goosie://settings")
 	case "print_pdf":
 		f.printActiveTabToPDF()
+	case "new_window":
+		if f.newWindow != nil {
+			f.newWindow()
+		}
 	}
 }
 
