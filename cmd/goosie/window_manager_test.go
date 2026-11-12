@@ -183,3 +183,42 @@ func TestManagerRunSavesAndTearsDown(t *testing.T) {
 		t.Fatalf("crash journal not removed on clean exit: %v", err)
 	}
 }
+
+func TestManagerLastTabClosesWindow(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 1: %v", err)
+	}
+	f2, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 2: %v", err)
+	}
+	waitWindows(t, m, 2)
+
+	// f1 has exactly one tab (the startup tab). Closing it fires onCloseLast,
+	// which closes f1's window; the manager must remove f1 and keep f2.
+	tabs1 := f1.tabMgr.Tabs()
+	if len(tabs1) != 1 {
+		t.Fatalf("f1 tab count = %d, want 1", len(tabs1))
+	}
+	f1.closeTab(tabs1[0].ID())
+
+	waitWindows(t, m, 1)
+	m.mu.Lock()
+	kept := len(m.windows) == 1 && m.windows[0] == f2
+	m.mu.Unlock()
+	if !kept {
+		t.Fatal("closing window 1's last tab did not leave window 2 registered")
+	}
+	select {
+	case <-m.done:
+		t.Fatal("manager quit while window 2 was still open")
+	default:
+	}
+}
