@@ -1098,6 +1098,14 @@ int GoosieIsMainThread(void) { return pthread_main_np(); }
 
 int GoosieHasDisplay(void) { return CGMainDisplayID() != 0; }
 
+// g_appLoopRunning is 1 while GoosieAppRun is turning the main loop and 0 otherwise.
+// It is the one off-main-readable signal in the shim: GoosieWindowCreateOnMain reads
+// it to avoid dispatch_sync-ing into a main queue nothing drains once the loop has
+// returned (which would hang). Set and cleared only on the main thread. The window
+// registry and appQuit stay main-thread-confined ObjC ivars; this is just the loop's
+// liveness, which an off-main creator must be able to see.
+static _Atomic int g_appLoopRunning = 0;
+
 GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err) {
 	if (err) *err = 0;
 	if (!pthread_main_np()) {
@@ -1218,8 +1226,28 @@ GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err) {
 	return gw;
 }
 
+GoosieWindow *GoosieWindowCreateOnMain(const char *title, int w, int h, int *err) {
+	if (err) *err = 0;
+	if (pthread_main_np()) {
+		return GoosieWindowCreate(title, w, h, err);
+	}
+	if (!atomic_load(&g_appLoopRunning)) {
+		// The main loop is not turning: a dispatch_sync would never be drained.
+		if (err) *err = 6;
+		return NULL;
+	}
+	__block GoosieWindow *result = NULL;
+	__block int code = 0;
+	dispatch_sync(dispatch_get_main_queue(), ^{
+		result = GoosieWindowCreate(title, w, h, &code);
+	});
+	if (err) *err = code;
+	return result;
+}
+
 void GoosieAppRun(GoosieWindow *gw) {
 	if (!gw) return;
+	atomic_store(&g_appLoopRunning, 1);
 	@autoreleasepool { [NSApp finishLaunching]; }
 	// The loop is turned by hand rather than by -[NSApplication run], for one reason:
 	// -run notices -stop: only at the top of an iteration it decides to take, and an app
@@ -1245,7 +1273,9 @@ void GoosieAppRun(GoosieWindow *gw) {
 	// Nothing is coming after this. The loop is how a queued commit reaches the layer
 	// and how a resize is noticed, and it has stopped turning, so a pump still waiting
 	// in GoosieNextEvent has to be woken rather than left in a condwait nobody will
-	// signal.
+	// signal. Clear the liveness flag first so a late off-main create returns code 6
+	// instead of dispatching into a queue this loop no longer drains.
+	atomic_store(&g_appLoopRunning, 0);
 	pushQuit(gw);
 }
 

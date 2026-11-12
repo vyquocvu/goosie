@@ -28,4 +28,9 @@ var (
 	// ErrNoDisplayLink reports a display but no way to be paced by it, which is a
 	// window that would never redraw.
 	ErrNoDisplayLink = errors.New("platform/darwin: the display cannot be paced")
+	// ErrAppQuitting reports a window create attempted while the app is shutting
+	// down: the shared delegate has already quit, or the main run loop is no longer
+	// turning to marshal an off-main create. The fix is to not open windows during
+	// teardown, not to change the arguments.
+	ErrAppQuitting = errors.New("platform/darwin: the app is quitting; no new window can be opened")
 )

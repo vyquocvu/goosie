@@ -74,13 +74,12 @@ type Window struct {
 // window, and go test on a macOS runner has to be able to ask without popping one.
 func Available() bool { return C.GoosieHasDisplay() != 0 }
 
-// Open creates the window. It must run on the process's main thread, on a goroutine
-// pinned there with runtime.LockOSThread; anything else is ErrNotMainThread rather
-// than the abort AppKit would otherwise raise.
+// Open creates the window. It may be called from any thread: the first window is
+// opened on the main thread (pinned with runtime.LockOSThread) before Run, and a
+// later window is opened off-main while Run turns - the shim's create trampoline
+// marshals that onto the main queue. An off-main create with no running app loop
+// returns ErrAppQuitting rather than hanging or aborting.
 func Open(cfg Config) (*Window, error) {
-	if C.GoosieIsMainThread() == 0 {
-		return nil, ErrNotMainThread
-	}
 	if cfg.Size.W <= 0 || cfg.Size.H <= 0 {
 		return nil, fmt.Errorf("platform/darwin: a window needs a positive size, got %dx%d",
 			cfg.Size.W, cfg.Size.H)
@@ -89,7 +88,7 @@ func Open(cfg Config) (*Window, error) {
 	defer C.free(unsafe.Pointer(title))
 
 	var cerr C.int
-	gw := C.GoosieWindowCreate(title, C.int(cfg.Size.W), C.int(cfg.Size.H), &cerr)
+	gw := C.GoosieWindowCreateOnMain(title, C.int(cfg.Size.W), C.int(cfg.Size.H), &cerr)
 	if gw == nil {
 		return nil, createErr(int(cerr), cfg)
 	}
@@ -120,6 +119,8 @@ func createErr(code int, cfg Config) error {
 		return ErrNoDisplay
 	case 5:
 		return ErrNoDisplayLink
+	case 6:
+		return ErrAppQuitting
 	}
 	return fmt.Errorf("platform/darwin: window create failed with code %d", code)
 }
@@ -352,7 +353,9 @@ func (w *Window) DroppedVsyncs() int64 {
 	return int64(shed)
 }
 
-// Run enters AppKit's run loop and does not return until the window is closed.
+// Run enters AppKit's run loop and does not return until the app quits - that is,
+// until the last window closes. Closing this window alone leaves Run turning for
+// the others.
 //
 // It belongs on the main thread, on the goroutine that called Open: the alternative is
 // a second thread owning AppKit while the first one sits idle, which is not a shape
@@ -365,9 +368,10 @@ func (w *Window) Run() {
 	// GoosieNextEvent is released by this return rather than left in it.
 }
 
-// Close stops the display link, ends the run loop, and waits for the pump to leave.
-// It is idempotent, and it is safe to call from a goroutine that is not the main
-// thread - which is the only way to call it while Run is turning the loop.
+// Close stops the display link, orders this window out, and waits for the pump to
+// leave. The app run loop ends when the LAST window closes, not this one. It is
+// idempotent, and it is safe to call from a goroutine that is not the main thread -
+// which is the only way to call it while Run is turning the loop.
 //
 // Every caller waits for the pump, including a second one arriving while the first is
 // still waiting: a window that reports itself closed while something is still inside

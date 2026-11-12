@@ -125,7 +125,18 @@ typedef struct GoosieEvent {
 // AppKit requires it and says so by returning NULL with *err set rather than by
 // letting the call abort the process. w and h are device pixels; the window's
 // frame is derived from them under the scale the backing store reports.
+// *err codes: 1 not main thread, 2 bad size, 3 out of memory, 4 no display,
+// 5 no display link, 6 the app is quitting (no window can be opened).
 GoosieWindow *GoosieWindowCreate(const char *title, int w, int h, int *err);
+
+// GoosieWindowCreateOnMain is the any-thread entry point. On the main thread it
+// calls GoosieWindowCreate directly; off the main thread it marshals the create
+// onto the main queue with dispatch_sync, which requires GoosieAppRun to be
+// turning (it drains the queue). If the app loop is not running it returns NULL
+// with *err 6 rather than dispatching into a queue nothing drains (which would
+// hang). This is how Cmd+N, handled on the chrome pump goroutine, opens window #2
+// while the main thread is inside Run.
+GoosieWindow *GoosieWindowCreateOnMain(const char *title, int w, int h, int *err);
 
 // GoosieIsMainThread reports whether the calling thread is the process's main
 // thread, which is the only thread AppKit will work with.
@@ -138,10 +149,13 @@ int GoosieIsMainThread(void);
 // binary on a machine with a display has to be able to ask without deciding anything.
 int GoosieHasDisplay(void);
 
-// GoosieAppRun turns the main event loop until the window is closed, by GoosieClose or
-// by the close button. Call it on the main thread, from the goroutine that created the
-// window and stays pinned to that thread. It returns on its own once the quit flag is
-// set; nothing here needs a pending event to notice one.
+// GoosieAppRun turns the main event loop until the app quits - that is, until the
+// last window closes (by GoosieClose or the close button) or terminate: fires.
+// Call it on the main thread, from the goroutine that created the first window and
+// stays pinned to that thread. It returns on its own once the shared delegate's
+// app-wide quit flag is set; nothing here needs a pending event to notice one.
+// While it turns it drains the main dispatch queue, which is what lets the create
+// trampoline and GoosieClose's order-out reach AppKit from other threads.
 void GoosieAppRun(GoosieWindow *gw);
 
 // GoosieNextEvent blocks until an event is queued and writes it to *out,
@@ -185,8 +199,9 @@ void GoosieSizeDevice(GoosieWindow *gw, int *w, int *h);
 void GoosieCounters(GoosieWindow *gw, int *queued, int *dropped, int *shed_vsyncs,
 	int *committed, int *vsyncs);
 
-// GoosieClose stops the display link, asks the run loop to end, and wakes a
-// GoosieNextEvent that is waiting. It is safe from any thread and safe twice.
+// GoosieClose stops the display link, wakes a GoosieNextEvent that is waiting, and
+// orders this window out on the main queue. The app run loop ends when the LAST
+// window closes, not this one. It is safe from any thread and safe twice.
 //
 // There is no GoosieWindowFree beside it, and that is a decision rather than an
 // omission. Everything a window owns - the NSWindow, its layer, the pixel ring, the
