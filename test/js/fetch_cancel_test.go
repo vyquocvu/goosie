@@ -2,6 +2,7 @@ package js_test
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 // cancelled before the request completed. This verifies that abort() tears
 // down the socket at the transport level, not just ignores the response.
 type cancelTrackingFetcher struct {
-	cancelled bool
+	cancelled atomic.Bool
 	release   chan struct{}
 }
 
@@ -20,7 +21,7 @@ func (f *cancelTrackingFetcher) Fetch(ctx context.Context, url, method string, h
 	// Wait for either the context to be cancelled or the release signal
 	select {
 	case <-ctx.Done():
-		f.cancelled = true
+		f.cancelled.Store(true)
 		return nil, ctx.Err()
 	case <-f.release:
 		return &js.FetchResponse{Status: 200, Body: []byte("ok")}, nil
@@ -76,7 +77,7 @@ func TestFetchAbortCancelsContext(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify the context was cancelled
-	if !fetcher.cancelled {
+	if !fetcher.cancelled.Load() {
 		t.Error("fetch context was not cancelled when abort() was called; the transport should tear down the socket, not just ignore the response")
 	}
 }
@@ -123,7 +124,7 @@ func TestXHRAbortCancelsContext(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Verify the context was cancelled
-	if !fetcher.cancelled {
+	if !fetcher.cancelled.Load() {
 		t.Error("XHR context was not cancelled when abort() was called; the transport should tear down the socket, not just ignore the response")
 	}
 }
