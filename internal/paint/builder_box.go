@@ -81,13 +81,16 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 	}
 
 	// Group opacity: an element's own opacity multiplies the accumulated opacity
-	// of every ancestor, and that product reaches the element's background, border
-	// and text as well as its descendants. A fully transparent box (effective 0)
-	// paints nothing and hides its whole subtree, because opacity does not inherit
-	// but a zero-opacity stacking context clips everything inside it to invisible;
-	// we stop the walk rather than emit a command, since DisplayCmd.Opacity 0 is
-	// reserved to mean "opaque/unset".
+	// of every ancestor. When this box is a *clean* faded group we withhold its
+	// own fraction from the threaded value and record it instead, so the group is
+	// faded once offscreen at composite time rather than per command (which would
+	// double-darken overlapping children). A non-clean faded box keeps threading
+	// own × inherited into every command exactly as before. A fully transparent
+	// box (effective 0) still paints nothing and hides its subtree, so the walk
+	// stops rather than emit a command, since DisplayCmd.Opacity 0 is reserved to
+	// mean "opaque/unset".
 	effective := inheritedOpacity
+	groupOpacity := float32(0)
 	if boxDeclaresOpacity(obj) {
 		o := obj.Style.Opacity
 		if o < 0 {
@@ -95,7 +98,11 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 		} else if o > 1 {
 			o = 1
 		}
-		effective *= o
+		if o > 0 && o < 1 && b.isCleanFadedGroup(obj) {
+			groupOpacity = o
+		} else {
+			effective *= o
+		}
 	}
 	if effective <= 0 {
 		return
@@ -109,6 +116,20 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 
 	childClip := inheritedClip
 	commandStart := b.list.Len()
+	// A nested group that would open on the same command as an enclosing
+	// recorded group is not recorded: its fade threads per-command inside the
+	// outer buffer instead. Safe (never loses a fade); the only case it touches
+	// is a decoration-less faded container whose first command is an already-
+	// grouped faded child.
+	recordThis := groupOpacity > 0 && !(len(b.groupHeadStack) > 0 && b.groupHeadStack[len(b.groupHeadStack)-1] == int32(commandStart))
+	// A clean faded box we decide not to record must still fade: its own fraction
+	// was withheld from effective above, so fold it back in here. It then paints
+	// per-command inside the enclosing group's buffer rather than vanishing (the
+	// enclosing group fades the whole buffer once by its own opacity on top).
+	if groupOpacity > 0 && !recordThis {
+		effective *= groupOpacity
+		groupOpacity = 0
+	}
 	if obj.Style != nil {
 		box := b.paintContextFor(obj, effective)
 		start := b.list.Len()
@@ -122,7 +143,14 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 		}
 		childClip = b.overflowClip(obj, childClip)
 	}
+	if recordThis {
+		b.groupHeadStack = append(b.groupHeadStack, int32(commandStart))
+	}
 	b.paintChildren(obj, childClip, effective)
+	if recordThis {
+		b.groupHeadStack = b.groupHeadStack[:len(b.groupHeadStack)-1]
+		b.list.AddGroup(groupOpacity, b.list.Len()-commandStart)
+	}
 	if z, ok := zIndexOf(obj.Style); ok {
 		commands := b.list.All()
 		for i := commandStart; i < len(commands); i++ {
@@ -142,6 +170,26 @@ func zIndexOf(s *style.ComputedStyle) (uint32, bool) {
 		return 0, false
 	}
 	return uint32(s.ZIndex), true
+}
+
+// isCleanFadedGroup reports whether obj's subtree contains no descendant with a
+// lifting z-index. It is the precondition for recording a faded group: a clean
+// group's every command carries the box's single Z, so List.SortStable keeps the
+// whole range contiguous and the rasterizer can render [Start,End) as one buffer.
+// The walk is bounded by the same arena depth the paint walk already allows, so
+// it adds no unbounded recursion. A false read is always safe — the box simply
+// falls back to the per-command path.
+func (b *Builder) isCleanFadedGroup(obj *layout.Object) bool {
+	for kid := obj.FirstKid; kid != 0; kid = b.arena.Get(kid).NextSibling {
+		k := b.arena.Get(kid)
+		if _, ok := zIndexOf(k.Style); ok {
+			return false
+		}
+		if !b.isCleanFadedGroup(k) {
+			return false
+		}
+	}
+	return true
 }
 
 // clipCommands intersects an ancestor's overflow clip into every command a box

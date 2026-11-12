@@ -29,6 +29,13 @@ type Builder struct {
 	// scrollOffset queries the JS runtime for an element's current scroll
 	// offset along one axis. nil means no element scrolling is active.
 	scrollOffset func(obj *layout.Object, prop string) float64
+	// groupHeadStack holds the commandStart ordinal of each currently-open clean
+	// faded group, outermost first. A nested group that would share its head
+	// command with an enclosing recorded group is not recorded separately (see
+	// paintBox): its fade threads per-command inside the outer buffer instead.
+	// Safe (never loses a fade); the only case it touches is a decoration-less
+	// faded container whose first command is an already-grouped faded child.
+	groupHeadStack []int32
 }
 
 // focusState groups the input state that influences text and control painting.

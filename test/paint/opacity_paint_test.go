@@ -7,12 +7,18 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// opFill returns the single opaque-background fill of the requested colour and
-// reports its carried opacity. The oracle values come from the Chromium
-// measurements in TASK-044 section 2: opacity:0 paints nothing, 0.5 reaches the
-// rasterizer as a real fade, 5 clamps to 1, and an ancestor's fraction applies
-// to its whole subtree.
+// The paint-side opacity oracles. The Chromium measurements behind the expected
+// values come from TASK-044 section 2: opacity:0 paints nothing, a fraction such
+// as 0.5 survives the style->paint trip as a real fade, 5 clamps to 1, and an
+// ancestor's fraction applies to its whole subtree exactly once.
+//
+// SP-8 moved the fade off the per-command path: a clean faded box is now recorded
+// as a paint.Group carrying its own opacity, and the group fades its subtree once
+// at composite. So the "value survived" checks read Group.OwnOpacity, and the
+// "counted once" check asserts no member command *also* carries a partial fade
+// (that would darken the content twice -- the original regression).
 
+// opFill returns the single opaque-background fill of the requested colour.
 func opFill(t *testing.T, cmds []paint.DisplayCmd, r, g, b uint8) paint.DisplayCmd {
 	t.Helper()
 	got := visSolidFills(cmds, r, g, b)
@@ -23,6 +29,12 @@ func opFill(t *testing.T, cmds []paint.DisplayCmd, r, g, b uint8) paint.DisplayC
 }
 
 func opClose(a, b float32) bool { return math.Abs(float64(a-b)) < 1e-6 }
+
+// partialFade reports whether c is a painted command carrying an opacity strictly
+// between 0 and 1 -- a per-command fade that would stack on top of a group fade.
+func partialFade(c paint.DisplayCmd) bool {
+	return (c.Kind == paint.CmdText || c.Kind == paint.CmdFill) && c.Opacity > 0 && c.Opacity < 1
+}
 
 // TestOpacityZeroDropsBox is the primary paint-side defect. Before the fix a
 // box with opacity:0 was emitted into the display list with Opacity==0, and the
@@ -49,8 +61,10 @@ func TestOpacityZeroDropsBox(t *testing.T) {
 	}
 }
 
-// TestOpacityFractionReachesCommand proves the value survives the whole
-// style->paint trip as an actual fraction, not as the opaque sentinel 0/1.
+// TestOpacityFractionReachesCommand proves the fraction survives the whole
+// style->paint trip as an actual fade, not as the opaque sentinel. Under the
+// group model each faded box is recorded as its own clean group carrying the
+// declared value (the leading-dot .5 shorthand included).
 // qc:BR-196
 func TestOpacityFractionReachesCommand(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -61,19 +75,26 @@ func TestOpacityFractionReachesCommand(t *testing.T) {
 	<div class="half"></div>
 	<div class="dot"></div>
 	</body></html>`
-	cmds := visDisplayList(t, html)
+	dl := gpLayer(t, html)
 
-	if op := opFill(t, cmds, 20, 20, 120).Opacity; !opClose(op, 0.5) {
-		t.Errorf("opacity:0.5 carried %v in the display command, want 0.5", op)
+	gs := dl.Groups()
+	if len(gs) != 2 {
+		t.Fatalf("Groups() = %d, want 2 (two sibling faded boxes, one clean group each)", len(gs))
 	}
-	if op := opFill(t, cmds, 120, 20, 20).Opacity; !opClose(op, 0.5) {
-		t.Errorf("opacity:.5 carried %v in the display command, want 0.5", op)
+	for _, g := range gs {
+		if !opClose(g.OwnOpacity, 0.5) {
+			t.Errorf("group OwnOpacity = %v, want 0.5: the fraction must survive as a real fade, not the opaque sentinel", g.OwnOpacity)
+		}
 	}
+	// Both boxes still paint.
+	opFill(t, dl.All(), 20, 20, 120)
+	opFill(t, dl.All(), 120, 20, 20)
 }
 
 // TestOpacityAboveOnePaintsOpaque pins the clamp measured in section 2: Chromium
 // reads opacity:5 back as 1. The box is painted, and it carries exactly 1.0, so
-// the out-of-range value must not survive to the rasterizer as 5.
+// the out-of-range value must not survive to the rasterizer as 5. An opacity of
+// 1 is not a fade, so it is not recorded as a group either.
 // qc:BR-196
 func TestOpacityAboveOnePaintsOpaque(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -92,8 +113,9 @@ func TestOpacityAboveOnePaintsOpaque(t *testing.T) {
 
 // TestGroupOpacityAppliesToSubtree is the accumulation half of the fix: opacity
 // does not inherit, but a translucent ancestor renders its whole subtree inside
-// one faded group, so an opaque child of an opacity:0.5 parent must itself reach
-// the rasterizer at 0.5, not at 1.
+// one faded group. Under SP-8 the parent is a clean group whose OwnOpacity is the
+// declared fraction, and both the parent's own fill and the opaque child fill are
+// group members carrying no partial fade of their own.
 // qc:BR-196
 func TestGroupOpacityAppliesToSubtree(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -105,40 +127,37 @@ func TestGroupOpacityAppliesToSubtree(t *testing.T) {
 		<div class="child"></div>
 	</div>
 	</body></html>`
-	cmds := visDisplayList(t, html)
+	dl := gpLayer(t, html)
 
-	parent := opFill(t, cmds, 200, 0, 0)
-	child := opFill(t, cmds, 0, 0, 200)
-	if !opClose(parent.Opacity, 0.5) {
-		t.Errorf("opacity:0.5 parent carried %v, want 0.5", parent.Opacity)
+	gs := dl.Groups()
+	if len(gs) != 1 {
+		t.Fatalf("Groups() = %d, want 1 (the opacity:0.5 parent is one clean group spanning its subtree)", len(gs))
 	}
-	if !opClose(child.Opacity, 0.5) {
-		t.Errorf("opaque child of an opacity:0.5 parent carried %v, want 0.5 (group opacity applies to the subtree)", child.Opacity)
+	if !opClose(gs[0].OwnOpacity, 0.5) {
+		t.Errorf("parent group OwnOpacity = %v, want 0.5", gs[0].OwnOpacity)
 	}
-}
-
-// opPaintedOpacity returns the opacity carried by every text and fill command,
-// which is the whole product the rasterizer will apply. A shape whose commands
-// disagree has faded some part of it more than once.
-func opPaintedOpacity(cmds []paint.DisplayCmd) []float32 {
-	var out []float32
-	for _, c := range cmds {
-		if c.Kind == paint.CmdText || c.Kind == paint.CmdFill {
-			out = append(out, c.Opacity)
+	parent := opFill(t, dl.All(), 200, 0, 0)
+	child := opFill(t, dl.All(), 0, 0, 200)
+	for _, c := range []paint.DisplayCmd{parent, child} {
+		if partialFade(c) {
+			t.Errorf("subtree member fill carried per-command opacity %v, want the group to hold the fade once", c.Opacity)
 		}
 	}
-	return out
 }
 
 // TestGroupOpacityCountedOncePerElement is the regression oracle. Accumulating
-// opacity down the box tree is right, but a box layout synthesized carries a
-// verbatim copy of the generating element's computed style
-// (style.AnonymousBlockStyle and style.inheritStyle both do `s = *parent`), and
-// that element already contributed. Multiplying the copy faded raw text once per
-// generated box: the first pass of this fix measured 0.25 for
-// `opacity:0.5` + raw text and 0.125 for the same text beside a block sibling,
-// where Chromium applies the declaration once no matter how many boxes layout
-// inserts.
+// opacity down the box tree must apply one declaration exactly once, whatever
+// boxes layout inserts. A box layout synthesizes carries a verbatim copy of the
+// generating element's computed style (style.AnonymousBlockStyle and
+// style.inheritStyle both do `s = *parent`); the first pass of the original fix
+// multiplied that copy and faded raw text twice (0.25 for `opacity:0.5`) or three
+// times (0.125 beside a block sibling), where Chromium applies the declaration
+// once.
+//
+// Under the group model the invariant reads two ways: the faded box is recorded as
+// a single clean group whose OwnOpacity is the Chromium-measured fraction, and no
+// member command carries a partial fade that would stack a second time on top of
+// the group's.
 //
 // Every expectation is a Chromium measurement taken with
 // scripts/verify-task044-group-opacity.js on this machine (viewport 400x200,
@@ -154,23 +173,20 @@ func TestGroupOpacityCountedOncePerElement(t *testing.T) {
 		body     string
 	}{
 		{
-			// The control shape: an element child owns its own box, so even the
-			// buggy walk faded it exactly once.
+			// The control shape: an element child owns its own box.
 			name: "span", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
 			body: `<div style="opacity:0.5"><span>anonymous text</span></div>`,
 		},
 		{
 			// Raw text: layout puts it in a box of its own whose style is the
-			// faded div's copy. This is the shape the first pass regressed;
-			// before the whole fix it was right by accident.
+			// faded div's copy. This is the shape the first pass regressed.
 			name: "anon", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
 			body: `<div style="opacity:0.5">anonymous text</div>`,
 		},
 		{
 			// Raw text beside a block sibling adds the anonymous block wrapper
 			// layout invents to stack the run against it, so the copy was
-			// multiplied a third time. The sibling's own fill belongs to an
-			// element and fades once.
+			// multiplied a third time.
 			name: "anondiv", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
 			body: `<div style="opacity:0.5">anonymous text<div style="background:rgb(10,10,120)">bg</div></div>`,
 		},
@@ -189,17 +205,14 @@ func TestGroupOpacityCountedOncePerElement(t *testing.T) {
 		{
 			// The anonymous-table half of the same rule: raw text beside a block
 			// inside a faded cell makes layout splice an anonymous cell whose
-			// style is a copy of that cell's (style.AnonymousTableStyle), so the
-			// declaration was counted once per wrapper.
+			// style is a copy of that cell's (style.AnonymousTableStyle).
 			name: "tableAnon", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
 			body: `<table><tbody><tr><td style="opacity:0.5">raw cell text<div>block</div></td></tr></tbody></table>`,
 		},
 		{
 			// Generated content is the exception, not a copy: a ::before box owns
 			// its own cascade result, so its declared opacity must still fade
-			// exactly once. Chromium measured 0.506 for this markup with no other
-			// text on the page, and 1.000 for the same pseudo without the
-			// declaration.
+			// exactly once.
 			name: "pseudoOwn", want: 0.5, chromium: "min_lum 126.0 -> glyph alpha 0.506",
 			css:  `#t::before{content:"gen";opacity:0.5}`,
 			body: `<div id="t"></div>`,
@@ -209,14 +222,17 @@ func TestGroupOpacityCountedOncePerElement(t *testing.T) {
 		t.Run(s.name, func(t *testing.T) {
 			html := `<!DOCTYPE html><html><head><style>html,body{margin:0}body{font:16px serif;color:#000}` +
 				s.css + `</style></head><body>` + s.body + `</body></html>`
-			got := opPaintedOpacity(visDisplayList(t, html))
-			if len(got) == 0 {
-				t.Fatalf("shape painted nothing; want text or fill commands to check")
+			dl := gpLayer(t, html)
+			gs := dl.Groups()
+			if len(gs) != 1 {
+				t.Fatalf("Groups() = %d, want 1 (one faded declaration is one clean group): %s", len(gs), s.chromium)
 			}
-			for i, op := range got {
-				if !opClose(op, s.want) {
-					t.Errorf("command %d carried opacity %v, want %v (Chromium %s: one declaration is counted once, whatever boxes layout inserts)",
-						i, op, s.want, s.chromium)
+			if !opClose(gs[0].OwnOpacity, s.want) {
+				t.Errorf("group OwnOpacity = %v, want %v (Chromium %s)", gs[0].OwnOpacity, s.want, s.chromium)
+			}
+			for _, c := range dl.All() {
+				if partialFade(c) {
+					t.Errorf("member command carried per-command opacity %v; the declaration would be counted twice on top of the group fade (Chromium %s)", c.Opacity, s.chromium)
 				}
 			}
 		})
