@@ -222,3 +222,70 @@ func TestManagerLastTabClosesWindow(t *testing.T) {
 	default:
 	}
 }
+
+func TestManagerSharesProfileStores(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 1: %v", err)
+	}
+	f2, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 2: %v", err)
+	}
+
+	if f1.bookmarks != f2.bookmarks {
+		t.Error("windows do not share one bookmark store")
+	}
+	if f1.history != f2.history {
+		t.Error("windows do not share one history store")
+	}
+	if f1.storage != f2.storage {
+		t.Error("windows do not share one localStorage registry")
+	}
+	if f1.client != f2.client {
+		t.Error("windows do not share one HTTP client")
+	}
+	if f1.bookmarks == nil {
+		t.Fatal("bookmark store is nil; a non-private config with a writable HOME must load one")
+	}
+	f1.bookmarks.Toggle("https://shared.test/", "Shared")
+	if !f2.bookmarks.Contains("https://shared.test/") {
+		t.Error("a bookmark added in window 1 is not visible in window 2")
+	}
+}
+
+func TestManagerPerWindowTabIsolation(t *testing.T) {
+	m, err := newWindowManager(testManagerConfig(t))
+	if err != nil {
+		t.Fatalf("newWindowManager: %v", err)
+	}
+	t.Cleanup(m.cleanup)
+
+	f1, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 1: %v", err)
+	}
+	f2, err := m.spawn("")
+	if err != nil {
+		t.Fatalf("spawn 2: %v", err)
+	}
+
+	if f1.tabMgr == f2.tabMgr {
+		t.Fatal("windows share one tab manager")
+	}
+	before := f2.tabMgr.Count()
+	f1.newTab()
+	f1.newTab()
+	if f1.tabMgr.Count() != before+2 {
+		t.Fatalf("f1 tab count = %d, want %d", f1.tabMgr.Count(), before+2)
+	}
+	if f2.tabMgr.Count() != before {
+		t.Fatalf("f2 tab count changed to %d; windows are not isolated", f2.tabMgr.Count())
+	}
+}
