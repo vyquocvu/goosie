@@ -227,10 +227,17 @@ def case_stale_baseline_fails():
 # "declared == measured", so an inflated declaration must fail against a fixed
 # measurement.  If a real render changes one of these counts, the parity run
 # itself goes red and both sides are re-measured together.
+#
+# selectors/03 re-measured 3 -> 2 on 2026-11-12 by BR-272: the band at rows
+# (579, 599) held 0 goosie pixels before the fix and 18 after, against 3017 in
+# Chromium's exact rows, so `blank == zero ink in those rows` no longer flags it.
+# The drop-cap content it was counting is still missing (the drift view keeps it
+# `shifted`, never `truly_blank`); only the band's physical ink count moved, and
+# render-known-gaps.json moved with it in the same commit.
 MEASURED = {
     "forms/04-advanced-inputs.png": 1,
     "html-features/01-forms-complete.png": 1,
-    "selectors/03-pseudo-elements.png": 3,
+    "selectors/03-pseudo-elements.png": 2,
     "unicode/02-emoji-symbols.png": 1,
 }
 

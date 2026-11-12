@@ -1525,6 +1525,21 @@
     "enforced": false
   },
   {
+    "id": "BR-272",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/vertical_align_classes_test.go:TestDeclaredLineHeightShorterThanTheRunItCarriesOverflowsIt",
+      "test/layout/vertical_align_classes_test.go:TestVerticalAlignClassesGiveTheLineBoxItsOwnHeight",
+      "test/layout/vertical_align_classes_test.go:TestVerticalAlignClassesPlaceTheChipWhereChromiumPutsIt"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

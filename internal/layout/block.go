@@ -203,12 +203,12 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	rowActive := false
 	// What a row owes the container's own font, read when the first row opens.
 	// A row is a line whose content is only atomic inline-level boxes, and such
-	// a line still has to contain the strut (atomicLineExtent, CSS 2.1 10.6.1).
+	// a line still has to contain the strut (lineExtent, CSS 2.1 10.6.1).
 	// The tallest margin box alone leaves out whatever the strut reaches below
 	// the baseline, so a row of chips or icons is short by that much and every
 	// block under it drifts up by the same amount per row. Reading it here keeps
 	// the metrics call off every block that has no inline-block kid at all.
-	var strutAbove, strutBelow float32
+	var sm strutMetrics
 	// Once the container has inline text of its own, though, its inline-blocks
 	// belong to that text's line list: the inline pass flows them as one
 	// unbreakable word each, which is what lets a title, its tag pills and its
@@ -262,18 +262,18 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 		// descent still belongs below it. Each kid is currently placed with its
 		// margin box at the row top, so the offset its class asks for is exactly
 		// how far it has to travel.
-		boxes := make([]atomicBox, len(rowKids))
+		boxes := make([]runDemand, len(rowKids))
 		for i, rk := range rowKids {
-			boxes[i] = boxOfAtomic(a, rk)
+			boxes[i] = atomicDemand(boxOfAtomic(a, rk), sm)
 		}
-		base, rowBox := atomicLineExtent(strutAbove, strutBelow, boxes)
+		fr := lineExtent(sm, boxes)
 		for i, rk := range rowKids {
-			if d := atomicLineTop(boxes[i], base, rowBox); d != 0 {
+			if d := fr.atomicTop(boxes[i].box); d != 0 {
 				shiftSubtree(a, rk, 0, d)
 			}
 		}
 		rowKids = rowKids[:0]
-		if bottom := rowTop + rowBox; bottom > y {
+		if bottom := rowTop + fr.height; bottom > y {
 			y = bottom
 		}
 		rowActive = false
@@ -484,7 +484,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						rowTop = y
 						if st := a.Get(id).Style; st != nil {
 							asc, desc, strutLine := fontHeights(a.Metrics, st.FontSize, st.FontSlot(), st.LineHeight)
-							strutAbove, strutBelow = strutSplit(asc, desc, strutLine)
+							sm = ofStrut(asc, desc, strutLine)
 						}
 					}
 					k.X = contentX + rowCursor + k.MarginLeft

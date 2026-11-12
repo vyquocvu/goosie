@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>vertical-align classes resolve against the line's baseline (GOOSIE-INLINEBASELINE-001)</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; }
+    .label { font-size: 12px; color: #666; margin: 0 0 2px 0; }
+    .row { width: 380px; }
+    /* The chip is deliberately shorter than the strut on every side: a box that
+       fills its line cannot show which of the line's two halves it was aligned
+       against. */
+    .chip { display: inline-block; width: 40px; height: 4px; background: #3498db; }
+    .tall { display: inline-block; width: 90px; height: 26px; margin: 0 10px 10px 0; background: #9ecae1; }
+    .band { height: 6px; margin: 0 0 8px 0; }
+    .b1 { background: #238b45; }
+    .b2 { background: #a63603; }
+    .stretch { width: 380px; line-height: 50px; background: #f7f7f7; }
+    .big { font-size: 64px; }
+</style>
+</head>
+<body>
+    <!-- All the evidence sits above the fold on purpose: parity scores an 800x600
+         viewport screenshot, so a shape that starts below y=600 is a shape no run
+         ever compares. -->
+    <div class="label">a 4px chip on a 16px strut, one row per vertical-align class</div>
+    <div class=row><span class=chip style="vertical-align:baseline"></span></div>
+    <div class="band b1"></div>
+    <div class=row><span class=chip style="vertical-align:top"></span></div>
+    <div class="band b1"></div>
+    <div class=row><span class=chip style="vertical-align:bottom"></span></div>
+    <div class="band b1"></div>
+    <div class=row><span class=chip style="vertical-align:text-top"></span></div>
+    <div class="band b1"></div>
+    <div class=row><span class=chip style="vertical-align:text-bottom"></span></div>
+    <div class="band b1"></div>
+    <div class=row><span class=chip style="vertical-align:5px"></span></div>
+    <div class="band b2"></div>
+    <div class=row><span class=chip style="vertical-align:-5px"></span></div>
+    <div class="band b2"></div>
+
+    <div class="label">text beside a taller empty inline-block - the line grows above the baseline and still pays the strut's descent below it</div>
+    <div class=row>words <span class=tall></span> more</div>
+    <div class="band b2"></div>
+
+    <div class="label">a 50px line-height carrying a 64px run - the run overflows its own declared height</div>
+    <div class=stretch>Fifty <span class=big>Big</span> here</div>
+    <div class="band b2"></div>
+</body>
+</html>

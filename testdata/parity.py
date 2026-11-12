@@ -100,7 +100,12 @@ PASS_AT = 90.0
 # of nothing but inline-blocks and images still owes the block's font a strut, and
 # that strut reaches below the baseline; the green and rust bands sit under nine
 # such rows, so a line box sized only from the tallest margin box drops them ~30px.
-MIN_SCORED_FIXTURES = 110
+# 111: layout-features/08-vertical-align-classes.html (GOOSIE-INLINEBASELINE-001) -
+# every `vertical-align` class on the same 4px chip over the same 16px strut, once
+# alone on its line and once after a word, each row followed by a solid band; the
+# classes move the baseline or stretch the line, so a placement that ignores them
+# slides every band below the row it follows.
+MIN_SCORED_FIXTURES = 111
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
