@@ -911,6 +911,11 @@ func (r *Runtime) setupWindow() {
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	_ = nav.Set("userActivation", activation)
 	_ = win.Set("navigator", nav)
+	// screen sits next to navigator because both are geometry-free window
+	// singletons: setupWindow runs for every runtime, while the viewport accessors
+	// innerWidth mirrors live in installCSSOMView, which a DOM-less runtime never
+	// installs.
+	r.setupScreen(win)
 
 	_ = win.Set("matchMedia", func(call goja.FunctionCall) goja.Value {
 		q := ""
