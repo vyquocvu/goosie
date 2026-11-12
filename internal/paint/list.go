@@ -20,6 +20,31 @@ import (
 type List struct {
 	cmds   []DisplayCmd
 	bounds frame.Rect
+	// pending holds the groups registered during the walk, each as an append-
+	// ordinal span. Build re-derives them as sorted index spans and clears this.
+	pending []pendingGroup
+}
+
+// Group is one clean faded opacity group: the contiguous half-open command range
+// [Start,End) in paint order that an opacity-declaring box emitted, to be faded
+// once by OwnOpacity and composited onto the destination by the rasterizer.
+// Bounds is the device-pixel union of the range's command bounds (a tile fast
+// reject and a damage hint). Parent is the enclosing group's index in Groups(),
+// or -1 for a top-level group. Only clean groups are recorded (builder isClean-
+// FadedGroup), which is what keeps [Start,End) contiguous through SortStable.
+type Group struct {
+	OwnOpacity float32
+	Bounds     frame.Rect
+	Start      int
+	End        int
+	Parent     int
+}
+
+// pendingGroup is a group as the walk leaves it: its own opacity over the append
+// ordinals [first,last), before the list has been sorted.
+type pendingGroup struct {
+	own         float32
+	first, last int32
 }
 
 // NewList returns a builder with room for n commands. The capacity is a hint
@@ -44,11 +69,15 @@ func (l *List) Reset() {
 	}
 	l.cmds = l.cmds[:0]
 	l.bounds = frame.Rect{}
+	l.pending = l.pending[:0]
 }
 
 // Append adds a command and folds it into the running bounds, so Bounds is O(1)
-// and a frame never recomputes the union.
+// and a frame never recomputes the union. The command's Seq is stamped to its
+// append ordinal here; a faded group recorded with AddGroup spans ordinals, and
+// Build maps those onto the sorted slab through this field.
 func (l *List) Append(c DisplayCmd) {
+	c.Seq = int32(len(l.cmds))
 	l.cmds = append(l.cmds, c)
 	if b, ok := c.Bounds(); ok {
 		if len(l.cmds) == 1 || l.bounds.Empty() {
@@ -57,6 +86,19 @@ func (l *List) Append(c DisplayCmd) {
 			l.bounds = l.bounds.Union(b)
 		}
 	}
+}
+
+// AddGroup records a clean faded group covering the most recent count commands,
+// faded once by own opacity at composite time. The builder calls it right after
+// painting a clean opacity box, whose whole subtree is exactly those commands.
+// A count that does not resolve to a positive opacity is a no-op: an opaque or
+// fully transparent box is not a group (the latter is dropped before it paints).
+func (l *List) AddGroup(own float32, count int) {
+	if count <= 0 || own <= 0 || own >= 1 {
+		return
+	}
+	last := int32(len(l.cmds))
+	l.pending = append(l.pending, pendingGroup{own: own, first: last - int32(count), last: last})
 }
 
 // Len returns the number of commands.
@@ -103,17 +145,89 @@ func (l *List) Build(version uint64) *LayerDL {
 	// and a text command's bounds walk its glyphs, so recomputing them there
 	// costs O(tiles x commands x glyphs) per frame. The sidecar pays the same
 	// walk exactly once per content version; values are identical to Bounds().
+	var cb []cmdBounds
 	if n := len(l.cmds); n > 0 {
-		cb := make([]cmdBounds, n)
+		cb = make([]cmdBounds, n)
 		for i := range l.cmds {
 			r, ok := l.cmds[i].Bounds()
 			cb[i] = cmdBounds{r: r, ok: ok}
 		}
 		dl.cb = cb
 	}
+	// Recover groups from the sorted slab. Build is always called after
+	// SortStable (engine/paint.go), and a clean group's members share one Z, so
+	// they stayed a contiguous run; Start is where the head landed, End Start+len.
+	if len(l.pending) > 0 {
+		dl.groups, dl.firstGroupAt = reconstructGroups(l.cmds, cb, l.pending)
+	}
 	l.cmds = nil
 	l.bounds = frame.Rect{}
+	l.pending = l.pending[:0]
 	return dl
+}
+
+// reconstructGroups maps every recorded ordinal span onto the sorted command
+// list. posOf[Seq] gives the sorted position of the command appended as ordinal
+// Seq; a clean group's span is contiguous there, so End = Start + (last-first).
+// Groups are ordered by Start then by End descending, so a parent is emitted
+// before each group it encloses; Parent and firstGroupAt fall out of a single
+// left-to-right pass with a stack of still-open ranges.
+func reconstructGroups(cmds []DisplayCmd, cb []cmdBounds, pending []pendingGroup) ([]Group, []int32) {
+	firstGroupAt := make([]int32, len(cmds))
+	for i := range firstGroupAt {
+		firstGroupAt[i] = -1
+	}
+	if len(pending) == 0 {
+		return nil, firstGroupAt
+	}
+	posOf := make([]int32, len(cmds))
+	for i := range cmds {
+		posOf[cmds[i].Seq] = int32(i)
+	}
+	mapped := make([]Group, 0, len(pending))
+	for _, p := range pending {
+		start := int(posOf[p.first])
+		end := start + int(p.last-p.first)
+		var b frame.Rect
+		for i := start; i < end && i < len(cb); i++ {
+			if cb[i].ok {
+				if b.Empty() {
+					b = cb[i].r
+				} else {
+					b = b.Union(cb[i].r)
+				}
+			}
+		}
+		mapped = append(mapped, Group{OwnOpacity: p.own, Bounds: b, Start: start, End: end, Parent: -1})
+	}
+	slices.SortStableFunc(mapped, func(a, b Group) int {
+		switch {
+		case a.Start < b.Start:
+			return -1
+		case a.Start > b.Start:
+			return 1
+		case a.End > b.End:
+			return -1
+		case a.End < b.End:
+			return 1
+		}
+		return 0
+	})
+	groups := make([]Group, 0, len(mapped))
+	var stack []int
+	for idx := range mapped {
+		g := mapped[idx]
+		for len(stack) > 0 && groups[stack[len(stack)-1]].End <= g.Start {
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) > 0 {
+			g.Parent = stack[len(stack)-1]
+		}
+		groups = append(groups, g)
+		firstGroupAt[g.Start] = int32(len(groups) - 1)
+		stack = append(stack, len(groups)-1)
+	}
+	return groups, firstGroupAt
 }
 
 // LayerDL is one layer's display list after publication: immutable, self-
@@ -130,6 +244,13 @@ type LayerDL struct {
 	// instead of re-walking glyphs per tile; nil (a LayerDL built outside
 	// List.Build, only in tests) falls back to live Bounds calls.
 	cb []cmdBounds
+	// groups holds the clean faded groups reconstructed by Build, in paint order.
+	// A list with no groups leaves it nil.
+	groups []Group
+	// firstGroupAt[i] is the index into groups of the group starting at command
+	// i, or -1. It lets the rasterizer find a group's start in O(1) while walking
+	// the list once, without a scan per command.
+	firstGroupAt []int32
 }
 
 // cmdBounds is one frozen command bounds entry.
@@ -174,6 +295,24 @@ func (d *LayerDL) At(i int) DisplayCmd { return d.cmds[i] }
 
 // All returns every command in paint order. The slice is shared and read-only.
 func (d *LayerDL) All() []DisplayCmd { return d.cmds }
+
+// Groups returns the clean faded groups in paint order. Nested groups appear
+// after their parent and inside its [Start,End). Nil when the list has none.
+func (d *LayerDL) Groups() []Group { return d.groups }
+
+// GroupAt returns the group whose range starts at command i. The rasterizer
+// jumps the whole range when a group starts at the walk index, so nested groups
+// are discovered by containment rather than a separate traversal.
+func (d *LayerDL) GroupAt(i int) (Group, bool) {
+	if i < 0 || i >= len(d.firstGroupAt) {
+		return Group{}, false
+	}
+	gi := d.firstGroupAt[i]
+	if gi < 0 {
+		return Group{}, false
+	}
+	return d.groups[gi], true
+}
 
 // ContentDamage includes old and new ink, so reflow cannot leave displaced pixels cached.
 func ContentDamage(before, after frame.Content) frame.Rect {

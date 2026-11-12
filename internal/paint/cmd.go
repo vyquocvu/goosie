@@ -178,6 +178,13 @@ type DisplayCmd struct {
 	// Z orders this command within its layer. The list is sorted once per
 	// content version, never per frame or per tile; see List.SortStable.
 	Z uint32
+
+	// Seq is the command's append ordinal in the list that produced it. It is set
+	// by List.Append and travels with the command through List.SortStable, so a
+	// faded group recorded by ordinal range can be re-derived from the *sorted*
+	// slab (see List.Build). Excluded from sameCommand: it is positional identity,
+	// not painted content.
+	Seq int32
 }
 
 // Bounds returns the box the command touches in content space, or false when it
