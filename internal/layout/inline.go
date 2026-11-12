@@ -1137,6 +1137,23 @@ func boxOfAtomic(a *Arena, id ObjectID) atomicBox {
 		(!isFormControl(k) && (isReplacedElement(k) || !hasInFlowLineBoxes(a, id))) {
 		return b
 	}
+	// Appearance-only widgets put their baseline on their bottom *border* edge:
+	// not on the bottom margin edge the way an image or an empty inline-block
+	// does, and not on an interior text line the way the controls that render a
+	// value do. Measured on Chromium 2026-11-12 with the UA margins in place: a
+	// 13px checkbox with 3px above and below answers a 20px line at offset 3 on
+	// the 16px strut (above 16 = margin-top + height, below 3 = margin-bottom),
+	// a 16px range with 2px of margin answers 22 at offset 2, the same checkbox
+	// with `margin: 10px` answers 33 at offset 10, and with `margin: 5px 0 15px`
+	// 33 at offset 5 - while a 13px *image* on the same strut takes 18 at offset
+	// 1, and so does `input[type=image]` given the same 13px box: those align on
+	// their bottom margin edge. So the widget's own box is what rides the
+	// baseline and only its bottom margin hangs under it, which is exactly
+	// `below = margin-bottom` here.
+	if isAppearanceWidget(k) {
+		b.below = k.MarginBottom
+		return b
+	}
 	// CSS 2.1 10.8: an inline-block with in-flow line boxes and visible overflow
 	// aligns its LAST LINE's baseline, not its bottom margin edge, so the descent
 	// of that line plus everything under it (padding, border, margin) sits below
@@ -1168,6 +1185,23 @@ func isFormControl(k *Object) bool {
 	}
 	switch k.Node.Data {
 	case "input", "select", "textarea", "button":
+		return true
+	}
+	return false
+}
+
+// isAppearanceWidget names the inputs whose whole box *is* the widget: there is
+// no interior text line for a baseline to come from, so they sort as form
+// controls for every other purpose and take their baseline from their own bottom
+// border edge instead (see boxOfAtomic). Measured 2026-11-12: checkbox, radio and
+// range answer here, while the widgets that render a value - text input, number,
+// button, select, textarea, colour picker - do not.
+func isAppearanceWidget(k *Object) bool {
+	if k.Node == nil || k.Node.Data != "input" {
+		return false
+	}
+	switch strings.ToLower(k.Node.GetAttribute("type")) {
+	case "checkbox", "radio", "range":
 		return true
 	}
 	return false

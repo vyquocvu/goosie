@@ -1555,6 +1555,22 @@
     "enforced": false
   },
   {
+    "id": "BR-274",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/control_baseline_test.go:TestAppearanceWidgetsAlignOnTheirBottomBorderEdge",
+      "test/layout/control_baseline_test.go:TestControlsThatRenderAValueKeepTheirInteriorBaseline",
+      "test/layout/control_baseline_test.go:TestWidgetBaselineSidesResolveAgainstEveryStrut",
+      "test/layout/control_baseline_test.go:TestWidgetBaselineUnderAlignClassesAndOnAtomsThatKeepTheirEdge"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

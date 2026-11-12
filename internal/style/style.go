@@ -978,6 +978,15 @@ input[type=image] { display: inline; }
    so they are inline-block like <button> below and sized by replacedSize. */
 input[type=submit], input[type=reset], input[type=button] { display: inline-block; }
 input[type=hidden] { display: none; }
+/* The appearance-only widgets carry UA margins, and they are not decoration:
+   a checkbox's baseline sits on its bottom *border* edge, so the 3px above and
+   3px below are what lift a 13px box out of a 16px strut into a 20px line at
+   offset 3 (Chromium computed margins, measured 2026-11-12: checkbox 3/3/3/4,
+   radio 3/3/0/5, range 2 all round). They live in the cascade rather than in
+   layout because an author margin: 0 has to win, as it does in the reference. */
+input[type=checkbox] { margin: 3px 3px 3px 4px; }
+input[type=radio] { margin: 3px 3px 0 5px; }
+input[type=range] { margin: 2px; }
 /* Chrome lays a button out as an inline-level box that shrinks to its label, so
    a row of buttons sits side by side, and gives it the platform chrome instead
    of letting it look like its own label: the control font rather than the

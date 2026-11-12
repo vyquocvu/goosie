@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Forms - control baselines and UA margins (GOOSIE-CONTROLBASELINE-001)</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; }
+    .label { font-size: 12px; color: #666; margin: 0 0 2px 0; }
+    .row { width: 520px; background: #f7f7f7; }
+    .band { height: 6px; margin: 0 0 6px 0; }
+    .b1 { background: #238b45; }
+    .b2 { background: #a63603; }
+    /* A checkbox is 13px and its UA margins are 3px above and below, so it asks
+       16px above the baseline on its own: a line carrying one is 20px, two
+       pixels taller than the 16px strut, and the widget sits 3px in. */
+    .f24 { font-size: 24px; }
+    /* 64px of font is a strut of 59 over 15, which outgrows the widget: its box
+       has to ride 46px down from the line top, not 59. */
+    .f64 { font-size: 64px; }
+    .lh { line-height: 50px; }
+    input[type=range] { width: 160px; }
+</style>
+</head>
+<body>
+    <!-- All the evidence sits above the fold on purpose: parity scores an 800x600
+         viewport screenshot, so a shape below y=600 is a shape no run compares. -->
+    <div class="label">checkbox, radio and range on one line - the range's 16px box plus its 2px of margin decides the baseline (22px), so the checkbox lands 5px down and the text that follows rides the same line</div>
+    <div class=row>Label <input type=checkbox> <input type=radio> <input type=range> after</div>
+    <div class="band b1"></div>
+
+    <div class=label>a 24px line (strut 22 over 6) and a 50px strut (30 over 20): the widget's own 16/3 demand stops being the tallest thing on the line, so its box drops 9px and 17px down respectively while the text stays on the strut</div>
+    <div class="row f24">Label <input type=checkbox> after</div>
+    <div class="band b2"></div>
+    <div class="row lh">Label <input type=checkbox> after</div>
+    <div class="band b1"></div>
+
+    <div class="row f64">Label <input type=checkbox> after</div>
+    <div class="band b2"></div>
+
+    <div class="label">author margins override the UA ones and are the same arithmetic - margin: 10px 0 lifts the line to 33px with the box 10px in, margin: 5px 0 15px answers 33px with the box 5px in because only the bottom margin hangs under the baseline</div>
+    <div class=row><input type=checkbox style="margin:10px 0"><span>&nbsp;</span><input type=checkbox style="margin:5px 0 15px 0"></div>
+    <div class="band b1"></div>
+
+    <div class="label">and the two edges a widget does not decide alone - vertical-align: top pins its 19px margin box to the line top, -5px lowers its own baseline and leaves 8px below it</div>
+    <div class=row><input type=checkbox style=vertical-align:top><span>&nbsp;</span><input type=checkbox style="vertical-align:-5px"></div>
+    <div class="band b2"></div>
+
+    <div class="label">the controls this slice must leave alone: a text field, a button and a select align on the interior baseline of the value they render, so each line equals its own box</div>
+    <div class=row><input type=text value=typing> <button>Go</button> <select><option>one</option></select></div>
+    <div class="band b1"></div>
+    <div class=row>Text <input type=text value=field> more <button>Save</button> tail</div>
+    <div class="band b2"></div>
+</body>
+</html>

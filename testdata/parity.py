@@ -110,7 +110,14 @@ PASS_AT = 90.0
 # line height rather than a margin box: a 64px run with `vertical-align: bottom`
 # takes the line's baseline 24px down with it, and a 64px run under
 # `line-height: 10px` starts its ink 32px above the line it belongs to.
-MIN_SCORED_FIXTURES = 112
+# 113: forms/09-control-baseline.html (GOOSIE-CONTROLBASELINE-001) - checkbox,
+# radio and range align on their own bottom BORDER edge and carry UA margins, so
+# a 13px box asks 16px above the baseline and every band under a row of controls
+# rides 2 to 13px lower than a strut-only line gives it; the fixture also stacks
+# the controls that align on an interior baseline instead - a text field, a
+# button and a select - so a rule that reaches past the widgets moves a band this
+# corpus compares.
+MIN_SCORED_FIXTURES = 113
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
