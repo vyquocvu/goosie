@@ -131,7 +131,7 @@ func importRef(stmt string) (string, bool) {
 		if !ok {
 			return "", false
 		}
-		ref = t.Payload
+		ref = css.URLPayload(t)
 		remainder = strings.TrimSpace(rest[t.End:])
 	} else if len(rest) > 0 && (rest[0] == '"' || rest[0] == '\'') {
 		end := stringEnd(rest, 0)
@@ -147,11 +147,17 @@ func importRef(stmt string) (string, bool) {
 	return ref, true
 }
 
+// unquote takes the string a @import or url() payload denotes: the delimiter
+// pair comes off and CSS escapes decode (CSS Syntax L3 4.3.7). Both halves are
+// measured, not assumed - `@import url("su\62.css")`, `@import "su\62.css"`,
+// `@import url(su\62.css)`, `@import url('su\62.css')` and
+// `@import url("su\62\2e css")` all fetched and applied /sub.css in Chromium
+// (measured 2026-11-12 over a local HTTP server, one fresh page per form).
 func unquote(s string) string {
 	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
-		return s[1 : len(s)-1]
+		return css.DecodeEscapes(s[1 : len(s)-1])
 	}
-	return s
+	return css.DecodeEscapes(s)
 }
 
 // importUsable reports whether an imported sheet can be spliced into its parent

@@ -4828,14 +4828,14 @@ func parseBackgroundColorWithScheme(v, scheme string) css.Color {
 	return css.Color{}
 }
 
-// extractBackgroundURL returns the inner target of the first url() in a
-// background value, unquoted, or "" when there is none (or it is `none`).
+// extractBackgroundURL returns the URL the first url() in a background value
+// denotes, escapes decoded, or "" when there is none (or it is `none`).
 func extractBackgroundURL(v string) string {
 	t, ok := css.ScanURL(v)
 	if !ok {
 		return ""
 	}
-	target := t.Payload
+	target := css.URLPayload(t)
 	if target == "" || target == "none" {
 		return ""
 	}

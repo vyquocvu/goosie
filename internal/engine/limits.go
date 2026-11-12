@@ -1015,6 +1015,11 @@ func decodeDataImageURL(u string) ([]byte, error) {
 // `url(icon_nav.png)` in /rAF/arcticFox.css must load from /rAF/, even though
 // the page lives at a different path. data: URIs, fragments and already-
 // absolute references are left untouched.
+//
+// A rewritten reference resolves the URL its escapes denote (`url("a\41 .png")`
+// is aA .png), while anything left alone is re-emitted byte for byte: there the
+// escapes are exactly what makes the payload valid sheet text, and decoding
+// them would rewrite `url("a\"b")` into the broken `url("a"b")`.
 func absolutizeCSSURLs(sheet, sheetURL string) string {
 	var b strings.Builder
 	i := 0
@@ -1033,14 +1038,8 @@ func absolutizeCSSURLs(sheet, sheetURL string) string {
 		}
 		b.WriteString(sheet[i:t.AfterOpen])
 		inner := sheet[t.AfterOpen:t.Close]
-		if out, ok := rewriteURLRef(sheetURL, t.Payload); ok {
-			if t.Quote != 0 {
-				b.WriteByte(t.Quote)
-			}
-			b.WriteString(out)
-			if t.Quote != 0 {
-				b.WriteByte(t.Quote)
-			}
+		if out, ok := rewriteURLRef(sheetURL, css.URLPayload(t)); ok {
+			b.WriteString(emitURLRef(out, t.Quote))
 		} else {
 			// data: URIs, fragments and already-absolute references are left
 			// alone: re-emit the raw inner bytes, quotes included, so a quoted
@@ -1051,6 +1050,42 @@ func absolutizeCSSURLs(sheet, sheetURL string) string {
 		i = t.End
 	}
 	return b.String()
+}
+
+// emitURLRef renders one rewritten absolute reference as the inner text of a
+// url() token, wrapped in the quote the source used so a sheet round-trips in
+// the style it was written in. An unquoted source keeps its bare form unless
+// the resolved URL carries a byte an unquoted url() token cannot hold; then it
+// is quoted rather than re-escaped, because a quoted payload needs no second
+// pass to read back. `url(a\)b.png)` is the case that forces this: it denotes
+// `a)b.png`, net/url leaves ')' raw in a path, and emitting that bare inside
+// `url(…)` would hand the next scan a token cut at the parenthesis.
+func emitURLRef(out string, quote byte) string {
+	if quote != 0 {
+		return string(quote) + out + string(quote)
+	}
+	if needsURLQuote(out) {
+		return `"` + out + `"`
+	}
+	return out
+}
+
+// needsURLQuote reports whether s has to be quoted to survive a url() token:
+// whitespace, a quote, a parenthesis, a backslash or a non-printable byte
+// (CSS Syntax L3 4.3.9). net/url already percent-encodes the first two and the
+// backslash, so in practice this fires on parentheses.
+func needsURLQuote(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c <= ' ' || c >= 0x7f {
+			return true
+		}
+		switch c {
+		case '"', '\'', '(', ')', '\\':
+			return true
+		}
+	}
+	return false
 }
 
 // rewriteURLRef resolves one url() target against the sheet URL, leaving data

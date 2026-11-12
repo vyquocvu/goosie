@@ -10,8 +10,10 @@ import "strings"
 type URLToken struct {
 	// Payload is the URL with any surrounding quotes removed and outer
 	// whitespace trimmed. It is the raw text between the delimiters: no percent
-	// or escape decoding happens here — the callers and the data-URI decoder
-	// own that. Empty means the token carried no URL (e.g. `url()`).
+	// or escape decoding happens here, because absolutizeCSSURLs re-emits it into
+	// stylesheet text where the escapes are what make it that string. A caller
+	// that resolves, fetches or matches wants URLPayload. Empty means the token
+	// carried no URL (e.g. `url()`).
 	Payload string
 	// Quote is the delimiter the payload was wrapped in — '"' or '\'' — or 0
 	// when the URL was written unquoted. absolutizeCSSURLs re-emits a rewritten
@@ -64,16 +66,21 @@ type URLToken struct {
 //     is re-read as an unquoted one and only a matched outer quote pair is
 //     stripped. That is exactly what the per-site scanners did before this
 //     helper existed, so this leniency is preserved rather than newly granted.
-//   - Fail-closed on a malformed token: an unterminated quoted payload
-//     (`url("abc`) and any backslash inside a quoted payload return ok=false
+//   - Fail-closed only on a token that never ends: an unterminated quoted
+//     payload (`url("abc`) and parentheses that never balance return ok=false
 //     with an empty payload rather than handing back half a URI — the same
-//     recovery stance TASK-041 took for bad strings. The backslash case is a
-//     deliberate narrowing, not spec: §4.3.9 makes a backslash an escape, and
-//     Chromium renders `url("…\"…")` (measured 2026-10-26: 800 blue px against
-//     Goosie's 0, before and after this scanner). The old readers also failed on
-//     it, and unescaping a URL payload is a separate task
-//     (GOOSIE-CSSURLESCAPE-001), so the scanner drops the declaration instead of
-//     guessing.
+//     recovery stance TASK-041 took for bad strings. A backslash inside a quoted
+//     payload is not one of those shapes: §4.3.9 makes `\X` one escape of any
+//     byte, so the pair is consumed and can neither open nor close the string.
+//     Chromium measures `url("a\"b")` as the URL `a"b`, and an SVG data URI whose
+//     attribute quotes are written `\"`, `\'` or `\22 ` paints (measured
+//     2026-11-12: 1,987 blue px across those three forms, against Goosie's 0
+//     while this scanner failed the whole token on the backslash). That
+//     is GOOSIE-CSSURLESCAPE-001, and this scanner is where it closes.
+//   - `Payload` is the source spelling either way: a quoted `a\"b` arrives as
+//     `a\"b`, because absolutizeCSSURLs re-emits the payload into the sheet where
+//     the escape is exactly what makes it that string. A caller about to fetch,
+//     decode or match takes the URL from URLPayload instead.
 //   - A payload-free `url()` is well-formed but empty: ok=true, Payload="".
 //   - Only the first url() in a value is returned; a `none` keyword carries no
 //     "url(" and so is never a match.
@@ -82,6 +89,24 @@ type URLToken struct {
 // admission caps (internal/engine/limits.go) and adds no second size limit.
 func ScanURL(s string) (URLToken, bool) {
 	return ScanURLAt(s, IndexURL(s))
+}
+
+// URLPayload is the URL a token denotes: the CSS escapes in its payload decode
+// (CSS Syntax L3 4.3.9). Every consumer that resolves, fetches or matches takes
+// it from here; every caller that re-emits the token into stylesheet text —
+// absolutizeCSSURLs — keeps using the raw Payload, because dropping the escapes
+// there would rewrite `url("a\"b")` into `url("a"b")` and break the token it
+// just matched.
+//
+// This is DecodeEscapes rather than a url-specific decoder because that is what
+// the spec makes it, and the measurements agree: an escaped delimiter belongs to
+// the URL (`url(a\)b)` is `a)b`), an escaped space survives as a space
+// (`url("a\ b")` is `a b`, which Chromium then writes back percent-encoded), and
+// a hex escape follows the 4.3.10 greedy up-to-six digits, so `url("a\41 b")` is
+// `aAb` while `url("a\2240")` is `a` + U+2240 and not `a"` + `40` (all measured
+// 2026-11-12 on the same document).
+func URLPayload(t URLToken) string {
+	return DecodeEscapes(t.Payload)
 }
 
 // ScanURLAt reads the url(...) token whose "url(" begins at s[start]. It exists
@@ -101,12 +126,15 @@ func ScanURLAt(s string, start int) (URLToken, bool) {
 
 	if p < len(s) && (s[p] == '"' || s[p] == '\'') {
 		quote := s[p]
-		// Consume to the matching quote. A backslash inside makes this a bad
-		// string under §4.3.9 → fail closed.
+		// Consume to the matching quote. A `\X` pair is one escape of any byte
+		// (CSS Syntax L3 4.3.9), so the backslash and the byte after it both
+		// belong to the string: `\"` cannot close it, and `\\` cannot leave the
+		// next quote stray. Only a string that never closes is a bad token.
 		q := -1
 		for k := p + 1; k < len(s); k++ {
 			if s[k] == '\\' {
-				return URLToken{}, false
+				k++
+				continue
 			}
 			if s[k] == quote {
 				q = k
@@ -132,6 +160,11 @@ func ScanURLAt(s string, start int) (URLToken, bool) {
 	depth := 1
 	for j := p; j < len(s); j++ {
 		switch s[j] {
+		case '\\':
+			// An escape carries its byte, so `\(` and `\)` cannot move the
+			// paren depth: `url(a\)b)` is one token for the URL `a)b` (measured
+			// 2026-11-12), where cutting at the escaped ')' would strand `b)`.
+			j++
 		case '(':
 			depth++
 		case ')':

@@ -75,16 +75,20 @@ func ParseBorderImageSource(value string) string {
 	return ""
 }
 
-// borderImageURL returns the payload of the first url() in v. It defers to the
-// shared ScanURL so a border-image-source whose payload contains a ')' — an SVG
-// data URI like url("…fill='rgb(0,0,255)'…") — is kept whole rather than cut at
-// the first parenthesis.
+// borderImageURL returns the URL the first url() in v denotes, escapes decoded.
+// It defers to the shared ScanURL so a border-image-source whose payload contains
+// a ')' — an SVG data URI like url("…fill='rgb(0,0,255)'…") — is kept whole rather
+// than cut at the first parenthesis.
 func borderImageURL(v string) (string, bool) {
 	t, ok := ScanURL(v)
-	if !ok || t.Payload == "" {
+	if !ok {
 		return "", false
 	}
-	return t.Payload, true
+	u := URLPayload(t)
+	if u == "" {
+		return "", false
+	}
+	return u, true
 }
 
 // ParseBorderImageSlice reads border-image-slice: 1-4 numbers/percentages

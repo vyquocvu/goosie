@@ -1464,6 +1464,34 @@
     "enforced": false
   },
   {
+    "id": "BR-269",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/css/url_test.go:TestURLPayloadDecodesEscapes",
+      "internal/css/url_test.go:TestURLPayloadKeepsTheSheetTextIntact",
+      "internal/engine/url_escape_test.go:TestAbsolutizeCSSURLsKeepsEscapedDataURIBytes",
+      "internal/engine/url_escape_test.go:TestAbsolutizeCSSURLsResolvesEscapedRefs",
+      "internal/engine/url_escape_test.go:TestCollectFontJobsResolvesAnEscapedSrc",
+      "internal/engine/url_escape_test.go:TestExpandCSSImportsEscapedInnerRef",
+      "internal/engine/url_escape_test.go:TestExtractFontURLDecodesEscapes",
+      "internal/engine/url_escape_test.go:TestImportRefDecodesEscapes",
+      "test/css/url_escape_test.go:TestBorderImageEscapedSVGReachesTheParsedStruct",
+      "test/css/url_escape_test.go:TestBorderImageShorthandKeepsEscapedSource",
+      "test/css/url_escape_test.go:TestBorderImageSourceURLDecodesEscapes",
+      "test/engine/url_escape_test.go:TestEscapedQuoteDataURLBackgroundAttachesToTheArena",
+      "test/style/url_escape_test.go:TestBackgroundImageEscapedQuoteSVGDataURI",
+      "test/style/url_escape_test.go:TestBackgroundImageURLDecodesEscapes",
+      "test/style/url_escape_test.go:TestBackgroundShorthandWithEscapedURL",
+      "test/style/url_escape_test.go:TestMaskImageURLDecodesEscapes"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

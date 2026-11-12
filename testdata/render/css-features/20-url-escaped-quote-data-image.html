@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Escapes inside a url() payload (GOOSIE-CSSURLESCAPE-001)</title>
+    <style>
+        body { margin: 20px; font-family: sans-serif; }
+        .label { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .mono { font: 16px monospace; }
+        .band { display: block; width: 120px; height: 40px; margin: 0 0 10px 0; background: #fff; }
+
+        /* CSS Syntax L3 4.3.9 makes `\X` inside a url() one escape of any byte,
+           so the three boxes below hold one identical data URI written three
+           ways: `\"` in a double-quoted payload, `\'` in a single-quoted one, and
+           the hex form `\22 ` whose terminator space is what stops it swallowing
+           the digits after it. Each denotes an SVG whose attribute quotes are
+           plain, and each must paint the same blue rectangle.
+
+           Goosie read all three as nothing. The second-pass url() scanner that
+           hands a payload to the image loader, the font fetcher, @import and
+           border-image stopped at a backslash instead of consuming the pair, so
+           the token failed closed and the element fell back to its
+           background-colour where every other browser paints the image. A
+           stylesheet written by hand, or one minified by a tool that escapes
+           rather than percent-encodes, produces exactly this shape.
+
+           The last two bands are the controls. The greedy `\22` (no terminator)
+           decodes to U+2240 and mangles the markup, so no engine paints an image
+           there and the box must stay white. An unterminated quoted payload
+           `url("a\` is a bad token and must drop only its own declaration: the
+           green band after it is the thing a scan that loses its place takes
+           away, together with everything below the fold.
+
+           border-image-source, @font-face src and @import resolve the same
+           payloads and are pinned at unit level (test/css/url_escape_test.go,
+           internal/engine/url_escape_test.go); this fixture scores the pixels
+           that reach the arena. */
+        .e1 { background-image: url("data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"40\"><rect width=\"120\" height=\"40\" fill=\"rgb(0,0,255)\"/></svg>"); }
+        .e2 { background-image: url('data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'120\' height=\'40\'><rect width=\'120\' height=\'40\' fill=\'rgb(0,0,255)\'/></svg>'); }
+        .e3 { background-image: url("data:image/svg+xml,<svg xmlns=\22 http://www.w3.org/2000/svg\22  width=\22 120\22  height=\22 40\22 ><rect width=\22 120\22  height=\22 40\22  fill=\22 rgb(0,0,255)\22 /></svg>"); }
+
+        /* Control: the hex escape reads up to six digits, so `\22http` is one
+           character and not `"` followed by `http`. The URI is broken markup and
+           the box must stay white in both engines. */
+        .bad { background-image: url("data:image/svg+xml,<svg xmlns=\22http://www.w3.org/2000/svg\22width=\22120\22height=\2240\22><rect width=\22120\22height=\2240\22fill=\22rgb(0,0,255)\22/></svg>"); }
+
+        .ok { height: 40px; background: #16a085; margin: 0 0 10px 0; }
+        .blue { height: 40px; background: #2980b9; margin: 0 0 10px 0; }
+        .amber { height: 24px; background: #f1c40f; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <p class="label">One SVG data URI, written with `\"`, with `\'`, and with `\22 `: all three bands must be blue.</p>
+    <div class="band e1"></div>
+    <div class="band e2"></div>
+    <div class="band e3"></div>
+
+    <p class="label">Control: a greedy hex escape mangles the URI, so this band must stay white.</p>
+    <div class="band bad"></div>
+
+    <p class="label">Control: an unterminated quoted payload below must cost only its own declaration.</p>
+    <div class="band unterminated" style="background-image: url(&quot;data:image/svg+xml,&lt;svg xmlns=\&quot;a\"></div>
+    <div class="ok"></div>
+    <div class="blue"></div>
+    <p class="mono">The quick brown fox jumps over the lazy dog</p>
+    <div class="amber"></div>
+
+    <div style="height:300px"></div>
+    <p class="label">Below the 600px fold: everything here is lost when the url token puts the scan out of position.</p>
+    <p class="mono">0123456789 abcdefghij KLMNOPQRST</p>
+    <div class="amber"></div>
+    <p class="mono">Last paragraph, monospace only if the sheet reached the end.</p>
+</body>
+</html>

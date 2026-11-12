@@ -92,7 +92,11 @@ PASS_AT = 90.0
 # a quoted attribute-selector value is a string, so `[data-x="a\"b"]` names `a"b`;
 # the band only paints once the escapes decode and ']' and ',' stay inside the
 # value instead of ending the condition or splitting the list.
-MIN_SCORED_FIXTURES = 108
+# 109: css-features/20-url-escaped-quote-data-image.html (GOOSIE-CSSURLESCAPE-001) -
+# a url() payload is a string too, so `url("…xmlns=\"…\"…")` denotes a URI whose
+# quotes are plain; the blue band only paints once the escapes decode before the
+# image loader sees the payload.
+MIN_SCORED_FIXTURES = 109
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

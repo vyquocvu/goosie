@@ -28,9 +28,18 @@ func TestScanURLPayload(t *testing.T) {
 		{"unquoted balanced parens", `url(a(b)c)`, `a(b)c`, true, 0},
 		{"unquoted nested balanced parens", `url(a(b(c))d)`, `a(b(c))d`, true, 0},
 		{"unquoted data uri with rgb", `url(data:image/svg+xml,<svg fill='rgb(0,0,255)'/></svg>)`, `data:image/svg+xml,<svg fill='rgb(0,0,255)'/></svg>`, true, 0},
-		// Rule 3: an escaped quote inside a quoted payload is a bad string.
-		{"escaped quote fails closed", `url("a\"b")`, "", false, 0},
-		{"escaped quote single fails closed", "url('a\\'b')", "", false, 0},
+		// Rule 3: a `\X` pair is one escape of any byte (CSS Syntax L3 4.3.9), so
+		// an escaped quote can neither open nor close the string and an escaped
+		// ')' cannot end an unquoted token. These rows pin the *source spelling*,
+		// which is what Payload carries: URLPayload is what decodes it, and
+		// `url("a\"b")` denotes the URL `a"b` in Chromium (measured 2026-11-12;
+		// the decoded side is pinned by test/css/url_escape_test.go).
+		{"escaped double quote stays in the payload", `url("a\"b")`, `a\"b`, true, '"'},
+		{"escaped single quote stays in the payload", `url('a\'b')`, `a\'b`, true, '\''},
+		{"escaped backslash does not free the next quote", `url("a\\b")`, `a\\b`, true, '"'},
+		{"escaped paren inside a string then a real close", `url("a\")b")`, `a\")b`, true, '"'},
+		{"hex escape stays in the payload", `url("a\41 b")`, `a\41 b`, true, '"'},
+		{"escaped paren keeps one unquoted token", `url(a\)b)`, `a\)b`, true, 0},
 		// Rule 4: fail-closed recovery, never the rest of the declaration.
 		{"unterminated quote fails closed", `url("abc`, "", false, 0},
 		{"unterminated quote with trailing decl", `url("abc;color:red)`, "", false, 0},
@@ -218,5 +227,84 @@ func BenchmarkIndexURLSheetOccurrences(b *testing.B) {
 			}
 			j += o + 4
 		}
+	}
+}
+
+// TestURLPayloadDecodesEscapes pins the two views of one token: Payload is the
+// source spelling a stylesheet can be re-emitted from, URLPayload is the URL it
+// denotes (CSS Syntax L3 4.3.9, measured 2026-11-12 in Chromium against a document
+// holding exactly these forms).
+//
+// The rows are chosen so a wrong decoder cannot pass: an escaped quote and an
+// escaped ')' each survive only when the pair is consumed as one escape, a hex
+// escape proves the up-to-six-digit greedy read (`\2240` is U+2240, not `"` and
+// `40` - the mangled form Chromium itself computes for that spelling), the
+// trailing-space form proves the one optional whitespace is eaten, and a doubled
+// backslash proves the second quote stays escaped rather than closing the string.
+// qc:BR-269
+func TestURLPayloadDecodesEscapes(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          string
+		wantPayload string
+		wantURL     string
+	}{
+		{"escaped double quote", `url("a\"b")`, `a\"b`, `a"b`},
+		{"escaped single quote", `url('a\'b')`, `a\'b`, `a'b`},
+		{"hex escape with its terminator space", `url("a\41 b")`, `a\41 b`, "aAb"},
+		{"hex escape at the end of the string", `url("a\41")`, `a\41`, "aA"},
+		{"doubled backslash", `url("a\\b")`, `a\\b`, `a\b`},
+		{"escaped space", `url("a\ b")`, `a\ b`, "a b"},
+		{"greedy hex digits", `url("\2240")`, `\2240`, "\u2240"},
+		{"escaped colon in an unquoted token", `url(data\:x)`, `data\:x`, "data:x"},
+		{"escaped paren keeps the tail", `url(a\)b)`, `a\)b`, "a)b"},
+		// No escape at all: the byte-identical case, and the reason every existing
+		// reader could route through URLPayload without moving.
+		{"plain payload passes through", `url(a.png)`, "a.png", "a.png"},
+		// A token that never ends stays a bad token.
+		{"unterminated string yields no token", `url("a\"b`, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tok, ok := ScanURL(tc.in)
+			if tc.wantPayload == "" && tc.wantURL == "" {
+				if ok {
+					t.Fatalf("ScanURL(%q) accepted a token that never ends: %+v", tc.in, tok)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("ScanURL(%q) reported no url()", tc.in)
+			}
+			if tok.Payload != tc.wantPayload {
+				t.Errorf("Payload = %q, want the source spelling %q", tok.Payload, tc.wantPayload)
+			}
+			if got := URLPayload(tok); got != tc.wantURL {
+				t.Errorf("URLPayload(%q) = %q, want %q", tc.in, got, tc.wantURL)
+			}
+		})
+	}
+}
+
+// TestURLPayloadKeepsTheSheetTextIntact is the reason decoding lives in
+// URLPayload and not in the scanner: a rewritten sheet must still carry the
+// escapes, because `url("a"b")` is a different - broken - token from
+// `url("a\"b")`. The payload slice out of the declaration has to equal the bytes
+// between the delimiters.
+// qc:BR-269
+func TestURLPayloadKeepsTheSheetTextIntact(t *testing.T) {
+	const decl = `.a{background:url("a\"b.png") no-repeat}`
+	tok, ok := ScanURL(decl)
+	if !ok {
+		t.Fatal("an escaped quote must not break the token")
+	}
+	if got := decl[tok.AfterOpen:tok.Close]; got != `"`+tok.Payload+`"` {
+		t.Errorf("raw inner text = %q, want the quoted payload %q", got, `"`+tok.Payload+`"`)
+	}
+	if want := `a\"b.png`; tok.Payload != want {
+		t.Errorf("Payload = %q, want %q - decoding here would rewrite the sheet", tok.Payload, want)
+	}
+	if got := URLPayload(tok); got != `a"b.png` {
+		t.Errorf("URLPayload = %q, want the URL a\"b fetches", got)
 	}
 }

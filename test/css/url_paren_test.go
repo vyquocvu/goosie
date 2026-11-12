@@ -43,7 +43,12 @@ func TestParseBorderImageSourceURLParen(t *testing.T) {
 		{"empty url()", `url()`, ""},
 		{"empty value", ``, ""},
 		{"unterminated quote fails closed", `url("abc`, ""},
-		{"escaped quote fails closed", `url("a\"b")`, ""},
+		// A `\X` pair is an escape, not a broken token, and the URL a reader
+		// fetches is the decoded one (GOOSIE-CSSURLESCAPE-001). Measured in
+		// Chromium 2026-11-12; test/css/url_escape_test.go holds the table.
+		{"escaped quote decodes", `url("a\"b")`, `a"b`},
+		{"escaped paren in an unquoted token decodes", `url(a\)b.png)`, "a)b.png"},
+		{"hex escape decodes", `url("a\41 b.png")`, "aAb.png"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1269,14 +1269,15 @@ func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
 }
 
 // extractFontURL pulls the first url(...) reference out of a @font-face src
-// value. The src property can carry multiple fallback formats; the engine only
-// serves TrueType and OpenType, so the first url() is the one to try.
+// value, escapes decoded — the payload is about to be fetched. The src property
+// can carry multiple fallback formats; the engine only serves TrueType and
+// OpenType, so the first url() is the one to try.
 func extractFontURL(v string) string {
 	t, ok := css.ScanURL(v)
 	if !ok {
 		return ""
 	}
-	return t.Payload
+	return css.URLPayload(t)
 }
 
 // maxFontRequests caps how many @font-face sources one document may fetch so a
