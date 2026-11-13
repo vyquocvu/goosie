@@ -40,6 +40,12 @@ func (r *Runtime) linkedCSSProvider() LinkedCSSFunc {
 // live; each sheet, MediaList and rule wrapper is cached so repeated reads
 // preserve object identity.
 func (r *Runtime) setupStyleSheetInterfaces() {
+	// The collection interfaces exist whether or not a page has read a list
+	// yet: Chromium answers typeof StyleSheetList "function" on a document with
+	// no sheets at all.
+	r.cssomCollectionProto("StyleSheetList")
+	r.cssomCollectionProto("CSSRuleList")
+	r.cssomCollectionProto("MediaList")
 	r.cssRuleProto = r.vm.NewObject()
 	for name, value := range map[string]int{
 		"STYLE_RULE": 1, "IMPORT_RULE": 3, "MEDIA_RULE": 4,
@@ -186,23 +192,15 @@ func (r *Runtime) newStyleSheetList(doc *dom.Document) goja.Value {
 func (r *Runtime) newStyleSheetCollection(doc *dom.Document) goja.Value {
 	owners := func() []*dom.Node { return styleSheetOwners(doc) }
 	target := r.vm.NewObject()
-	_ = target.SetPrototype(r.ensureCollectionProto())
-	_ = target.DefineAccessorProperty("length", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(len(owners()))
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = target.Set("item", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return goja.Null()
-		}
-		index := int(call.Argument(0).ToInteger())
-		nodes := owners()
-		if index < 0 || index >= len(nodes) {
-			return goja.Null()
-		}
-		return r.wrapCSSStyleSheet(nodes[index])
-	}))
-	return r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
+	_ = target.SetPrototype(r.cssomCollectionProto("StyleSheetList"))
+	return r.cssomCollection(r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
+		// length and the indices are answered here so the list stays live: a
+		// sheet a script appends, removes or disables moves through the one
+		// object the page already holds, with no rebuild and no second list.
 		Get: func(proxied *goja.Object, property string, _ goja.Value) goja.Value {
+			if property == "length" {
+				return r.vm.ToValue(len(owners()))
+			}
 			if isCanonicalIndex(property) {
 				index, _ := strconv.Atoi(property)
 				nodes := owners()
@@ -239,7 +237,7 @@ func (r *Runtime) newStyleSheetCollection(doc *dom.Document) goja.Value {
 			}
 			return r.vm.NewArray(keys...)
 		},
-	}))
+	})), "StyleSheetList")
 }
 
 // styleSheetOwners lists the elements whose sheets document.styleSheets
@@ -486,29 +484,20 @@ func (r *Runtime) newMediaList(owner *dom.Node) goja.Value {
 		}
 		return out
 	}
+	proto := r.cssomCollectionProto("MediaList")
 	target := r.vm.NewObject()
-	_ = target.DefineAccessorProperty("mediaText", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(mediaText())
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = target.DefineAccessorProperty("length", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(len(segments()))
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = target.Set("item", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return goja.Null()
-		}
-		index := int(call.Argument(0).ToInteger())
-		parts := segments()
-		if index < 0 || index >= len(parts) {
-			return goja.Null()
-		}
-		return r.vm.ToValue(parts[index])
-	}))
-	_ = target.Set("toString", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(mediaText())
-	}))
-	return r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
+	_ = target.SetPrototype(proto)
+	return r.cssomCollection(r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
 		Get: func(proxied *goja.Object, property string, _ goja.Value) goja.Value {
+			// The two live reads answered here are what keeps a MediaList live:
+			// the prototype's members reach the same values through `this`, but
+			// only this list knows the attribute its owner carries now.
+			switch property {
+			case "mediaText":
+				return r.vm.ToValue(mediaText())
+			case "length":
+				return r.vm.ToValue(len(segments()))
+			}
 			if isCanonicalIndex(property) {
 				parts := segments()
 				index, _ := strconv.Atoi(property)
@@ -527,30 +516,31 @@ func (r *Runtime) newMediaList(owner *dom.Node) goja.Value {
 			return goja.Undefined()
 		},
 		HasIdx: func(_ *goja.Object, index int) bool { return index >= 0 && index < len(segments()) },
-	}))
+		GetOwnPropertyDescriptorIdx: func(_ *goja.Object, index int) goja.PropertyDescriptor {
+			parts := segments()
+			if index < 0 || index >= len(parts) {
+				return goja.PropertyDescriptor{}
+			}
+			return goja.PropertyDescriptor{Value: r.vm.ToValue(parts[index]), Writable: goja.FLAG_FALSE, Enumerable: goja.FLAG_TRUE, Configurable: goja.FLAG_TRUE}
+		},
+		OwnKeys: func(proxied *goja.Object) *goja.Object {
+			parts := segments()
+			keys := make([]interface{}, 0, len(parts)+len(proxied.Keys()))
+			for index := range parts {
+				keys = append(keys, strconv.Itoa(index))
+			}
+			for _, key := range proxied.Keys() {
+				keys = append(keys, key)
+			}
+			return r.vm.NewArray(keys...)
+		},
+	})), "MediaList")
 }
 
+// cssRuleListForSheet is how the sheet wrappers reach their list: one cached
+// CSSRuleList per owner, rebuilt only when the sheet's text changes.
 func (r *Runtime) cssRuleListForSheet(owner *dom.Node) goja.Value {
-	rules := r.sheetRuleObjects(owner)
-	obj := r.vm.NewObject()
-	_ = obj.SetPrototype(r.ensureCollectionProto())
-	for i, rule := range rules {
-		_ = obj.Set(strconv.Itoa(i), rule)
-	}
-	_ = obj.DefineAccessorProperty("length", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(len(rules))
-	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = obj.Set("item", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) == 0 {
-			return goja.Null()
-		}
-		index := int(call.Argument(0).ToInteger())
-		if index < 0 || index >= len(rules) {
-			return goja.Null()
-		}
-		return rules[index]
-	}))
-	return obj
+	return r.cssRuleList(owner)
 }
 
 func (r *Runtime) wrapCSSStyleRule(owner *dom.Node, rule css.Rule) *goja.Object {

@@ -554,6 +554,21 @@ type Runtime struct {
 	// Both are keyed by owner node; neither is measured for constructed sheets.
 	cssMediaLists map[*dom.Node]goja.Value
 	sheetDisabled map[*dom.Node]bool
+	// cssRuleListObjects caches the one CSSRuleList a sheet hands out, keyed by
+	// owner and rebuilt when the sheet's text changes: measured, Chromium answers
+	// `sheet.cssRules === sheet.cssRules` true while a list built per read broke
+	// it.
+	cssRuleListObjects map[*dom.Node]cachedCSSRuleList
+	// cssomCollectionProtos holds the StyleSheetList, CSSRuleList and MediaList
+	// prototypes - one object per interface, shared by every instance, which is
+	// what makes instanceof and isPrototypeOf against the globals hold.
+	cssomCollectionProtos map[string]*goja.Object
+	// cssomCollections is the brand check those prototypes run: Chromium answers
+	// `TypeError: Illegal invocation` for every receiver that is not a list it
+	// handed out, even one wearing the interface's @@toStringTag, so each list
+	// records its interface name against the object the page holds. Entries are
+	// bounded by the per-owner caches that already keep these lists alive.
+	cssomCollections map[*goja.Object]string
 	// selectorPlans caches query selectors compiled from the strings pages
 	// pass to querySelector/querySelectorAll/matches/closest. The general
 	// matcher tests one selector against every candidate node, so parsing it
