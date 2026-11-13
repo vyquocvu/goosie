@@ -1762,6 +1762,28 @@
     "enforced": false
   },
   {
+    "id": "BR-285",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/cssom_collection_test.go:TestFetchedSheetHoldsOneCSSRuleList",
+      "test/engine/cssom_collection_test.go:TestFetchedSheetRuleListSurvivesAStyleChange",
+      "test/engine/cssom_collection_test.go:TestStyleTextEditReparseSucceedingReads",
+      "test/js/cssom_collections_test.go:TestCSSOMCollectionItemConvertsItsIndex",
+      "test/js/cssom_collections_test.go:TestCSSOMCollectionMembersRefuseForeignReceivers",
+      "test/js/cssom_collections_test.go:TestCSSOMCollectionPrototypesOwnTheMeasuredMembers",
+      "test/js/cssom_collections_test.go:TestCSSOMCollectionsAreCachedPerOwner",
+      "test/js/cssom_collections_test.go:TestCSSOMCollectionsBrandTheirInterfaces",
+      "test/js/cssom_collections_test.go:TestCSSOMCollectionsOwnOnlyTheirIndices",
+      "test/js/cssom_collections_test.go:TestCSSOMCollectionsStayLiveThroughOneObject",
+      "test/js/cssom_collections_test.go:TestMediaListReportsTheOwnersAttribute"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [
