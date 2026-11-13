@@ -1736,6 +1736,32 @@
     "enforced": false
   },
   {
+    "id": "BR-284",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/cssom_style_sheets_test.go:TestCSSOMListsLinkedSheetsWithFetchedRules",
+      "test/engine/cssom_style_sheets_test.go:TestDisabledLinkedSheetIsNeitherListedNorApplied",
+      "test/engine/cssom_style_sheets_test.go:TestDuplicateLinkedHrefListsTwoSheetsFromOneRequest",
+      "test/engine/cssom_style_sheets_test.go:TestMediaMismatchedDuplicateHrefKeepsTheCascadeSlot",
+      "test/engine/cssom_style_sheets_test.go:TestScriptInsertedLinkIsListedAtItsDocumentPosition",
+      "test/js/style_sheets_surface_test.go:TestAdoptedStyleSheetIsNotListed",
+      "test/js/style_sheets_surface_test.go:TestLinkAndStyleSheetIdentityMatchesTheListEntry",
+      "test/js/style_sheets_surface_test.go:TestSheetDisabledFlagReadsBackWithoutTouchingTheAttribute",
+      "test/js/style_sheets_surface_test.go:TestStyleSheetAndRuleObjectsKeepIdentityAcrossReads",
+      "test/js/style_sheets_surface_test.go:TestStyleSheetHrefIsAbsoluteForLinksAndNullForStyles",
+      "test/js/style_sheets_surface_test.go:TestStyleSheetListIsLiveForAppendRemoveAndDisable",
+      "test/js/style_sheets_surface_test.go:TestStyleSheetListOrdersLinksAndStylesInDocumentOrder",
+      "test/js/style_sheets_surface_test.go:TestStyleSheetMediaReportsTheAttributeAndStaysLive",
+      "test/js/style_sheets_surface_test.go:TestStyleSheetTitleIsNullUnlessTheAttributeIsSet"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

@@ -1064,9 +1064,11 @@ func (r *Runtime) installInterface(iface string, p *goja.Object) {
 		r.installStringReflection(p, "imageSizes", "imagesizes")
 		r.installCrossOriginReflection(p)
 		r.installBoolReflection(p, "disabled", "disabled")
+		r.installSheetAccessor(p)
 	case "HTMLStyleElement":
 		r.installStringReflection(p, "media", "media")
 		r.installStringReflection(p, "type", "type")
+		r.installSheetAccessor(p)
 	case "HTMLTitleElement":
 		_ = p.DefineAccessorProperty("text", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			node := r.getNode(call.This)

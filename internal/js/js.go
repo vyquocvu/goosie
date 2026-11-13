@@ -544,7 +544,16 @@ type Runtime struct {
 	// styleObjects preserves the per-element CSSStyleDeclaration identity.
 	styleObjects         map[*dom.Node]*goja.Object
 	cssStyleSheetObjects map[*dom.Node]*goja.Object
-	styleSheetLists      map[*dom.Document]*goja.Object
+	styleSheetLists      map[*dom.Document]goja.Value
+	// cssRuleLists preserves each sheet's CSSRule wrapper objects, keyed by the
+	// owner node and rebuilt only when the sheet's own text changes. Rebuilding
+	// per read broke `sheet.cssRules[0] === sheet.cssRules.item(0)`.
+	cssRuleLists map[*dom.Node]cachedCSSRules
+	// cssMediaLists preserves the one MediaList a sheet hands out, and
+	// sheetDisabled the disabled flag a page sets on the sheet object itself.
+	// Both are keyed by owner node; neither is measured for constructed sheets.
+	cssMediaLists map[*dom.Node]goja.Value
+	sheetDisabled map[*dom.Node]bool
 	// selectorPlans caches query selectors compiled from the strings pages
 	// pass to querySelector/querySelectorAll/matches/closest. The general
 	// matcher tests one selector against every candidate node, so parsing it
@@ -638,6 +647,10 @@ type Runtime struct {
 	// pseudoStyle reads resolved pseudo-element declarations for innerText.
 	// The engine installs it alongside computedStyle; nil means no pseudo styles.
 	pseudoStyle PseudoStyleFunc
+	// linkedCSS reads the style sheet text this navigation already fetched for
+	// one absolute URL. The engine installs it alongside computedStyle; nil
+	// means a linked sheet reports no rules (see style_sheets.go).
+	linkedCSS LinkedCSSFunc
 
 	// layoutGeometry reads the engine's layout arena for one node's border-box
 	// geometry. Installed by the engine alongside computedStyle; nil means

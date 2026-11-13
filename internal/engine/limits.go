@@ -683,13 +683,30 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 		all = append(all, cssSource{text: src})
 	}
 	// A linked sheet is fetched against its own URL and its text spliced into a
-	// reserved slot so the cascade sees sources in document order. The slot is
-	// claimed during the walk and filled after the concurrent fetch below.
+	// reserved slot so the cascade sees sources in document order. One URL is
+	// requested once per pass: measured over http on a page linking s.css
+	// twice, Chromium issues one request while document.styleSheets still
+	// holds two entries.
+	//
+	// slot is -1 for a sheet the cascade must not see: a media query that does
+	// not match this viewport still has to be fetched and memoised, because
+	// document.styleSheets lists it and Chromium reports its rules (measured on
+	// one fixture served over http: /print.css is requested and its sheet holds
+	// one rule at a screen viewport, where this engine requested nothing and the
+	// sheet read 0 rules). When the same URL turns up again with media that does
+	// match, the fetch already scheduled picks up that slot rather than asking
+	// for the URL twice - measured on s.css linked print-first then screen,
+	// where Chromium reads rgb(11, 22, 33) for the class s.css colours behind
+	// one request. One map cannot serve both jobs: deduplicating the fetch by
+	// URL alone answers rgb(0, 0, 0), because the screen link never gets a slot.
+	// A disabled link is not fetched at all: Chromium requests it, but nothing
+	// here can ever read its text, since document.styleSheets leaves it out.
 	type pendingLink struct {
 		slot int
 		abs  string
 	}
-	linked := map[string]bool{}
+	linked := map[string]bool{}   // URLs that already own a cascade slot
+	scheduled := map[string]int{} // URLs already queued for one fetch
 	var pending []pendingLink
 	linksLeft := maxLinkedSheets
 	stats, err := walkDocument(doc, func(n *dom.Node) error {
@@ -698,19 +715,38 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				all = append(all, cssSource{text: n.TextContent()})
 			}
 		}
-		if n.Element() && n.Data == "link" && linker != nil && linksLeft > 0 {
-			if css.MatchMediaWithOptions(n.GetAttribute("media"), mediaOpts) {
-				if href := stylesheetHref(n); href != "" {
-					if abs, ok := resolveSubresourceURL(base, href); ok && !linked[abs] {
-						linked[abs] = true
-						linksLeft--
-						all = append(all, cssSource{})
-						pending = append(pending, pendingLink{slot: len(all) - 1, abs: abs})
-					} else if !ok && onMixed != nil {
+		// A disabled link contributes no rules and no request. Measured on the
+		// same fixture: `p.dis`, coloured only by the disabled L10's dis.css,
+		// reads rgb(0, 0, 0) in Chromium where this engine answered rgb(6, 6, 6),
+		// and document.styleSheets leaves that link out. The attribute is
+		// presence-only, so disabled="false" still disables, which is exactly
+		// what HTMLLinkElement.disabled reflection writes and removes.
+		if n.Element() && n.Data == "link" && linker != nil && linksLeft > 0 && !n.HasAttribute("disabled") {
+			if href := stylesheetHref(n); href != "" {
+				abs, resolved := resolveSubresourceURL(base, href)
+				applies := css.MatchMediaWithOptions(n.GetAttribute("media"), mediaOpts)
+				if !resolved {
+					if applies && onMixed != nil {
 						if bad, mixed := mixedContentURL(base, href); mixed {
 							onMixed(MixedContentStylesheet, bad)
 						}
 					}
+				} else if idx, ok := scheduled[abs]; ok {
+					if applies && !linked[abs] {
+						linked[abs] = true
+						all = append(all, cssSource{})
+						pending[idx].slot = len(all) - 1
+					}
+				} else {
+					scheduled[abs] = len(pending)
+					slot := -1
+					if applies {
+						linked[abs] = true
+						all = append(all, cssSource{})
+						slot = len(all) - 1
+					}
+					pending = append(pending, pendingLink{slot: slot, abs: abs})
+					linksLeft--
 				}
 			}
 		}
@@ -750,7 +786,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 		}
 		wg.Wait()
 		for i, p := range pending {
-			if texts[i] == nil {
+			if texts[i] == nil || p.slot < 0 {
 				continue
 			}
 			text := absolutizeCSSURLs(*texts[i], p.abs)

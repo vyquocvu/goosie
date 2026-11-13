@@ -9,9 +9,36 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// setupStyleSheetInterfaces installs the CSSOM surface needed to reflect
-// document-owned <style> elements. The collection is live; each sheet wrapper
-// is cached so repeated reads preserve object identity.
+// LinkedCSSFunc answers the CSS text the engine already fetched for one
+// absolute style sheet URL. ok is false when this document owes no text for
+// that URL - it was never requested, or the request failed - and the sheet then
+// reports an empty rule list, which is the measured shape of a <link> whose
+// fetch 404s: Chromium lists /missing.css with 0 rules and a non-null .sheet.
+//
+// The contract lives in internal/js because the import graph forbids this
+// package from reaching internal/engine. The engine supplies it from the same
+// memo the cascade fetches through, so the CSSOM and the cascade cannot
+// disagree about what a sheet contains.
+type LinkedCSSFunc func(url string) (string, bool)
+
+// SetLinkedCSSProvider installs the engine's fetched style sheet reader. The
+// engine calls it alongside SetComputedStyleProvider, before any script runs.
+func (r *Runtime) SetLinkedCSSProvider(fn LinkedCSSFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.linkedCSS = fn
+}
+
+func (r *Runtime) linkedCSSProvider() LinkedCSSFunc {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.linkedCSS
+}
+
+// setupStyleSheetInterfaces installs the CSSOM surface needed to reflect the
+// document's <style> and <link rel=stylesheet> elements. The collection is
+// live; each sheet, MediaList and rule wrapper is cached so repeated reads
+// preserve object identity.
 func (r *Runtime) setupStyleSheetInterfaces() {
 	r.cssRuleProto = r.vm.NewObject()
 	for name, value := range map[string]int{
@@ -32,15 +59,49 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("ownerNode", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		return r.wrapNode(r.sheetOwner(call.This))
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = r.cssStyleSheetProto.DefineAccessorProperty("href", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+	// An inline sheet has no URL of its own; a linked one reports the absolute
+	// URL its text came from. Measured over http, a re-enabled link's sheet
+	// reads "http://127.0.0.1:8931/dup.css" verbatim and every <style> reads
+	// null; HTMLLinkElement.href on the same link is the same absolute URL.
+	_ = r.cssStyleSheetProto.DefineAccessorProperty("href", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		if url, ok := r.linkedSheetHref(r.sheetOwner(call.This)); ok {
+			return r.vm.ToValue(url)
+		}
 		return goja.Null()
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	_ = r.cssStyleSheetProto.DefineAccessorProperty("media", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return r.mediaListOf(r.sheetOwner(call.This))
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	// The title of a sheet is its owner's title attribute. Measured: the
+	// <link title="Alternate"> entry reports "Alternate", an appended
+	// <style title="StyleTitle"> reports "StyleTitle", and every sheet with no
+	// title attribute reports null rather than "".
+	_ = r.cssStyleSheetProto.DefineAccessorProperty("title", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		owner := r.sheetOwner(call.This)
+		if owner == nil || !owner.HasAttribute("title") {
+			return goja.Null()
+		}
+		return r.vm.ToValue(owner.GetAttribute("title"))
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	// disabled is the sheet's own flag rather than the element's attribute:
+	// measured, setting it on a listed sheet reads back true, leaves the sheet
+	// at the same index, and writes no attribute on the link.
+	_ = r.cssStyleSheetProto.DefineAccessorProperty("disabled", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(r.sheetDisabled[r.sheetOwner(call.This)])
+	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		owner := r.sheetOwner(call.This)
+		if owner == nil {
+			return goja.Undefined()
+		}
+		if r.sheetDisabled == nil {
+			r.sheetDisabled = make(map[*dom.Node]bool)
+		}
+		r.sheetDisabled[owner] = call.Argument(0).ToBoolean()
+		return goja.Undefined()
+	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("type", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue("text/css")
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = r.cssStyleSheetProto.DefineAccessorProperty("disabled", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(false)
-	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value { return goja.Undefined() }), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = r.cssStyleSheetProto.Set("replaceSync", func(call goja.FunctionCall) goja.Value {
 		sheet, ok := call.This.(*goja.Object)
 		if !ok {
@@ -62,6 +123,10 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 	if ok {
 		_ = ctor.Set("prototype", r.cssStyleSheetProto)
 		_ = r.cssStyleSheetProto.Set("constructor", ctor)
+		// String(sheet) carries the interface name: measured as
+		// "[object CSSStyleSheet]" for both a linked and an inline sheet,
+		// where this engine answered "[object Object]" without the brand.
+		r.defineInterfaceToStringTag("CSSStyleSheet", r.cssStyleSheetProto)
 		_ = r.vm.Set("CSSStyleSheet", ctor)
 	}
 
@@ -103,9 +168,9 @@ func (r *Runtime) newStyleSheetList(doc *dom.Document) goja.Value {
 		return r.newStyleSheetCollection(nil)
 	}
 	if r.styleSheetLists == nil {
-		r.styleSheetLists = make(map[*dom.Document]*goja.Object)
+		r.styleSheetLists = make(map[*dom.Document]goja.Value)
 	}
-	if obj := r.styleSheetLists[doc]; obj != nil {
+	if obj, ok := r.styleSheetLists[doc]; ok {
 		return obj
 	}
 	obj := r.newStyleSheetCollection(doc)
@@ -113,30 +178,87 @@ func (r *Runtime) newStyleSheetList(doc *dom.Document) goja.Value {
 	return obj
 }
 
-func (r *Runtime) newStyleSheetCollection(doc *dom.Document) *goja.Object {
-	obj := r.vm.NewObject()
-	_ = obj.SetPrototype(r.ensureCollectionProto())
-	for i, node := range styleElements(doc) {
-		_ = obj.Set(strconv.Itoa(i), r.wrapCSSStyleSheet(node))
-	}
-	_ = obj.DefineAccessorProperty("length", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(len(styleElements(doc)))
+// newStyleSheetCollection builds the live document.styleSheets list. Every read
+// walks the document again, so a sheet a script appends, disables or removes is
+// visible without any rebuild: measured on the fixture, clearing L8's disabled
+// flag puts its sheet back at index 7 and takes the length from 12 to 13, and
+// removing L1 takes its entry with the length down to 11 and leaves L2 first.
+func (r *Runtime) newStyleSheetCollection(doc *dom.Document) goja.Value {
+	owners := func() []*dom.Node { return styleSheetOwners(doc) }
+	target := r.vm.NewObject()
+	_ = target.SetPrototype(r.ensureCollectionProto())
+	_ = target.DefineAccessorProperty("length", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(len(owners()))
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = obj.Set("item", func(call goja.FunctionCall) goja.Value {
+	_ = target.Set("item", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Null()
 		}
 		index := int(call.Argument(0).ToInteger())
-		nodes := styleElements(doc)
+		nodes := owners()
 		if index < 0 || index >= len(nodes) {
 			return goja.Null()
 		}
 		return r.wrapCSSStyleSheet(nodes[index])
-	})
-	return obj
+	}))
+	return r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
+		Get: func(proxied *goja.Object, property string, _ goja.Value) goja.Value {
+			if isCanonicalIndex(property) {
+				index, _ := strconv.Atoi(property)
+				nodes := owners()
+				if index >= 0 && index < len(nodes) {
+					return r.wrapCSSStyleSheet(nodes[index])
+				}
+				return goja.Undefined()
+			}
+			return proxied.Get(property)
+		},
+		GetIdx: func(_ *goja.Object, index int, _ goja.Value) goja.Value {
+			nodes := owners()
+			if index >= 0 && index < len(nodes) {
+				return r.wrapCSSStyleSheet(nodes[index])
+			}
+			return goja.Undefined()
+		},
+		HasIdx: func(_ *goja.Object, index int) bool { return index >= 0 && index < len(owners()) },
+		GetOwnPropertyDescriptorIdx: func(_ *goja.Object, index int) goja.PropertyDescriptor {
+			nodes := owners()
+			if index < 0 || index >= len(nodes) {
+				return goja.PropertyDescriptor{}
+			}
+			return goja.PropertyDescriptor{Value: r.wrapCSSStyleSheet(nodes[index]), Writable: goja.FLAG_FALSE, Enumerable: goja.FLAG_TRUE, Configurable: goja.FLAG_TRUE}
+		},
+		OwnKeys: func(proxied *goja.Object) *goja.Object {
+			nodes := owners()
+			keys := make([]interface{}, 0, len(nodes)+len(proxied.Keys()))
+			for index := range nodes {
+				keys = append(keys, strconv.Itoa(index))
+			}
+			for _, key := range proxied.Keys() {
+				keys = append(keys, key)
+			}
+			return r.vm.NewArray(keys...)
+		},
+	}))
 }
 
-func styleElements(doc *dom.Document) []*dom.Node {
+// styleSheetOwners lists the elements whose sheets document.styleSheets
+// reports, in document order over the whole tree with template contents
+// skipped. Measured against Chromium on the fixture, the 12 entries are
+//
+//	LINK#L1 LINK#L2 LINK#L3 LINK#L4 LINK#L5 LINK#L6 LINK#L7 STYLE#S1
+//	STYLE#S2 LINK#L9 STYLE#S3 STYLE#S5
+//
+// which is plain document order, and the fixture was built to pin three rules
+// inside it: a link inserted by a parser-blocking script lands where its
+// element sits, so L9 follows the two head <style> elements and precedes the
+// body ones; a link with the disabled attribute contributes no entry (L8,
+// disabled from script, and L10, disabled in the markup, are both absent) while
+// a <style> carrying the same attribute still does, because HTMLStyleElement
+// has no disabled IDL and Chromium lists and applies S5; and neither the sheet
+// inside <template id="TPL"> nor the one adopted through
+// document.adoptedStyleSheets is listed.
+func styleSheetOwners(doc *dom.Document) []*dom.Node {
 	if doc == nil || doc.IsXML {
 		return nil
 	}
@@ -144,8 +266,15 @@ func styleElements(doc *dom.Document) []*dom.Node {
 	var walk func(*dom.Node)
 	walk = func(parent *dom.Node) {
 		for node := parent.FirstChild; node != nil; node = node.NextSibling {
-			if node.Element() && node.Namespace == dom.NSHTML && node.Data == "style" {
-				nodes = append(nodes, node)
+			if node.Element() && node.Namespace == dom.NSHTML {
+				switch node.Data {
+				case "style":
+					nodes = append(nodes, node)
+				case "link":
+					if _, ok := linkedSheetReference(node); ok {
+						nodes = append(nodes, node)
+					}
+				}
 			}
 			if node.IsHTMLTemplate() {
 				continue
@@ -157,17 +286,150 @@ func styleElements(doc *dom.Document) []*dom.Node {
 	return nodes
 }
 
+// linkedSheetReference reports the raw reference of the style sheet a <link>
+// points at, and false when the element owns no sheet at all: no stylesheet rel
+// token, the disabled attribute set, or an empty href. The false cases are
+// measured - an appended `<link rel=stylesheet>` with no href reports a null
+// .sheet and is not listed, and a disabled link does the same even though its
+// href resolves.
+func linkedSheetReference(node *dom.Node) (string, bool) {
+	if node == nil || node.HasAttribute("disabled") {
+		return "", false
+	}
+	isCSS := false
+	for _, tok := range strings.Fields(node.GetAttribute("rel")) {
+		if strings.EqualFold(tok, "stylesheet") {
+			isCSS = true
+		}
+	}
+	if !isCSS {
+		return "", false
+	}
+	href := strings.TrimSpace(node.GetAttribute("href"))
+	if href == "" {
+		return "", false
+	}
+	return href, true
+}
+
+// linkedSheetHref resolves a <link>'s reference the way HTMLLinkElement.href
+// does, so the CSSOM and the element's own IDL cannot disagree about one URL.
+// Without a document base to resolve against the raw reference answers, which
+// is resolveURLString's existing fallback.
+func (r *Runtime) linkedSheetHref(node *dom.Node) (string, bool) {
+	href, ok := linkedSheetReference(node)
+	if !ok {
+		return "", false
+	}
+	if abs, _, ok := r.resolveURLForNode(href, node); ok {
+		return abs, true
+	}
+	return href, true
+}
+
+// installSheetAccessor defines the read-only `.sheet` of an element that can
+// own a style sheet. Measured, L1.sheet is the very object
+// document.styleSheets[0] is, a link whose fetch 404s still answers a sheet,
+// and S1.sheet is the entry at its index in the list.
+func (r *Runtime) installSheetAccessor(p *goja.Object) {
+	_ = p.DefineAccessorProperty("sheet", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return r.ownerStyleSheet(r.getNode(call.This))
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+}
+
+// ownerStyleSheet answers the CSSStyleSheet an element owns, which is the same
+// object document.styleSheets hands out for it, or null when the element owns
+// no sheet. Membership is decided by the list itself, so the two views cannot
+// disagree: measured, L1.sheet === document.styleSheets[0], a link whose fetch
+// 404s still has a sheet, a disabled link and a link with no href have none, and
+// a <style> inside a template has none even though it is in the document.
+func (r *Runtime) ownerStyleSheet(node *dom.Node) goja.Value {
+	if node == nil || node.Doc == nil {
+		return goja.Null()
+	}
+	for _, owner := range styleSheetOwners(node.Doc) {
+		if owner == node {
+			return r.wrapCSSStyleSheet(node)
+		}
+	}
+	return goja.Null()
+}
+
+// sheetCSSText is the text one sheet's rules are parsed from: the element's own
+// children for a <style>, and the text this navigation fetched for the URL a
+// <link> resolves to. A linked sheet nobody fetched has no text, so its rule
+// list is empty - the measured shape of the 404 entry, and the honest answer
+// wherever the engine never installed a reader.
+func (r *Runtime) sheetCSSText(owner *dom.Node) string {
+	if owner == nil {
+		return ""
+	}
+	if owner.Element() && owner.Data == "link" {
+		url, ok := r.linkedSheetHref(owner)
+		if !ok {
+			return ""
+		}
+		if fn := r.linkedCSSProvider(); fn != nil {
+			if text, ok := fn(url); ok {
+				return text
+			}
+		}
+		return ""
+	}
+	return owner.TextContent()
+}
+
+// cachedCSSRules is one sheet's rule wrappers together with the text they were
+// built from, so a sheet whose text changed rebuilds and a sheet whose text is
+// the same keeps handing back the objects the page already holds.
+type cachedCSSRules struct {
+	text  string
+	rules []*goja.Object
+}
+
+func (r *Runtime) sheetRuleObjects(owner *dom.Node) []*goja.Object {
+	text := r.sheetCSSText(owner)
+	if owner == nil {
+		return r.wrapCSSRules(owner, css.Parse(text).Rules)
+	}
+	if cached, ok := r.cssRuleLists[owner]; ok && cached.text == text {
+		return cached.rules
+	}
+	rules := r.wrapCSSRules(owner, css.Parse(text).Rules)
+	if r.cssRuleLists == nil {
+		r.cssRuleLists = make(map[*dom.Node]cachedCSSRules)
+	}
+	r.cssRuleLists[owner] = cachedCSSRules{text: text, rules: rules}
+	return rules
+}
+
+func (r *Runtime) wrapCSSRules(owner *dom.Node, parsed []css.Rule) []*goja.Object {
+	rules := make([]*goja.Object, len(parsed))
+	for i, rule := range parsed {
+		rules[i] = r.wrapCSSStyleRule(owner, rule)
+	}
+	return rules
+}
+
 func (r *Runtime) wrapCSSStyleSheet(owner *dom.Node) *goja.Object {
+	if owner == nil {
+		return r.cssStyleSheetObject(owner)
+	}
 	if r.cssStyleSheetObjects == nil {
 		r.cssStyleSheetObjects = make(map[*dom.Node]*goja.Object)
 	}
 	if obj := r.cssStyleSheetObjects[owner]; obj != nil {
 		return obj
 	}
+	obj := r.cssStyleSheetObject(owner)
+	r.cssStyleSheetObjects[owner] = obj
+	return obj
+}
+
+func (r *Runtime) cssStyleSheetObject(owner *dom.Node) *goja.Object {
 	obj := r.vm.NewObject()
 	_ = obj.SetPrototype(r.cssStyleSheetProto)
 	_ = obj.Set("__sheetOwner", r.wrapNode(owner))
-	r.cssStyleSheetObjects[owner] = obj
 	return obj
 }
 
@@ -179,17 +441,106 @@ func (r *Runtime) sheetOwner(sheet goja.Value) *dom.Node {
 	return r.getNode(obj.Get("__sheetOwner"))
 }
 
+// mediaListOf answers the one MediaList of one sheet. Measured, Chromium hands
+// the same object for every read (`sheet.media === sheet.media`), the text is
+// the owner's media attribute read on the spot - after
+// `L3.setAttribute("media", "screen and (min-width: 100px)")` the sheet already
+// in hand reports the new text - and a sheet with no media attribute reports ""
+// with an empty list rather than "all".
+func (r *Runtime) mediaListOf(owner *dom.Node) goja.Value {
+	if owner == nil {
+		return r.newMediaList(owner)
+	}
+	if list, ok := r.cssMediaLists[owner]; ok {
+		return list
+	}
+	if r.cssMediaLists == nil {
+		r.cssMediaLists = make(map[*dom.Node]goja.Value)
+	}
+	list := r.newMediaList(owner)
+	r.cssMediaLists[owner] = list
+	return list
+}
+
+func (r *Runtime) newMediaList(owner *dom.Node) goja.Value {
+	mediaText := func() string {
+		if owner == nil {
+			return ""
+		}
+		return owner.GetAttribute("media")
+	}
+	// A media query list is comma-separated: measured, `media="screen"` answers
+	// length 1 with item(0) and [0] both "screen", and no attribute answers
+	// length 0 with item(0) null and [0] undefined.
+	segments := func() []string {
+		text := mediaText()
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		parts := strings.Split(text, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, part)
+			}
+		}
+		return out
+	}
+	target := r.vm.NewObject()
+	_ = target.DefineAccessorProperty("mediaText", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(mediaText())
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	_ = target.DefineAccessorProperty("length", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(len(segments()))
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	_ = target.Set("item", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return goja.Null()
+		}
+		index := int(call.Argument(0).ToInteger())
+		parts := segments()
+		if index < 0 || index >= len(parts) {
+			return goja.Null()
+		}
+		return r.vm.ToValue(parts[index])
+	}))
+	_ = target.Set("toString", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(mediaText())
+	}))
+	return r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
+		Get: func(proxied *goja.Object, property string, _ goja.Value) goja.Value {
+			if isCanonicalIndex(property) {
+				parts := segments()
+				index, _ := strconv.Atoi(property)
+				if index >= 0 && index < len(parts) {
+					return r.vm.ToValue(parts[index])
+				}
+				return goja.Undefined()
+			}
+			return proxied.Get(property)
+		},
+		GetIdx: func(_ *goja.Object, index int, _ goja.Value) goja.Value {
+			parts := segments()
+			if index >= 0 && index < len(parts) {
+				return r.vm.ToValue(parts[index])
+			}
+			return goja.Undefined()
+		},
+		HasIdx: func(_ *goja.Object, index int) bool { return index >= 0 && index < len(segments()) },
+	}))
+}
+
 func (r *Runtime) cssRuleListForSheet(owner *dom.Node) goja.Value {
+	rules := r.sheetRuleObjects(owner)
 	obj := r.vm.NewObject()
 	_ = obj.SetPrototype(r.ensureCollectionProto())
-	rules := r.parsedCSSRules(owner)
 	for i, rule := range rules {
-		_ = obj.Set(strconv.Itoa(i), r.wrapCSSStyleRule(owner, rule))
+		_ = obj.Set(strconv.Itoa(i), rule)
 	}
 	_ = obj.DefineAccessorProperty("length", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(len(rules))
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-	_ = obj.Set("item", func(call goja.FunctionCall) goja.Value {
+	_ = obj.Set("item", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return goja.Null()
 		}
@@ -197,16 +548,9 @@ func (r *Runtime) cssRuleListForSheet(owner *dom.Node) goja.Value {
 		if index < 0 || index >= len(rules) {
 			return goja.Null()
 		}
-		return r.wrapCSSStyleRule(owner, rules[index])
-	})
+		return rules[index]
+	}))
 	return obj
-}
-
-func (r *Runtime) parsedCSSRules(owner *dom.Node) []css.Rule {
-	if owner == nil {
-		return nil
-	}
-	return css.Parse(owner.TextContent()).Rules
 }
 
 func (r *Runtime) wrapCSSStyleRule(owner *dom.Node, rule css.Rule) *goja.Object {

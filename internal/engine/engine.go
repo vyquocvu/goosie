@@ -936,6 +936,7 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		})
 		s.jsRT.SetComputedStyleProvider(s.computedStyleValues)
 		s.jsRT.SetPseudoStyleProvider(s.pseudoStyleValues)
+		s.jsRT.SetLinkedCSSProvider(s.StyleSheetText)
 		s.installLayoutProviders()
 		s.jsRT.SetSubresourceBudget(s.sub)
 		s.jsRT.SetImageLoader(s)
@@ -3598,6 +3599,19 @@ func (s *Session) startAnimations() {
 			now,
 		)
 	}
+}
+
+// StyleSheetText answers the CSS text this navigation already fetched for one
+// absolute style sheet URL. document.styleSheets parses a linked sheet's rules
+// from it, and ok is false when the memo holds nothing - the URL was never
+// requested, or its request failed - so that sheet reports no rules, which is
+// the measured answer for a <link> whose fetch 404s.
+//
+// The engine owns the fetch and internal/js may not reach it, so this narrow
+// reader is what SetLinkedCSSProvider installs. The memo belongs to the session
+// from construction and locks itself, so no session lock is taken here.
+func (s *Session) StyleSheetText(url string) (string, bool) {
+	return s.cssText.lookup(url)
 }
 
 // Stylesheets returns a slice of parsed stylesheets applied to this session.
