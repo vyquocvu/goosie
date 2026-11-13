@@ -106,7 +106,11 @@ func isFileInput(n *dom.Node) bool {
 }
 
 func isSubmitButton(n, form *dom.Node) bool {
-	if n == nil || !n.Element() || dom.IsFormControlDisabled(n) || FindForm(n) != form {
+	return isSubmitButtonInAnyState(n, form) && !dom.IsFormControlDisabled(n)
+}
+
+func isSubmitButtonInAnyState(n, form *dom.Node) bool {
+	if n == nil || !n.Element() || FindForm(n) != form {
 		return false
 	}
 	switch n.Data {
@@ -120,7 +124,13 @@ func isSubmitButton(n, form *dom.Node) bool {
 	}
 }
 
-// FirstSubmitButton returns the first enabled submit button in tree order.
+// FirstSubmitButton returns the first submit button in tree order, disabled or
+// not. Implicit submission picks its submitter this way: a disabled button
+// stays the chosen submitter and blocks the submission rather than handing the
+// job to the next button (measured in Chromium 131.0.6778.33 with /tmp/v2/run4.py
+// and /tmp/v2/run5b.py, 2026-11-13: Enter in a form whose first submit button
+// is disabled records no navigation at all, and removing that button lets the
+// same Enter submit `/s2?t2=t2v`).
 func FirstSubmitButton(form *dom.Node) *dom.Node {
 	if form == nil {
 		return nil
@@ -131,7 +141,7 @@ func FirstSubmitButton(form *dom.Node) *dom.Node {
 		if n == nil || found != nil {
 			return
 		}
-		if isSubmitButton(n, form) {
+		if isSubmitButtonInAnyState(n, form) {
 			found = n
 			return
 		}
@@ -141,6 +151,20 @@ func FirstSubmitButton(form *dom.Node) *dom.Node {
 	}
 	walk(form)
 	return found
+}
+
+// disabledFormControlAt returns the nearest disabled form control at or above
+// n, or nil. Only the disableable controls suppress pointer input: a disabled
+// fieldset and a stray `disabled` attribute on a non-control both keep their
+// clicks (/tmp/v2/run7.py, 2026-11-13: `<fieldset disabled>` -> `click:fs2`,
+// `<div disabled>` -> `click:ddiv`).
+func disabledFormControlAt(n *dom.Node) *dom.Node {
+	for cur := n; cur != nil; cur = cur.Parent {
+		if dom.IsDisableableFormControl(cur) && dom.IsFormControlDisabled(cur) {
+			return cur
+		}
+	}
+	return nil
 }
 
 // ValidateForm returns invalid controls in tree order. This intentionally

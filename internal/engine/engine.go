@@ -2159,6 +2159,27 @@ func (s *Session) ClickAt(x, y float32) bool {
 			hitNode = hitNode.Parent
 		}
 	}
+	if disabled := disabledFormControlAt(hitNode); disabled != nil {
+		// A disabled form control takes part in no click. Measured in Chromium
+		// 131.0.6778.33 (/tmp/v2/run4.py, run8.py, run9.py, 2026-11-13): a
+		// press on the control itself dispatches no click to it or to any
+		// ancestor, a press on one of its children dispatches a click whose
+		// path stops at the control's boundary (capture and bubble run inside
+		// the subtree only, so the control, its form and the document's
+		// capture listeners never see it), and neither runs any activation
+		// behaviour.
+		if disabled != hitNode {
+			path := dom.EventPath(hitNode)
+			for i, node := range path {
+				if node == disabled {
+					path = path[:i]
+					break
+				}
+			}
+			dom.DispatchEventWithPath(hitNode, dom.NewTrustedEvent("click", true, true), path)
+		}
+		return dismissed || dismissedPopup != nil
+	}
 	if isRangeInput(hitNode) && !dom.IsFormControlDisabled(hitNode) {
 		if s.jsRT != nil {
 			s.jsRT.SetTransientUserActivation(true)

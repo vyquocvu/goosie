@@ -612,7 +612,15 @@ func isResetButton(node *dom.Node) bool {
 
 func (r *Runtime) clickHTMLElement(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
-	if node == nil || !node.Element() || dom.IsFormControlDisabled(node) {
+	if node == nil || !node.Element() {
+		return goja.Undefined()
+	}
+	if dom.IsDisableableFormControl(node) && dom.IsFormControlDisabled(node) {
+		// Only a disabled form control swallows the simulated click. A stray
+		// `disabled` attribute elsewhere still dispatches: measured in
+		// Chromium 131.0.6778.33, `<div disabled>.click()` delivers
+		// `click:ddiv` while every disabled control in the same document
+		// logs nothing at all (/tmp/v2/run5.py, 2026-11-13).
 		return goja.Undefined()
 	}
 	owner := r.formOwner(node)

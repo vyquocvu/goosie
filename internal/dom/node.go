@@ -459,6 +459,26 @@ func IsFormControlDisabled(node *Node) bool {
 	return node != nil && (node.HasAttribute("disabled") || IsDisabledByFieldset(node))
 }
 
+// IsDisableableFormControl reports whether node is a form control whose
+// disabled state suppresses pointer input: input, button, select, textarea, or
+// a form-associated custom element. Two measured shapes stay outside this set
+// (Chromium 131.0.6778.33, 2026-11-13): a click that lands on a disabled
+// <fieldset> still dispatches to the fieldset, and a stray `disabled`
+// attribute on an element that is not a control changes nothing at all.
+func IsDisableableFormControl(node *Node) bool {
+	if node == nil || !node.Element() || node.Namespace != NSHTML {
+		return false
+	}
+	if node.FormAssociatedCustomElement {
+		return true
+	}
+	switch node.Data {
+	case "button", "input", "select", "textarea":
+		return true
+	}
+	return false
+}
+
 func (n *Node) selectAttributeChanged(name string) {
 	if n == nil {
 		return

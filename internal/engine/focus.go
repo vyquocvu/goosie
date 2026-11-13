@@ -1298,7 +1298,18 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 		}
 		s.opMu.Unlock()
 		if form != nil {
-			s.submitForm(form, FirstSubmitButton(form))
+			submitter := FirstSubmitButton(form)
+			if submitter != nil && dom.IsFormControlDisabled(submitter) {
+				// The disabled default button is still the chosen submitter, so
+				// the press submits nothing at all - it does not fall through to
+				// the next enabled button and it does not validate. Measured in
+				// Chromium 131.0.6778.33: Enter in /tmp/v2/probe5.html form #f2
+				// (disabled submit first, enabled one second) records no
+				// navigation and no invalid event, while removing the disabled
+				// button submits /s2?t2=keep.
+				return true
+			}
+			s.submitForm(form, submitter)
 			return true
 		}
 	}
@@ -2913,6 +2924,13 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 	defer s.opMu.Unlock()
 	s.clearValidationBubbleLocked()
 	if n == nil || !n.Element() {
+		return false
+	}
+	if dom.IsDisableableFormControl(n) && dom.IsFormControlDisabled(n) {
+		// The disabled state itself blocks the toggle, so no activation path
+		// has to remember to check first. Measured in Chromium 131.0.6778.33:
+		// a press and `element.click()` both leave a disabled checkbox
+		// unchecked (/tmp/v2/run4.py, run5.py, 2026-11-13).
 		return false
 	}
 	typ := strings.ToLower(n.GetAttribute("type"))
