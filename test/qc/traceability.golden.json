@@ -1706,6 +1706,36 @@
     "enforced": false
   },
   {
+    "id": "BR-283",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/reveal_settle_test.go:TestScreenshotCapturesStartupReveal",
+      "cmd/goosie/reveal_settle_test.go:TestScreenshotDoesNotWaitForLateReveal",
+      "cmd/goosie/reveal_settle_test.go:TestScreenshotOfStaticPageIsUnaffected",
+      "cmd/goosie/reveal_settle_test.go:TestSteadyDoesNotWaitForLateStartupTimer",
+      "cmd/goosie/reveal_settle_test.go:TestSteadyRevealEnteringTheHorizonRestartsTheSettleCount",
+      "cmd/goosie/reveal_settle_test.go:TestSteadyRevealWaitSpendsOnlyOneHorizon",
+      "cmd/goosie/reveal_settle_test.go:TestSteadyWaitsForStartupTimer",
+      "internal/js/pending_load_timer_test.go:TestClosedRuntimeOwesNoStartupWork",
+      "internal/js/pending_load_timer_test.go:TestPendingLoadTimerIncludesChildBrowsingContext",
+      "internal/js/pending_load_timer_test.go:TestStartupIntervalCountsUntilItsFirstFire",
+      "internal/js/pending_load_timer_test.go:TestTimersQueuedAfterTheLoadStepAreNotStartupWork",
+      "internal/js/pending_load_timer_test.go:TestTimersQueuedBeforeLoadAreMarkedAsStartupWork",
+      "test/engine/pending_load_timer_test.go:TestPendingStartupWorkIsTheRevealThePagePaintsAfter",
+      "test/engine/pending_load_timer_test.go:TestSessionWithoutJSOwesNothing",
+      "test/engine/pending_load_timer_test.go:TestStartupIntervalCountsOnceBeforeItsFirstFire",
+      "test/engine/pending_load_timer_test.go:TestStartupTimerIsPendingLoadWork",
+      "test/engine/pending_load_timer_test.go:TestTimerQueuedAfterLoadIsNotStartupWork",
+      "test/engine/pending_load_timer_test.go:TestZeroDelayStartupTaskIsDueNow"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

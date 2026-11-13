@@ -177,6 +177,24 @@ var _ surface.Window = (*driver)(nil)
 // gets from two presents. A 600 floor made every parity fixture pay ~10s.
 const steadyFloorFrames = 8
 
+// steadyRevealHorizon bounds the wait a screenshot run will spend on a page's
+// own startup timers, in both directions: a timer further ahead than this is
+// not waited for, and the whole wait costs the run no more than this much wall
+// time. The number is measured. Chromium 131.0.6778.33 at viewport 1280x800
+// (2026-11-13), with setTimeout/setInterval hooked from document start and the
+// sum of visible element areas sampled at 0/200/300/500/800/1200/2000/3000ms
+// after navigation start: https://www.gov.vn queues 81 timers before its load
+// event and its area never moves (148,269,173 px² throughout);
+// https://vnexpress.net queues 938 and moves once, between 200ms and 300ms
+// (156,858,060 to 159,597,862); https://tuoitre.vn queues 327 and moves at
+// 200ms and 300ms (351,555,917 to 355,378,465), then holds to 3s. Every one of
+// those moves came from a timer of 300ms or less. What is queued past that is
+// polling - vnexpress carries 187 timers at 1s and five at 24h, gov.vn boots a
+// 24h one - and bought no new pixels in 3s of watching, so waiting for it
+// would only make every screenshot of the page later, not truer. Half a second
+// is the widest observed reveal window doubled.
+const steadyRevealHorizon = 500 * time.Millisecond
+
 // steadyDriver is a window that passes vsyncs through without scrolling and
 // signals done once the surface has nothing left to draw. It is the screenshot
 // mode's driver: the page loads in the background, the loop presents frames, and
@@ -207,6 +225,11 @@ type steadyDriver struct {
 	// readiness is decided. See watchVsync.
 	vsyncFn func() bool
 
+	// revealFn asks how soon the page still owes a timer it queued during its
+	// own load. See steadyRevealHorizon and revealPending.
+	revealFn    func() (time.Duration, bool)
+	revealStart time.Time
+
 	mu   sync.Mutex
 	sent int
 }
@@ -223,6 +246,17 @@ func newSteadyDriver(f *framePath, frames int) *steadyDriver {
 	}
 	go d.pump()
 	return d
+}
+
+// watchReveal tells the driver how to ask the page when it next owes itself a
+// timer it queued during its own load. Like the other watchers it can only be
+// attached after the loop is built, and the getter runs on the pump's
+// goroutine, the same single thread that already ticks the session, so it reads
+// the runtime's timer queue without a second lock discipline.
+func (d *steadyDriver) watchReveal(reveal func() (time.Duration, bool)) {
+	d.mu.Lock()
+	d.revealFn = reveal
+	d.mu.Unlock()
 }
 
 // watchProgress tells the driver how to ask how much raster work has landed
@@ -348,6 +382,15 @@ func (d *steadyDriver) ready(started time.Time) bool {
 			return time.Since(d.lastMove) > d.stallBudget
 		}
 	}
+	// Nothing in the tile accounting can see a page that has promised to show
+	// itself shortly: every tile is drawn, nothing is on order, and no callback
+	// has repainted yet because no callback has run. Waiting for a startup
+	// timer is what keeps `setTimeout(reveal, 200)` out of the PNG as a blank
+	// page, and it is deliberately the page's own load-phase queue rather than
+	// the whole timer list - see steadyRevealHorizon for what that costs.
+	if d.revealPending() {
+		return false
+	}
 	if d.sent >= d.ceiling {
 		return true
 	}
@@ -359,6 +402,36 @@ func (d *steadyDriver) ready(started time.Time) bool {
 		d.settled = 0
 	}
 	return d.settled >= 2
+}
+
+// revealPending reports whether the page still owes startup work worth waiting
+// a frame for, and spends the run's share of the wait while doing so. The
+// caller holds d.mu.
+//
+// Two bounds keep this from becoming a licence to wait indefinitely. A timer
+// further away than the horizon is not waited for at all, so a page that boots
+// a polling interval or a delayed redirect settles as fast as it did before.
+// And the whole wait is capped at one horizon measured from the first frame
+// that wanted it, which costs any screenshot at most ~500ms even on a page that
+// keeps queueing zero-delay startup tasks. Waiting restarts the settle count
+// because the frame the run would have written is not the frame the reveal
+// paints: the two idle frames have to come after it.
+func (d *steadyDriver) revealPending() bool {
+	if d.revealFn == nil {
+		return false
+	}
+	due, ok := d.revealFn()
+	if !ok || due > steadyRevealHorizon {
+		return false
+	}
+	if d.revealStart.IsZero() {
+		d.revealStart = time.Now()
+	}
+	if time.Since(d.revealStart) > steadyRevealHorizon {
+		return false
+	}
+	d.settled = 0
+	return true
 }
 
 var _ surface.Window = (*steadyDriver)(nil)

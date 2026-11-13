@@ -288,7 +288,16 @@ type timer struct {
 	nextFire  time.Time
 	repeat    bool // true for setInterval, false for setTimeout
 	fromDefer bool
-	nesting   int
+	// beforeLoad records that the timer was queued while the document still
+	// read something other than "complete", which is the window a page's own
+	// boot code lives in: inline scripts, deferred scripts, DOMContentLoaded
+	// and load handlers. A host deciding whether a frame is worth capturing
+	// needs exactly that distinction, because a startup reveal is work the
+	// page promised before it showed anything, while a timer queued by later
+	// user interaction is not. The flag clears when the timer first fires, so
+	// a repeating timer an animation loop re-arms cannot hold a host waiting.
+	beforeLoad bool
+	nesting    int
 }
 
 const (
@@ -3518,13 +3527,14 @@ func (r *Runtime) setupTimers() {
 		r.nextTimerID++
 		id := r.nextTimerID
 		r.timers[id] = &timer{
-			id:        id,
-			callback:  callback,
-			interval:  time.Duration(ms) * time.Millisecond,
-			nextFire:  time.Now().Add(time.Duration(ms) * time.Millisecond),
-			repeat:    false,
-			fromDefer: r.inDeferScript,
-			nesting:   nesting,
+			id:         id,
+			callback:   callback,
+			interval:   time.Duration(ms) * time.Millisecond,
+			nextFire:   time.Now().Add(time.Duration(ms) * time.Millisecond),
+			repeat:     false,
+			fromDefer:  r.inDeferScript,
+			beforeLoad: r.readyState() != ReadyComplete,
+			nesting:    nesting,
 		}
 		return id
 	}
@@ -3544,13 +3554,14 @@ func (r *Runtime) setupTimers() {
 		r.nextTimerID++
 		id := r.nextTimerID
 		r.timers[id] = &timer{
-			id:        id,
-			callback:  callback,
-			interval:  time.Duration(ms) * time.Millisecond,
-			nextFire:  time.Now().Add(time.Duration(ms) * time.Millisecond),
-			repeat:    true,
-			fromDefer: r.inDeferScript,
-			nesting:   nesting,
+			id:         id,
+			callback:   callback,
+			interval:   time.Duration(ms) * time.Millisecond,
+			nextFire:   time.Now().Add(time.Duration(ms) * time.Millisecond),
+			repeat:     true,
+			fromDefer:  r.inDeferScript,
+			beforeLoad: r.readyState() != ReadyComplete,
+			nesting:    nesting,
 		}
 		return id
 	}
@@ -3630,6 +3641,7 @@ func (r *Runtime) TickDeferredTimer() bool {
 	} else {
 		delete(r.timers, next.id)
 	}
+	next.beforeLoad = false
 	if err := r.runTimerCallback(next); err != nil {
 		return true
 	}
@@ -3689,6 +3701,7 @@ func (r *Runtime) Tick() bool {
 	} else {
 		delete(r.timers, next.id)
 	}
+	next.beforeLoad = false
 	if err := r.runTimerCallback(next); err != nil {
 		return true
 	}
@@ -3700,28 +3713,92 @@ func (r *Runtime) Tick() bool {
 	return true
 }
 
-// tickIFrameChildren gives child browsing contexts an event-loop turn when
-// the embedding engine pumps the top-level document. Each child Runtime keeps
-// its own task queue and realm.
-func (r *Runtime) tickIFrameChildren() bool {
-	var tick func(*dom.Node) bool
-	tick = func(node *dom.Node) bool {
+// PendingLoadTimerDelay reports how soon this document still owes a timer it
+// queued before its own load step: negative means one is already due, and the
+// second result is false when no startup timer is waiting. Child browsing
+// contexts are included because the engine pumps them from the same turn, so
+// a reveal inside a frame is the same kind of work.
+//
+// The question a host really has to answer is "is this frame worth writing?",
+// and neither the tile counts nor the repaint stamp can see a page that has
+// promised to show itself shortly: every tile is drawn, the loop is quiet, and
+// a setTimeout that has not run yet leaves no trace at all. Measured on
+// https://www.gov.vn, https://vnexpress.net and https://tuoitre.vn
+// (2026-11-13, Chromium 131.0.6778.33, viewport 1280x800), those pages queue
+// 81, 938 and 327 timers before their load events, and their visible layout
+// area stops moving 200 to 300ms after navigation start - so the useful signal
+// is a startup timer due soon, not any pending timer at all: gov.vn boots a
+// 24-hour timer that changes nothing on screen, and waiting for it would delay
+// every screenshot of the page by 24 hours.
+func (r *Runtime) PendingLoadTimerDelay() (time.Duration, bool) {
+	if r == nil {
+		return 0, false
+	}
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return 0, false
+	}
+	var best time.Duration
+	found := false
+	consider := func(d time.Duration, ok bool) {
+		if ok && (!found || d < best) {
+			best, found = d, true
+		}
+	}
+	for _, t := range r.timers {
+		if t.beforeLoad {
+			consider(time.Until(t.nextFire), true)
+		}
+	}
+	r.eachIFrameChild(func(child *Runtime) bool {
+		consider(child.PendingLoadTimerDelay())
+		return false
+	})
+	return best, found
+}
+
+// eachIFrameChild walks every child browsing context attached to this
+// document, nested frames included, in document order. The visit reports
+// whether the walk may stop, which is what lets tickIFrameChildren abandon a
+// turn as soon as one context did work instead of ticking the rest of them.
+func (r *Runtime) eachIFrameChild(visit func(*Runtime) bool) {
+	var walk func(*dom.Node) bool
+	walk = func(node *dom.Node) bool {
 		if node == nil {
 			return false
 		}
 		if node.Element() && node.Data == "iframe" {
-			if child := r.iframeChildRuntimes[node]; child != nil && child.Tick() {
+			if child := r.iframeChildRuntimes[node]; child != nil && visit(child) {
 				return true
 			}
 		}
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			if tick(child) {
+			if walk(child) {
 				return true
 			}
 		}
 		return false
 	}
-	return r.domDoc != nil && tick(&r.domDoc.Node)
+	if r.domDoc != nil {
+		walk(&r.domDoc.Node)
+	}
+}
+
+// tickIFrameChildren gives child browsing contexts an event-loop turn when
+// the embedding engine pumps the top-level document. Each child Runtime keeps
+// its own task queue and realm.
+func (r *Runtime) tickIFrameChildren() bool {
+	work := false
+	r.eachIFrameChild(func(child *Runtime) bool {
+		if child.Tick() {
+			work = true
+			return true
+		}
+		return false
+	})
+	return work
 }
 
 // Run evaluates one classic script to completion, returning an *Error for an

@@ -977,6 +977,10 @@ func run(args []string) error {
 		// asks whether it may settle, so a timer or image completion that lands
 		// mid-run is drawn rather than truncated.
 		sd.watchVsync(f.pumpJS)
+		// Idle tiles are not an idle page: a document that queued its own reveal
+		// while it loaded has drawn nothing yet, so the run asks the page before
+		// it decides the frame is worth writing.
+		sd.watchReveal(f.pendingReveal)
 		sd.watchIdle(func() bool {
 			// Idle is not "nothing needed": a frame can want no tiles while the
 			// tiles it is waiting on are still on order at a worker. Both halves

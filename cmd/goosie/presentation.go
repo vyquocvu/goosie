@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/ax"
 	"github.com/vyquocvu/goosie/internal/engine"
@@ -107,6 +108,27 @@ func (f *framePath) pumpJS() bool {
 	}
 	f.repaintTab(tab, frame.Rect{})
 	return true
+}
+
+// pendingReveal asks the document pumpJS ticks when it next owes itself a
+// timer queued during its own load. It mirrors pumpJS's two shapes - a paced
+// run has no tab manager, an interactive one resolves the active tab - because
+// a driver that waits has to consult the same session the pump runs, and
+// consulting another one would let a frame be called settled while the page it
+// depicts was still about to change.
+func (f *framePath) pendingReveal() (time.Duration, bool) {
+	sess := f.pacedSession
+	if f.tabMgr != nil {
+		if tab := f.tabMgr.Active(); tab != nil {
+			sess = tab.Session()
+		} else {
+			sess = nil
+		}
+	}
+	if sess == nil {
+		return 0, false
+	}
+	return sess.PendingLoadTimerDelay()
 }
 
 // pumpPaced is pumpJS for a paced run: one synchronously loaded document, no

@@ -3242,6 +3242,23 @@ func (s *Session) JSTitle() string {
 	return s.jsRT.Title()
 }
 
+// PendingLoadTimerDelay reports how soon this document still owes a timer it
+// queued before its own load step, and false when no such timer is waiting.
+// It exists for hosts that decide when a frame is worth writing: a page that
+// reveals itself on a startup timer looks completely idle to the frame path
+// while that timer is pending, because every tile is drawn and nothing has
+// been repainted since the last one. The answer covers the work the pump would
+// run next, not the whole queue, so a page that polls on a long timer does not
+// hold a host waiting for it. A session with no runtime owes nothing.
+func (s *Session) PendingLoadTimerDelay() (time.Duration, bool) {
+	if s.jsRT == nil {
+		return 0, false
+	}
+	s.lifecycleMu.RLock()
+	defer s.lifecycleMu.RUnlock()
+	return s.jsRT.PendingLoadTimerDelay()
+}
+
 // PumpJS runs one event-loop turn for the document: timer, fetch, worker and
 // RAF callbacks fire, then the pipeline reflows if the turn changed the DOM.
 // It reports whether the caller must repaint for a DOM or canvas change.
