@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Forms - the measured UA control cascade (GOOSIE-CONTROLSIZE-001)</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; }
+    .label { font-size: 12px; color: #666; margin: 0 0 2px 0; }
+    .row { width: 560px; background: #f7f7f7; }
+    .band { height: 6px; margin: 0 0 6px 0; }
+    .b1 { background: #238b45; }
+    .b2 { background: #a63603; }
+    /* The reference's intrinsic width for a field is sixteen characters of the
+       control font and for a select the widest option label plus its arrow -
+       both a per-character average this engine cannot read
+       (GOOSIE-CONTROLWIDTH-001), and the picker controls' own boxes and their
+       shadow interiors are what forms/04-advanced-inputs.html scores. The
+       widths are therefore pinned, so what this fixture compares is the height
+       and the chrome BR-276 moved onto measurements, and the fields are empty
+       wherever the point is the box rather than the value. */
+    .w145 { width: 145px; }
+    .w176 { width: 176px; }
+    .w45 { width: 45px; }
+    /* A page's own chrome has to replace the reference's, not stack on it: the
+       field in this row is 163x33 - 145 of content, 16 of padding, 2 of border
+       - and the row it stands on is 33 tall, where the UA row above is 21. */
+    .page input { padding: 8px; border: 1px solid #ccc; }
+    /* An author font-size beats the UA control font and the box follows it: one
+       line of 24px plus the 6px of frame and padding a field still carries is
+       the 34px box below, and the button beside it shrink-wraps to the same 34.
+       The 24px select lands 1px above the reference's 31 for its shadow
+       listbox's own rounding (GOOSIE-DATECONTROL-001). */
+    .big input, .big select, .big button { font-size: 24px; }
+    .big input { width: 200px; }
+    .big select { width: 90px; }
+</style>
+</head>
+<body>
+    <!-- All the evidence sits above the fold on purpose: parity scores an 800x600
+         viewport screenshot, so a shape below y=600 is a shape no run compares.
+         Every row is followed by a solid band, so a line box that comes out one
+         pixel short of the reference slides the bands below it and the score
+         reads it. -->
+
+    <!-- A text field is 145px of content inside a 2px inset frame and 1px/2px of
+         padding, so 153x21, and its row is 21 tall - two pixels more than the
+         16px strut it stands on. A textarea rows=2 is two lines of its monospace
+         control font and 6px of chrome: 36px of box with 4px of strut under it,
+         which is the row that must not gain an interior baseline. -->
+    <div class=label>the field is 153x21 on a 21px row; the textarea is 36 with 4px of strut under it</div>
+    <div class=row><input type=text class=w145> <input type=search class=w145> <input type=password class=w145></div>
+    <div class="band b1"></div>
+    <div class=row><textarea rows=2 cols=20 class=w176></textarea></div>
+    <div class="band b2"></div>
+
+    <!-- The button face is #efefef under a 2px frame with 1px/6px of padding,
+         shared by the real button and the button-like input; a select is one
+         line of the control font plus its 1px frame, 19px tall; the checkbox and
+         the radio are transparent, the way the reference paints them, and not
+         white. The tallest demand on the line is the widgets' - 16px above the
+         baseline and 6 below - so the row is 22 and not 21. -->
+    <div class=label>the button face, a 19px select and two transparent widgets on one 22px line</div>
+    <div class=row><button>Go</button> <input type=submit> <select class=w45><option>one</option></select> <input type=checkbox> <input type=radio></div>
+    <div class="band b1"></div>
+
+    <!-- An input[type=image] is a replaced box sized from its attributes and
+         aligned on its bottom margin edge exactly like the <img> beside it -
+         both 15x15 on a 19px line, where the input used to collapse to nothing
+         at all. The frame is the page's own so both boxes show in both engines:
+         the reference paints the src inside the image input and this engine does
+         not yet (GOOSIE-IMAGEINPUT-001), so the evidence here is the box and the
+         line, not the picture. One 1x1 opaque pixel, scaled up. -->
+    <div class=label>an image input and an image, sized and aligned the same</div>
+    <div class=row><input type=image width=13 height=13 alt=g style="border:1px solid #a63603"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNQ7nYFAAHIAPQniln6AAAAAElFTkSuQmCC"> <img width=13 height=13 alt=i style="border:1px solid #a63603"
+      src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNQ7nYFAAHIAPQniln6AAAAAElFTkSuQmCC"></div>
+    <div class="band b2"></div>
+
+    <div class=label>and the two rules an author has to win: 163x33 with the page's chrome, 34px at 24px</div>
+    <div class="row page"><input type=text> <button>Go</button></div>
+    <div class="band b1"></div>
+    <div class="row big"><input type=text> <select><option>one</option></select> <button>Go</button></div>
+    <div class="band b2"></div>
+</body>
+</html>

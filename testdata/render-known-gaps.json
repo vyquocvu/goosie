@@ -15,16 +15,6 @@
       "fixture": "selectors/03-pseudo-elements.png",
       "blank_regions": 2,
       "follow_up_task": "docs/tasks/TASK-033-FIRST-LETTER-DROP-CAP.md"
-    },
-    {
-      "fixture": "forms/04-advanced-inputs.png",
-      "blank_regions": 1,
-      "follow_up_task": "docs/tasks/TASK-028-FORM-CONTROL-APPEARANCE.md"
-    },
-    {
-      "fixture": "html-features/01-forms-complete.png",
-      "blank_regions": 1,
-      "follow_up_task": "docs/tasks/TASK-024-RENDER-REGION-GAPS.md"
     }
   ]
 }

@@ -2277,6 +2277,11 @@ func shiftInlineContent(a *Arena, id ObjectID, dx, dy float32) {
 // input control, or an image. These are drawn by the control or the decoded
 // pixels rather than laid out from text content, so their `auto` size has to
 // come from outside the box model.
+//
+// Content size, always: the caller adds the box's padding and border back, so
+// the chrome a control carries has to come from the cascade. That is what makes
+// a field's box one line of the control font plus the reference's own 1px/2px
+// padding and 2px border, instead of a height guessed here.
 func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok bool) {
 	s := obj.Style
 	if s == nil || obj.Node == nil || !obj.Node.Element() {
@@ -2286,9 +2291,17 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		return imgContentSize(a, obj, containingW)
 	}
 	if obj.Node.Data == "select" {
-		w, h = 154, 20
+		// Chromium sizes a select's border box to one line of the control font
+		// plus its 1px frame: measured 19 tall at the UA 13.3333px, 20 at 14px
+		// and 22 at 16px, so the content box is the line and 2px. The width is
+		// the widest option label plus the arrow, which nothing here can
+		// measure (the labels are display:none boxes and the metric is an
+		// average char width Goosie's font library does not read:
+		// GOOSIE-CONTROLWIDTH-001), so the 154px box the engine has always
+		// drawn survives, as 152px of content inside that frame.
+		w, h = 152, 21
 		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
-			h = lh
+			h = lh + 2
 		}
 		return w, h, true
 	}
@@ -2357,12 +2370,25 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		return w, h, true
 	}
 	switch strings.ToLower(obj.Node.GetAttribute("type")) {
+	case "image":
+		// An image input is an image: Chromium sizes it the way it sizes an
+		// <img>, answering 13x13 for width=13 height=13 (measured 2026-11-12).
+		// The engine never fetches or paints this control's src, so the
+		// attributes are all that can reach the box (GOOSIE-IMAGEINPUT-001).
+		return imgContentSize(a, obj, containingW)
 	case "checkbox", "radio":
+		// The UA sheet gives these no border and no padding, so 13x13 is both
+		// the content box and the border box Chromium measures.
 		return 13, 13, true
 	case "range":
 		return 129, 16, true
 	case "submit", "reset", "button":
-		// Button-like inputs shrink-wrap their value label with a minimum of 80px.
+		// A button-like input shrink-wraps its value label. Chromium has no
+		// minimum width for one: measured at the UA control font, an empty
+		// submit is 16px wide (its own 12px of padding and 4px of border and
+		// nothing else), "Go" is 33.796875px and "Submit" 57.5px. The height is
+		// one line of the control font, which the 1px/6px padding and 2px border
+		// the UA sheet carries turn into the 21px box the reference draws.
 		var text string
 		if obj.Node.HasAttribute("value") {
 			text = obj.Node.GetAttribute("value")
@@ -2374,54 +2400,61 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 				text = "Reset"
 			}
 		}
-		textW := estimateTextWidth(a, s, text)
-		ubw := s.UsedBorderWidths()
-		w = textW + s.PaddingLeft + s.PaddingRight + ubw[1] + ubw[3]
-		if text != "" && w < 80 {
-			w = 80
-		}
-		h = 20
+		w = estimateTextWidth(a, s, text)
 		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
 			h = lh
+		} else {
+			h = 15
 		}
-		h += s.PaddingTop + s.PaddingBottom + ubw[0] + ubw[2]
 		return w, h, true
 	case "", "text", "password", "email", "tel", "url", "search", "number":
 	case "date", "time", "datetime-local", "datetime", "month", "week", "color", "file":
 		// Replaced controls the engine has no picker UI for still occupy a box:
 		// the page's border and padding on them must paint, and the row they
 		// sit in must not collapse to nothing, which is what left five bands
-		// blank in testdata/render/forms/04-advanced-inputs.html. Widths are
-		// Chromium's intrinsic ones for the value formats it renders, measured
-		// on that fixture at 800x600 DPR 1 as a border box minus the page's 8px
-		// padding and 1px border: date 123, time 73, datetime-local 186,
-		// month 155, week 146, colour swatch 32, and the file control's
-		// "Choose File" button 214.
+		// blank in testdata/render/forms/04-advanced-inputs.html. These are
+		// Chromium's content boxes, measured 2026-11-12 through
+		// getComputedStyle at the UA control font (13.3333px): date
+		// 119.328125x17.328125, time 72x20, month 149.328125x17.328125, week
+		// 141.328125x17.328125, datetime-local 179.328125x17.328125, colour
+		// swatch 44x23, and the file control's "Choose File" button and label
+		// 253x21. The reference scales every one of them with the control font
+		// - the date family answers 130x22 total at 14px where it is
+		// 124.328125x21.328125 at 13.3333px - and the numbers behind that
+		// scaling are the shadow editor's own metrics, which are not the page's
+		// (GOOSIE-DATECONTROL-001). Only the file box follows from a line: its
+		// content is the interior button, one line of lh plus its 6px of chrome.
 		switch strings.ToLower(obj.Node.GetAttribute("type")) {
 		case "date":
-			w = 123
+			w, h = 119.328125, 17.328125
 		case "time":
-			w = 73
+			w, h = 72, 20
 		case "datetime-local", "datetime":
-			w = 186
+			w, h = 179.328125, 17.328125
 		case "month":
-			w = 155
+			w, h = 149.328125, 17.328125
 		case "week":
-			w = 146
+			w, h = 141.328125, 17.328125
 		case "color":
-			w = 32
+			w, h = 44, 23
 		case "file":
-			w = 214
-		}
-		h = 16
-		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
-			h = lh
+			w = 253
+			h = 21
+			if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
+				h = lh + 6
+			}
 		}
 		return w, h, true
 	default:
 		return 0, 0, false
 	}
-	w, h = 154, 16
+	// A text field is 153px wide and 21px tall in Chromium at the UA control
+	// font; 145px of that width is content, the rest being the 2px border and
+	// 2px side padding the UA sheet now carries. The width follows the size
+	// attribute through an average-character metric Goosie's font library does
+	// not expose (GOOSIE-CONTROLWIDTH-001), so it stays the UA default; the
+	// height is one line of the control font, which is 15px at 13.3333px.
+	w, h = 145, 15
 	if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
 		h = lh
 	}

@@ -125,7 +125,17 @@ PASS_AT = 90.0
 # leaving it. Chips, runs of text and three different parent sizes are all in the
 # rows, each followed by a solid band, and every one of those bands sat 6 to 30px
 # somewhere else before the rules were measured.
-MIN_SCORED_FIXTURES = 114
+# 115: forms/10-control-ua-boxes.html (GOOSIE-CONTROLSIZE-001) - the control font
+# and the chrome every form control carries, now read off the reference instead of
+# guessed in layout: a text field's 153x21 box on a 21px line, a rows=2 textarea's
+# 36px box with 4px of strut under it, the button face and the 19px select, an
+# input[type=image] that takes the 15x15 box and the 19px line its <img> beside it
+# answers instead of collapsing to nothing, and the two rules an author has to win
+# - a page's own padding and border replacing the UA chrome, and an author
+# font-size carrying the box with it. The widths are pinned to what the reference
+# measures, because the intrinsic ones follow a per-character average this engine
+# cannot read (GOOSIE-CONTROLWIDTH-001).
+MIN_SCORED_FIXTURES = 115
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

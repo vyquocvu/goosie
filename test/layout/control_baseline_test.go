@@ -298,23 +298,24 @@ func TestControlsThatRenderAValueKeepTheirInteriorBaseline(t *testing.T) {
 	arena := controlMetricsSession(t, controlBaselineHTML, 800)
 	// The widgets whose visible box carries text of its own - a text field, a
 	// button, a select - align on that interior baseline, which is what the BR-270
-	// classification measured and what this slice deliberately does not touch: the
-	// line equals the control's own box on each of these, so the strut's descent is
+	// classification measured and what BR-274 deliberately did not touch: the line
+	// equals the control's own box on each of these, so the strut's descent is
 	// already covered and adding the widget rule here would lift every field off
-	// the line its label sits on. The numbers below are the pre-BR-274 answers on
-	// this markup, pinned as a guard. Chromium's for the same rows are on each case
-	// and the ones that differ differ by the control's own box height - Chromium
-	// lays controls in their UA font, 13.3333px, which the engine does not model -
-	// and not by which edge their baseline comes from.
+	// the line its label sits on. The three rows below were pinned as the
+	// pre-BR-274 answers, two of them a pixel or three short of the reference
+	// because the engine laid controls out in the page's font; BR-276 gave them
+	// their UA control font and their measured chrome, and all three now answer
+	// what Chromium does on this same markup - 21 for the field, 21 for the
+	// button, 19 for the select, each at offset 0.
 	for _, c := range []struct {
 		id    string
 		lineH float32
 		top   float32
 		why   string
 	}{
-		{"f5", 18, 0, "text field: Chromium's line is 21 because its box is 21 - a 13.3333px UA font Goosie does not model"},
+		{"f5", 21, 0, "text field: one line of the 13.3333px control font plus the 2px border and 1px padding the UA sheet carries"},
 		{"f6", 21, 0, "button: line 21 at offset 0, the same answer the reference gives"},
-		{"f7", 18, 0, "select: Chromium's line is 19 for its 19px box, again a box height and not a baseline"},
+		{"f7", 19, 0, "select: the control's own 19px box, which the UA sheet now builds out of a line and a 1px frame"},
 	} {
 		lineH, top, _, _ := controlOffsets(t, arena, c.id)
 		if !almostEqual(lineH, c.lineH) || !almostEqual(top, c.top) {

@@ -1587,6 +1587,21 @@
     "enforced": false
   },
   {
+    "id": "BR-276",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/control_ua_box_test.go:TestControlsKeepTheirMeasuredLinesAndOffsets",
+      "test/layout/control_ua_box_test.go:TestControlsSizeToTheirMeasuredBorderBoxes",
+      "test/layout/control_ua_box_test.go:TestUASheetResolvesTheMeasuredControlCascade"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

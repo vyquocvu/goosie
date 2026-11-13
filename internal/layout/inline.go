@@ -1208,20 +1208,32 @@ func boxOfAtomic(a *Arena, id ObjectID, sm strutMetrics) atomicBox {
 	return b
 }
 
-// isFormControl reports one of the boxes whose visible text is not a DOM child:
-// they align on that text's baseline like any inline-block with line boxes, which
-// is what keeps a lone control from gaining the strut's descent on top of its own.
-// Measured on Chromium 2026-11-12, each control alone on a line in a 16px block:
-// text input line 21 for a 21px box, colour picker 27 for 27, select 19 for 19,
-// textarea 40 for a 36px box plus its own descent, button 21 for 21 - while a 20px
-// image on the same strut takes 24, the whole descent added.
+// isFormControl reports the boxes whose visible text lives in a shadow tree the
+// arena never sees, so nothing but a shortcut can answer "does it have line
+// boxes" for them: they align on that text's baseline like any inline-block with
+// line boxes, which is what keeps a lone control from gaining the strut's
+// descent on top of its own. Measured on Chromium 2026-11-12, each control alone
+// on a line in a 16px block (strut line 18), as line box / box offset / box:
+// text input 21 / 0 / 21, select 19 / 0 / 19, file 21 / 0 / 21, colour swatch
+// 27 / 0 / 27, button 21 / 0 / 21 - while a 20px image on the same strut takes
+// 24, the whole descent added.
+//
+// Two names that used to be here are not. A textarea answers 40 / 0 / 36 for a
+// rows=2 box, the strut's descent under it, and the same whether or not it holds
+// text: it aligns on its bottom margin edge like the other replaced boxes. An
+// input[type=image] answers 18 / 1 / 13 and 24 / 0 / 40x20, byte for byte what a
+// plain <img> of the same box gives. A <button> needs no shortcut either: its
+// label is a DOM child, and measuring it is what makes an empty button answer
+// 18 for a 6px box, which the shortcut turned into 20.
 func isFormControl(k *Object) bool {
 	if k.Node == nil || !k.Node.Element() {
 		return false
 	}
 	switch k.Node.Data {
-	case "input", "select", "textarea", "button":
+	case "select":
 		return true
+	case "input":
+		return strings.ToLower(k.Node.GetAttribute("type")) != "image"
 	}
 	return false
 }

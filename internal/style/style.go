@@ -874,7 +874,7 @@ func UserAgentStylesheet() *css.Stylesheet { return uaSheet }
 var uaSheet = css.Parse(uaCSS)
 
 var uaCSS = `
-input, button, select, textarea, table {
+table {
 	box-sizing: border-box;
 }
 html { display: block; }
@@ -965,13 +965,48 @@ msqrt { display: inline-block; }
    and colour controls are replaced boxes too even though the engine has no
    picker behind them: keeping them inline collapsed each one to 0x0, so the
    border and padding a page sets on it painted nothing and the row it sat in
-   lost its height (five blank bands in forms/04-advanced-inputs). Only
-   input[type=image] still stays inline: it is sized from its src image, which
-   this stylesheet cannot read. */
+   lost its height (five blank bands in forms/04-advanced-inputs). */
 input { display: inline-block; background-color: #ffffff; }
-textarea { display: inline-block; background-color: #ffffff; font-family: monospace; font-size: 13.333px; white-space: pre-wrap; }
+/* Chromium lays every control out in its own font rather than the document's.
+   Measured with getComputedStyle 2026-11-12 (standards mode, body at 16px
+   sans-serif): 13.3333px weight 400 in Arial for the fields, buttons,
+   selects and the colour swatch, the same size in monospace for textarea and
+   the date family, and line-height normal for all of them. It belongs in the
+   cascade, not in a magic height in layout, because that is the only origin an
+   author can beat: a declared font-size wins here exactly as it does in the
+   reference (measured 24px on a field: 258x34 there, 153x34 here - the width
+   is GOOSIE-CONTROLWIDTH-001). A CSS-wide keyword in the shorthand does not
+   win yet, which is GOOSIE-FONTSHORTHANDWIDE-001. */
+input, select, button { font: 400 13.3333px Arial; font-style: normal; }
+textarea, input[type=date], input[type=time], input[type=month],
+input[type=week], input[type=datetime-local] { font: 400 13.3333px monospace; font-style: normal; }
+/* The chrome each control carries: measured 2026-11-12 with getComputedStyle,
+   the style, the width and the box-sizing of every side plus the background, and
+   it is what turns one line of the control font into the box the reference
+   draws. A text field's 21px is a 15px line with 1px of padding and a 2px
+   border either side; a select's 19px is its own 17px interior inside a 1px
+   solid frame; a file, tick or range control carries no border and no padding,
+   and the tick and file controls are transparent because the reference is.
+   inset and outset are the reference's styles, and Goosie paints both as a
+   solid strip in the border colour (GOOSIE-BEVELPAINT-001): the field frame's
+   rgb(118,118,118) is what the reference computes and so reads correctly as a
+   flat strip, while a button's border computes to currentColor because the
+   reference derives its bevel from the face colour - so the #767676 below is
+   the mid-grey Goosie has always painted a button frame with, standing in for
+   a bevel, not a measured colour. */
+input { box-sizing: content-box; border: 2px inset rgb(118, 118, 118); padding: 1px 2px; }
+input[type=date], input[type=time], input[type=month],
+input[type=week], input[type=datetime-local] { border: 2px inset rgb(118, 118, 118); padding: 0 0 0 1px; }
+input[type=search], input[type=button], input[type=submit], input[type=reset],
+input[type=checkbox], input[type=radio], input[type=color], select, button { box-sizing: border-box; }
+input[type=file], input[type=range], input[type=checkbox],
+input[type=radio], input[type=image] { border: 0; padding: 0; }
+input[type=file], input[type=checkbox], input[type=radio], input[type=image] { background-color: transparent; }
+input[type=button], input[type=submit], input[type=reset], button { background-color: #efefef; padding: 1px 6px; border: 2px outset #767676; }
+input[type=color] { background-color: #efefef; border: 1px solid; padding: 1px 2px; }
+textarea { display: inline-block; background-color: #ffffff; border: 1px solid rgb(118, 118, 118); padding: 2px; white-space: pre-wrap; }
 textarea[wrap="off" i] { white-space: pre; }
-input[type=image] { display: inline; }
+select { display: inline-block; background-color: #ffffff; border: 1px solid rgb(118, 118, 118); padding: 0; }
 /* Chrome lays button-like inputs out as inline-level boxes that shrink-wrap
    their value label. display:inline would send them down the generic inline
    descent with no children to measure, collapsing every submit button to 0x0,
@@ -988,10 +1023,10 @@ input[type=checkbox] { margin: 3px 3px 3px 4px; }
 input[type=radio] { margin: 3px 3px 0 5px; }
 input[type=range] { margin: 2px; }
 /* Chrome lays a button out as an inline-level box that shrinks to its label, so
-   a row of buttons sits side by side, and gives it the platform chrome instead
-   of letting it look like its own label: the control font rather than the
-   inherited one, 6px side padding, and a 2px outset border on the button face. */
-button { display: inline-block; text-align: center; padding: 1px 6px; border: 2px outset #767676; background-color: #efefef; font: 400 13.333px Arial; font-style: normal; }
+   a row of buttons sits side by side and the label centres in it. The control
+   font and the platform chrome it draws that box with are the shared rules
+   above, where an author font-size or border can beat them. */
+button { display: inline-block; text-align: center; }
 dl { display: block; margin-top: 1em; margin-bottom: 1em; }
 dt { display: block; font-weight: 700; }
 dd { display: block; margin-left: 40px; }

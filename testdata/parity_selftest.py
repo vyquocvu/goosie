@@ -234,9 +234,13 @@ def case_stale_baseline_fails():
 # The drop-cap content it was counting is still missing (the drift view keeps it
 # `shifted`, never `truly_blank`); only the band's physical ink count moved, and
 # render-known-gaps.json moved with it in the same commit.
+#
+# The two forms entries were not re-measured to 0, they left the file: BR-276
+# gave controls their UA boxes, so `forms/04-advanced-inputs` and
+# `html-features/01-forms-complete` now measure 0 blank bands, and 0 is what the
+# equality gate already demands of any healthy fixture - a declaration of 0
+# would only restate the PASS.
 MEASURED = {
-    "forms/04-advanced-inputs.png": 1,
-    "html-features/01-forms-complete.png": 1,
     "selectors/03-pseudo-elements.png": 2,
     "unicode/02-emoji-symbols.png": 1,
 }
@@ -250,7 +254,7 @@ def case_baseline_matches_passes():
     h = Harness()
     try:
         kg = h.mod.load_known_gaps(REAL_GAPS)
-        check("real baseline loaded (expected 4 entries)", len(kg) == 4,
+        check("real baseline loaded (expected 2 entries)", len(kg) == 2,
               f"{len(kg)} entries: {kg}")
         check("baseline and measured cover the same fixtures", set(kg) == set(MEASURED),
               f"declared={sorted(kg)} measured={sorted(MEASURED)}")
