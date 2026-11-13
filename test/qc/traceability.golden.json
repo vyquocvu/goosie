@@ -1642,6 +1642,25 @@
     "enforced": false
   },
   {
+    "id": "BR-280",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/box_shadow_run_once_test.go:TestInlineBlockDoesNotDuplicateItsOwnShadow",
+      "test/paint/box_shadow_run_once_test.go:TestInlineGeneratorFragmentsStillEmitTheShadow",
+      "test/paint/box_shadow_run_once_test.go:TestPseudoElementKeepsItsOwnShadow",
+      "test/paint/box_shadow_run_once_test.go:TestRunGatedShadowStaysBehindItsElementAndText",
+      "test/paint/box_shadow_run_once_test.go:TestRunShadowSpillInsideTheElementIsGone",
+      "test/paint/box_shadow_run_once_test.go:TestShadowDeclarationIsEmittedOnceWhateverTheTextShape",
+      "test/paint/box_shadow_run_once_test.go:TestShadowPaintsTheSamePixelsWhateverTheTextShape"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

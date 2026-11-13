@@ -148,7 +148,15 @@ PASS_AT = 90.0
 # a block sibling.  Five stacked sharp layers carry the inherited ink across a real share
 # of the frame, and the negative rows (author `none`, an own declaration, `initial`) plus
 # the `unset` row and the currentcolor container keep the rest of the measured law visible.
-MIN_SCORED_FIXTURES = 117
+# 118: css-features/23-box-shadow-run-once.html (GOOSIE-SHADOWRUN-001) - the outer shadow a
+# block declares, painted once whatever shape its text takes: raw text, words in spans, text
+# a spacer sibling splits into two anonymous bands, a wrapping line, two declared layers, an
+# inline-block and a ::before that owns its own ring, and an empty box as the reference. A
+# ring is the box minus itself, so every per-word run emission landed on the interior the
+# element had already filled: counted over those interiors Chromium keeps 1,071 red-tinted
+# px, all of them the inline-block's own ring, and 0 in every other row; the unfixed engine
+# spread 19,401 and the fixed engine reproduces Chromium's shape at 1,114.
+MIN_SCORED_FIXTURES = 118
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

@@ -393,7 +393,7 @@ func resolveInlineEdges(a *Arena, id ObjectID, containingW float32) {
 // fragment, by DOM parent rather than arena parent: layout reparents runs into
 // anonymous boxes, so the box a run hangs off is frequently anonymous while the
 // element that owns the copied style is the text node's DOM parent. Mirrors
-// paint's fragmentOwnsBackground. Returns false when the generator is not an
+// paint's fragmentOwnsDecorations. Returns false when the generator is not an
 // inline element (e.g. text sitting directly in a block).
 func inlineFragmentGenerator(a *Arena, frag *Object) (ObjectID, bool) {
 	if frag.Node == nil || !frag.Node.Text() || frag.Node.Parent == nil {

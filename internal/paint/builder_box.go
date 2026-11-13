@@ -36,8 +36,8 @@ func boxDeclaresOpacity(obj *layout.Object) bool {
 	return obj.Node.Element() || obj.Node.Parent == nil
 }
 
-// fragmentOwnsBackground reports whether a box may emit the background its
-// computed style carries.
+// fragmentOwnsDecorations reports whether a box may emit the background and the
+// box-shadow its computed style carries.
 //
 // The same verbatim style copies that made group opacity double-count own this
 // defect (GOOSIE-INLINEBG-001). Layout splices a box per word for every text
@@ -55,14 +55,24 @@ func boxDeclaresOpacity(obj *layout.Object) bool {
 // the run fills rendered (213,63,63) against the block's own (227,127,127), where
 // Chromium renders (227,127,127) uniformly.
 //
+// A run duplicates a box-shadow the same way, and there the spill is inside the
+// generating box rather than only on top of it (GOOSIE-SHADOWRUN-001): a ring is
+// the box minus itself, so a run's ring lands on the interior the element has
+// already filled. Measured on an 800x160 render at DPR 1 of a 300x76 block with
+// `background:#ffffff` and `box-shadow:0 0 10px 6px rgba(200,0,0,.5)`, Chromium
+// puts red-dominant ink on 0 px of that interior; the run emissions put it on
+// 1,197 for raw text, 2,573 when the words sit in spans (the whitespace between
+// them is still the block's own text) and 2,019 when a spacer sibling splits the
+// text into two anonymous bands.
+//
 // The generating element is looked up by node rather than by walking up the arena
 // parents, because layout reparents runs into the anonymous blocks and line boxes
 // it splices: the box a run hangs off is frequently anonymous, while the element
 // that owns the copied style is the text node's DOM parent. Generated content is
 // the exception, exactly as it is for group opacity above: a
 // ::before/::after/::first-letter box's synthetic text node has no parent
-// element, that box *is* the pseudo-element's box, and it owns its background.
-func (b *Builder) fragmentOwnsBackground(obj *layout.Object) bool {
+// element, that box *is* the pseudo-element's box, and it owns its decorations.
+func (b *Builder) fragmentOwnsDecorations(obj *layout.Object) bool {
 	if obj.Node == nil || !obj.Node.Text() || obj.Node.Parent == nil {
 		return true
 	}
@@ -237,14 +247,17 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 		// Inline boxes span multiple lines; their text fragments own the visible
 		// per-line backgrounds, while the union box would fill the gaps.
 		//
-		// The shadow is left gated only on paintsInlineFragments: text runs
-		// duplicate it the same way they duplicated the background, but that is
-		// measured and registered as its own defect, not silently folded into
-		// this one.
-		if len(computed.BoxShadow) > 0 {
+		// The outer shadow stands or falls with them: a text run of a non-inline
+		// generator copies that generator's style verbatim, BoxShadow included, and
+		// a ring around a word lies inside the element's own box, so the emission is
+		// a second composite on top of filled background (GOOSIE-SHADOWRUN-001).
+		// An inline generator's fragments keep emitting, which is the legitimate
+		// half - the union box paints no decoration at all.
+		owns := b.fragmentOwnsDecorations(obj)
+		if owns && len(computed.BoxShadow) > 0 {
 			b.paintBoxShadow(obj, paint.rect, paint.radius, paint.opacity)
 		}
-		if b.fragmentOwnsBackground(obj) {
+		if owns {
 			b.paintBoxBackground(obj, paint)
 			// Inset layers are the other half of the same declaration and cannot
 			// join the shadow call above: they paint over the background just

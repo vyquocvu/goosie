@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; background: rgb(240, 240, 240); font: 16px serif; }
+  /* GOOSIE-SHADOWRUN-001.  A block declares a translucent shadow and carries
+     text directly: layout splices a box per word and copies the element's
+     computed style into it, BoxShadow included, and a ring is the box minus
+     itself, so every run painted the element's shadow again INSIDE the element's
+     own filled background.  Counted over the white interior of every box on this
+     document, Chromium puts red-tinted ink on 1,071 px - all of them in the
+     inline-block's row, where its own ring legitimately sits inside the parent
+     block's white interior - and 0 px in every other row.  The fixed engine
+     reproduces that exactly (1,114 px, all in the same row) where the duplicated
+     emission spread 19,401 over the interiors, 17,203 of them outside that row,
+     539 inside the blurred row where Chromium keeps 0.
+     The shapes are the ones the oracle measures, and the last row is the
+     reference: the same block with no text at all, which must look like every
+     text shape above it.
+     Only the first row is blurred (`blur 10 + spread 8`, the declaration the
+     defect was found on).  The rest use a hard spread ring on purpose: the
+     Gaussian tail an outer blur leaves outside the box is a separate measured
+     gap (GOOSIE-SHADOWBLUR-001) and already costs 8,064 px on this one row, so
+     blurring every row would score the blur model here instead of the emission
+     count this slice fixed. */
+  .box {
+    width: 260px; height: 46px; margin: 10px 14px; padding: 4px 6px;
+    background: #ffffff;
+    box-shadow: 0 0 0 8px rgba(200, 0, 0, 0.5);
+  }
+  .twolayer {
+    width: 260px; height: 46px; margin: 10px 14px; padding: 4px 6px;
+    background: #ffffff;
+    box-shadow: 1px 1px 0 4px rgba(0, 0, 200, 0.5), 0 0 0 6px rgba(200, 0, 0, 0.5);
+  }
+  /* one row keeps the blurred declaration the defect was found on */
+  .blur { box-shadow: 0 0 10px 8px rgba(200, 0, 0, 0.5); }
+  .spacer { height: 14px; }
+  /* An inline-block owns its shadow on its own box; the text run inside it must
+     not add a second ring. */
+  .ib {
+    display: inline-block; width: 74px; height: 22px; background: rgb(0, 200, 0);
+    box-shadow: 0 0 0 6px rgba(200, 0, 0, 0.5);
+  }
+  /* Generated content is the documented exception: a ::before box owns its
+     decorations, so it keeps its own ring inside the block's own. */
+  .gen { width: 260px; height: 46px; margin: 10px 14px; padding: 4px 6px; background: #ffffff;
+         box-shadow: 0 0 0 6px rgba(200, 0, 0, 0.5); }
+  .gen::before { content: "pre"; box-shadow: 0 0 0 4px rgba(0, 150, 0, 0.5); }
+</style>
+</head>
+<body>
+  <div class="box blur">raw text is the element's own text here</div>
+  <div class="box"><span>words</span> <span>in</span> <span>spans</span> <span>with</span> <span>gaps</span></div>
+  <div class="box">one two three<div class="spacer"></div>four five six</div>
+  <div class="box">a line that wraps around and around until it runs out of room for more words</div>
+  <div class="twolayer">two declared layers behind raw text</div>
+  <div class="box"><span class="ib">inline-block</span> tail text</div>
+  <div class="gen">a block whose ::before owns its own ring</div>
+  <div class="box"></div>
+</body>
+</html>
