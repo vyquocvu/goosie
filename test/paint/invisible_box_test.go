@@ -40,15 +40,33 @@ import (
 // opacity", "any clip" or "any zero-size box" down to nothing fails here as
 // loudly as no suppression at all. The visible control is also the proof that
 // the geometry above is the true footprint and not an artefact of the test.
+//
+// What the controls declare changed on 2026-11-13, when GOOSIE-SHADOWBLUR-001
+// (BR-281) replaced the concentric-ring blur with the measured Gaussian field.
+// That measurement says a blurred shadow whose shadow rect has no area paints
+// nothing at all: Chromium reads 0 ink pixels for the 0x0, 40x0 and 0x40 boxes
+// of /tmp/sb4/probe.html with `0 1px 4px rgba(0,128,255,.9)`, and Goosie now
+// emits no command for the same documents. The smudge was therefore two defects
+// stacked, and only the suppression half is this file's. To keep the 0-command
+// assertions non-vacuous the controls declare a hard spread ring instead,
+// `box-shadow: 0 0 0 4px rgba(0,0,0,.2)`: measured, Chromium paints the visible
+// quadrant of the 8x8 square - 16 pixels at (0,0)-(3,3) reading (204,204,204),
+// the other three quadrants lying off the page - and Goosie emits the two strips
+// that make it. The blurred declaration's own law is asserted below, still
+// against a declared control so that "nothing" can never be the easy answer.
 
 // invisibleBoxDoc renders one zero-size box at the content origin with an extra
-// declaration folded in ahead of the shadow that made the smudge.
-func invisibleBoxDoc(decl string) string {
+// declaration folded in ahead of the shadow it declares.
+func invisibleBoxDoc(decl, shadow string) string {
 	return fmt.Sprintf(`<!doctype html>
 <html><head><style>html,body{margin:0;padding:0}</style></head>
-<body><div style="width:0;height:0;%sbox-shadow:0 1px 4px rgba(0,0,0,.2)"></div>
-</body></html>`, decl)
+<body><div style="width:0;height:0;%sbox-shadow:%s"></div>
+</body></html>`, decl, shadow)
 }
+
+// ibHardRing is the declaration the controls use: a hard spread ring, which both
+// engines paint as the visible quadrant of an 8x8 square.
+const ibHardRing = "0 0 0 4px rgba(0,0,0,.2)"
 
 // qc:BR-196
 func TestBoxThatCSSPaintsNothingEmitsNoCommands(t *testing.T) {
@@ -60,20 +78,19 @@ func TestBoxThatCSSPaintsNothingEmitsNoCommands(t *testing.T) {
 		name string
 		decl string
 		// wantCornerCmds is how many commands the box must put into the tile's
-		// corner: 0 when CSS says it paints nothing. A visible box's shadow emits
-		// four fills (two rings x top+bottom strips) but both top strips lie
-		// entirely at y<0, so only the two bottom strips reach the corner - and
-		// they are the whole smudge.
+		// corner: 0 when CSS says it paints nothing. A visible box's hard ring emits
+		// two strips and only the lower one reaches the corner, since the upper lies
+		// entirely at y<0 - the same half of the smudge the blurred shadow made.
 		wantCornerCmds int
 		wantTotal      int
 	}{
 		{"opacity 0", "opacity:0;", 0, 0},
 		{"visibility hidden", "visibility:hidden;", 0, 0},
-		{"opacity 0.5 still paints", "opacity:0.5;", 2, 4},
-		{"visible still paints", "", 2, 4},
+		{"opacity 0.5 still paints", "opacity:0.5;", 1, 2},
+		{"visible still paints", "", 1, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sess, err := engine.NewSession(invisibleBoxDoc(tc.decl), nil, 1280, engine.WithViewportH(1024))
+			sess, err := engine.NewSession(invisibleBoxDoc(tc.decl, ibHardRing), nil, 1280, engine.WithViewportH(1024))
 			if err != nil {
 				t.Fatalf("NewSession: %v", err)
 			}
@@ -119,8 +136,54 @@ func TestBoxThatCSSPaintsNothingEmitsNoCommands(t *testing.T) {
 					union = union.Union(b)
 				}
 			}
-			if want := (frame.Rect4(-4, 0, 4, 5)); union != want {
-				t.Errorf("visible shadow corner footprint = %v, want %v (the measured GOOSIE-LIVE-006 smudge shape)", union, want)
+			if want := (frame.Rect4(-4, 0, 4, 4)); union != want {
+				t.Errorf("visible shadow corner footprint = %v, want %v (the measured GOOSIE-LIVE-006 smudge shape; "+
+					"Chromium reads its 16 visible pixels at (0,0)-(3,3) as (204,204,204))", union, want)
+			}
+		})
+	}
+}
+
+// The other half of the smudge, and the law BR-281 measured: a blurred shadow whose
+// shadow rect has no area paints nothing. The zero-size box at the content origin is
+// that shape, and Chromium's own render of it (0x0, 40x0 and 0x40 boxes with
+// `0 1px 4px rgba(0,128,255,.9)` in /tmp/sb4/probe.html) holds 0 ink pixels. Before
+// that measurement the ring approximation emitted four fills here, ink Chromium has
+// never painted, and they only became visible because the suppression defect above let
+// them draw at the shadow's full alpha. The hard-ring case in the same table is what
+// keeps this from being satisfied by never emitting a shadow.
+// qc:BR-281
+func TestZeroAreaBoxPaintsNoBlurredShadow(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		shadow   string
+		wantCmds int
+	}{
+		{"blurred offset shadow paints nothing", "0 1px 4px rgba(0,0,0,.2)", 0},
+		{"blurred shadow paints nothing", "0 0 8px rgba(0,0,0,.2)", 0},
+		{"hard spread ring paints its two strips", ibHardRing, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sess, err := engine.NewSession(invisibleBoxDoc("", tc.shadow), nil, 1280, engine.WithViewportH(1024))
+			if err != nil {
+				t.Fatalf("NewSession: %v", err)
+			}
+			defer sess.Close()
+			list, err := sess.PaintChecked(1)
+			if err != nil {
+				t.Fatalf("PaintChecked: %v", err)
+			}
+			// This document emits nothing but the shadow, so the total is the count.
+			cmds := list.Build(1).All()
+			if len(cmds) != tc.wantCmds {
+				var got []string
+				for _, c := range cmds {
+					if b, ok := c.Bounds(); ok {
+						got = append(got, fmt.Sprintf("(%d,%d,%d,%d) a=%d", b.X0, b.Y0, b.X1, b.Y1, c.Color.A()))
+					}
+				}
+				t.Errorf("zero-size box declaring %q emitted %d commands %v, want %d "+
+					"(Chromium paints 0 ink pixels for a blurred one and 16 for the ring)", tc.shadow, len(cmds), got, tc.wantCmds)
 			}
 		})
 	}

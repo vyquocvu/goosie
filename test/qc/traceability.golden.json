@@ -1661,6 +1661,30 @@
     "enforced": false
   },
   {
+    "id": "BR-281",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/paint/outer_shadow_field_test.go:TestOuterAxisProfileOfACollapsedRectIsZeroEverywhere",
+      "internal/paint/outer_shadow_field_test.go:TestOuterAxisProfileStaysACoverageOnARealSpan",
+      "test/css/shadow_test.go:TestParseBoxShadowNegativeSpread",
+      "test/paint/box_shadow_blur_field_test.go:TestBlurredOuterFieldMasksStayOutsideTheBorderBox",
+      "test/paint/box_shadow_blur_field_test.go:TestBlurredOuterShadowInksNothingInsideTheBorderBox",
+      "test/paint/box_shadow_blur_field_test.go:TestBlurredOuterShadowSweepsTheChromiumProfile",
+      "test/paint/box_shadow_blur_field_test.go:TestCollapsedNegativeSpreadInksNothing",
+      "test/paint/box_shadow_blur_field_test.go:TestOversizedBlurredFieldKeepsTheRingApproximation",
+      "test/paint/box_shadow_blur_field_test.go:TestRoundedBlurredShadowKeepsTheRingApproximation",
+      "test/paint/box_shadow_blur_field_test.go:TestTwoBlurredLayersCompositeTheTwoFields",
+      "test/paint/box_shadow_blur_field_test.go:TestTwoLayerShadowStacksFirstDeclaredOnTop",
+      "test/paint/invisible_box_test.go:TestZeroAreaBoxPaintsNoBlurredShadow"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

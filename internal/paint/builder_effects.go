@@ -9,15 +9,24 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// paintBoxShadow draws each non-inset box-shadow layer as an offset coloured
-// rectangle behind the element. An outer shadow is clipped to the outside of
-// the border box (CSS Backgrounds §7.1.1): the element covers its own
-// interior, so only the ring outside `rect` is emitted. Blur is approximated
-// with up to three concentric layers at decreasing opacity; a real Gaussian
-// blur is not available in the tile rasterizer.
+// paintBoxShadow draws every non-inset box-shadow layer behind the element,
+// clipped to the outside of the border box (CSS Backgrounds §7.1.1): the
+// element covers its own interior, so only the ring outside `rect` is emitted.
+//
+// Layers go back to front, because CSS stacks the first declared shadow on top
+// of the later ones. Measured with two opaque hard rings - `0 0 0 10px red, 0 0
+// 0 4px green` reads red across all 10px, while the same pair declared the
+// other way round reads green for its 4px and red beyond it.
+//
+// A blur is the Gaussian a real blur integrates, not a stack of hard layers: a
+// square layer gets the measured field from appendOuterBlurredField. Two cases
+// cannot use that field and keep the concentric approximation - a rounded box,
+// because a masked fill drops the radius (GOOSIE-INSETARC-001 says the same of
+// the inset path), and a ring too large to mask pixel by pixel.
 func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius frame.Corners, opacity float32) {
 	s := obj.Style
-	for _, sh := range s.BoxShadow {
+	for i := len(s.BoxShadow) - 1; i >= 0; i-- {
+		sh := s.BoxShadow[i]
 		if sh.Inset {
 			// Inset layers belong over the background and under the border, so
 			// they are emitted by paintInsetBoxShadow at that point in the order
@@ -33,9 +42,10 @@ func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius fra
 			rect.X1+dx+spread,
 			rect.Y1+dy+spread,
 		)
-		// A zero-size box still casts when blurred or spread: the layers below
-		// inflate the rect. Only a truly empty shadow (no size, no blur, no
-		// spread) paints nothing.
+		// The cheap no-op: no size, no blur and no spread leaves nothing to
+		// paint. A blurred shadow on a zero-size box is a no-op too, but for the
+		// measured reason in outerAxisProfile - the rect keeps no span to fall off
+		// across - so it is left to that path rather than guessed at here.
 		blurLayers := int32(sh.Blur * b.scale)
 		if shadowRect.Empty() && blurLayers <= 0 {
 			continue
@@ -44,35 +54,45 @@ func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius fra
 		if sh.ColorIsCurrent {
 			color = convertColor(s.Color)
 		}
-		// Approximate blur with concentric layers. Each layer is slightly
-		// larger and more transparent than the one before it.
-		if blurLayers <= 0 {
+		sigma := float32(blurLayers) / 2
+		if sigma <= 0 {
 			b.appendShadowRing(shadowRect, rect, radius, color, opacity)
 			continue
 		}
-		// Draw from outermost (most transparent) to innermost (fully opaque).
-		const maxBlurSteps = 4
-		steps := blurLayers / 2
-		if steps < 1 {
-			steps = 1
+		if !radius.Empty() || outerFieldArea(shadowRect, rect, sigma) > int64(fieldMaskBudget) {
+			b.appendBlurredRings(shadowRect, rect, radius, color, opacity, blurLayers)
+			continue
 		}
-		if steps > maxBlurSteps {
-			steps = maxBlurSteps
-		}
-		for i := steps; i >= 1; i-- {
-			expand := int32(i) * blurLayers / steps
-			layerRect := frame.Rect4(
-				shadowRect.X0-expand,
-				shadowRect.Y0-expand,
-				shadowRect.X1+expand,
-				shadowRect.Y1+expand,
-			)
-			// Alpha fades from nearly transparent (outermost) to the full
-			// shadow color (innermost).
-			frac := float32(i) / float32(steps)
-			layerOpacity := opacity * frac
-			b.appendShadowRing(layerRect, rect, radius, color, layerOpacity)
-		}
+		b.appendOuterBlurredField(shadowRect, rect, sigma, color, opacity)
+	}
+}
+
+// appendBlurredRings approximates a blur with up to four concentric layers at
+// increasing opacity, the shape the outer path shipped before the falloff was
+// measured. It is what a rounded or oversized blurred layer still gets.
+func (b *Builder) appendBlurredRings(shadowRect, rect frame.Rect, radius frame.Corners, color frame.Color, opacity float32, blurLayers int32) {
+	// Draw from outermost (most transparent) to innermost (fully opaque).
+	const maxBlurSteps = 4
+	steps := blurLayers / 2
+	if steps < 1 {
+		steps = 1
+	}
+	if steps > maxBlurSteps {
+		steps = maxBlurSteps
+	}
+	for i := steps; i >= 1; i-- {
+		expand := int32(i) * blurLayers / steps
+		layerRect := frame.Rect4(
+			shadowRect.X0-expand,
+			shadowRect.Y0-expand,
+			shadowRect.X1+expand,
+			shadowRect.Y1+expand,
+		)
+		// Alpha fades from nearly transparent (outermost) to the full
+		// shadow color (innermost).
+		frac := float32(i) / float32(steps)
+		layerOpacity := opacity * frac
+		b.appendShadowRing(layerRect, rect, radius, color, layerOpacity)
 	}
 }
 
@@ -111,23 +131,157 @@ func (b *Builder) appendShadowRing(layerRect, borderBox frame.Rect, radius frame
 	}
 }
 
+// outerBlurReach is how far past the shadow rect a blurred layer still carries
+// ink: three standard deviations, rounded up. Measured as the last pixel
+// Chromium inks on a 120x60 box - blur 2 dies 3px out (1.5 sigma, the shortest
+// tail that survives rounding), blur 8 at 12px, blur 16 at 24px and blur 40 at
+// 60px, all 3.0 sigma. Past that the Gaussian holds under a 1/240 step of the
+// page's background, so the last column of a field is a mask byte of 0.
+func outerBlurReach(sigma float32) int32 {
+	return int32(math.Ceil(3 * float64(sigma)))
+}
+
+// outerFieldArea counts the device pixels appendOuterBlurredField would mask:
+// the shadow rect grown by the blur's reach, minus the border box the field is
+// clipped to the outside of.
+func outerFieldArea(shadowRect, borderBox frame.Rect, sigma float32) int64 {
+	reach := outerBlurReach(sigma)
+	field := frame.Rect4(
+		shadowRect.X0-reach,
+		shadowRect.Y0-reach,
+		shadowRect.X1+reach,
+		shadowRect.Y1+reach,
+	)
+	inside := field.Intersection(borderBox)
+	return int64(field.W())*int64(field.H()) - int64(inside.W())*int64(inside.H())
+}
+
+// appendOuterBlurredField paints one blurred outer layer as the field a real
+// blur leaves outside the border box. Blurring a rect convolves it with a
+// separable Gaussian, so with sigma = blur/2 the pixel whose centre sits at p
+// keeps Phi((hi-p)/sigma) - Phi((lo-p)/sigma) of the declared alpha on each
+// axis, where lo and hi are the shadow rect's edges on that axis, and the pixel
+// is the product of the two axes.
+//
+// Fitting that cost 2,261 pixels swept against Chromium at blurs 1 to 40,
+// spreads -4 to 10, offsets -20 to 10, declared alphas .25 to 1, a 12px thin
+// box, a translucent border and an opaque background: rms 0.0036, worst pixel
+// 0.0132 - 3.2 levels of a 240-step ramp. The concentric stack it replaces was
+// off by 250: at blur 8 it put 0.83 of the alpha on the first pixel past a
+// 120x60 box, where Chromium reads 0.229.
+func (b *Builder) appendOuterBlurredField(shadowRect, borderBox frame.Rect, sigma float32, color frame.Color, opacity float32) {
+	reach := outerBlurReach(sigma)
+	field := frame.Rect4(
+		shadowRect.X0-reach,
+		shadowRect.Y0-reach,
+		shadowRect.X1+reach,
+		shadowRect.Y1+reach,
+	)
+	// The same four strips appendShadowRing inks a hard layer with: top and
+	// bottom span the field, left and right fill between them. None of them
+	// reaches inside the border box, which is where the clip lives, and no pixel
+	// is in two of them, which is what keeps the alpha from doubling.
+	strips := []frame.Rect{
+		frame.Rect4(field.X0, field.Y0, field.X1, borderBox.Y0),
+		frame.Rect4(field.X0, borderBox.Y1, field.X1, field.Y1),
+		frame.Rect4(field.X0, borderBox.Y0, borderBox.X0, borderBox.Y1),
+		frame.Rect4(borderBox.X1, borderBox.Y0, field.X1, borderBox.Y1),
+	}
+	for _, strip := range strips {
+		b.appendOuterFieldStrip(strip, shadowRect, sigma, color, opacity)
+	}
+}
+
+// appendOuterFieldStrip tiles one strip into masked cells of at most
+// fieldMaskCap device pixels per side. Each axis' profile is evaluated once per
+// column and once per row rather than once per pixel: a 64x64 cell is 128 erf
+// calls instead of 4,096, and the product is exact at every pixel either way.
+func (b *Builder) appendOuterFieldStrip(strip, shadowRect frame.Rect, sigma float32, color frame.Color, opacity float32) {
+	if strip.Empty() {
+		return
+	}
+	cols := outerAxisProfile(strip.X0, int(strip.W()), shadowRect.X0, shadowRect.X1, sigma)
+	rows := outerAxisProfile(strip.Y0, int(strip.H()), shadowRect.Y0, shadowRect.Y1, sigma)
+	step := int32(fieldMaskCap)
+	for cy, ry := strip.Y0, 0; cy < strip.Y1; cy, ry = cy+step, ry+int(step) {
+		rh := min(int(step), int(strip.H())-ry)
+		for cx, rx := strip.X0, 0; cx < strip.X1; cx, rx = cx+step, rx+int(step) {
+			cw := min(int(step), int(strip.W())-rx)
+			cell := frame.Rect4(cx, cy, cx+int32(cw), cy+int32(rh))
+			b.appendOuterFieldCell(cell, cols[rx:rx+cw], rows[ry:ry+rh], color, opacity)
+		}
+	}
+}
+
+// outerAxisProfile is one axis' coverage at the centre of each of n consecutive
+// device pixels, for a shadow rect spanning lo to hi in the same coordinates.
+// The centre, not the corner: Chromium's first inked column is a half-pixel of
+// the falloff deep, which is what pins this convention.
+//
+// An axis whose span is not positive is a shadow a negative spread has collapsed
+// to a line or a point, and there is no area left to blur: measured on a 120x60
+// box, `0 0 16px -30px`, `-40px` and `-70px` all leave every pixel outside the
+// border box at the page's own colour.
+func outerAxisProfile(start int32, n int, lo, hi int32, sigma float32) []float32 {
+	out := make([]float32, n)
+	if hi <= lo {
+		return out
+	}
+	for i := range out {
+		p := float32(start) + float32(i) + 0.5
+		c := blurCoverage(p, float32(hi), sigma) - blurCoverage(p, float32(lo), sigma)
+		if c < 0 {
+			c = 0
+		}
+		out[i] = c
+	}
+	return out
+}
+
+// appendOuterFieldCell emits one cell of an outer blurred field as a fill of the
+// layer's colour whose mask carries the two axes' product per pixel. Source-over
+// cannot make that product from two edge ramps - it multiplies the un-inked
+// fractions instead of the ink - which is why the inset corners needed this same
+// shape. The declared opacity rides on the command, where the rasterizer applies
+// it to the colour before the mask, keeping the profile linear in alpha.
+func (b *Builder) appendOuterFieldCell(cell frame.Rect, cols, rows []float32, color frame.Color, opacity float32) {
+	m := image.NewAlpha(image.Rect(0, 0, len(cols), len(rows)))
+	inked := false
+	for j, ry := range rows {
+		row := j * m.Stride
+		for i, cx := range cols {
+			v := uint8(255*ry*cx + 0.5)
+			m.Pix[row+i] = v
+			if v > 0 {
+				inked = true
+			}
+		}
+	}
+	if !inked {
+		return
+	}
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: cell, Color: color, Mask: m, Opacity: opacity})
+}
+
 // insetBlurSamples is how many points an inset layer's fitted falloff is
 // sampled at. Five samples keep every pixel of the swept Chromium profiles
 // within 0.016 of the measured alpha - 4 levels of an 8-bit ramp.
 const insetBlurSamples = 5
 
-// insetMaskCap bounds one masked inset cell's resolution. Stretching is safe
-// because a cell only reaches the cap when the blur is wide, and a wide blur is
-// a flat curve: the coverage slope is 1/(sigma*sqrt(2*pi)), so the error one
-// block introduces stays within the levels the ramp fit already costs.
-const insetMaskCap = 64
+// fieldMaskCap bounds one masked field cell's resolution, on the inset edge
+// bands and on the ring outside a box alike. Stretching is safe because a cell
+// only reaches the cap when the blur is wide, and a wide blur is a flat curve:
+// the coverage slope is 1/(sigma*sqrt(2*pi)), so the error one block introduces
+// stays within the levels the ramp fit already costs.
+const fieldMaskCap = 64
 
-// insetMaskBudget bounds the area that may be masked pixel by pixel. A cell's
+// fieldMaskBudget bounds the area that may be masked pixel by pixel. A cell's
 // mask never holds more entries than the cell has pixels, so the same number
 // caps the mask memory and the per-pixel work, and one tile's worth is what the
-// rasterizer already agrees to cost for a damaged tile. Past it an inset layer
-// whose bands cross falls back to stacked ramps.
-const insetMaskBudget = 65536
+// rasterizer already agrees to cost for a damaged tile. Past it a blurred layer
+// falls back to stacked approximations: the inset path to ramps whose bands
+// cross, the outer path to concentric rings.
+const fieldMaskBudget = 65536
 
 // paintInsetBoxShadow draws every `inset` box-shadow layer inside the box.
 //
@@ -277,7 +431,7 @@ func (b *Builder) appendInsetBlurredField(rect frame.Rect, left, right, top, bot
 	tt, tb := insetReach(top, rect.H(), sigma), insetReach(bottom, rect.H(), sigma)
 	crossing := tl+tr >= rect.W() || tt+tb >= rect.H()
 	switch {
-	case crossing && int(rect.W())*int(rect.H()) <= insetMaskBudget:
+	case crossing && int(rect.W())*int(rect.H()) <= fieldMaskBudget:
 		b.appendInsetMaskedCells(rect, left, right, top, bottom, sigma, color)
 	case crossing || !radius.Empty():
 		b.appendInsetRamp(frame.Rect4(rect.X0, rect.Y0, rect.X0+tl, rect.Y1), 90, left, tl, sigma, color, radius)
@@ -310,7 +464,7 @@ func (b *Builder) appendInsetRamp(band frame.Rect, angle float32, depth, thickne
 		t := float32(i) / float32(insetBlurSamples-1)
 		stops[i] = frame.GradientStop{
 			At:    t,
-			Color: frame.ScaleColor(color, insetCoverage(float32(thickness)*t, float32(depth), sigma)),
+			Color: frame.ScaleColor(color, blurCoverage(float32(thickness)*t, float32(depth), sigma)),
 		}
 	}
 	b.list.Append(DisplayCmd{
@@ -329,8 +483,8 @@ func (b *Builder) appendInsetRamp(band frame.Rect, angle float32, depth, thickne
 // the corner reads 0.367, which this model gives as 0.384 and stacking two ramps
 // source-over gives as 0.521.
 func insetFieldCoverage(x, y float32, w, h int32, left, right, top, bottom int32, sigma float32) float32 {
-	cx := insetCoverage(x, float32(left), sigma) + insetCoverage(float32(w)-x, float32(right), sigma)
-	cy := insetCoverage(y, float32(top), sigma) + insetCoverage(float32(h)-y, float32(bottom), sigma)
+	cx := blurCoverage(x, float32(left), sigma) + blurCoverage(float32(w)-x, float32(right), sigma)
+	cy := blurCoverage(y, float32(top), sigma) + blurCoverage(float32(h)-y, float32(bottom), sigma)
 	if cx > 1 {
 		cx = 1
 	}
@@ -350,7 +504,7 @@ func (b *Builder) appendInsetMaskedCell(layer, cell frame.Rect, left, right, top
 	if w <= 0 || h <= 0 {
 		return
 	}
-	mw, mh := min(w, insetMaskCap), min(h, insetMaskCap)
+	mw, mh := min(w, fieldMaskCap), min(h, fieldMaskCap)
 	// Mask pixel i stands for the device block whose centre is (i+0.5)*w/mw: at
 	// the cap the fill stretches it, and drawMaskedFill samples a mask by nearest
 	// device pixel, so one value covers the whole block.
@@ -367,11 +521,11 @@ func (b *Builder) appendInsetMaskedCell(layer, cell frame.Rect, left, right, top
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: cell, Color: color, Mask: m})
 }
 
-// appendInsetMaskedCells tiles a whole box into masked cells of insetMaskCap
+// appendInsetMaskedCells tiles a whole box into masked cells of fieldMaskCap
 // device pixels, which is how a field whose bands cross gets its corners and its
 // interior at once. The last row and column take the remainder.
 func (b *Builder) appendInsetMaskedCells(rect frame.Rect, left, right, top, bottom int32, sigma float32, color frame.Color) {
-	step := int32(insetMaskCap)
+	step := int32(fieldMaskCap)
 	for y := rect.Y0; y < rect.Y1; y += step {
 		for x := rect.X0; x < rect.X1; x += step {
 			b.appendInsetMaskedCell(rect, frame.Rect4(x, y, min(x+step, rect.X1), min(y+step, rect.Y1)), left, right, top, bottom, sigma, color)
@@ -379,10 +533,12 @@ func (b *Builder) appendInsetMaskedCells(rect frame.Rect, left, right, top, bott
 	}
 }
 
-// insetCoverage is the fraction of an inset layer's alpha that survives x device
-// pixels inward from the edge whose blurred ink reaches depth: the tail of the
-// Gaussian Skia convolves that edge with, written as the normal CDF.
-func insetCoverage(x, depth, sigma float32) float32 {
+// blurCoverage is the fraction of a blurred edge's alpha that survives at x: the
+// tail of the Gaussian a real blur convolves that edge with, centred on the
+// depth the edge would have unfuzzed and written as the normal CDF. An inset
+// edge is measured inward from the box's own edge, an outer one in absolute
+// device coordinates, which is why the two callers differ in what they pass.
+func blurCoverage(x, depth, sigma float32) float32 {
 	z := float64(depth-x) / (float64(sigma) * math.Sqrt2)
 	return float32(0.5 * (1 + math.Erf(z)))
 }

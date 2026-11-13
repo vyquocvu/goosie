@@ -36,9 +36,12 @@ import (
 //	  empty block 16 | raw text 128 pre -> 16 post | spans 64 pre -> 16 post
 //	  split bands 112 pre -> 16 post
 //	changed pixels (with-shadow minus without-shadow), same 340x120 tile
-//	  all four shapes 13,056 with a symmetric difference of 0 between them;
-//	  pre-fix the raw-text shapes differed from the empty block by 7,158 / 4,740 /
-//	  7,154 pixels past 30 levels
+//	  Goosie post-fix: 15,332 on all four shapes, symmetric difference 0 between
+//	  them (13,056 under the concentric-ring blur this slice replaced; pre-fix the
+//	  raw-text shapes differed from the empty block by 7,158 / 4,740 / 7,154 px)
+//	  Chromium: 16,636 on the same two documents, and its own changed sets differ
+//	  from Goosie's on 1,304 px - every one of them a 1-level tail pixel at the
+//	  edge of the field, none of them past 6 levels
 //
 // The shapes that must NOT change are pinned too, because a gate that silences
 // every fragment is the wrong rule: an inline generator's fragments own the
@@ -50,9 +53,10 @@ import (
 // fixed binary reads 96.358% PASS and the pre-fix binary 88.807% FAIL, with 19,401
 // red-tinted interior px against Chromium's 1,071 - every one of them the
 // inline-block's own ring, a row the fixed engine keeps at 1,114. Seven of its eight
-// rows use a hard spread ring because the outer blur's Gaussian tail is measured
-// separately as GOOSIE-SHADOWBLUR-001; blurring every row scored that defect instead
-// of this one (87.44% fixed / 78.16% pre-fix, both under the bar).
+// rows use a hard spread ring because the outer blur's Gaussian tail was still
+// unmeasured then; it is the separable field BR-281 measures against Chromium.
+// Blurring every row scored that defect instead of this one (87.44% fixed /
+// 78.16% pre-fix, both under the bar).
 
 // srShadowColor is rgba(200,0,0,0.5) as the display list stores it: premultiplied,
 // so the red byte is 100 and the alpha byte 128.
@@ -132,14 +136,16 @@ func TestRunShadowSpillInsideTheElementIsGone(t *testing.T) {
 
 // Shape invariance at the rasterizer, which is what a page actually gets: the set
 // of pixels the declaration changes must not depend on how the element's text is
-// shaped. 13,056 pixels on all four shapes here, symmetric difference 0 - the
-// pre-fix raw-text shapes differed from the empty block by 7,158 / 4,740 / 7,154
-// pixels past 30 levels.
+// shaped. 15,332 pixels on all four shapes here, symmetric difference 0 (Chromium
+// changes 16,636 on the same two documents, and 1,304 px of the difference between
+// the two engines' sets are 1-level tail pixels) - the pre-fix raw-text shapes
+// differed from the empty block by 7,158 / 4,740 / 7,154 pixels past 30 levels.
 // qc:BR-280
 func TestShadowPaintsTheSamePixelsWhateverTheTextShape(t *testing.T) {
 	base := apChanged(apRaster(t, srBare, srShapes[0].body), apRaster(t, srLayer, srShapes[0].body))
-	if len(base) != 13056 {
-		t.Fatalf("the declaration changed %d pixels on the empty block, want the measured 13056", len(base))
+	if len(base) != 15332 {
+		t.Fatalf("the declaration changed %d pixels on the empty block, want the measured 15332 "+
+			"(Chromium changes 16636 on this document; the old ring model changed 13056)", len(base))
 	}
 	for _, shape := range srShapes[1:] {
 		got := apChanged(apRaster(t, srBare, shape.body), apRaster(t, srLayer, shape.body))

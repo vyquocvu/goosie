@@ -37,6 +37,28 @@ func TestParseBoxShadowBasic(t *testing.T) {
 	}
 }
 
+// TestParseBoxShadowNegativeSpread pins the fourth length as a distance rather
+// than a radius: a negative spread shrinks the shadow inside its box and Chromium
+// paints it, so the layer has to survive the parser at all. Only the blur radius
+// is restricted to a non-negative length.
+//
+// qc:BR-281
+func TestParseBoxShadowNegativeSpread(t *testing.T) {
+	shadows := css.ParseBoxShadow("0 0 8px -4px rgb(0, 0, 255)")
+	if len(shadows) != 1 {
+		t.Fatalf("ParseBoxShadow with a negative spread = %v, want one layer", shadows)
+	}
+	if shadows[0].Spread != -4 {
+		t.Errorf("Spread = %v, want -4", shadows[0].Spread)
+	}
+	if shadows[0].Blur != 8 {
+		t.Errorf("Blur = %v, want 8", shadows[0].Blur)
+	}
+	if got := css.ParseBoxShadow("0 0 -8px red"); len(got) != 0 {
+		t.Errorf("ParseBoxShadow(%q) = %v, want nil (a negative blur is invalid)", "0 0 -8px red", got)
+	}
+}
+
 // TestParseBoxShadowInset verifies the inset keyword is recognized.
 func TestParseBoxShadowInset(t *testing.T) {
 	shadows := css.ParseBoxShadow("inset 3px 3px 5px black")
@@ -306,7 +328,6 @@ func TestParseBoxShadowOneBadLayerDropsAll(t *testing.T) {
 		"10px",
 		"10px 10px 10px 10px 10px",
 		"10px 10px -5px red",
-		"10px 10px 5px -2px red",
 	} {
 		if got := css.ParseBoxShadow(v); len(got) != 0 {
 			t.Errorf("ParseBoxShadow(%q) = %v, want nil (whole declaration invalid)", v, got)

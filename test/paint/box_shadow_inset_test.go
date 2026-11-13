@@ -361,7 +361,7 @@ func TestInsetShadowCrossingBandsSweepTheChromiumProfile(t *testing.T) {
 
 // TestInsetShadowCrossingBandsMaskTheWholeBox is the structural half of the
 // crossing case: with no middle cell left to ink, the field goes out as masked
-// cells over the whole padding box - one per insetMaskCap block - and no ramp at
+// cells over the whole padding box - one per fieldMaskCap block - and no ramp at
 // all, so no pixel is composited twice.
 //
 // qc:BR-277

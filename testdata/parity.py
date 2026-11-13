@@ -156,7 +156,15 @@ PASS_AT = 90.0
 # element had already filled: counted over those interiors Chromium keeps 1,071 red-tinted
 # px, all of them the inline-block's own ring, and 0 in every other row; the unfixed engine
 # spread 19,401 and the fixed engine reproduces Chromium's shape at 1,114.
-MIN_SCORED_FIXTURES = 118
+# 119: css-features/24-box-shadow-blur-field.html (GOOSIE-SHADOWBLUR-001) - the falloff an
+# outer `box-shadow` blur leaves outside its box, which the engine used to draw as at most
+# four hard rings: sigma 2/4/8 on identical boxes, spread +4 and -4, offsets either way, a
+# 40px blur wider than three times the box's height, a 12px band and a 10px strip, the two
+# layer orders that make the first declaration ride on top, two blurred layers compositing,
+# a collapsed rect and a zero-size box that must paint nothing, and a soft card.  100.0% PASS
+# against 86.535% FAIL on the pre-fix binary; the corpus moved 118/119 -> 119/119 at 96.390 ->
+# 96.569 average, with the four other blurred-shadow rows improving and no row regressing.
+MIN_SCORED_FIXTURES = 119
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

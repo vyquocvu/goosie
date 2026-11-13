@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  /* GOOSIE-SHADOWBLUR-001.  An outer box-shadow with a blur radius is one
+     separable Gaussian band, alpha = A * gx(x) * gy(y), whose sigma is half the
+     declared blur and whose support is 3 sigma.  Until this row the engine drew
+     at most four concentric hard rings per blurred layer, which put ~0.6 of the
+     shadow's alpha where Chromium's falloff reads 0.05-0.20 and stopped the ink
+     wherever the last ring happened to end.  Every row here declares the shape
+     the oracle sweeps: a plain blur, a blur with positive and negative spread,
+     offsets on both sides of the box, a blur wider than the box is tall, boxes
+     thinner than the field, two layers whose order is visible in the overlap, a
+     collapsed shadow rect that must paint nothing, and an everyday card.
+     Chromium 131.0.6778.33 renders this document; the numbers are, in order,
+     this row 100.0% PASS against 86.535% FAIL on the pre-fix binary (cc8c49db),
+     the corpus 119/119 at a 96.569% average against 118/119 at 96.390%, and the
+     four other rows that carry a blurred outer shadow moving the same way:
+     css-features/07-shadows 95.151 -> 98.485, css-features/23-box-shadow-run-once
+     96.358 -> 98.42, css-features/21-inset-box-shadow 98.367 -> 99.987 and
+     positioning/03-fixed 91.356 -> 92.173. The other 114 fixtures did not move.
+     At the pixel level the same field sweeps 2,261 points Chromium measured, with
+     a worst-pixel error of 0.0132 of alpha (three levels of the 240-step ramp) and
+     an rms of 0.0036; on the run-once document it changes 15,332 pixels against
+     Chromium's 16,636, and the whole 1,304-pixel difference is 1-level tail at the
+     edge of the support.  No text and no corner radii on purpose: glyph metrics
+     (GOOSIE-FONTMETRIC-001) and the arc of a rounded blurred shadow
+     (GOOSIE-SHADOWARC-001) are separate measured gaps and would score here instead
+     of the falloff. */
+  html, body { margin: 0; background: rgb(240, 240, 240); }
+  .b { position: absolute; width: 150px; height: 50px; background: rgb(240, 240, 240); }
+</style>
+</head>
+<body>
+  <!-- sigma = 2, 4 and 8 on identical boxes: the three radii an everyday page
+       actually declares, with the field reaching 6, 12 and 24 px. -->
+  <div class="b" style="left:60px; top:30px; box-shadow: 0 0 4px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:300px; top:30px; box-shadow: 0 0 8px 4px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:540px; top:30px; box-shadow: 0 0 16px rgba(0,0,255,1)"></div>
+
+  <!-- An offset moves the whole field with the shadow rect; a negative spread
+       shrinks it inside the box, and -4px of spread on a 8px blur is the row
+       whose rect is closest to collapsing. -->
+  <div class="b" style="left:60px; top:140px; box-shadow: 6px 6px 8px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:300px; top:140px; box-shadow: 0 0 8px -4px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:540px; top:140px; box-shadow: -20px 0 8px rgba(0,0,255,0.5)"></div>
+
+  <!-- A blur wider than three times the box's own height crosses on both axes,
+       so the interior band is the whole 50px; then the two thin shapes, where a
+       rectangular field is most visible: a 12px-tall band and a 10px-wide strip. -->
+  <div class="b" style="left:60px; top:260px; box-shadow: 0 0 40px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:300px; top:279px; height:12px; box-shadow: 0 0 8px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:540px; top:260px; width:10px; height:50px;
+       box-shadow: 0 0 8px rgba(0,0,255,0.5)"></div>
+
+  <!-- Layer order without any blur to hide behind: 10px of red over 4px of green
+       reads red across the whole band, declared the other way round green holds
+       its 4px.  The third box composites two blurred layers. -->
+  <div class="b" style="left:60px; top:390px;
+       box-shadow: 0 0 0 10px rgba(255,0,0,0.5), 0 0 0 4px rgba(0,200,0,0.5)"></div>
+  <div class="b" style="left:300px; top:390px;
+       box-shadow: 0 0 0 4px rgba(0,200,0,0.5), 0 0 0 10px rgba(255,0,0,0.5)"></div>
+  <div class="b" style="left:540px; top:390px;
+       box-shadow: 0 0 8px rgba(0,0,255,0.5), 0 0 16px rgba(0,0,255,0.25)"></div>
+
+  <!-- A negative spread that takes the rect past nothing paints no ink at all:
+       Chromium reads the bare page here, and so must the engine.  The zero-size
+       boxes are the same law in the shape GOOSIE-LIVE-006 found it in: the
+       blurred declaration paints nothing, the hard 4px spread paints its 8x8
+       square.  The card on the right is the everyday soft shade. -->
+  <div class="b" style="left:60px; top:500px; background:#ffffff;
+       box-shadow: 0 0 16px -30px rgba(0,0,255,0.5)"></div>
+  <div style="position:absolute; left:290px; top:525px; width:0; height:0;
+       box-shadow: 0 1px 4px rgba(0,0,0,0.2)"></div>
+  <div style="position:absolute; left:330px; top:525px; width:0; height:0;
+       box-shadow: 0 0 0 4px rgba(0,0,0,0.2)"></div>
+  <div class="b" style="left:540px; top:500px; background:#ffffff;
+       box-shadow: 0 6px 12px rgba(0,0,0,0.3)"></div>
+</body>
+</html>

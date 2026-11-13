@@ -142,14 +142,12 @@ func parseOneBoxShadow(s string) (BoxShadow, bool) {
 	}
 
 	// Need exactly offsetX and offsetY, plus optional blur and spread.
-	// Negative blur and spread radii are invalid; offsets may be negative.
+	// A negative blur radius is invalid; offsets and the spread may be negative,
+	// since a negative spread is how a shadow is shrunk inside its box.
 	if len(lengths) < 2 || len(lengths) > 4 {
 		return shadow, false
 	}
 	if len(lengths) >= 3 && lengths[2] < 0 {
-		return shadow, false
-	}
-	if len(lengths) >= 4 && lengths[3] < 0 {
 		return shadow, false
 	}
 	shadow.OffsetX = lengths[0]
