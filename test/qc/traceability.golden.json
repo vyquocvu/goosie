@@ -947,7 +947,7 @@
       "test/frame/corners_contains_test.go:TestEllipticalCornerTestsEachAxis",
       "test/frame/corners_contains_test.go:TestRoundedCornerExcludesPixelsOutsideTheCurve",
       "test/frame/corners_contains_test.go:TestSquareCornersAreThePlainRectTest",
-      "test/paint/box_shadow_ring_test.go:TestInsetOnlyShadowPaintsNoRing",
+      "test/paint/box_shadow_ring_test.go:TestInsetOnlyShadowKeepsItsInkInsideTheBorderBox",
       "test/paint/box_shadow_ring_test.go:TestOffsetBoxShadowInksOnlyTheSideItIsPushedTo",
       "test/paint/box_shadow_ring_test.go:TestOuterBoxShadowPaintsOnlyTheRingOutsideTheBorderBox",
       "test/paint/outline_ring_test.go:TestNoOutlineStylePaintsNoRing",
@@ -1598,6 +1598,24 @@
       "test/layout/control_ua_box_test.go:TestControlsKeepTheirMeasuredLinesAndOffsets",
       "test/layout/control_ua_box_test.go:TestControlsSizeToTheirMeasuredBorderBoxes",
       "test/layout/control_ua_box_test.go:TestUASheetResolvesTheMeasuredControlCascade"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-277",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/box_shadow_inset_test.go:TestInsetShadowCellsTileThePaddingBox",
+      "test/paint/box_shadow_inset_test.go:TestInsetShadowCrossingBandsMaskTheWholeBox",
+      "test/paint/box_shadow_inset_test.go:TestInsetShadowCrossingBandsSweepTheChromiumProfile",
+      "test/paint/box_shadow_inset_test.go:TestInsetShadowPaintsOverBackgroundUnderBorder",
+      "test/paint/box_shadow_inset_test.go:TestInsetShadowStopsMaskingPastItsBudget",
+      "test/paint/box_shadow_inset_test.go:TestInsetShadowSweepsTheChromiumProfile"
     ],
     "enforced": false
   },

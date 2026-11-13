@@ -100,19 +100,27 @@ func TestOffsetBoxShadowInksOnlyTheSideItIsPushedTo(t *testing.T) {
 	}
 }
 
-// Inset shadows are a documented no-op in this builder, so a box declaring only
-// an inset layer must emit no shadow ink at all - and must not lose its own
-// background either.
+// Inset layers are not the ring an outer shadow is: their ink belongs inside the
+// border box, and box_shadow_inset_test.go pins its shape. What survives of the
+// no-ring era is the two halves this fixture was built to check - a box that
+// declares only an inset layer still paints its own background, and none of the
+// layer's ink escapes the box.
 //
 // qc:BR-073
-func TestInsetOnlyShadowPaintsNoRing(t *testing.T) {
+func TestInsetOnlyShadowKeepsItsInkInsideTheBorderBox(t *testing.T) {
 	fills, boxFillAt, _ := shadowFills(t, `<!doctype html><html><head><style>`+
 		`html,body{margin:0}`+
 		`#b{position:absolute;left:40px;top:40px;width:120px;height:60px;`+
 		`background:rgb(0,200,0);box-shadow:inset 4px 4px 0 2px rgb(128,0,128)}`+
 		`</style></head><body><div id="b"></div></body></html>`)
-	if len(fills) != 0 {
-		t.Errorf("inset shadow emitted %d fills %v, want none (inset is not painted yet)", len(fills), fills)
+	borderBox := frame.Rect4(40, 40, 160, 100)
+	if len(fills) == 0 {
+		t.Fatal("an inset layer painted nothing: it belongs inside the border box, not behind the element")
+	}
+	for i, f := range fills {
+		if area := intersectArea(f, borderBox); area != f.W()*f.H() {
+			t.Errorf("inset fill %d %v puts %d px outside the border box", i, f, f.W()*f.H()-area)
+		}
 	}
 	if boxFillAt < 0 {
 		t.Error("the box's own background disappeared with the inset layer")

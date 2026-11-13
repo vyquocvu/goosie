@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; background: rgb(240, 240, 240); }
+  .b { position: absolute; width: 200px; height: 100px; background: rgb(240, 240, 240); }
+</style>
+</head>
+<body>
+  <!-- Per-side signed depth: spread + the offset aimed at each edge. Left and
+       top carry 6px of the band, right and bottom nothing. -->
+  <div class="b" style="left:20px; top:20px; box-shadow: inset 4px 4px 0 2px rgba(0,0,255,0.5)"></div>
+  <!-- No offset, no spread: a symmetric edge profile over 8px of blur. -->
+  <div class="b" style="left:240px; top:20px; box-shadow: inset 0 0 8px rgba(0,0,255,0.5)"></div>
+  <!-- The offset's own edge is the heaviest, the opposite edge keeps a tail. -->
+  <div class="b" style="left:460px; top:20px; box-shadow: inset 4px 0 8px rgba(0,0,255,0.5)"></div>
+
+  <!-- A blur wider than half the box never reaches the declared alpha. -->
+  <div class="b" style="left:20px; top:150px; box-shadow: inset 0 0 40px rgb(0,0,255)"></div>
+  <!-- Over the background, under a translucent border. -->
+  <div class="b" style="left:240px; top:150px; border:4px solid rgba(255,0,0,0.5);
+       box-shadow: inset 0 0 12px rgba(0,0,255,0.5)"></div>
+  <!-- Layer order: the first declared layer rides on top of the later one. -->
+  <div class="b" style="left:460px; top:150px;
+       box-shadow: inset 0 0 8px rgba(0,0,255,0.5), inset 6px 6px 0 rgba(255,0,0,0.5)"></div>
+
+  <!-- Boxes narrower than two blurs: opposite bands cross, and the crossing is
+       where a doubled composite shows. -->
+  <div style="position:absolute; left:20px; top:290px; width:12px; height:60px;
+       background:rgb(240,240,240); box-shadow: inset 0 0 8px rgba(0,0,255,0.5)"></div>
+  <div style="position:absolute; left:60px; top:290px; width:12px; height:60px;
+       background:rgb(240,240,240); box-shadow: inset 4px 0 8px 2px rgba(0,0,255,0.5)"></div>
+  <div style="position:absolute; left:100px; top:310px; width:30px; height:20px;
+       background:rgb(240,240,240); box-shadow: inset 3px 3px 6px rgba(0,0,255,0.5)"></div>
+  <!-- Crossing on both axes at once: the whole interior is field. -->
+  <div style="position:absolute; left:160px; top:290px; width:40px; height:40px;
+       background:rgb(240,240,240); box-shadow: inset 0 0 40px rgba(0,0,255,0.5)"></div>
+
+  <!-- The everyday case: a soft inner shade on a white card. -->
+  <div class="b" style="left:240px; top:290px; background:#ffffff;
+       box-shadow: inset 0 0 16px rgba(0,0,0,0.35)"></div>
+  <!-- One inset layer and one outer layer on the same box. -->
+  <div class="b" style="left:460px; top:290px; background:#ffffff;
+       box-shadow: 0 6px 12px rgba(0,0,0,0.3), inset 0 0 8px rgba(0,0,255,0.5)"></div>
+  <!-- Inset spread that fills the box. -->
+  <div class="b" style="left:20px; top:420px; box-shadow: inset 0 0 0 60px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:240px; top:420px; box-shadow: inset 0 0 0 6px rgba(0,0,255,0.5)"></div>
+  <div class="b" style="left:460px; top:420px; box-shadow: inset 0 0 0 0 rgba(0,0,255,0.5)"></div>
+</body>
+</html>

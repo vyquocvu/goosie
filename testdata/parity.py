@@ -135,7 +135,14 @@ PASS_AT = 90.0
 # font-size carrying the box with it. The widths are pinned to what the reference
 # measures, because the intrinsic ones follow a per-character average this engine
 # cannot read (GOOSIE-CONTROLWIDTH-001).
-MIN_SCORED_FIXTURES = 115
+# 116: css-features/21-inset-box-shadow.html (GOOSIE-INSETSHADOW-001) - the ink an
+# `inset` box-shadow puts *inside* the box, which this engine used to drop: per-side
+# signed depth (spread plus the offset aimed at each edge), the Gaussian tail a blur
+# leaves at each edge, the product of two tails at a corner, the layer order over a
+# background and under a translucent border, boxes narrower than two blurs where the
+# bands cross, and a spread that fills the whole box. Every box sits on a background
+# the same colour as its own, so the shadow is the only thing that moves a pixel.
+MIN_SCORED_FIXTURES = 116
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

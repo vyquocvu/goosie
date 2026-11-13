@@ -246,6 +246,12 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 		}
 		if b.fragmentOwnsBackground(obj) {
 			b.paintBoxBackground(obj, paint)
+			// Inset layers are the other half of the same declaration and cannot
+			// join the shadow call above: they paint over the background just
+			// emitted and under the borders below (CSS Backgrounds §4.4), so they
+			// belong on the background's own ownership test rather than the outer
+			// shadow's.
+			b.paintInsetBoxShadow(obj, paint)
 		}
 	}
 	switch {
