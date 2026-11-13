@@ -41,6 +41,20 @@ Các trạng thái phải được ghi theo lần chạy: **NOT RUN**, **PASS**,
 - Live smoke: https://about.google/products/; không dùng profile chứa cookie hoặc dữ liệu cá nhân.
 - Cất ảnh/chụp màn hình và log theo artifacts/qa/<YYYY-MM-DD>/<TC-ID>/; mỗi FAIL cần bước tái hiện ngắn nhất, expected/actual, ảnh, log và build SHA. Không ghi cookie, token hay dữ liệu cá nhân vào evidence.
 
+### Probe Chromium và số đo ad-hoc
+
+Số đo chép vào comment, catalog, roadmap hay registry đều phải nói rõ đo trên build nào và bằng harness nào. Repo pin hai oracle trong `testdata/oracle-pins.json` (`test/gatecheck/oracle_pins_test.go` giữ chúng khớp với requirements/package.json/reference-meta):
+
+- **Render parity**: Python Playwright 1.49.1 → Chromium **131.0.6778.33**. Script chạy bằng python (`/tmp/*/run*.py`, `testdata/parity.py`) thuộc build này.
+- **Interaction parity và probe DOM/CSSOM tạm**: Node Playwright 1.63.0 (cài global) → Chromium **153.0.8010.12**. Runner `.js` thuộc build này.
+
+Vì hai build lệch nhau, khi ghi một luật mới hoặc nghi ngờ số đo đã có thì đo lại trên **cả hai**, mỗi probe một browser context/trang tải mới:
+
+- Một context dùng cho nhiều probe làm rò trạng thái DOM và bộ nhớ đệm của tài nguyên, tạo ra khác biệt giả giữa hai build; đã phải rút lại hai kết luận vì lý do này.
+- So sánh theo giá trị đã parse và sắp xếp key, không so chuỗi thô; chuẩn hoá khác biệt thuộc về harness (prefix lỗi `Page.evaluate:` so với `page.evaluate:`, port xuất hiện trong URL) để chúng không bị tính là khác biệt của trình duyệt.
+- Khi serialize kết quả ở phía Node, không dùng whitelist key của `JSON.stringify` vì nó làm mất object lồng nhau.
+- Sau khi cô lập, khác biệt còn lại được ghi kèm số đo của cả hai build; engine theo build nào phải nói rõ ngay chỗ ghi số đó.
+
 ## 3. Kịch bản và test case
 
 ### QA-001 — Khởi chạy và mở URL trực tiếp (P0, Native CUA)

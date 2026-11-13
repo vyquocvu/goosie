@@ -13,10 +13,12 @@ import (
 // CSSRuleList.prototype.item working on any object, and own length/item
 // properties where Chromium owns only the indices.
 //
-// The expectations are Chromium 131.0.6778.33 numbers measured on this exact
-// document (2026-11-13, viewport 1280x400, DPR 1, served over http; dumps
-// /tmp/b287/cr_colA.json and cr_colB.json, probes index10.html), read here
-// against the same rule text: LINK#L1 -> a.css with media="screen, print" and
+// The expectations are Chromium 153.0.8010.12 numbers (the Node Playwright
+// 1.63.0 oracle) measured on this exact document (2026-11-13, viewport
+// 1280x400, DPR 1, served over http; dumps /tmp/b287/cr_colA.json and
+// cr_colB.json, probes index10.html) and re-run on the pinned 131.0.6778.33
+// render oracle, which answered these two the same way, read here against the
+// same rule text: LINK#L1 -> a.css with media="screen, print" and
 // LINK#L2 -> b.css with no media attribute, then the two inline sheets. Only
 // rule counts and selector text are compared, since the colours in the served
 // sheets differ from the fixture's.

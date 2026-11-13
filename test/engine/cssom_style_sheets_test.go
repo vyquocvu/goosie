@@ -45,9 +45,11 @@ func colorOfClass(t *testing.T, sess *engine.Session, class string) (int, int, i
 // every linked entry answered href null, and a sheet whose fetch failed had no
 // representation at all.
 //
-// The expectations are the ones measured on one Chromium 131.0.6778.33 fixture
-// served over http (2026-11-13, viewport 1280x400, DPR 1, dumps quoted in the
-// BR-284 catalog row): a linked sheet reports its own rules whatever its media
+// The expectations are the ones measured on one Chromium 153.0.8010.12 fixture
+// served over http (the Node Playwright 1.63.0 oracle; 2026-11-13, viewport
+// 1280x400, DPR 1, dumps quoted in the BR-284 catalog row, and re-run on the
+// pinned 131.0.6778.33 render oracle, which answered them the same way): a
+// linked sheet reports its own rules whatever its media
 // says (/print.css: 1 rule at a screen viewport, and the request is issued), a
 // sheet whose fetch 404s is listed with 0 rules and a non-null .sheet, two links
 // with the same href are two sheets behind one request, and a link with the

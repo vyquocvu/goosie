@@ -13,9 +13,11 @@ import (
 // read 4 where Chromium reads 12, and every entry answered href null with no
 // media, title or disabled surface at all and no way back to its element.
 //
-// Every expectation below is read off one Chromium 131.0.6778.33 measurement of
-// a fixture served over http (2026-11-13, viewport 1280x400, DPR 1; the raw
-// dumps are quoted in the BR-284 catalog row). Chromium's 12 entries there were
+// Every expectation below is read off one Chromium 153.0.8010.12 measurement
+// (the Node Playwright 1.63.0 oracle) of a fixture served over http (2026-11-13,
+// viewport 1280x400, DPR 1; the raw dumps are quoted in the BR-284 catalog row),
+// re-run on the pinned 131.0.6778.33 render oracle, which answered all six of
+// these probes the same way. Chromium's 12 entries there were
 //
 //	LINK#L1 LINK#L2 LINK#L3 LINK#L4 LINK#L5 LINK#L6 LINK#L7 STYLE#S1
 //	STYLE#S2 LINK#L9 STYLE#S3 STYLE#S5

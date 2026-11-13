@@ -16,12 +16,13 @@ import (
 // object at all, and sheet.cssRules was rebuilt on every read, so
 // `sheet.cssRules === sheet.cssRules` was false.
 //
-// Every expectation is read off the Chromium 131.0.6778.33 measurements quoted
-// in internal/js/cssom_collections.go (2026-11-13, one http fixture, viewport
+// Every expectation is read off the Chromium 153.0.8010.12 measurements (the
+// Node Playwright 1.63.0 oracle; 2026-11-13, one http fixture, viewport
 // 1280x400, DPR 1, dumps /tmp/b287/cr_col.json through cr_col12.txt plus
-// cr_colA/B/C). The page
-// below is the same document order measured there - two links, then the head's
-// style elements, then the body's - with one rule per style element, and it is
+// cr_colA/B/C) quoted in internal/js/cssom_collections.go; re-running the same
+// 14 probes on the pinned 131.0.6778.33 render oracle agreed on 12 of them. The
+// page below is the same document order measured there - two links, then the
+// head's style elements, then the body's - with one rule per style element, and it is
 // what the dumps measured: the C1 link is the one carrying media="screen, print"
 // (MediaList of 2), C2 has no media attribute (the empty list, not "all"), and
 // A1/A2/A3 each own a one-rule sheet.
@@ -297,6 +298,12 @@ func TestMediaListReportsTheOwnersAttribute(t *testing.T) {
 // after appending a <style> the StyleSheetList already in hand has one more
 // entry, the new sheet answers a null href and an empty mediaText, and item(n)
 // is the very object at [n].
+//
+// The two reference builds split on exactly this law: on 153.0.8010.12 the
+// handle in hand answers the new text and a fresh read of `sheet.media` is the
+// same object, while on the pinned 131.0.6778.33 render oracle the handle keeps
+// the old two-entry text and a fresh read is a different MediaList (`=== m`
+// false). This oracle pins the live reading, which this engine implements.
 //
 // qc:BR-285
 func TestCSSOMCollectionsStayLiveThroughOneObject(t *testing.T) {

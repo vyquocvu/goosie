@@ -10,11 +10,17 @@ import (
 
 // The three CSSOM collections each answer for an interface of their own.
 //
-// Measured 2026-11-13 on one http fixture served to Chromium 131.0.6778.33
-// (viewport 1280x400, DPR 1; the dumps are /tmp/b287/cr_col.json through
-// cr_col12.txt plus cr_colA/B/C, and test/js/cssom_collections_test.go and
-// test/engine/cssom_collection_test.go read this engine against the same
-// numbers):
+// Measured 2026-11-13 on one http fixture served to Chromium 153.0.8010.12, the
+// build the Node Playwright 1.63.0 oracle drives (viewport 1280x400, DPR 1; the
+// dumps are /tmp/b287/cr_col.json through cr_col12.txt plus cr_colA/B/C, and
+// test/js/cssom_collections_test.go and test/engine/cssom_collection_test.go
+// read this engine against the same numbers). Re-running those 14 probes on the
+// pinned render oracle - Playwright 1.49.1, Chromium 131.0.6778.33 - agreed on
+// 12; the two that did not are the MediaList a page holds across a media
+// attribute change (recorded on the liveness law below) and the name at the top
+// of the StyleSheetList prototype chain, which no oracle reads:
+// `Object.getPrototypeOf(Object.getPrototypeOf(styleSheets)).name` is null on
+// 131 and undefined on 153.
 //
 // Object.prototype.toString.call(x)  [object StyleSheetList] / [object CSSRuleList] / [object MediaList]
 // Object.getOwnPropertyNames(list)   the indices only: "0+1+2" for three sheets, "0" for one rule,
@@ -78,6 +84,13 @@ import (
 // no own index at all, not "all". After `L1.setAttribute("media", …)` the
 // MediaList already in hand reports the new text, and after appending a <style>
 // the StyleSheetList already in hand has length 4 with the new sheet at index 3.
+// That liveness law is the one the two reference builds disagree on, measured on
+// the same fixture: held after the change, 153.0.8010.12 answers `screen and
+// (min-width: 100px),1` and re-reads the very same object, while 131.0.6778.33
+// keeps answering `screen, print,2` on the handle in hand and hands a *different*
+// object on the next read. This engine follows 153, which is the reading the
+// interface defines - the list is a live view of the attribute, not a snapshot of
+// it - and the BR-285 oracle pins it (`TestCSSOMCollectionsStayLiveThroughOneObject`).
 //
 // Reads of a live collection go through its Proxy trap, because that is what
 // keeps them live: a sheet appended, removed or disabled moves through the same
