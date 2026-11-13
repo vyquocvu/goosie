@@ -48,7 +48,7 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 		// keep their own DOM and cascade. Resolve their author sheets against
 		// that document so defaultView.getComputedStyle observes iframe rules
 		// and live states such as :defined.
-		sheets, err := checkedSheets(n.Doc, nil, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
+		sheets, err := s.collectSheets(n.Doc, nil)
 		if err != nil {
 			return nil
 		}

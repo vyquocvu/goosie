@@ -23,8 +23,10 @@ const maxImportDepth = 4
 // Breadth is capped at maxCSSImports distinct targets across the whole
 // expansion (the seen set doubles as the counter) and every fetched payload
 // charges the shared subresource budget; over either, the statement imports
-// nothing rather than failing the document.
-func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]bool, sub *subBudget, depth int, onMixed func(MixedContentKind, string)) string {
+// nothing rather than failing the document. Requests and charges go through the
+// navigation's sheet memo, so a target one pass has already paid for is spliced
+// from that memo on the next pass instead of being fetched and charged again.
+func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]bool, sub *subBudget, cache *cssTextCache, depth int, onMixed func(MixedContentKind, string)) string {
 	if linker == nil || depth > maxImportDepth {
 		return text
 	}
@@ -53,8 +55,8 @@ func expandCSSImports(linker CSSLinker, sheetURL, text string, seen map[string]b
 					if ref, ok := importRef(text[i:end]); ok {
 						if abs, ok := resolveSubresourceURL(sheetURL, ref); ok && !seen[abs] && len(seen) < maxCSSImports {
 							seen[abs] = true
-							if sheet, err := linker(sheetURL, abs); err == nil && sub.take(len(sheet)) {
-								inner := expandCSSImports(linker, abs, absolutizeCSSURLs(sheet, abs), seen, sub, depth+1, onMixed)
+							if sheet, ok := cssSheetText(linker, sheetURL, abs, sub, cache); ok {
+								inner := expandCSSImports(linker, abs, absolutizeCSSURLs(sheet, abs), seen, sub, cache, depth+1, onMixed)
 								if importUsable(inner) {
 									b.WriteString(inner)
 								}

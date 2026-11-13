@@ -169,7 +169,7 @@ func TestExpandCSSImportsURLKeepsParenPayload(t *testing.T) {
 		return "", errors.New("missing")
 	}
 	in := `@import url("inner.css");`
-	out := expandCSSImports(linker, "https://e/p/page.css", in, map[string]bool{}, &subBudget{}, 1, nil)
+	out := expandCSSImports(linker, "https://e/p/page.css", in, map[string]bool{}, &subBudget{}, nil, 1, nil)
 	if strings.Contains(out, "@import") {
 		t.Fatalf("statement was not spliced out:\n%s", out)
 	}

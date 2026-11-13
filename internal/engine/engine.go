@@ -119,6 +119,15 @@ type Session struct {
 	// shared total stops a page from spending the maximum on every family
 	// at once.
 	sub *subBudget
+	// cssText memoises this navigation's fetched style sheet text by URL, so a
+	// sheet a later collection pass asks for again costs no request and no
+	// second byte charge. Read and written by the fetch pool's workers, hence
+	// the mutex inside.
+	cssText *cssTextCache
+	// styleInstalled names the sheet set s.sheets holds - the document's
+	// stylesheet-relevant DOM plus the media options it was collected under -
+	// so a pass that changed neither reuses it instead of re-collecting.
+	styleInstalled styleInstall
 
 	// imgMu guards the image maps and pendingImgs. LoadDeferredImages runs on
 	// the caller's goroutine and writes these maps while the session owner
@@ -349,6 +358,12 @@ type WorkCounts struct {
 	StyleNodeVisits   uint64
 	LayoutBuilds      uint64
 	DisplayListBuilds uint64
+	// CSSCollections counts the passes that walked the document for style
+	// declarations and collected the sheet set the cascade resolves against.
+	// A page whose scripts mutate nothing owes one collection, so a count that
+	// grows with the number of scripts is the re-collection storm the sheet memo
+	// and the install signature exist to stop.
+	CSSCollections uint64
 }
 
 type pipelineWorkCounts struct {
@@ -356,6 +371,7 @@ type pipelineWorkCounts struct {
 	styleNodeVisits   atomic.Uint64
 	layoutBuilds      atomic.Uint64
 	displayListBuilds atomic.Uint64
+	cssCollections    atomic.Uint64
 }
 
 // WorkCounts returns a concurrency-safe snapshot of this session's pipeline
@@ -369,7 +385,16 @@ func (s *Session) WorkCounts() WorkCounts {
 		StyleNodeVisits:   s.workCounts.styleNodeVisits.Load(),
 		LayoutBuilds:      s.workCounts.layoutBuilds.Load(),
 		DisplayListBuilds: s.workCounts.displayListBuilds.Load(),
+		CSSCollections:    s.workCounts.cssCollections.Load(),
 	}
+}
+
+// collectSheets runs one style sheet collection and counts it. Everything the
+// cascade needs about this navigation travels with the session, so the four
+// places that install a sheet set share one entry point.
+func (s *Session) collectSheets(doc *dom.Document, authorCSS []string) ([]*css.Stylesheet, error) {
+	s.workCounts.cssCollections.Add(1)
+	return checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.cssText, s.reportMixed)
 }
 
 // LayoutPassCounts returns a concurrency-safe snapshot of the per-formatting-
@@ -687,7 +712,7 @@ type fontJob struct {
 // collected automatically, and the UA stylesheet is added internally.
 // The returned session has a fully laid-out arena ready for paint.
 func NewSession(html string, authorCSS []string, viewportW float32, opts ...Option) (*Session, error) {
-	s := &Session{sub: &subBudget{}}
+	s := &Session{sub: &subBudget{}, cssText: &cssTextCache{}}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -757,11 +782,11 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	// stylesheets before running page scripts, then lazily resolve the cascade on
 	// the first CSSOM read. The normal final style phase resolves it once for
 	// documents that do not query computed style during script execution.
-	preScriptSheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
+	preScriptSheets, err := s.collectSheets(doc, authorCSS)
 	if err != nil {
 		return nil, err
 	}
-	preScriptStyleSignature := stylesheetDOMSignature(doc)
+	s.styleInstalled = s.installSignature(doc)
 	s.sheets = preScriptSheets
 	s.styleResolver = style.NewResolver(preScriptSheets)
 	s.styleDirty.Store(true)
@@ -769,11 +794,12 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.runScripts()
 	s.clearDetachedFocus()
 	sheets := preScriptSheets
-	if stylesheetDOMSignature(doc) != preScriptStyleSignature {
-		sheets, err = checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
+	if sig := s.installSignature(doc); sig != s.styleInstalled {
+		sheets, err = s.collectSheets(doc, authorCSS)
 		if err != nil {
 			return nil, err
 		}
+		s.styleInstalled = sig
 	}
 	s.loadFonts(sheets)
 	s.sheets = sheets
@@ -849,6 +875,25 @@ func stylesheetDOMSignature(doc *dom.Document) string {
 		return true
 	})
 	return signature.String()
+}
+
+// styleInstall names the sheet set a session has installed: which stylesheet
+// declarations the document carried, and under which media options they were
+// collected. Collecting asks the DOM twice over - walk it, then parse every
+// sheet it found - so a pass whose signature matches owes no collection at all.
+//
+// The media half is not decoration. @media conditions resolve while parsing, so
+// toggling dark mode or high contrast changes what the same text compiles to
+// even though no attribute moved.
+type styleInstall struct {
+	dom   string
+	media css.MediaOptions
+}
+
+// installSignature describes the collection a session would run right now, for
+// comparison with the one whose sheets are installed.
+func (s *Session) installSignature(doc *dom.Document) styleInstall {
+	return styleInstall{dom: stylesheetDOMSignature(doc), media: s.mediaOptions()}
 }
 
 // bindJSRuntime connects the live parser document to its realm. The first call
@@ -1081,14 +1126,20 @@ func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS [
 	}
 	// Stylesheets preceding this script are already in the live tree. Install
 	// their current cascade so synchronous CSSOM reads in the script see them.
-	sheets, err := checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.reportMixed)
-	if err != nil {
-		s.recordScriptError(err)
-	} else {
-		s.sheets = sheets
-		s.styleResolver = style.NewResolver(sheets)
-		s.styleDirty.Store(true)
-		s.layoutDirty.Store(true)
+	// A page with 23 scripts and nothing new to install used to collect 23 times
+	// over, each pass re-requesting every linked sheet; the signature says when
+	// the tree or the media options actually moved.
+	if sig := s.installSignature(doc); sig != s.styleInstalled {
+		sheets, err := s.collectSheets(doc, authorCSS)
+		if err != nil {
+			s.recordScriptError(err)
+		} else {
+			s.sheets = sheets
+			s.styleResolver = style.NewResolver(sheets)
+			s.styleDirty.Store(true)
+			s.layoutDirty.Store(true)
+			s.styleInstalled = sig
+		}
 	}
 	if err := s.jsRT.RunParserScript(source, name); err != nil {
 		s.recordScriptError(err)

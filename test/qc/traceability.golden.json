@@ -1685,6 +1685,27 @@
     "enforced": false
   },
   {
+    "id": "BR-282",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/engine/css_sheet_memo_test.go:TestLinkedSheetBytesChargedOncePerNavigation",
+      "internal/engine/css_sheet_memo_test.go:TestNilSheetMemoAlwaysMisses",
+      "test/engine/linked_css_once_test.go:TestDuplicateLinkedSheetHrefRequestedOnce",
+      "test/engine/linked_css_once_test.go:TestFailedSheetFetchIsRetriedOnLaterPass",
+      "test/engine/linked_css_once_test.go:TestImportedSheetRequestedOnceAcrossPasses",
+      "test/engine/linked_css_once_test.go:TestLinkedSheetsRequestedOnceAcrossScriptPasses",
+      "test/engine/linked_css_once_test.go:TestMixedContentLinkedSheetFetchesNothing",
+      "test/engine/linked_css_once_test.go:TestMutatingScriptsCollectOncePerChange",
+      "test/engine/linked_css_once_test.go:TestPureReadScriptsCollectTheSheetSetOnce",
+      "test/engine/linked_css_once_test.go:TestScriptRewrittenHrefFetchesOnlyTheNewSheet"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

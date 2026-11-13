@@ -183,7 +183,7 @@ func TestExpandCSSImportsEscapedInnerRef(t *testing.T) {
 		}
 		return "", errors.New("missing")
 	}
-	out := expandCSSImports(linker, "https://e/p/page.css", `@import url("in\6e er.css");`, map[string]bool{}, &subBudget{}, 1, nil)
+	out := expandCSSImports(linker, "https://e/p/page.css", `@import url("in\6e er.css");`, map[string]bool{}, &subBudget{}, nil, 1, nil)
 	if len(fetched) != 1 || fetched[0] != innerURL {
 		t.Fatalf("imported sheet URL = %q, want [%s] (the escaped ref must resolve to inner.css)", fetched, innerURL)
 	}

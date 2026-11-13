@@ -604,7 +604,79 @@ type cssSource struct {
 	remote bool
 }
 
-func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, mediaOpts css.MediaOptions, sub *subBudget, onMixed func(MixedContentKind, string)) ([]*css.Stylesheet, error) {
+// cssTextCache is one navigation's memo of style sheet text, keyed by the
+// absolute URL it came from. Linked sheets are re-collected on every pass that
+// needs a cascade - once per parser-blocking script, and again for a CSSOM read
+// against another document - and without a memo each pass asks for every sheet
+// afresh. Measured on https://www.gov.vn (2026-11-13, viewport 1280, the same
+// subresource wiring the browser uses): 33 distinct stylesheet URLs cost 927 to
+// 1,059 requests and 9.6s to 29.8s of fetch work across the eight workers,
+// while Chromium issues 36 requests for 36 distinct URLs on the same page. A
+// pass whose 6s CSSFetchBudget ran out simply did not request the links past
+// that point, so the sheet set only became complete through later passes
+// asking for them again - the cost was requests and wall time, not a missing
+// cascade (four getComputedStyle probes on the live page answer identically
+// before and after this memo). Text the memo holds is neither requested nor
+// charged again, so one navigation pays for one copy of each sheet: measured
+// 33 requests and 1.5s to 4.5s of fetch work in five runs.
+//
+// Failed fetches are not memoised: only bytes the budget has taken are worth
+// remembering, and a host that answers later should be able to answer.
+type cssTextCache struct {
+	mu    sync.Mutex
+	texts map[string]string
+}
+
+// lookup returns the text this navigation already fetched and charged for url.
+// A nil cache is a caller that collects sheets outside any session and every
+// URL is then a miss, which is the behaviour before the memo existed.
+func (c *cssTextCache) lookup(url string) (string, bool) {
+	if c == nil {
+		return "", false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	text, ok := c.texts[url]
+	return text, ok
+}
+
+// store keeps url's text. The lock never spans a fetch, because workers fetch
+// concurrently; two passes racing on one URL then both request it and store the
+// same text twice, which costs the request the memo exists to save only in that
+// race and keeps the map single-entry either way.
+func (c *cssTextCache) store(url, text string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.texts == nil {
+		c.texts = make(map[string]string)
+	}
+	c.texts[url] = text
+}
+
+// cssSheetText resolves one absolute style sheet URL to its text: the memo's
+// copy when this navigation already fetched it, otherwise a fresh request that
+// charges the shared subresource budget before being memoised. ok is false when
+// the request failed or its bytes did not fit, the same two outcomes the
+// callers already treated as "this sheet contributes nothing".
+func cssSheetText(linker CSSLinker, base, abs string, sub *subBudget, cache *cssTextCache) (string, bool) {
+	if text, ok := cache.lookup(abs); ok {
+		return text, true
+	}
+	text, err := linker(base, abs)
+	if err != nil {
+		return "", false
+	}
+	if !sub.take(len(text)) {
+		return "", false
+	}
+	cache.store(abs, text)
+	return text, true
+}
+
+func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSLinker, mediaOpts css.MediaOptions, sub *subBudget, cache *cssTextCache, onMixed func(MixedContentKind, string)) ([]*css.Stylesheet, error) {
 	budget := &cssBudget{}
 	all := make([]cssSource, 0, len(sources)+8)
 	for _, src := range sources {
@@ -671,10 +743,8 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 			go func(i int, abs string) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				if sheet, err := linker(base, abs); err == nil {
-					if sub.take(len(sheet)) {
-						texts[i] = &sheet
-					}
+				if sheet, ok := cssSheetText(linker, base, abs, sub, cache); ok {
+					texts[i] = &sheet
 				}
 			}(i, p.abs)
 		}
@@ -684,7 +754,7 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				continue
 			}
 			text := absolutizeCSSURLs(*texts[i], p.abs)
-			all[p.slot] = cssSource{text: expandCSSImports(linker, p.abs, text, linked, sub, 1, onMixed), remote: true}
+			all[p.slot] = cssSource{text: expandCSSImports(linker, p.abs, text, linked, sub, cache, 1, onMixed), remote: true}
 		}
 	}
 	if err != nil {
