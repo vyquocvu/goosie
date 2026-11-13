@@ -159,17 +159,32 @@ func TestTextShadowNoBlur(t *testing.T) {
 	}
 }
 
-// TestShadowNotInherited verifies that box-shadow and text-shadow are not
-// inherited from parent to child (they are not inherited CSS properties).
-func TestShadowNotInherited(t *testing.T) {
+// TestBoxShadowNotInheritedButTextShadowIs pins the two properties' opposite
+// inheritance rules on the smallest document that shows them. box-shadow is not
+// inherited (css-backgrounds-3 §7.1). text-shadow IS (css-text-decor-3 §3): the
+// child span below computes the parent's layer list, which is what Chromium
+// measures on the same shape (460 px of shadow ink inside a `<span>` child of a
+// shadowed parent, TASK-053 §9.2 limit 6). The assertion this replaced claimed
+// text-shadow stayed nil in a child, i.e. it encoded GOOSIE-TEXTSHADOW-001 as
+// expected behaviour; the full measured law lives in
+// test/style/text_shadow_inherit_test.go.
+// qc:BR-278
+func TestBoxShadowNotInheritedButTextShadowIs(t *testing.T) {
 	const html = `<html><body><div class="parent"><span class="child">text</span></div></body></html>`
 	const sheet = `.parent { box-shadow: 5px 5px 10px black; text-shadow: 2px 2px 4px red; }`
 	child := styleFor(t, html, sheet, "span")
 	if len(child.BoxShadow) != 0 {
 		t.Errorf("box-shadow should not inherit, child got %d shadows", len(child.BoxShadow))
 	}
-	if len(child.TextShadow) != 0 {
-		t.Errorf("text-shadow should not inherit, child got %d shadows", len(child.TextShadow))
+	if len(child.TextShadow) != 1 {
+		t.Fatalf("text-shadow should inherit, child got %d shadows", len(child.TextShadow))
+	}
+	sh := child.TextShadow[0]
+	if sh.OffsetX != 2 || sh.OffsetY != 2 || sh.Blur != 4 {
+		t.Errorf("inherited text-shadow geometry = (%v,%v,%v), want (2,2,4)", sh.OffsetX, sh.OffsetY, sh.Blur)
+	}
+	if sh.Color.R != 255 || sh.Color.G != 0 || sh.Color.B != 0 {
+		t.Errorf("inherited text-shadow color = (%d,%d,%d), want red", sh.Color.R, sh.Color.G, sh.Color.B)
 	}
 }
 

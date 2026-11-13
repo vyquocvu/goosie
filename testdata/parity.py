@@ -142,7 +142,13 @@ PASS_AT = 90.0
 # background and under a translucent border, boxes narrower than two blurs where the
 # bands cross, and a spread that fills the whole box. Every box sits on a background
 # the same colour as its own, so the shadow is the only thing that moves a pixel.
-MIN_SCORED_FIXTURES = 116
+# 117: css-features/22-text-shadow-inherit.html (GOOSIE-TEXTSHADOW-001) - the ink an
+# ancestor's `text-shadow` owes every element below it, which this engine dropped: child
+# spans, a grandchild, real and `display: table` cells, and the runs layout splices around
+# a block sibling.  Five stacked sharp layers carry the inherited ink across a real share
+# of the frame, and the negative rows (author `none`, an own declaration, `initial`) plus
+# the `unset` row and the currentcolor container keep the rest of the measured law visible.
+MIN_SCORED_FIXTURES = 117
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

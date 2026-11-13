@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  html, body { margin: 0; background: rgb(240, 240, 240); }
+  /* Five stacked sharp layers, so the ink inheritance is supposed to hand out
+     covers a real share of the frame instead of a hairline of glyph edges. */
+  .src {
+    margin: 8px 12px; font: 30px serif;
+    text-shadow: 2px 2px 0 rgb(0,0,255), 4px 4px 0 rgb(0,0,255), 6px 6px 0 rgb(0,0,255),
+                 8px 8px 0 rgb(0,0,255), 10px 10px 0 rgb(0,0,255);
+  }
+  .row { height: 44px; }
+  /* The omitted layer colour is currentcolor, which settles per USING element. */
+  .cc { margin: 8px 12px; font: 30px serif; color: rgb(0,150,0); text-shadow: 6px 6px 0; }
+</style>
+</head>
+<body>
+  <div class="src">
+    <div class="row"><span>the child span inherits every layer here</span></div>
+    <div class="row"><div><em>a grandchild em inherits it too, in full</em></div></div>
+    <div class="row"><span style="text-shadow: none">an author none wins</span></div>
+    <div class="row"><span style="text-shadow: 2px 2px 0 rgb(255,0,0)">an own declaration wins</span></div>
+    <div class="row"><span style="text-shadow: initial">initial resets to none</span></div>
+    <div class="row"><span style="text-shadow: unset">unset means inherit</span></div>
+    <div class="row"><table><tbody><tr><td>a real table cell inherits</td></tr></tbody></table></div>
+    <div class="row"><div style="display:table"><div style="display:table-cell">a table-cell box inherits</div></div></div>
+    <div class="row">raw text before<span style="text-shadow: inherit"> and after</span> a sibling</div>
+  </div>
+
+  <div class="cc">
+    <div class="row">the declaring element shadows green</div>
+    <div class="row"><span style="color: rgb(200,0,0)">a restyled child shadows red</span></div>
+    <div class="row"><span style="text-shadow: none">a child that clears it has no ink</span></div>
+  </div>
+</body>
+</html>

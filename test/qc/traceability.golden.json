@@ -1620,6 +1620,28 @@
     "enforced": false
   },
   {
+    "id": "BR-278",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/text_shadow_inherit_test.go:TestInheritedTextShadowPaintsChildGlyphs",
+      "test/paint/text_shadow_inherit_test.go:TestInheritedTextShadowResolvesCurrentColorPerUsingElement",
+      "test/style/shadow_test.go:TestBoxShadowNotInheritedButTextShadowIs",
+      "test/style/text_shadow_inherit_test.go:TestAnonymousTableStyleKeepsInheritedTextShadow",
+      "test/style/text_shadow_inherit_test.go:TestTextShadowCSSWideKeywordsOnAnInheritedProperty",
+      "test/style/text_shadow_inherit_test.go:TestTextShadowInheritanceKeepsCurrentColorUnresolved",
+      "test/style/text_shadow_inherit_test.go:TestTextShadowInheritsIntoTableCells",
+      "test/style/text_shadow_inherit_test.go:TestTextShadowInheritsThroughSeveralLevels",
+      "test/style/text_shadow_inherit_test.go:TestTextShadowInheritsToDescendantSpans",
+      "test/style/text_shadow_inherit_test.go:TestTextShadowOwnDeclarationAndNoneWinOverInheritance"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

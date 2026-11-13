@@ -539,7 +539,9 @@ type ComputedStyle struct {
 	// box-shadow property. nil means no shadow (the initial `none`).
 	BoxShadow []css.BoxShadow
 	// TextShadow is the list of text-shadow layers, resolved from the CSS
-	// text-shadow property. nil means no shadow.
+	// text-shadow property. nil means no shadow. Unlike BoxShadow this one is
+	// inherited (css-text-decor-3 §3), so inheritFromParent carries the parent's
+	// layers and a `currentcolor` layer resolves at paint, per using element.
 	TextShadow []css.TextShadow
 
 	// Transitions holds the parsed CSS transition declarations. Each entry
@@ -713,6 +715,14 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 // owns no box decoration of its own: borders, backgrounds, shadows and
 // images stay on the real elements, so the wrapper neither doubles their
 // paint nor invents spacing.
+//
+// `text-shadow` is not box decoration and is not cleared here, matching the
+// block builder: it is inherited (css-text-decor-3 §3), so the layers are what
+// the text inside the generated box would compute anyway, and Chromium paints
+// them on the cell text (838 px changed on a real <td>, 813 on a
+// `display: table-cell`, all of it on the glyphs). Zeroing it here made the two
+// builders disagree on an inherited property, which is how a table wrapper
+// could lose a shadow its cells' own cascade handed them.
 func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	var s ComputedStyle
 	if parent == nil {
@@ -741,7 +751,6 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	s.BackgroundGradient = Gradient{}
 	s.BackgroundRadialGradient = RadialGradient{}
 	s.BoxShadow = nil
-	s.TextShadow = nil
 	s.BorderImage = css.BorderImage{}
 	return &s
 }
@@ -2186,11 +2195,13 @@ func resolveStartingStyle(matched []*indexedSelector, vp Viewport, fonts *Custom
 }
 
 // resolveShadowColors finishes box-shadow and text-shadow after every other
-// declaration has spoken. Only the `inherit` keyword settles here: it copies
-// the parent's computed layers, flags included, so a `currentcolor` layer
-// keeps resolving against whichever element uses it. Explicit and omitted
-// `currentcolor` stay flagged through the cascade; paint resolves them against
-// the owning element's final `color`.
+// declaration has spoken. Only the CSS-wide keywords settle here: `inherit`
+// copies the parent's computed layers, flags included, so a `currentcolor`
+// layer keeps resolving against whichever element uses it, and on text-shadow
+// `unset` means the same thing because the property is inherited
+// (css-cascade-4 §6.3). Explicit and omitted `currentcolor` stay flagged
+// through the cascade; paint resolves them against the owning element's final
+// `color`.
 func resolveShadowColors(cs *ComputedStyle, parent *ComputedStyle, normal, important []cascadeEntry) {
 	if v, ok := winningDeclValue("box-shadow", normal, important); ok && strings.EqualFold(strings.TrimSpace(v), "inherit") {
 		cs.BoxShadow = nil
@@ -2198,10 +2209,18 @@ func resolveShadowColors(cs *ComputedStyle, parent *ComputedStyle, normal, impor
 			cs.BoxShadow = append([]css.BoxShadow(nil), parent.BoxShadow...)
 		}
 	}
-	if v, ok := winningDeclValue("text-shadow", normal, important); ok && strings.EqualFold(strings.TrimSpace(v), "inherit") {
-		cs.TextShadow = nil
-		if parent != nil && len(parent.TextShadow) > 0 {
-			cs.TextShadow = append([]css.TextShadow(nil), parent.TextShadow...)
+	if v, ok := winningDeclValue("text-shadow", normal, important); ok {
+		v = strings.TrimSpace(v)
+		// `unset` belongs with `inherit` here, not with `initial`: for an
+		// inherited property css-cascade-4 §6.3 defines unset as inherit, and
+		// Chromium changed 843 px on an `unset` child of a shadowed parent. The
+		// parser's nil answer is right for `initial` (0 px there) and wrong for
+		// this keyword.
+		if strings.EqualFold(v, "inherit") || strings.EqualFold(v, "unset") {
+			cs.TextShadow = nil
+			if parent != nil && len(parent.TextShadow) > 0 {
+				cs.TextShadow = append([]css.TextShadow(nil), parent.TextShadow...)
+			}
 		}
 	}
 }
@@ -2592,6 +2611,14 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.TextIndent = parent.TextIndent
 	cs.TextTransform = parent.TextTransform
 	cs.TextDecoration = parent.TextDecoration
+	// css-text-decor-3 §3 lists text-shadow as inherited, so a declaration on an
+	// ancestor reaches every glyph below it, not only the element that declared
+	// it. Chromium measures 460 px of shadow ink inside a `<span>` child of a
+	// shadowed parent (TASK-053 §9.2 limit 6); without this line Goosie measured
+	// 0 there. The layer travels unresolved: a `currentcolor` layer settles
+	// against the *using* element's `color` at paint, which is why the inherited
+	// value is the parsed list and not a colour-baked copy of the parent's.
+	cs.TextShadow = parent.TextShadow
 	cs.VerticalAlign = parent.VerticalAlign
 	cs.ListStyleType = parent.ListStyleType
 	cs.ColorScheme = parent.ColorScheme
