@@ -11,33 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// These are the oracles for GOOSIE-INLINEBG-001: text-run and inline-fragment
-// boxes repainted their generating element's background, so a translucent block
-// background was composited a second time wherever a word sat.
-//
-// Measured on this host with cmd/dump-paint on a 300x60 block declaring
-// `background:rgb(200,0,0)` and holding `one two three four`: the block's own fill
-// (0,0,300,60) plus one more fill per text run -
-// (0,0,24,18) (23,0,28,18) (27,0,52,18) (51,0,56,18) (55,0,88,18) (87,0,92,18)
-// (91,0,118,18). With `rgba(200,0,0,.5)` those seven extra fills put (213,63,63)
-// on 1,395 pixels of a 400x120 render at DPR 1 against the block's own
-// (227,127,127) on 15,876, where Chromium measures (227,127,127) on 17,300 of the
-// block's 18,000 pixels, nothing doubled, and the remaining 700 are glyph ink and
-// its antialiasing.
-//
-// The cause is the same verbatim style copy that made group opacity double-count
-// (GOOSIE-VIS-001, TASK-044): layout splices a box per word and fills it with the
-// generating element's computed style, background included
-// (style.inheritStyle: `cs := *parent`), and the builder painted a background for
-// those boxes too. What has to stay intact is the legitimate half: an *inline*
-// element is meant to fragment its background across lines and its own box paints
-// none, so its fragments are the only thing that does. That is why each shape
-// below comes in both a block and an inline form - a mechanism that collapses one
-// of them indiscriminately fails the other.
-
-// ibDisplayList builds a real document through the untrusted-input path and
-// returns the frozen display list at device scale 1. viewportW is the viewport
-// width, so a shape can be made to wrap.
 func ibDisplayList(t *testing.T, css, body string, viewportW int) []paint.DisplayCmd {
 	t.Helper()
 	fonts, err := raster.NewFonts()
@@ -58,9 +31,6 @@ func ibDisplayList(t *testing.T, css, body string, viewportW int) []paint.Displa
 	return dl.Build(1).All()
 }
 
-// ibRectsOf names every solid fill of the requested opaque colour, in list order.
-// A background painted once per element and once per inline fragment is fully
-// described by this list: one entry per generated box that owns the paint.
 func ibRectsOf(cmds []paint.DisplayCmd, r, g, b uint8) []string {
 	var out []string
 	for _, c := range cmds {
@@ -71,7 +41,6 @@ func ibRectsOf(cmds []paint.DisplayCmd, r, g, b uint8) []string {
 	return out
 }
 
-// ibFill is one declared background and the exact fills it must produce.
 type ibFill struct {
 	what      string
 	r, g, b   uint8
@@ -81,13 +50,11 @@ type ibFill struct {
 // qc:BR-198
 func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		css  string
-		body string
-		w    int
-		want []ibFill
-		// wantKinds is the whole command histogram for shapes whose background is
-		// not a solid fill, so a re-emission in any other form is still caught.
+		name      string
+		css       string
+		body      string
+		w         int
+		want      []ibFill
 		wantKinds map[paint.CmdKind]int
 	}{
 		{
@@ -101,10 +68,6 @@ func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 			want: []ibFill{{what: "block", r: 10, g: 120, b: 20, wantRects: []string{"(0,0,300,18)"}}},
 		},
 		{
-			// The shape TASK-044 measured for group opacity: raw text beside a
-			// block sibling, so layout splices an anonymous block around the run.
-			// That wrapper also carries a copy of the div's style and must add
-			// nothing to it.
 			name: "raw text beside a block sibling",
 			body: `<div style="width:300px;background:rgb(10,120,20)">one two<div style="background:rgb(20,20,120)">block child</div>tail three</div>`,
 			want: []ibFill{
@@ -113,10 +76,6 @@ func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 			},
 		},
 		{
-			// The inline half rides in the same box: the span's own box paints no
-			// background because its union rect would bridge the gaps between
-			// lines, so its one word fragment must still paint while the block it
-			// sits in paints exactly once.
 			name: "inline fragment inside a block",
 			body: `<div style="width:300px;background:rgb(10,120,20)">one <span style="background:rgb(200,0,200)">two</span> three four</div>`,
 			want: []ibFill{
@@ -150,9 +109,6 @@ func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 			want: []ibFill{{what: "block", r: 10, g: 120, b: 20, wantRects: []string{"(0,0,800,18)"}}},
 		},
 		{
-			// A gradient background is the same emission through the gradient
-			// path: the block owns it and the runs must not re-emit it. Four
-			// words, seven fragments, one gradient layer and no fill at all.
 			name: "gradient background",
 			body: `<div style="width:300px;height:60px;background-image:linear-gradient(rgb(10,120,20),rgb(10,120,20))">one two three four</div>`,
 			wantKinds: map[paint.CmdKind]int{
@@ -177,8 +133,6 @@ func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 						f.what, f.r, f.g, f.b, len(got), got, len(f.wantRects), f.wantRects)
 				}
 			}
-			// Nothing else may paint a solid fill either, so an extra emission in
-			// a colour no case declares cannot pass by unnoticed.
 			var total int
 			kinds := map[paint.CmdKind]int{}
 			for _, c := range cmds {
@@ -199,13 +153,6 @@ func TestBlockBackgroundIsEmittedOnceNotPerTextRun(t *testing.T) {
 	}
 }
 
-// TestInlineFragmentsStillCarryTheirOwnBackground holds the fix to its real
-// width. An inline element's background is meant to fragment: one fill per line
-// fragment, never the element's union rect. Generated content is the other half
-// of that exception - a ::before/::first-letter box owns its own cascade result
-// and its own background, and is inline-level, so it fragments too. A mechanism
-// that drops a copied background whenever a box is not an element fails every
-// case here.
 // qc:BR-198
 func TestInlineFragmentsStillCarryTheirOwnBackground(t *testing.T) {
 	for _, tc := range []struct {
@@ -216,8 +163,6 @@ func TestInlineFragmentsStillCarryTheirOwnBackground(t *testing.T) {
 		want []string
 	}{
 		{
-			// Six words wrapping into two lines: seven fragments on the first
-			// line, three on the second.
 			name: "span wrapping onto two lines",
 			body: `<p style="margin:0;width:120px"><span style="background:rgb(200,0,200)">aaa bbb ccc ddd eee fff</span></p>`,
 			w:    120,
@@ -258,13 +203,6 @@ func TestInlineFragmentsStillCarryTheirOwnBackground(t *testing.T) {
 	}
 }
 
-// TestTranslucentBlockBackgroundCompositesOnce is the pixel half of the oracle:
-// it rasterizes the frozen list exactly as the tile path does and reads the
-// colours back. rgba(200,0,0,.5) over white is (227,127,127) composited once and
-// (213,63,63) composited twice, and Chromium's render of the same document holds
-// (227,127,127) on every non-ink pixel of the block - measured on this host from
-// a 400x120 screenshot at DPR 1: 17,300 of 18,000 pixels, the remaining 700 being
-// glyph ink and its antialiasing.
 // qc:BR-199
 func TestTranslucentBlockBackgroundCompositesOnce(t *testing.T) {
 	html := `<!doctype html><html><head><style>html,body{margin:0;font:16px serif}` +
@@ -284,10 +222,6 @@ func TestTranslucentBlockBackgroundCompositesOnce(t *testing.T) {
 		t.Fatalf("PaintChecked: %v", err)
 	}
 
-	// The fragment rects cmd/dump-paint measured before the fix are
-	// (0,0,24,18) (23,0,28,18) (27,0,52,18) (51,0,56,18) (55,0,88,18)
-	// (87,0,92,18) (91,0,118,18), so the points below sit inside them and clear
-	// of the seams where two fragments touch.
 	single := frame.RGB(227, 127, 127)
 	doubled := frame.RGB(213, 63, 63)
 	bitmap := frame.NewBitmap(300, 60)
@@ -312,8 +246,6 @@ func TestTranslucentBlockBackgroundCompositesOnce(t *testing.T) {
 		}
 	}
 
-	// Then the whole block, so no point is cherry-picked: nothing may carry the
-	// twice-composited colour, and nearly everything must carry the once value.
 	var nDoubled, nOnce, nOther int
 	for y := 0; y < 60; y++ {
 		for x := 0; x < 300; x++ {
@@ -337,8 +269,6 @@ func TestTranslucentBlockBackgroundCompositesOnce(t *testing.T) {
 	}
 }
 
-// ibColorName renders a packed colour the way the measurements in this file are
-// written, so a failure line reads as pixel values and not as a packed integer.
 func ibColorName(c frame.Color) string {
 	return fmt.Sprintf("(%d,%d,%d)", c.R(), c.G(), c.B())
 }

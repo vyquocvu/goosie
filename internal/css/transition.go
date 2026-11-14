@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// TimingFunc is a CSS transition timing function.
 type TimingFunc uint8
 
 const (
@@ -15,7 +14,6 @@ const (
 	TimingEaseInOut
 )
 
-// ParseTimingFunc parses a CSS timing function keyword.
 func ParseTimingFunc(s string) TimingFunc {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "linear":
@@ -32,8 +30,6 @@ func ParseTimingFunc(s string) TimingFunc {
 	return TimingEase
 }
 
-// EvalTimingFunc evaluates the timing function at progress t (0..1), returning
-// the eased progress value.
 func (tf TimingFunc) Eval(t float64) float64 {
 	if t <= 0 {
 		return 0
@@ -54,15 +50,12 @@ func (tf TimingFunc) Eval(t float64) float64 {
 		}
 		return -1 + (4-2*t)*t
 	case TimingEase:
-		// cubic-bezier(0.25, 0.1, 0.25, 1.0) approximation
 		return cubicBezier(0.25, 0.1, 0.25, 1.0, t)
 	}
 	return t
 }
 
-// cubicBezier approximates a cubic-bezier timing function using Newton's method.
 func cubicBezier(x1, y1, x2, y2, t float64) float64 {
-	// Find the parametric t for the given x using Newton-Raphson.
 	guess := t
 	for i := 0; i < 8; i++ {
 		x := bezier(x1, x2, guess) - t
@@ -95,22 +88,13 @@ func abs64(x float64) float64 {
 	return x
 }
 
-// Transition is one parsed transition from the transition shorthand or
-// longhand properties.
 type Transition struct {
-	Property string     // CSS property name, or "all", or "" for none
-	Duration float64    // duration in seconds
-	Timing   TimingFunc // timing function
-	Delay    float64    // delay in seconds
+	Property string
+	Duration float64
+	Timing   TimingFunc
+	Delay    float64
 }
 
-// ParseTransitionShorthand parses the CSS `transition` shorthand value, which
-// may contain comma-separated transitions. Each transition is:
-//
-//	<property> <duration> <timing-function> <delay>
-//
-// Duration and delay are time values (e.g. "0.3s", "300ms"). Only the duration
-// is required; the rest default to "all", "ease", and "0s" respectively.
 func ParseTransitionShorthand(value string) []Transition {
 	value = strings.TrimSpace(value)
 	if value == "" || strings.ToLower(value) == "none" {
@@ -129,8 +113,6 @@ func ParseTransitionShorthand(value string) []Transition {
 	return transitions
 }
 
-// splitTransitionParts splits on commas that are outside parentheses, so
-// `cubic-bezier(0.25, 0.1, 0.25, 1.0)` does not break into pieces.
 func splitTransitionParts(s string) []string {
 	var parts []string
 	depth := 0
@@ -154,7 +136,6 @@ func splitTransitionParts(s string) []string {
 	return parts
 }
 
-// parseOneTransition parses one transition entry: property duration [timing] [delay].
 func parseOneTransition(s string) Transition {
 	tr := Transition{
 		Property: "all",
@@ -176,7 +157,6 @@ func parseOneTransition(s string) Transition {
 			tr.Timing = ParseTimingFunc(lower)
 			continue
 		}
-		// Otherwise it is the property name.
 		tr.Property = lower
 	}
 
@@ -190,8 +170,6 @@ func parseOneTransition(s string) Transition {
 	return tr
 }
 
-// splitTransitionTokens splits a single transition entry on whitespace, keeping
-// function calls like cubic-bezier(...) intact.
 func splitTransitionTokens(s string) []string {
 	var tokens []string
 	depth := 0
@@ -233,12 +211,10 @@ func splitTransitionTokens(s string) []string {
 	return tokens
 }
 
-// isTimingValue reports whether a token looks like a CSS time value.
 func isTimingValue(s string) bool {
 	return strings.HasSuffix(s, "s") || strings.HasSuffix(s, "ms")
 }
 
-// isTimingFuncKeyword reports whether a token is a timing function keyword.
 func isTimingFuncKeyword(s string) bool {
 	switch s {
 	case "ease", "linear", "ease-in", "ease-out", "ease-in-out":
@@ -247,7 +223,6 @@ func isTimingFuncKeyword(s string) bool {
 	return strings.HasPrefix(s, "cubic-bezier") || strings.HasPrefix(s, "steps")
 }
 
-// parseTime parses a CSS time value (e.g. "0.3s", "300ms") into seconds.
 func parseTime(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
 	if strings.HasSuffix(s, "ms") {
@@ -269,19 +244,16 @@ func parseTime(s string) (float64, bool) {
 	return 0, false
 }
 
-// parseFloat64 is a simple float parser that avoids importing strconv in this file.
 func parseFloat64(s string) (float64, bool) {
 	if s == "" {
 		return 0, false
 	}
-	// Use the same approach as the token package.
 	v := parseFloat(s)
 	return v, v != 0 || s == "0" || s == "0.0" || s == ".0" || s == "0." ||
 		strings.HasPrefix(s, "0.") || strings.HasPrefix(s, ".0") ||
 		strings.HasPrefix(s, "-0") || strings.HasPrefix(s, "+0")
 }
 
-// ParseTransitionProperty parses the transition-property longhand.
 func ParseTransitionProperty(value string) []string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "" || value == "none" {
@@ -300,8 +272,6 @@ func ParseTransitionProperty(value string) []string {
 	return props
 }
 
-// ParseTransitionDuration parses the transition-duration longhand, which is a
-// comma-separated list of time values.
 func ParseTransitionDuration(value string) []float64 {
 	var durations []float64
 	for _, part := range strings.Split(value, ",") {
@@ -313,7 +283,6 @@ func ParseTransitionDuration(value string) []float64 {
 	return durations
 }
 
-// ParseTransitionTimingFunction parses the transition-timing-function longhand.
 func ParseTransitionTimingFunction(value string) []TimingFunc {
 	var funcs []TimingFunc
 	for _, part := range strings.Split(value, ",") {
@@ -325,7 +294,6 @@ func ParseTransitionTimingFunction(value string) []TimingFunc {
 	return funcs
 }
 
-// ParseTransitionDelay parses the transition-delay longhand.
 func ParseTransitionDelay(value string) []float64 {
 	var delays []float64
 	for _, part := range strings.Split(value, ",") {

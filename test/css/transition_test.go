@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestParseTransitionShorthandBasic verifies that a simple transition shorthand
-// parses the property, duration, timing function, and delay correctly.
 func TestParseTransitionShorthandBasic(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("background 0.3s ease")
 	if len(transitions) != 1 {
@@ -29,7 +27,6 @@ func TestParseTransitionShorthandBasic(t *testing.T) {
 	}
 }
 
-// TestParseTransitionShorthandAll verifies that "all" is the default property.
 func TestParseTransitionShorthandAll(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("0.5s linear")
 	if len(transitions) != 1 {
@@ -43,7 +40,6 @@ func TestParseTransitionShorthandAll(t *testing.T) {
 	}
 }
 
-// TestParseTransitionShorthandMultiple verifies comma-separated transitions.
 func TestParseTransitionShorthandMultiple(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("background 0.3s ease, color 0.5s linear")
 	if len(transitions) != 2 {
@@ -60,7 +56,6 @@ func TestParseTransitionShorthandMultiple(t *testing.T) {
 	}
 }
 
-// TestParseTransitionShorthandDelay verifies the optional delay parameter.
 func TestParseTransitionShorthandDelay(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("opacity 0.3s ease-in 0.1s")
 	if len(transitions) != 1 {
@@ -78,7 +73,6 @@ func TestParseTransitionShorthandDelay(t *testing.T) {
 	}
 }
 
-// TestParseTransitionShorthandMs verifies millisecond time units.
 func TestParseTransitionShorthandMs(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("background 300ms ease-out")
 	if len(transitions) != 1 {
@@ -92,7 +86,6 @@ func TestParseTransitionShorthandMs(t *testing.T) {
 	}
 }
 
-// TestParseTransitionShorthandNone verifies that "none" returns no transitions.
 func TestParseTransitionShorthandNone(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("none")
 	if len(transitions) != 0 {
@@ -100,7 +93,6 @@ func TestParseTransitionShorthandNone(t *testing.T) {
 	}
 }
 
-// TestParseTransitionShorthandEmpty verifies that an empty value returns no transitions.
 func TestParseTransitionShorthandEmpty(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("")
 	if len(transitions) != 0 {
@@ -108,7 +100,6 @@ func TestParseTransitionShorthandEmpty(t *testing.T) {
 	}
 }
 
-// TestParseTransitionShorthandEaseInOut verifies the ease-in-out timing function.
 func TestParseTransitionShorthandEaseInOut(t *testing.T) {
 	transitions := css.ParseTransitionShorthand("all 1s ease-in-out")
 	if len(transitions) != 1 {
@@ -119,7 +110,6 @@ func TestParseTransitionShorthandEaseInOut(t *testing.T) {
 	}
 }
 
-// TestParseTimingFunc verifies the ParseTimingFunc function.
 func TestParseTimingFunc(t *testing.T) {
 	tests := []struct {
 		input string
@@ -130,9 +120,9 @@ func TestParseTimingFunc(t *testing.T) {
 		{"ease-in", css.TimingEaseIn},
 		{"ease-out", css.TimingEaseOut},
 		{"ease-in-out", css.TimingEaseInOut},
-		{"EASE", css.TimingEase},     // case insensitive
-		{"Linear", css.TimingLinear}, // case insensitive
-		{"unknown", css.TimingEase},  // unknown defaults to ease
+		{"EASE", css.TimingEase},
+		{"Linear", css.TimingLinear},
+		{"unknown", css.TimingEase},
 	}
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
@@ -144,9 +134,7 @@ func TestParseTimingFunc(t *testing.T) {
 	}
 }
 
-// TestTimingFuncEval verifies that timing functions produce correct eased values.
 func TestTimingFuncEval(t *testing.T) {
-	// Linear should be identity.
 	for _, v := range []float64{0, 0.25, 0.5, 0.75, 1.0} {
 		got := css.TimingLinear.Eval(v)
 		if math.Abs(got-v) > 0.001 {
@@ -154,7 +142,6 @@ func TestTimingFuncEval(t *testing.T) {
 		}
 	}
 
-	// All timing functions should return 0 at t=0 and 1 at t=1.
 	for _, tf := range []css.TimingFunc{css.TimingEase, css.TimingLinear, css.TimingEaseIn, css.TimingEaseOut, css.TimingEaseInOut} {
 		if got := tf.Eval(0); got != 0 {
 			t.Errorf("TimingFunc(%v).Eval(0) = %v, want 0", tf, got)
@@ -164,18 +151,15 @@ func TestTimingFuncEval(t *testing.T) {
 		}
 	}
 
-	// EaseIn should be slower at start (t=0.5 should be < 0.5).
 	if got := css.TimingEaseIn.Eval(0.5); got >= 0.5 {
 		t.Errorf("EaseIn.Eval(0.5) = %v, want < 0.5", got)
 	}
 
-	// EaseOut should be faster at start (t=0.5 should be > 0.5).
 	if got := css.TimingEaseOut.Eval(0.5); got <= 0.5 {
 		t.Errorf("EaseOut.Eval(0.5) = %v, want > 0.5", got)
 	}
 }
 
-// TestParseTransitionProperty verifies the transition-property longhand.
 func TestParseTransitionProperty(t *testing.T) {
 	tests := []struct {
 		input string
@@ -203,7 +187,6 @@ func TestParseTransitionProperty(t *testing.T) {
 	}
 }
 
-// TestParseTransitionDuration verifies the transition-duration longhand.
 func TestParseTransitionDuration(t *testing.T) {
 	durations := css.ParseTransitionDuration("0.3s, 500ms")
 	if len(durations) != 2 {
@@ -217,7 +200,6 @@ func TestParseTransitionDuration(t *testing.T) {
 	}
 }
 
-// TestParseTransitionDelay verifies the transition-delay longhand.
 func TestParseTransitionDelay(t *testing.T) {
 	delays := css.ParseTransitionDelay("0.1s, 200ms")
 	if len(delays) != 2 {
@@ -231,7 +213,6 @@ func TestParseTransitionDelay(t *testing.T) {
 	}
 }
 
-// TestParseTransitionTimingFunction verifies the transition-timing-function longhand.
 func TestParseTransitionTimingFunction(t *testing.T) {
 	funcs := css.ParseTransitionTimingFunction("ease-in, linear, ease-out")
 	if len(funcs) != 3 {
@@ -248,8 +229,6 @@ func TestParseTransitionTimingFunction(t *testing.T) {
 	}
 }
 
-// TestTransitionInStylesheet verifies that transition declarations parse
-// correctly when embedded in a full stylesheet.
 func TestTransitionInStylesheet(t *testing.T) {
 	sheet := css.Parse(`
 		.box {
@@ -264,7 +243,6 @@ func TestTransitionInStylesheet(t *testing.T) {
 		t.Fatalf("got %d rules, want 2", len(sheet.Rules))
 	}
 
-	// Find the transition declaration.
 	found := false
 	for _, d := range sheet.Rules[0].Declarations {
 		if d.Property == "transition" {

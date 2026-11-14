@@ -40,7 +40,6 @@ func TestFlags_ToggleAndReset(t *testing.T) {
 		flags: mgr,
 	}
 
-	// 1. Toggle doh-dns from false to true
 	buildFlagsPageHTML(f, "goosie://flags?action=toggle&id=doh-dns")
 	if !f.flags.IsEnabled("doh-dns") {
 		t.Errorf("expected doh-dns to be enabled after toggle")
@@ -51,7 +50,6 @@ func TestFlags_ToggleAndReset(t *testing.T) {
 		t.Errorf("expected modified banner after toggling flag")
 	}
 
-	// 2. Reset all
 	buildFlagsPageHTML(f, "goosie://flags?action=reset")
 	if f.flags.IsEnabled("doh-dns") {
 		t.Errorf("expected doh-dns to be disabled after reset")

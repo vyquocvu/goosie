@@ -32,9 +32,6 @@ func matchesPseudo(t *testing.T, s *engine.Session, id, pseudo string) bool {
 }
 
 // qc:BR-105
-// TestUserInvalidWaitsForFailedSubmission pins the difference between :invalid
-// and :user-invalid: the field is invalid from the start, but only an attempted
-// submission turns that into a state author CSS may style as user-facing.
 func TestUserInvalidWaitsForFailedSubmission(t *testing.T) {
 	s := newUserInvalidSession(t, `<form id="f" action="/send"><input id="q" name="q" required></form>`)
 	form := s.Doc.ElementByID("f")
@@ -62,8 +59,6 @@ func TestUserInvalidWaitsForFailedSubmission(t *testing.T) {
 		t.Fatal("the blocked form should match :user-invalid")
 	}
 
-	// Typing a value satisfies `required`; the user-facing state flips to valid
-	// without another submission. The blocked submit already focused the field.
 	if s.Focused() != s.Doc.ElementByID("q") {
 		t.Fatal("the blocked submission should focus the offending control")
 	}
@@ -101,9 +96,6 @@ func TestUserInvalidStaysScopedToTheAttemptedForm(t *testing.T) {
 }
 
 // qc:BR-105
-// TestUserInvalidFollowsBlur pins the other way a browser reveals validation:
-// leaving an empty required control is already a user interaction, so the field
-// becomes :user-invalid without a submission attempt.
 func TestUserInvalidFollowsBlur(t *testing.T) {
 	s := newUserInvalidSession(t, `<form id="f" action="/send"><input id="q" name="q" required><input id="other" name="other"></form>`)
 	q := s.Doc.ElementByID("q")

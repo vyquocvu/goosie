@@ -42,7 +42,6 @@ func TestTextUnderlineOffsetAndThickness(t *testing.T) {
 		t.Errorf("p1 TextDecorationThickness: want 2, got %v", s1.TextDecorationThickness)
 	}
 
-	// Verify child inherits TextUnderlineOffset and TextDecorationThickness
 	sSpan := styles[span1.ID]
 	if sSpan.TextUnderlineOffset != 4 {
 		t.Errorf("span1 inherited TextUnderlineOffset: want 4, got %v", sSpan.TextUnderlineOffset)

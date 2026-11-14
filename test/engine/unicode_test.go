@@ -8,10 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// Unicode text input contract: every layer of the edit pipeline — value
-// storage, caret math, backspace, painting, selection — is rune-based, so an
-// astral emoji counts as one character and never splits into lone surrogates.
-
 func unicodeInputSession(t *testing.T, value string) (*engine.Session, float32, float32) {
 	t.Helper()
 	s := newFocusSession(t, `<html><body style="margin: 0;"><input id="a" value="`+value+`"></body></html>`)

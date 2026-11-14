@@ -14,8 +14,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
-// newRestoreTestPath builds an isolated framePath configured with a temporary
-// state directory and session active journal file for crash recovery testing.
 func newRestoreTestPath(t *testing.T) (*framePath, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -46,14 +44,11 @@ func newRestoreTestPath(t *testing.T) (*framePath, string) {
 	return f, dir
 }
 
-// TestCrashRecovery_DetectsCrashedJournal verifies that a pre-existing active session journal
-// on startup is detected as an abnormal termination, loading crashedSession and setting the initial URL to goosie://restore.
 func TestCrashRecovery_DetectsCrashedJournal(t *testing.T) {
 	dir := t.TempDir()
 	activeFile := filepath.Join(dir, "session_active.json")
 	permFile := filepath.Join(dir, "session.json")
 
-	// Simulate abnormal shutdown: session_active.json exists with 2 tabs
 	crashedState := session.State{
 		Tabs: []session.TabState{
 			{URL: "https://example.com/one", Title: "Tab One"},
@@ -73,7 +68,6 @@ func TestCrashRecovery_DetectsCrashedJournal(t *testing.T) {
 		dpr:               1.0,
 	}
 
-	// Replicate startup logic
 	f, _ := newRestoreTestPath(t)
 	f.config = c
 
@@ -110,12 +104,9 @@ func TestCrashRecovery_DetectsCrashedJournal(t *testing.T) {
 	}
 }
 
-// TestCrashRecovery_InternalPageRender verifies HTML output for goosie://restore
-// when crashed tabs exist and when no crashed session is present.
 func TestCrashRecovery_InternalPageRender(t *testing.T) {
 	f, _ := newRestoreTestPath(t)
 
-	// Case 1: No crashed session
 	f.crashedSession = nil
 	title, htmlContent := buildRestorePageHTML(f, "goosie://restore")
 	if title != "Session Restore - Goosie" {
@@ -125,7 +116,6 @@ func TestCrashRecovery_InternalPageRender(t *testing.T) {
 		t.Errorf("expected empty-state message in HTML, got:\n%s", htmlContent)
 	}
 
-	// Case 2: Crashed session present with 2 tabs
 	f.crashedSession = &session.State{
 		Tabs: []session.TabState{
 			{URL: "https://golang.org", Title: "Go Programming Language"},
@@ -158,8 +148,6 @@ func TestCrashRecovery_InternalPageRender(t *testing.T) {
 	}
 }
 
-// TestCrashRecovery_ActionRestore verifies that clicking 'Restore' applies the crashed tabs,
-// clears the crashed state, and deletes session_active.json.
 // qc:BR-042
 func TestCrashRecovery_ActionRestore(t *testing.T) {
 	f, _ := newRestoreTestPath(t)
@@ -176,7 +164,6 @@ func TestCrashRecovery_ActionRestore(t *testing.T) {
 		t.Fatalf("session.Save: %v", err)
 	}
 
-	// Active tab currently shows goosie://restore
 	f.tabMgr.Active().SetURL("goosie://restore")
 	f.tabMgr.Active().SetTitle("Restore Session - Goosie")
 	f.crashedSession = &crashedState
@@ -189,12 +176,10 @@ func TestCrashRecovery_ActionRestore(t *testing.T) {
 		t.Errorf("HTML missing restored confirmation: %s", htmlContent)
 	}
 
-	// Verify crashedSession is cleared
 	if f.crashedSession != nil {
 		t.Error("expected crashedSession to be nil after restore")
 	}
 
-	// Verify session_active.json now journals the restored session state
 	loaded, err := session.Load(activeFile)
 	if err != nil {
 		t.Fatalf("failed to load active journal after restore: %v", err)
@@ -203,7 +188,6 @@ func TestCrashRecovery_ActionRestore(t *testing.T) {
 		t.Errorf("active journal state after restore = %+v, want 2 restored tabs", loaded.Tabs)
 	}
 
-	// Verify tab manager now has 2 restored tabs
 	if count := f.tabMgr.Count(); count != 2 {
 		t.Fatalf("tabMgr.Count() = %d, want 2", count)
 	}
@@ -217,9 +201,6 @@ func TestCrashRecovery_ActionRestore(t *testing.T) {
 	if f.tabMgr.Active() != all[1] {
 		t.Errorf("active tab = %v, want tab 1", f.tabMgr.Active())
 	}
-	// Restore rebuilds tab metadata only. A fresh document for the active
-	// tab starts loading, and the background tab stays lazy; neither may
-	// carry the crashed process's in-flight response.
 	for i, tab := range all {
 		if tab.Session() != nil {
 			t.Errorf("restored tab %d already owns a document; restore must not replay an in-flight response", i)
@@ -227,8 +208,6 @@ func TestCrashRecovery_ActionRestore(t *testing.T) {
 	}
 }
 
-// TestCrashRecovery_ActionDismiss verifies that clicking 'Don't Restore' clears
-// the crashed state and removes the active journal without modifying current tabs.
 func TestCrashRecovery_ActionDismiss(t *testing.T) {
 	f, _ := newRestoreTestPath(t)
 	activeFile := f.config.sessionActiveFile
@@ -260,13 +239,10 @@ func TestCrashRecovery_ActionDismiss(t *testing.T) {
 	}
 }
 
-// TestCrashRecovery_SaveActiveSessionJournal verifies that saveActiveSession persists
-// open tabs, but does not overwrite the journal while the restore prompt is pending.
 func TestCrashRecovery_SaveActiveSessionJournal(t *testing.T) {
 	f, _ := newRestoreTestPath(t)
 	activeFile := f.config.sessionActiveFile
 
-	// 1. Set open tab
 	tab := f.tabMgr.Active()
 	tab.SetURL("https://active.example/test")
 	tab.SetTitle("Active Test")
@@ -281,14 +257,12 @@ func TestCrashRecovery_SaveActiveSessionJournal(t *testing.T) {
 		t.Fatalf("loaded tabs = %+v, want 1 tab with https://active.example/test", loaded.Tabs)
 	}
 
-	// 2. While crashedSession is pending, saveActiveSession must NOT overwrite
 	f.crashedSession = &session.State{
 		Tabs: []session.TabState{{URL: "https://crashed.example/"}},
 	}
 	tab.SetURL("https://changed.example/")
 	f.saveActiveSession()
 
-	// Should still have original saved tabs on disk
 	loaded2, err := session.Load(activeFile)
 	if err != nil {
 		t.Fatalf("session.Load: %v", err)
@@ -298,8 +272,6 @@ func TestCrashRecovery_SaveActiveSessionJournal(t *testing.T) {
 	}
 }
 
-// TestCrashRecovery_ClearDataRemovesActiveJournal verifies that clearBrowsingData removes
-// session_active.json along with cookies, history, and regular session.
 func TestCrashRecovery_ClearDataRemovesActiveJournal(t *testing.T) {
 	dir := t.TempDir()
 	c := config{

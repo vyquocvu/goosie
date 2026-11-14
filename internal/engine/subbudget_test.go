@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// TestSubBudgetAccountsOnce pins the shared total: charges accumulate and
-// the first charge past the cap fails without spending.
 func TestSubBudgetAccountsOnce(t *testing.T) {
 	b := &subBudget{}
 	if !b.take(maxSubresourceBytes - 1) {

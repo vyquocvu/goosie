@@ -16,7 +16,6 @@ func TestJourneyInitialWindowUsableTab(t *testing.T) {
 	browser := newBrowserE2E(t)
 	defer browser.close(t)
 
-	// Check tab manager state on clean startup
 	if count := browser.f.tabMgr.Count(); count != 1 {
 		t.Fatalf("startup tab count = %d, want 1; %s", count, browser.diagnostics())
 	}
@@ -25,7 +24,6 @@ func TestJourneyInitialWindowUsableTab(t *testing.T) {
 		t.Fatalf("startup active tab is nil; %s", browser.diagnostics())
 	}
 
-	// Verify accessibility tree reflects exactly one tab and it is Selected
 	browser.waitFor(t, "startup accessibility tree has single selected tab", func() bool {
 		tree := browser.window.AccessibilityTree()
 		tabGroup, ok := findAXNode(tree, "goosie.tabs")
@@ -44,7 +42,6 @@ func TestJourneyInitialWindowUsableTab(t *testing.T) {
 		return tabNodes[0].Selected
 	})
 
-	// Verify address bar is present in accessibility tree
 	addrNode, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 	if !ok {
 		t.Fatalf("startup address bar accessibility node missing; %s", browser.diagnostics())
@@ -53,7 +50,6 @@ func TestJourneyInitialWindowUsableTab(t *testing.T) {
 		t.Errorf("address node AddressBar = false, want true")
 	}
 
-	// Verify the tab is immediately usable: navigate to a local server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!doctype html><html><body><h1 id="started">Started Tab</h1></body></html>`)
@@ -91,7 +87,6 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 	url2 := server.URL + "/tab2"
 	url3 := server.URL + "/tab3"
 
-	// 1. Navigate first tab to url1
 	browser.navigateViaAddressBar(t, url1)
 	browser.waitFor(t, "tab 1 loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "doc1")
@@ -99,7 +94,6 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 	})
 	tab1ID := browser.f.tabMgr.Active().ID()
 
-	// 2. Open second tab via Cmd+T
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
 	browser.waitFor(t, "second tab created and focused", func() bool {
 		return browser.f.tabMgr.Count() == 2 && browser.f.tabMgr.Active().ID() != tab1ID
@@ -115,7 +109,6 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 		return ok && browser.activeURL() == url2
 	})
 
-	// 3. Open third tab via New Tab button click in AX tree
 	browser.clickNode(t, "goosie.new-tab")
 	browser.waitFor(t, "third tab created and focused", func() bool {
 		id := browser.f.tabMgr.Active().ID()
@@ -136,7 +129,6 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 	id2Str := strconv.FormatUint(tab2ID, 10)
 	id3Str := strconv.FormatUint(tab3ID, 10)
 
-	// 4. Switch to Tab 1 by clicking its AX tab node
 	browser.clickNode(t, "goosie.tab."+id1Str)
 	browser.waitFor(t, "switched to tab 1", func() bool {
 		_, doc1 := findAXNode(browser.window.AccessibilityTree(), "doc1")
@@ -147,7 +139,6 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 		t.Errorf("tab 1 title = %q, want %q", active.Title(), "Title One")
 	}
 
-	// 5. Switch to Tab 2
 	browser.clickNode(t, "goosie.tab."+id2Str)
 	browser.waitFor(t, "switched to tab 2", func() bool {
 		_, doc2 := findAXNode(browser.window.AccessibilityTree(), "doc2")
@@ -158,7 +149,6 @@ func TestJourneySwitchBetweenThreeTabs(t *testing.T) {
 		t.Errorf("tab 2 title = %q, want %q", active.Title(), "Title Two")
 	}
 
-	// 6. Switch back to Tab 3
 	browser.clickNode(t, "goosie.tab."+id3Str)
 	browser.waitFor(t, "switched to tab 3", func() bool {
 		_, doc3 := findAXNode(browser.window.AccessibilityTree(), "doc3")
@@ -191,7 +181,6 @@ func TestJourneyCloseActiveTabSelectsNext(t *testing.T) {
 	firstURL := server.URL + "/first"
 	secondURL := server.URL + "/second"
 
-	// Set up first tab
 	browser.navigateViaAddressBar(t, firstURL)
 	browser.waitFor(t, "first tab loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "first-doc")
@@ -199,7 +188,6 @@ func TestJourneyCloseActiveTabSelectsNext(t *testing.T) {
 	})
 	firstID := browser.f.tabMgr.Active().ID()
 
-	// Open second tab
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
 	browser.waitFor(t, "second tab created and focused", func() bool {
 		return browser.f.tabMgr.Count() == 2 && browser.f.tabMgr.Active().ID() != firstID
@@ -215,11 +203,8 @@ func TestJourneyCloseActiveTabSelectsNext(t *testing.T) {
 		return ok && browser.activeURL() == secondURL
 	})
 
-	// Close the active second tab using Cmd+W
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 'w', Mods: surface.ModCommand})
 
-	// Wait for the close to select the next tab: count drops to 1 and the
-	// remaining tab is the one that was open before.
 	browser.waitFor(t, "closed tab hands focus to the remaining tab", func() bool {
 		active := browser.f.tabMgr.Active()
 		return browser.f.tabMgr.Count() == 1 && active != nil && active.ID() == firstID

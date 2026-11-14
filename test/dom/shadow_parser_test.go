@@ -49,7 +49,6 @@ func TestDeclarativeShadowDOM_OpenMode(t *testing.T) {
 		t.Errorf("expected shadow root mode 'open', got '%s'", card.ShadowRoot.Mode)
 	}
 
-	// Verify shadow root element children: div.card-inner and slot
 	srChild := card.ShadowRoot.FirstChild
 	for srChild != nil && !srChild.Element() {
 		srChild = srChild.NextSibling
@@ -65,7 +64,6 @@ func TestDeclarativeShadowDOM_OpenMode(t *testing.T) {
 		t.Fatalf("expected second shadow element child to be 'slot', got %+v", slotChild)
 	}
 
-	// Verify light DOM child: span.slotted-item, and that template is NOT in the light DOM
 	lightChild := card.FirstChild
 	for lightChild != nil && !lightChild.Element() {
 		lightChild = lightChild.NextSibling

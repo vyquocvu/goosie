@@ -7,27 +7,20 @@ import (
 	"time"
 )
 
-// KeyframesRule represents a parsed @keyframes at-rule.
 type KeyframesRule struct {
-	Name  string         // the animation name
-	Stops []KeyframeStop // sorted by Offset
+	Name  string
+	Stops []KeyframeStop
 }
 
-// KeyframeStop is one keyframe within a @keyframes rule.
 type KeyframeStop struct {
-	Offset       float32           // 0.0 to 1.0 (from=0, to=1)
-	Declarations map[string]string // property: value pairs
+	Offset       float32
+	Declarations map[string]string
 }
 
-// ParseKeyframes parses the body of a @keyframes rule.
-// Input is the content between the braces after "@keyframes name".
-// Example input: "from { opacity: 0 } to { opacity: 1 }"
-// Or: "0% { opacity: 0 } 50% { opacity: 0.5 } 100% { opacity: 1 }"
 func ParseKeyframes(body string) ([]KeyframeStop, error) {
 	var stops []KeyframeStop
 	pos := 0
 	for pos < len(body) {
-		// Skip whitespace.
 		for pos < len(body) && isKFWhitespace(body[pos]) {
 			pos++
 		}
@@ -35,18 +28,16 @@ func ParseKeyframes(body string) ([]KeyframeStop, error) {
 			break
 		}
 
-		// Read selector(s) up to '{'.
 		selStart := pos
 		for pos < len(body) && body[pos] != '{' {
 			pos++
 		}
 		if pos >= len(body) {
-			break // no block found
+			break
 		}
 		selText := strings.TrimSpace(body[selStart:pos])
-		pos++ // skip '{'
+		pos++
 
-		// Read block content up to matching '}'.
 		depth := 1
 		blockStart := pos
 		for pos < len(body) && depth > 0 {
@@ -63,25 +54,21 @@ func ParseKeyframes(body string) ([]KeyframeStop, error) {
 		}
 		blockText := body[blockStart:pos]
 		if pos < len(body) {
-			pos++ // skip '}'
+			pos++
 		}
 
 		if selText == "" {
 			continue
 		}
 
-		// Parse offsets from selector text.
 		offsets, err := parseKeyframeSelectors(selText)
 		if err != nil {
 			return nil, err
 		}
 
-		// Parse declarations from block text.
 		decls := parseKeyframeDeclarations(blockText)
 
-		// Create a stop for each offset, sharing the same declarations.
 		for _, off := range offsets {
-			// Copy declarations so each stop is independent.
 			d := make(map[string]string, len(decls))
 			for k, v := range decls {
 				d[k] = v
@@ -93,7 +80,6 @@ func ParseKeyframes(body string) ([]KeyframeStop, error) {
 		}
 	}
 
-	// Sort stops by offset.
 	sort.Slice(stops, func(i, j int) bool {
 		return stops[i].Offset < stops[j].Offset
 	})
@@ -101,13 +87,10 @@ func ParseKeyframes(body string) ([]KeyframeStop, error) {
 	return stops, nil
 }
 
-// isKFWhitespace reports whether c is CSS whitespace.
 func isKFWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 }
 
-// parseKeyframeSelectors parses a comma-separated list of keyframe selectors
-// and returns their offsets. Selectors can be "from", "to", or "N%".
 func parseKeyframeSelectors(s string) ([]float32, error) {
 	parts := strings.Split(s, ",")
 	var offsets []float32
@@ -142,8 +125,6 @@ func parseKeyframeSelectors(s string) ([]float32, error) {
 	return offsets, nil
 }
 
-// parseKeyframeDeclarations parses the declarations inside a keyframe block.
-// Returns a map of property -> value.
 func parseKeyframeDeclarations(s string) map[string]string {
 	decls := make(map[string]string)
 	for _, part := range strings.Split(s, ";") {
@@ -165,17 +146,15 @@ func parseKeyframeDeclarations(s string) map[string]string {
 	return decls
 }
 
-// AnimationDirection controls how @keyframes animations play.
 type AnimationDirection int
 
 const (
-	AnimNormal           AnimationDirection = iota // forward
-	AnimReverse                                    // backward
-	AnimAlternate                                  // forward, then backward
-	AnimAlternateReverse                           // backward, then forward
+	AnimNormal AnimationDirection = iota
+	AnimReverse
+	AnimAlternate
+	AnimAlternateReverse
 )
 
-// ParseAnimationDirection parses a CSS animation-direction keyword.
 func ParseAnimationDirection(s string) AnimationDirection {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "reverse":
@@ -188,17 +167,15 @@ func ParseAnimationDirection(s string) AnimationDirection {
 	return AnimNormal
 }
 
-// AnimationFillMode controls what happens before/after a @keyframes animation.
 type AnimationFillMode int
 
 const (
-	FillNone      AnimationFillMode = iota
-	FillForwards                    // holds last keyframe after completion
-	FillBackwards                   // applies first keyframe during delay
-	FillBoth                        // both forwards and backwards
+	FillNone AnimationFillMode = iota
+	FillForwards
+	FillBackwards
+	FillBoth
 )
 
-// ParseAnimationFillMode parses a CSS animation-fill-mode keyword.
 func ParseAnimationFillMode(s string) AnimationFillMode {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "forwards":
@@ -211,8 +188,6 @@ func ParseAnimationFillMode(s string) AnimationFillMode {
 	return FillNone
 }
 
-// ParseDuration parses a CSS time value ("1s", "500ms") into a Go Duration.
-// Returns 0 for unparseable values.
 func ParseDuration(s string) time.Duration {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -235,8 +210,6 @@ func ParseDuration(s string) time.Duration {
 	return 0
 }
 
-// ParseAnimationShorthand parses the CSS animation shorthand value.
-// Format: name duration [timing] [delay] [itercount] [direction] [fillmode]
 func ParseAnimationShorthand(value string) (
 	name string,
 	duration time.Duration,
@@ -287,7 +260,6 @@ func ParseAnimationShorthand(value string) (
 	return
 }
 
-// splitAnimTokens splits on whitespace outside parentheses.
 func splitAnimTokens(s string) []string {
 	var tokens []string
 	depth := 0
@@ -328,12 +300,10 @@ func splitAnimTokens(s string) []string {
 	return tokens
 }
 
-// isTimeValue reports whether a token looks like a CSS time value.
 func isTimeValue(s string) bool {
 	return strings.HasSuffix(s, "ms") || strings.HasSuffix(s, "s")
 }
 
-// isPositiveInt reports whether s is a positive integer string.
 func isPositiveInt(s string) bool {
 	if s == "" {
 		return false

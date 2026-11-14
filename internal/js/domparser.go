@@ -15,16 +15,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// DOMParser and XMLSerializer bindings.
-//
-// DOMParser.parseFromString(str, type) parses an HTML or XML string into a
-// detached Document. Supported types: "text/html", "application/xhtml+xml",
-// "text/xml", "application/xml", "image/svg+xml".
-//
-// XMLSerializer.serializeToString(node) serializes a DOM node subtree to an
-// XML string.
-
-// setupDOMParser installs the DOMParser constructor on the global scope.
 func (r *Runtime) setupDOMParser() {
 	r.installDOMParserConstructor(r.vm.GlobalObject(), func() (*dom.Document, string) {
 		if documentURL := r.documentURL(); documentURL != nil {
@@ -76,7 +66,6 @@ func (r *Runtime) domParserContextURL(receiver goja.Value) string {
 	return result.String()
 }
 
-// setupXMLSerializer installs the XMLSerializer constructor on the global scope.
 func (r *Runtime) setupXMLSerializer() {
 	win := r.vm.GlobalObject()
 	proto := r.vm.NewObject()
@@ -92,7 +81,6 @@ func (r *Runtime) setupXMLSerializer() {
 	_ = win.Set("XMLSerializer", ctor)
 }
 
-// jsParseFromString implements DOMParser.parseFromString(str, type).
 func (r *Runtime) jsParseFromString(call goja.FunctionCall, contextURL string) goja.Value {
 	if len(call.Arguments) < 2 {
 		panic(r.vm.NewTypeError("Failed to execute 'parseFromString': 2 arguments required"))
@@ -110,14 +98,11 @@ func (r *Runtime) jsParseFromString(call goja.FunctionCall, contextURL string) g
 	}
 }
 
-// parseHTMLString parses an HTML string into a detached Document using the
-// existing HTML parser.
 func (r *Runtime) parseHTMLString(src string, contextURL string) goja.Value {
 	doc, err := dom.ParseBoundedWithHandlersAndScripting(src, dom.ParseLimits{
 		Nodes: 4096, Depth: 64, Attributes: 256, AttributeBytes: 8192,
 	}, false, nil, nil, nil)
 	if err != nil {
-		// On parse failure, return an error document with a parsererror element.
 		doc = dom.NewDocument()
 		doc.CharacterSet = "UTF-8"
 		doc.ContentType = "text/html"
@@ -134,8 +119,6 @@ func (r *Runtime) parseHTMLString(src string, contextURL string) goja.Value {
 	return r.wrapDetachedDocument(doc)
 }
 
-// parseXMLString parses an XML string into a detached Document using a basic
-// XML parser.
 func (r *Runtime) parseXMLString(src string, mime string, contextURL string) goja.Value {
 	doc, err := ParseXMLDocumentBounded(src, mime, dom.ParseLimits{
 		Nodes: 4096, Depth: 64, Attributes: 256, AttributeBytes: 8192,
@@ -149,17 +132,10 @@ func (r *Runtime) parseXMLString(src string, mime string, contextURL string) goj
 	return r.wrapDetachedDocument(doc)
 }
 
-// ParseXMLDocumentBounded parses an XML document into the engine DOM. It is
-// exported for document loaders that receive an XML MIME type; unlike
-// DOMParser, the returned document is active and its scripts have not been
-// marked inert. Limits are checked during a strict XML tokenization pass,
-// before the DOM tree is allocated.
 func ParseXMLDocumentBounded(src string, mime string, limits dom.ParseLimits) (*dom.Document, error) {
 	return ParseXMLDocumentBoundedWithParserCallbacks(src, mime, limits, nil, nil, nil)
 }
 
-// ParseXMLDocumentBoundedWithParserCallbacks runs hooks while an active XML
-// document is being parsed. DOMParser uses the callback-free entry point.
 func ParseXMLDocumentBoundedWithParserCallbacks(src string, mime string, limits dom.ParseLimits,
 	onElement func(*dom.Node, []dom.Attribute), onInserted func(*dom.Node), onScript func(*dom.Document, *dom.Node),
 ) (*dom.Document, error) {
@@ -170,8 +146,6 @@ func ParseXMLDocumentBoundedWithParserCallbacks(src string, mime string, limits 
 	return doc, nil
 }
 
-// ParseXMLDocumentIntoBoundedWithParserCallbacks fills an existing active XML
-// document so a browsing context can bind its runtime before parsing begins.
 func ParseXMLDocumentIntoBoundedWithParserCallbacks(doc *dom.Document, src string, mime string, limits dom.ParseLimits,
 	onElement func(*dom.Node, []dom.Attribute), onInserted func(*dom.Node), onScript func(*dom.Document, *dom.Node),
 ) error {
@@ -201,9 +175,6 @@ func ParseXMLDocumentIntoBoundedWithParserCallbacks(doc *dom.Document, src strin
 	return nil
 }
 
-// ParseXMLFragmentBounded parses a well-formed XML fragment in the namespace
-// context of context. HTML document wrappers in the XHTML namespace are
-// stripped as required by the DOM Parsing contextual-fragment algorithm.
 func ParseXMLFragmentBounded(context *dom.Node, src string, limits dom.ParseLimits) (*dom.Node, error) {
 	if context == nil || !context.Element() {
 		return nil, fmt.Errorf("XML fragment parsing requires an element context")
@@ -327,9 +298,6 @@ func (r *Runtime) setDetachedDocumentURL(doc *dom.Document, raw string) {
 	}
 }
 
-// setDocShortcuts walks the top level of doc to find html/head/body.
-// For XML documents the root element may not be named "html", so we also
-// record the first element found as doc.HTML (documentElement).
 func setDocShortcuts(doc *dom.Document) {
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
@@ -339,7 +307,6 @@ func setDocShortcuts(doc *dom.Document) {
 		if n.Element() {
 			lower := strings.ToLower(n.Data)
 			if doc.HTML == nil {
-				// First element becomes documentElement regardless of name.
 				doc.HTML = n
 			}
 			if doc.Head == nil && lower == "head" {
@@ -356,7 +323,6 @@ func setDocShortcuts(doc *dom.Document) {
 	walk(&doc.Node)
 }
 
-// jsSerializeToString implements XMLSerializer.serializeToString(node).
 func (r *Runtime) jsSerializeToString(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) < 1 {
 		panic(r.vm.NewTypeError("Failed to execute 'serializeToString': 1 argument required"))
@@ -433,7 +399,6 @@ func (c xmlNamespaceContext) clone() xmlNamespaceContext {
 	return copy
 }
 
-// serializeXMLNode writes the XML serialization of node to sb.
 func serializeXMLNode(sb *strings.Builder, n *dom.Node) {
 	nextPrefix := 1
 	serializeXMLNodeWithContext(sb, n, xmlNamespaceContext{
@@ -509,9 +474,6 @@ func serializeXMLNodeWithContext(sb *strings.Builder, n *dom.Node, ctx xmlNamesp
 		local := n.Data
 		childCtx := ctx.clone()
 		uri := xmlElementNamespace(n, ctx)
-		// Apply explicit namespace declarations before resolving this element's
-		// qualified name. XMLParser stores declarations as attributes, while
-		// HTML's foreign-content parser records the namespace directly on nodes.
 		for _, a := range n.Attr {
 			if a.Name == "xmlns" {
 				if a.Value == uri {
@@ -559,7 +521,6 @@ func serializeXMLNodeWithContext(sb *strings.Builder, n *dom.Node, ctx xmlNamesp
 		} else if uri == ctx.defaultURI {
 			prefix = ""
 		} else if prefix != "" && childCtx.prefixes[prefix] == uri {
-			// Keep the current prefix when its declaration agrees.
 		} else if prefix != "" && xmlHasPrefixDeclaration(n, prefix, "") {
 			prefix = ensurePrefix(prefix, uri)
 		} else if closest := nearestXMLPrefix(childCtx, uri); closest != "" {
@@ -595,7 +556,6 @@ func serializeXMLNodeWithContext(sb *strings.Builder, n *dom.Node, ctx xmlNamesp
 			name := a.Name
 			switch a.NamespaceURI {
 			case "http://www.w3.org/2000/xmlns/":
-				// Namespace declarations are emitted exactly as supplied.
 			case "http://www.w3.org/XML/1998/namespace":
 				if !strings.Contains(name, ":") {
 					name = "xml:" + name
@@ -629,8 +589,6 @@ func serializeXMLNodeWithContext(sb *strings.Builder, n *dom.Node, ctx xmlNamesp
 				}
 			}
 			if a.Name == "xmlns" {
-				// The element's namespace URI, rather than a contradictory
-				// declaration, determines the serialization namespace.
 				defaultGenerated := false
 				for _, declaration := range generated {
 					if declaration[0] == "" && declaration[1] == uri {
@@ -829,7 +787,6 @@ func isXMLSerializerHTMLVoid(name string) bool {
 	}
 }
 
-// escapeXMLText escapes text for XML content.
 func escapeXMLText(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
@@ -837,7 +794,6 @@ func escapeXMLText(s string) string {
 	return s
 }
 
-// escapeXMLAttr escapes an attribute value for XML.
 func escapeXMLAttr(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, `<`, "&lt;")
@@ -849,11 +805,6 @@ func escapeXMLAttr(s string) string {
 	return s
 }
 
-// ---------------------------------------------------------------------------
-// Basic XML parser
-// ---------------------------------------------------------------------------
-
-// xmlParser is a minimal XML parser that builds a DOM tree.
 type xmlParser struct {
 	input           string
 	pos             int
@@ -865,7 +816,6 @@ type xmlParser struct {
 	onScript        func(*dom.Document, *dom.Node)
 }
 
-// parseXMLNodes parses the XML string and returns a slice of top-level nodes.
 func parseXMLNodes(src string, doc *dom.Document, entities map[string]string) ([]*dom.Node, error) {
 	return parseXMLNodesWithCallbacks(src, doc, entities, nil, nil, nil)
 }
@@ -905,7 +855,6 @@ func parseXMLNodesWithCallbacks(src string, doc *dom.Document, entities map[stri
 					continue
 				case '!':
 					if p.pos+3 < len(p.input) && p.input[p.pos+2] == '-' && p.input[p.pos+3] == '-' {
-						// Comment.
 						p.pos += 4
 						end := strings.Index(p.input[p.pos:], "-->")
 						if end >= 0 {
@@ -926,8 +875,7 @@ func parseXMLNodesWithCallbacks(src string, doc *dom.Document, entities map[stri
 						continue
 					}
 					if strings.HasPrefix(p.input[p.pos+2:], "[CDATA[") {
-						// CDATA section.
-						p.pos += 9 // skip <![CDATA[
+						p.pos += 9
 						end := strings.Index(p.input[p.pos:], "]]>")
 						if end >= 0 {
 							data := p.input[p.pos : p.pos+end]
@@ -938,7 +886,6 @@ func parseXMLNodesWithCallbacks(src string, doc *dom.Document, entities map[stri
 						}
 						continue
 					}
-					// Unknown <! construct, skip.
 					p.pos += 2
 					end := strings.Index(p.input[p.pos:], ">")
 					if end >= 0 {
@@ -950,8 +897,6 @@ func parseXMLNodesWithCallbacks(src string, doc *dom.Document, entities map[stri
 				case '/':
 					return nil, fmt.Errorf("unexpected XML closing tag")
 				default:
-					// Preserve document order for comments, processing instructions,
-					// and doctypes that precede a root parsed incrementally below.
 					for _, pending := range nodes {
 						if pending.Parent == nil {
 							doc.Node.AppendChild(pending)
@@ -969,7 +914,6 @@ func parseXMLNodesWithCallbacks(src string, doc *dom.Document, entities map[stri
 				p.pos++
 			}
 		} else {
-			// Text at top level.
 			start := p.pos
 			for p.pos < len(p.input) && p.input[p.pos] != '<' {
 				p.pos++
@@ -1006,7 +950,6 @@ func (p *xmlParser) parseProcessingInstruction() (*dom.Node, error) {
 	if !validXMLQName(target) {
 		return nil, fmt.Errorf("invalid XML processing instruction target %q", target)
 	}
-	// The XML declaration is a byte-stream declaration, not a DOM node.
 	if start == 0 && strings.EqualFold(target, "xml") {
 		return nil, nil
 	}
@@ -1099,14 +1042,12 @@ func takeXMLQuoted(src string) (value, rest string, ok bool) {
 	return src[1:end], src[end+1:], true
 }
 
-// parseElement parses an element and its children.
 func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 	if p.pos >= len(p.input) || p.input[p.pos] != '<' {
 		return nil, nil
 	}
-	p.pos++ // skip <
+	p.pos++
 
-	// Read tag name.
 	tagStart := p.pos
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
@@ -1126,7 +1067,6 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 	}
 	selfClosing := false
 
-	// Parse attributes.
 	seenAttributes := make(map[string]bool)
 	for {
 		p.skipWhitespace()
@@ -1142,7 +1082,6 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 			selfClosing = true
 			break
 		}
-		// Parse attribute.
 		name, value := p.parseAttr()
 		if !validXMLQName(name) {
 			return nil, fmt.Errorf("invalid XML attribute name %q", name)
@@ -1273,17 +1212,14 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 	p.namespaceScopes = append(p.namespaceScopes, namespaces)
 	defer func() { p.namespaceScopes = p.namespaceScopes[:len(p.namespaceScopes)-1] }()
 
-	// Parse children until closing tag.
 	for p.pos < len(p.input) {
 		if p.input[p.pos] == '<' {
 			if p.pos+1 < len(p.input) && p.input[p.pos+1] == '/' {
-				// Closing tag.
 				p.pos += 2
 				endTag := p.readName()
 				if endTag != tag {
 					return nil, fmt.Errorf("mismatched XML closing tag %q for %q", endTag, tag)
 				}
-				// Skip to >.
 				p.skipWhitespace()
 				if p.pos >= len(p.input) || p.input[p.pos] != '>' {
 					return nil, fmt.Errorf("malformed XML closing tag")
@@ -1306,7 +1242,6 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 			}
 			if p.pos+1 < len(p.input) && p.input[p.pos+1] == '!' {
 				if p.pos+3 < len(p.input) && p.input[p.pos+2] == '-' && p.input[p.pos+3] == '-' {
-					// Comment.
 					p.pos += 4
 					end := strings.Index(p.input[p.pos:], "-->")
 					if end >= 0 {
@@ -1319,7 +1254,6 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 					continue
 				}
 				if strings.HasPrefix(p.input[p.pos+2:], "[CDATA[") {
-					// CDATA section.
 					p.pos += 9
 					end := strings.Index(p.input[p.pos:], "]]>")
 					if end >= 0 {
@@ -1331,7 +1265,6 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 					}
 					continue
 				}
-				// Unknown <! construct.
 				p.pos += 2
 				end := strings.Index(p.input[p.pos:], ">")
 				if end >= 0 {
@@ -1341,13 +1274,11 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 				}
 				continue
 			}
-			// Child element.
 			_, err := p.parseElement(n)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			// Text content.
 			start := p.pos
 			for p.pos < len(p.input) && p.input[p.pos] != '<' {
 				p.pos++
@@ -1366,7 +1297,6 @@ func (p *xmlParser) parseElement(parent *dom.Node) (*dom.Node, error) {
 	return nil, fmt.Errorf("unterminated XML element %q", tag)
 }
 
-// readName reads a name (tag or attribute name) from the current position.
 func (p *xmlParser) readName() string {
 	start := p.pos
 	for p.pos < len(p.input) {
@@ -1379,11 +1309,9 @@ func (p *xmlParser) readName() string {
 	return p.input[start:p.pos]
 }
 
-// parseAttr parses a single attribute name="value" pair.
 func (p *xmlParser) parseAttr() (name, value string) {
 	name = p.readName()
 	if name == "" {
-		// Skip unknown character.
 		if p.pos < len(p.input) {
 			p.pos++
 		}
@@ -1393,7 +1321,7 @@ func (p *xmlParser) parseAttr() (name, value string) {
 	if p.pos >= len(p.input) || p.input[p.pos] != '=' {
 		return name, ""
 	}
-	p.pos++ // skip =
+	p.pos++
 	p.skipWhitespace()
 	if p.pos >= len(p.input) {
 		return name, ""
@@ -1407,7 +1335,7 @@ func (p *xmlParser) parseAttr() (name, value string) {
 		}
 		value = p.input[start:p.pos]
 		if p.pos < len(p.input) {
-			p.pos++ // skip closing quote
+			p.pos++
 		}
 	} else {
 		start := p.pos
@@ -1424,7 +1352,6 @@ func (p *xmlParser) parseAttr() (name, value string) {
 	return name, value
 }
 
-// skipWhitespace advances past whitespace characters.
 func (p *xmlParser) skipWhitespace() {
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
@@ -1435,9 +1362,6 @@ func (p *xmlParser) skipWhitespace() {
 	}
 }
 
-// decodeXMLEntities expands XML predefined, numeric, and internal general
-// entity references. validateXMLDocument rejects unknown or malformed
-// references before this tree-building pass.
 func decodeXMLEntities(source string, entities map[string]string) (string, error) {
 	return decodeXMLEntitiesDepth(source, entities, 0)
 }
@@ -1731,11 +1655,6 @@ func validXMLQName(name string) bool {
 	return true
 }
 
-// validateDOMElementQName implements DOM's current "validate and extract"
-// name rules for element names. DOM intentionally accepts a wider set than
-// XML Names so DOM-created names are compatible with names the HTML parser can
-// produce. Keep this separate from validXMLQName, which remains appropriate
-// for XML parser constructs such as processing instructions.
 func validateDOMElementQName(namespace, qualifiedName string) (prefix, localName, exception string) {
 	localName = qualifiedName
 	if colon := strings.IndexByte(qualifiedName, ':'); colon >= 0 {

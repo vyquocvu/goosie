@@ -15,7 +15,7 @@ func TestTrigonometricFunctions(t *testing.T) {
 	}{
 		{"sin(0)", 0.0, 0.001},
 		{"sin(30deg)", 0.5, 0.001},
-		{"sin(0.52359877)", 0.5, 0.001}, // unitless radians
+		{"sin(0.52359877)", 0.5, 0.001},
 		{"sin(0.25turn)", 1.0, 0.001},
 		{"sin(100grad)", 1.0, 0.001},
 		{"sin(pi / 6)", 0.5, 0.001},
@@ -60,7 +60,7 @@ func TestExponentialPowerFunctions(t *testing.T) {
 		{"sqrt(256)", 16.0, 0.001},
 		{"hypot(3px, 4px)", 5.0, 0.001},
 		{"hypot(6, 8)", 10.0, 0.001},
-		{"hypot(1, 2, 2)", 3.0, 0.001}, // 1^2 + 2^2 + 2^2 = 9 -> sqrt(9) = 3
+		{"hypot(1, 2, 2)", 3.0, 0.001},
 		{"exp(0)", 1.0, 0.001},
 		{"exp(1)", float32(math.E), 0.001},
 		{"log(1)", 0.0, 0.001},
@@ -118,9 +118,7 @@ func TestSignAndSteppedFunctions(t *testing.T) {
 }
 
 func TestMathFunctionsInValueLength(t *testing.T) {
-	// Direct length function evaluation
 	v1 := css.ParseValue("sin(30deg) * 100px")
-	// Or inside calc
 	v2 := css.ParseValue("calc(100px * sin(30deg))")
 	if l := v2.ToLength(); math.Abs(float64(l-50.0)) > 0.01 {
 		t.Errorf("ToLength() = %f, want 50.0", l)

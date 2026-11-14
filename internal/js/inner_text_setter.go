@@ -76,8 +76,6 @@ func (r *Runtime) setOuterText(node *dom.Node, value string) {
 	next := node.NextSibling
 	replacements := innerTextSetterNodes(node.Doc, value)
 	if len(replacements) == 0 {
-		// Unlike innerText, outerText replaces the element with a Text node even
-		// for the empty string. Adjacent Text nodes are merged below.
 		replacements = []*dom.Node{node.Doc.NewText("")}
 	}
 	fragment := node.Doc.NewDocumentFragment()
@@ -91,9 +89,6 @@ func (r *Runtime) setOuterText(node *dom.Node, value string) {
 	r.mergeOuterTextAdjacentNodes(parent, previous, replacements, next)
 }
 
-// mergeOuterTextAdjacentNodes merges only the Text nodes touching the
-// replacement sequence. Adjacent text elsewhere in the parent is left intact,
-// as required by the outerText setter's replacement algorithm.
 func (r *Runtime) mergeOuterTextAdjacentNodes(parent, previous *dom.Node, replacements []*dom.Node, next *dom.Node) {
 	if parent == nil || len(replacements) == 0 {
 		return

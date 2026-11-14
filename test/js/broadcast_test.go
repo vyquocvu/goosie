@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// TestBroadcastChannelConstructor verifies the constructor exists on both the
-// global scope and window, and that the name property is read-only.
 func TestBroadcastChannelConstructor(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -65,8 +63,6 @@ func TestBroadcastChannelConstructor(t *testing.T) {
 	}
 }
 
-// TestBroadcastChannelRequiresName pins the spec rule: constructing without a
-// name throws a TypeError.
 func TestBroadcastChannelRequiresName(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -82,8 +78,6 @@ func TestBroadcastChannelRequiresName(t *testing.T) {
 	}
 }
 
-// TestBroadcastChannelEmptyName pins the constructor's DOMString conversion:
-// an empty string is a valid channel name.
 func TestBroadcastChannelEmptyName(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -100,9 +94,6 @@ func TestBroadcastChannelEmptyName(t *testing.T) {
 	}
 }
 
-// TestBroadcastChannelSameNameExchange is the core acceptance test: two
-// channels with the same name can exchange messages via postMessage and
-// onmessage.
 func TestBroadcastChannelSameNameExchange(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -123,7 +114,6 @@ func TestBroadcastChannelSameNameExchange(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Drain events so the queued message fires onmessage.
 	r.Tick()
 
 	if err := r.Run(`var count = received.length; var msg = received[0];`, "inline"); err != nil {
@@ -142,12 +132,9 @@ func TestBroadcastChannelSameNameExchange(t *testing.T) {
 		t.Fatalf("MessageEvent state after dispatch = %s, want reset currentTarget/phase/path and retained target", got)
 	}
 
-	// Cleanup.
 	_ = r.Run(`ch1.close(); ch2.close();`, "cleanup.js")
 }
 
-// TestBroadcastChannelDifferentNamesDoNotInterfere verifies that channels with
-// different names are isolated: posting on one does not reach the other.
 func TestBroadcastChannelDifferentNamesDoNotInterfere(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -378,8 +365,6 @@ func TestBroadcastChannelListenerAbortSignal(t *testing.T) {
 	_ = r.Run(`receiver.close(); sender.close();`, "cleanup.js")
 }
 
-// TestBroadcastChannelCloseStopsReceiving verifies that after close(), the
-// channel no longer receives messages.
 func TestBroadcastChannelCloseStopsReceiving(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -428,8 +413,6 @@ func TestBroadcastChannelCloseDuringMessageHandlerCancelsQueuedDelivery(t *testi
 	_ = r.Run(`sender.close();`, "cleanup.js")
 }
 
-// TestBroadcastChannelSenderDoesNotReceive verifies that postMessage does not
-// deliver to the sending channel itself -- only to peers.
 func TestBroadcastChannelSenderDoesNotReceive(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -454,8 +437,6 @@ func TestBroadcastChannelSenderDoesNotReceive(t *testing.T) {
 	_ = r.Run(`ch1.close();`, "cleanup.js")
 }
 
-// TestBroadcastChannelMultiplePeers verifies that postMessage delivers to all
-// other channels with the same name, not just one.
 func TestBroadcastChannelMultiplePeers(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -510,8 +491,6 @@ func TestBroadcastChannelMultiplePeers(t *testing.T) {
 	_ = r.Run(`sender.close(); peer1.close(); peer2.close();`, "cleanup.js")
 }
 
-// TestBroadcastChannelObjectPayload verifies that structured data (objects)
-// round-trips through postMessage.
 func TestBroadcastChannelObjectPayload(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -540,7 +519,6 @@ func TestBroadcastChannelObjectPayload(t *testing.T) {
 	_ = r.Run(`ch1.close(); ch2.close();`, "cleanup.js")
 }
 
-// TestBroadcastChannelNumberPayload verifies that numeric data round-trips.
 func TestBroadcastChannelNumberPayload(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -566,9 +544,6 @@ func TestBroadcastChannelNumberPayload(t *testing.T) {
 	_ = r.Run(`ch1.close(); ch2.close();`, "cleanup.js")
 }
 
-// TestBroadcastChannelCrossRuntime verifies that channels in different
-// runtimes (simulating different tabs) sharing the same hub can exchange
-// messages.
 func TestBroadcastChannelCrossRuntime(t *testing.T) {
 	hub := js.NewBroadcastHub()
 
@@ -584,7 +559,6 @@ func TestBroadcastChannelCrossRuntime(t *testing.T) {
 	}
 	defer r2.Close()
 
-	// Tab 1 creates a channel and listens.
 	if err := r1.Run(`
 		var tab1received = [];
 		var ch1 = new BroadcastChannel('cross');
@@ -593,7 +567,6 @@ func TestBroadcastChannelCrossRuntime(t *testing.T) {
 		t.Fatalf("Run r1: %v", err)
 	}
 
-	// Tab 2 creates a channel with the same name and posts.
 	if err := r2.Run(`
 		var ch2 = new BroadcastChannel('cross');
 		ch2.postMessage('from tab2');
@@ -601,7 +574,6 @@ func TestBroadcastChannelCrossRuntime(t *testing.T) {
 		t.Fatalf("Run r2: %v", err)
 	}
 
-	// Drain events on tab 1 so the message fires.
 	r1.Tick()
 
 	if err := r1.Run(`var count = tab1received.length; var msg = tab1received[0];`, "inline"); err != nil {
@@ -677,8 +649,6 @@ func TestBroadcastChannelIsScopedToOriginAndReportsSenderOrigin(t *testing.T) {
 	}
 }
 
-// TestBroadcastChannelDoubleClose verifies that calling close() twice does not
-// panic or error.
 func TestBroadcastChannelDoubleClose(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 
@@ -696,8 +666,6 @@ func TestBroadcastChannelDoubleClose(t *testing.T) {
 	}
 }
 
-// TestBroadcastChannelPostAfterClose verifies that postMessage after close()
-// throws InvalidStateError and does not deliver.
 func TestBroadcastChannelPostAfterClose(t *testing.T) {
 	r := newRuntime(t, js.Options{Timeout: 5 * time.Second})
 

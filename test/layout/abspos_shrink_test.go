@@ -29,12 +29,6 @@ func findAbspos(arena *layout.Arena) []*layout.Object {
 	return out
 }
 
-// An absolutely positioned box with auto width shrink-wraps its content
-// (CSS 2.1 §10.3.7). When its children are blocks, there is no inline extent
-// to read back, but the measure width must still collapse to the children's
-// preferred widths: leaving the 10000px probe width in place paints
-// viewport-wide strips (Google's dropdowns, carousels) and breaks every
-// overflow clip and document extent around them.
 func TestAbsposShrinkWrapsBlockChildren(t *testing.T) {
 	arena := positionedSession(t, `<html><body><div style="position: relative;"><div style="position: absolute; top: 0; left: 0;"><p>menu</p></div></div></body></html>`, 800)
 	boxes := findAbspos(arena)

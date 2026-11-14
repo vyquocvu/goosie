@@ -6,9 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// document.fonts (FontFaceSet) is the first API Google's homepage needs: its
-// boot script calls document.fonts.load(...).catch(...) before defining the
-// `google` global, so a missing FontFaceSet takes the whole app down.
 func TestDocumentFontsExists(t *testing.T) {
 	r := newRuntime(t, jsOpts())
 	if err := r.Run(`var out = (typeof document.fonts) + "/" + (document.fonts === document.fonts);`, "inline"); err != nil {
@@ -36,8 +33,6 @@ document.fonts.load('400 10pt "Google Sans"').then(function(faces) {
 	}
 }
 
-// A bad font spec must reject (catchable), never throw synchronously: pages
-// chain .catch() off load(), and a sync throw would kill the boot script.
 func TestDocumentFontsLoadBadSpecRejects(t *testing.T) {
 	r := newRuntime(t, jsOpts())
 	src := `
@@ -76,9 +71,6 @@ document.fonts.ready.then(function(s) { readyOut = (s === document.fonts) ? "sel
 	}
 }
 
-// Google's actual first inline script, verbatim. It must run clean: before
-// this API existed it threw "Cannot read property 'load' of undefined" and
-// every later script died on "google is not defined".
 func TestGoogleFontsBootScript(t *testing.T) {
 	r := newRuntime(t, jsOpts())
 	src := `(function(){var w=["Google Sans",[400,500,700]];(function(){for(var a=0;a<w.length;a+=2)for(var b=w[a],e=w[a+1],d=0,c=void 0;c=e[d];++d)b==="Noto Color Emoji"?document.fonts.load(c+" 10pt "+b,"").catch(function(){}):document.fonts.load(c+" 10pt "+b).catch(function(){})})();})();`

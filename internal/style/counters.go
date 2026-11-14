@@ -7,16 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// CSS counters (css-lists-3 §5-7): counter-reset/set/increment establish and
-// adjust named counters in nested scopes, and counter()/counters() in
-// `content` render them. Scopes are tree state threaded through layout in
-// document order, not inherited computed values.
-
-// ParseCounterDecls parses `counter-reset`, `counter-set` and
-// `counter-increment` values: `none` or runs of `name [integer]`. Bare names
-// default to def (0 for reset/set, 1 for increment). It returns nil for
-// `none`, empty input, or any malformed pair, in which case the declaration
-// is dropped like any other invalid one.
 func ParseCounterDecls(value string, def int) map[string]int {
 	fields := strings.Fields(value)
 	if len(fields) == 0 {
@@ -83,10 +73,6 @@ func isDecimalInt(s string) bool {
 	return true
 }
 
-// FormatCounter renders value in a predefined counter style. Unknown styles
-// fall back to decimal, which is also the spec's last resort: rendering
-// SOMETHING wrong-looking beats rendering nothing, and matches what the
-// engine did before a style existed at all.
 func FormatCounter(value int, style string) string {
 	switch strings.ToLower(strings.TrimSpace(style)) {
 	case "", "decimal":
@@ -174,18 +160,11 @@ func formatAlpha(value int, upper bool) string {
 	return strings.ToLower(string(rev))
 }
 
-// additiveSymbol is one weight of an additive (non-positional) numbering
-// system like Georgian or Armenian: greedy largest-first decomposition.
 type additiveSymbol struct {
 	v int
 	s string
 }
 
-// georgianSymbols is the predefined Georgian numbering table. The archaic
-// letters sit inside the sequence (8 is ჱ, 60 is ჲ, 400 is ჳ), so the weights
-// do not follow the modern alphabet — the table below is read off the CSS
-// css-lists WPT reference renders (counter-004, counters-004), where 19999
-// renders as ჵჰშჟთ = 10000+9000+600+70+9, confirming greedy decomposition.
 var georgianSymbols = []additiveSymbol{
 	{10000, "ჵ"}, {9000, "ჰ"}, {8000, "ჯ"}, {7000, "ჴ"},
 	{6000, "ხ"}, {5000, "ჭ"}, {4000, "წ"}, {3000, "ძ"},
@@ -198,7 +177,6 @@ var georgianSymbols = []additiveSymbol{
 	{5, "ე"}, {4, "დ"}, {3, "გ"}, {2, "ბ"}, {1, "ა"},
 }
 
-// armenianSymbols is the classical Armenian numbering table, 1-9999.
 var armenianSymbols = []additiveSymbol{
 	{9000, "Ք"}, {8000, "Փ"}, {7000, "Ւ"}, {6000, "Ց"},
 	{5000, "Ր"}, {4000, "Տ"}, {3000, "Վ"}, {2000, "Ս"},
@@ -242,9 +220,6 @@ func formatCJKDecimal(value int) string {
 	return b.String()
 }
 
-// digitZeroStyle maps counter styles that substitute decimal digits
-// one-for-one, to the code point of their zero. Only entries certain from the
-// Unicode blocks are listed; anything else falls back to decimal.
 func digitZeroStyle(style string) (rune, bool) {
 	switch style {
 	case "arabic-indic":
@@ -300,8 +275,6 @@ func formatDigitMapped(value int, zero rune) string {
 	return b.String()
 }
 
-// ContentPart is one piece of a parsed `content` value: a literal, a
-// counter()/counters() function, or (never produced, kept for symmetry) raw.
 type ContentPartKind int
 
 const (
@@ -314,21 +287,14 @@ const (
 	ContentNoCloseQuote
 )
 
-// ContentPart carries a counter() or counters() reference with its style.
 type ContentPart struct {
 	Kind  ContentPartKind
-	Text  string // literal text for ContentText
-	Name  string // counter name for Counter/Counters
-	Sep   string // separator for Counters
-	Style string // counter style, "" means decimal
+	Text  string
+	Name  string
+	Sep   string
+	Style string
 }
 
-// ParseContentParts splits a `content` value into literals and counter
-// functions. It reports ok=false for anything it does not understand, in
-// which case the caller keeps the historical raw-string behavior byte for
-// byte. Pure string content never reaches here (the cascade handles quoted
-// strings on its existing path); only values naming counter() or counters()
-// do.
 func ParseContentParts(value string) (parts []ContentPart, ok bool) {
 	if !hasCounterFunc(value) && !hasQuoteKeyword(value) {
 		return nil, false
@@ -410,8 +376,6 @@ func hasCounterFunc(value string) bool {
 	return strings.Contains(lower, "counter(") || strings.Contains(lower, "counters(")
 }
 
-// hasTopLevelCounterFunc finds counter( or counters( outside strings and
-// nested parens: only those evaluate, everything else keeps raw behavior.
 func hasTopLevelCounterFunc(value string) bool {
 	depth := 0
 	inStr := byte(0)
@@ -451,12 +415,6 @@ func hasTopLevelCounterFunc(value string) bool {
 
 func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' }
 
-// isIdentStart/isIdentChar live in gradient.go and are reused here: idents
-// outside ASCII fall back to raw-string behavior rather than misparsing.
-
-// scanQuoted reads a quoted string starting at i (the quote), returning the
-// raw inner text; callers decode escapes with css.DecodeEscapes, the same
-// function plain string content goes through.
 func scanQuoted(s string, i int) (string, int, bool) {
 	q := s[i]
 	var b strings.Builder
@@ -479,7 +437,6 @@ func scanQuoted(s string, i int) (string, int, bool) {
 	return "", 0, false
 }
 
-// parseCounterFunc parses the argument list at s[i] (the opening paren).
 func parseCounterFunc(plural bool, s string, i int) (ContentPart, int, bool) {
 	depth := 0
 	j := i
@@ -586,9 +543,6 @@ func isBareIdent(s string) bool {
 	return true
 }
 
-// CounterScope is one level of CSS counter state. Scopes nest: reset
-// establishes a child, set and increment adjust the innermost instance or
-// create the counter in a fresh child. The zero value is an empty root.
 type CounterScope struct {
 	parent *CounterScope
 	vals   map[string]int
@@ -605,8 +559,6 @@ func (s *CounterScope) owner(name string) *CounterScope {
 	return nil
 }
 
-// ApplyReset establishes a fresh nested counter set. An empty declaration
-// list leaves the scope untouched.
 func (s *CounterScope) ApplyReset(m map[string]int) *CounterScope {
 	if len(m) == 0 {
 		return s
@@ -618,8 +570,6 @@ func (s *CounterScope) ApplyReset(m map[string]int) *CounterScope {
 	return c
 }
 
-// ApplySet assigns counters in place, creating missing ones in a fresh child
-// scope so siblings sharing the parent never observe them.
 func (s *CounterScope) ApplySet(m map[string]int) *CounterScope {
 	cur := s
 	for k, v := range m {
@@ -635,8 +585,6 @@ func (s *CounterScope) ApplySet(m map[string]int) *CounterScope {
 	return cur
 }
 
-// ApplyIncrement adds to the innermost instance of each counter, creating
-// missing ones at 0 first. Like set, creation happens in a fresh child.
 func (s *CounterScope) ApplyIncrement(m map[string]int) *CounterScope {
 	cur := s
 	for k, v := range m {
@@ -652,8 +600,6 @@ func (s *CounterScope) ApplyIncrement(m map[string]int) *CounterScope {
 	return cur
 }
 
-// Lookup reports the innermost value of a counter and whether any scope owns
-// one. Missing counters read as absent; evaluation renders those as 0.
 func (s *CounterScope) Lookup(name string) (int, bool) {
 	if o := s.owner(name); o != nil {
 		return o.vals[name], true
@@ -661,8 +607,6 @@ func (s *CounterScope) Lookup(name string) (int, bool) {
 	return 0, false
 }
 
-// Levels collects a counter's value at every scope level holding one,
-// outermost first, for counters().
 func (s *CounterScope) Levels(name string) []int {
 	var rev []int
 	for sc := s; sc != nil; sc = sc.parent {
@@ -678,7 +622,6 @@ func (s *CounterScope) Levels(name string) []int {
 	return rev
 }
 
-// EvaluateContentWithQuotes renders parsed content parts against a scope and quote pairs.
 func EvaluateContentWithQuotes(parts []ContentPart, scope *CounterScope, quotes []string, quoteDepth *int) string {
 	if quotes == nil {
 		quotes = []string{"“", "”", "‘", "’"}
@@ -736,8 +679,6 @@ func EvaluateContentWithQuotes(parts []ContentPart, scope *CounterScope, quotes 
 	return b.String()
 }
 
-// EvaluateContent renders parsed content parts against a scope. Counter
-// styles default to decimal; a counter with no instance anywhere renders 0.
 func EvaluateContent(parts []ContentPart, scope *CounterScope) string {
 	return EvaluateContentWithQuotes(parts, scope, nil, nil)
 }

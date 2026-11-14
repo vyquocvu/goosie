@@ -97,8 +97,6 @@ func TestHistoryLoadCorruptFileIsError(t *testing.T) {
 	}
 }
 
-// TestHistoryLoadCapsOversizedFile: a legacy file past the cap loads only
-// the newest MaxEntries visits, matching what Record keeps at runtime.
 func TestHistoryLoadCapsOversizedFile(t *testing.T) {
 	type entry struct {
 		URL   string    `json:"url"`
@@ -140,7 +138,6 @@ func TestHistoryDeleteEntryAndPersist(t *testing.T) {
 		t.Fatalf("Entries() = %d, want 3", len(entries))
 	}
 
-	// Delete the exact first visit; the later same-URL visit survives.
 	if !s.DeleteEntry("https://a.example", entries[0].At) {
 		t.Fatal("DeleteEntry of a recorded visit = false, want true")
 	}
@@ -171,9 +168,6 @@ func TestHistoryDeleteEntryAndPersist(t *testing.T) {
 	}
 }
 
-// TestHistoryDeleteEntryTimestampRoundTrip pins the encoding the management UI
-// uses: a timestamp serialized as RFC3339Nano (and through JSON) must still
-// match the recorded visit exactly.
 func TestHistoryDeleteEntryTimestampRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.json")
 	s, err := history.Load(path)
@@ -183,13 +177,10 @@ func TestHistoryDeleteEntryTimestampRoundTrip(t *testing.T) {
 	s.Record("https://a.example", "A")
 	at := s.Entries()[0].At
 
-	// Through the UI's query-parameter encoding.
 	parsed, err := time.Parse(time.RFC3339Nano, at.Format(time.RFC3339Nano))
 	if err != nil {
 		t.Fatalf("RFC3339Nano round trip: %v", err)
 	}
-	// Through JSON persistence: save, reload, and delete on the reloaded
-	// store using the URL-encoded timestamp.
 	if err := s.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -224,15 +215,12 @@ func TestHistoryClearAndPersist(t *testing.T) {
 	if got := s2.Entries(); len(got) != 0 {
 		t.Fatalf("reloaded Entries() after Clear = %+v, want empty", got)
 	}
-	// The log still records after a clear.
 	s2.Record("https://c.example", "C")
 	if got := s2.Entries(); len(got) != 1 {
 		t.Fatalf("Entries() after Clear+Record = %+v, want the new visit", got)
 	}
 }
 
-// FR-DAT-02: a recorded visit carries its transition type and the running
-// visit count for its URL, and both survive persistence.
 func TestHistoryRecordsTransitionAndVisitCount(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "history.json")
 	s, err := history.Load(path)
@@ -244,8 +232,6 @@ func TestHistoryRecordsTransitionAndVisitCount(t *testing.T) {
 	s.RecordVisit("https://a.example", "A again", history.TransitionLink)
 	s.RecordVisit("https://a.example", "A reload", history.TransitionReload)
 
-	// The final reload labels the visit already at the head rather than
-	// appending a fourth entry (BR-045).
 	want := []struct {
 		url        string
 		transition history.Transition
@@ -278,8 +264,6 @@ func TestHistoryRecordsTransitionAndVisitCount(t *testing.T) {
 	assertVisits(reloaded.Entries())
 }
 
-// A reload of the page already at the head labels that visit instead of
-// appending a duplicate (BR-045): reloading must not grow the visit log.
 func TestHistoryReloadLabelsHeadVisitWithoutGrowingLog(t *testing.T) {
 	s, err := history.Load(filepath.Join(t.TempDir(), "history.json"))
 	if err != nil {
@@ -296,7 +280,6 @@ func TestHistoryReloadLabelsHeadVisitWithoutGrowingLog(t *testing.T) {
 	}
 }
 
-// FR-DAT-02: deletion is granular - the last hour, today, or all time.
 func TestHistoryDeleteLastHourAndToday(t *testing.T) {
 	now := time.Date(2026, 11, 2, 15, 0, 0, 0, time.Local)
 	legacy := []map[string]any{
@@ -378,16 +361,12 @@ func TestHistorySearch(t *testing.T) {
 	if got := s.Search("nomatchxyz"); len(got) != 0 {
 		t.Fatalf("Search(nomatchxyz) = %+v, want empty", got)
 	}
-	// Oldest-first order is preserved.
 	got = s.Search("example")
 	if got[0].URL != "https://example.com" || got[1].URL != "https://blog.example.net" {
 		t.Fatalf("Search(example) order = %+v, want oldest first", got)
 	}
 }
 
-// TestHistoryFrecencyScore pins the ranking shared by the omnibox: frequency
-// multiplies a recency bucket, so a busy page can outrank a fresher one and a
-// stale one-off cannot float to the top.
 func TestHistoryFrecencyScore(t *testing.T) {
 	now := time.Date(2026, 11, 2, 15, 0, 0, 0, time.UTC)
 	cases := []struct {

@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// ItemStatus distinguishes the lifecycle phases of a download.
 type ItemStatus string
 
 const (
@@ -24,7 +23,6 @@ const (
 	StatusCanceled  ItemStatus = "canceled"
 )
 
-// Item tracks an in-flight or completed download.
 type Item struct {
 	ID              string     `json:"id"`
 	URL             string     `json:"url"`
@@ -40,7 +38,6 @@ type Item struct {
 	EndTime         time.Time  `json:"end_time,omitempty"`
 }
 
-// Percent reports progress from 0.0 to 100.0, or -1.0 if total size is unknown.
 func (it *Item) Percent() float64 {
 	if it.TotalBytes <= 0 {
 		if it.Status == StatusCompleted {
@@ -55,7 +52,6 @@ func (it *Item) Percent() float64 {
 	return p
 }
 
-// Speed calculates instantaneous transfer rate in bytes per second.
 func (it *Item) Speed() float64 {
 	if it.Status != StatusActive {
 		return 0
@@ -67,7 +63,6 @@ func (it *Item) Speed() float64 {
 	return float64(it.DownloadedBytes) / elapsed
 }
 
-// FormattedSize returns a human-readable size string (e.g. "12.4 MB / 50.0 MB" or "12.4 MB").
 func (it *Item) FormattedSize() string {
 	if it.TotalBytes > 0 {
 		return fmt.Sprintf("%s / %s", FormatBytes(it.DownloadedBytes), FormatBytes(it.TotalBytes))
@@ -75,12 +70,10 @@ func (it *Item) FormattedSize() string {
 	return FormatBytes(it.DownloadedBytes)
 }
 
-// FormattedSpeed returns formatted transfer rate (e.g. "2.4 MB/s").
 func (it *Item) FormattedSpeed() string {
 	return FormatSpeed(it.Speed())
 }
 
-// FormatBytes converts raw bytes into a human-readable unit string.
 func FormatBytes(b int64) string {
 	if b < 0 {
 		return "Unknown"
@@ -97,7 +90,6 @@ func FormatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// FormatSpeed converts bytes per second into human-readable speed.
 func FormatSpeed(bytesPerSec float64) string {
 	if bytesPerSec <= 0 {
 		return "--"
@@ -105,7 +97,6 @@ func FormatSpeed(bytesPerSec float64) string {
 	return FormatBytes(int64(bytesPerSec)) + "/s"
 }
 
-// Manager orchestrates download items, progress updates, and OS interactions.
 type Manager struct {
 	mu        sync.RWMutex
 	dir       string
@@ -118,7 +109,6 @@ type Manager struct {
 	resume    map[string]func()
 }
 
-// NewManager creates a download manager saving by default to dir.
 func NewManager(dir string) *Manager {
 	return &Manager{
 		dir:    dir,
@@ -129,21 +119,18 @@ func NewManager(dir string) *Manager {
 	}
 }
 
-// Dir returns the target download directory.
 func (m *Manager) Dir() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.dir
 }
 
-// SetDir updates the target download directory.
 func (m *Manager) SetDir(dir string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.dir = dir
 }
 
-// CreateItem registers a new download item.
 func (m *Manager) CreateItem(rawURL, filename string, totalBytes int64) *Item {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -164,7 +151,6 @@ func (m *Manager) CreateItem(rawURL, filename string, totalBytes int64) *Item {
 	return item
 }
 
-// UpdateProgress updates the downloaded byte count for an active item.
 func (m *Manager) UpdateProgress(id string, downloaded int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -177,13 +163,10 @@ func (m *Manager) UpdateProgress(id string, downloaded int64) {
 	m.notify(item)
 }
 
-// Complete marks an item as successfully completed.
 func (m *Manager) Complete(id string, localPath string) {
 	m.CompleteWithDigest(id, localPath, "")
 }
 
-// CompleteWithDigest marks an item as completed and records the SHA-256 of the
-// bytes that were written, so the saved file can be verified later.
 func (m *Manager) CompleteWithDigest(id, localPath, sha256 string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -209,7 +192,6 @@ func (m *Manager) CompleteWithDigest(id, localPath, sha256 string) {
 	m.notify(item)
 }
 
-// Fail marks an item as failed with an error message.
 func (m *Manager) Fail(id string, err error) {
 	m.mu.Lock()
 	item, ok := m.byID[id]
@@ -238,7 +220,6 @@ func (m *Manager) Fail(id string, err error) {
 	}
 }
 
-// Cancel terminates and marks an item as canceled.
 func (m *Manager) Cancel(id string) {
 	m.mu.Lock()
 	item, ok := m.byID[id]
@@ -268,9 +249,6 @@ func (m *Manager) Cancel(id string) {
 	m.mu.Unlock()
 }
 
-// SetCancel attaches the operation canceler to an active download. If the
-// item was already canceled, cancel is invoked immediately to close the race
-// between publishing the item and attaching its network request.
 func (m *Manager) SetCancel(id string, cancel context.CancelFunc) {
 	if cancel == nil {
 		return
@@ -289,10 +267,6 @@ func (m *Manager) SetCancel(id string, cancel context.CancelFunc) {
 	m.mu.Unlock()
 }
 
-// SetPause attaches the operation that stops an active transfer while keeping
-// its partial file. Pausing is only offered for items whose transfer registered
-// a pause handler, so a buffered download is never left in a state it cannot
-// leave.
 func (m *Manager) SetPause(id string, pause context.CancelFunc) {
 	if pause == nil {
 		return
@@ -308,8 +282,6 @@ func (m *Manager) SetPause(id string, pause context.CancelFunc) {
 	m.mu.Unlock()
 }
 
-// Pause stops an active transfer and marks the item resumable. The partial file
-// is preserved on disk. It reports whether the item changed state.
 func (m *Manager) Pause(id string) bool {
 	m.mu.Lock()
 	item, ok := m.byID[id]
@@ -334,7 +306,6 @@ func (m *Manager) Pause(id string) bool {
 	return true
 }
 
-// SetResume attaches the operation that continues a paused transfer.
 func (m *Manager) SetResume(id string, resume func()) {
 	if resume == nil {
 		return
@@ -347,8 +318,6 @@ func (m *Manager) SetResume(id string, resume func()) {
 	m.mu.Unlock()
 }
 
-// Resume restarts a paused transfer from its preserved partial file. It reports
-// whether the item changed state.
 func (m *Manager) Resume(id string) bool {
 	m.mu.Lock()
 	item, ok := m.byID[id]
@@ -371,8 +340,6 @@ func (m *Manager) Resume(id string) bool {
 	return true
 }
 
-// SetTemp records the partial file a paused transfer must keep and the bytes it
-// already holds.
 func (m *Manager) SetTemp(id, path string, downloaded int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -385,9 +352,6 @@ func (m *Manager) SetTemp(id, path string, downloaded int64) {
 	m.notify(item)
 }
 
-// Restart resets an item that must begin again from byte zero, such as a
-// resume whose Range request the server answered with the whole entity. The
-// abandoned partial file is not referenced any more; the caller removes it.
 func (m *Manager) Restart(id string, totalBytes int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -402,7 +366,6 @@ func (m *Manager) Restart(id string, totalBytes int64) {
 	m.notify(item)
 }
 
-// Pausable reports whether an item has a registered pause handler.
 func (m *Manager) Pausable(id string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -410,7 +373,6 @@ func (m *Manager) Pausable(id string) bool {
 	return ok
 }
 
-// Resumable reports whether a paused item can be resumed.
 func (m *Manager) Resumable(id string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -419,7 +381,6 @@ func (m *Manager) Resumable(id string) bool {
 	return ok && item.Status == StatusPaused && hasResume
 }
 
-// Get finds an item by ID.
 func (m *Manager) Get(id string) *Item {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -430,7 +391,6 @@ func (m *Manager) Get(id string) *Item {
 	return nil
 }
 
-// Items returns a chronological slice copy of all tracked items.
 func (m *Manager) Items() []*Item {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -443,7 +403,6 @@ func (m *Manager) Items() []*Item {
 	return res
 }
 
-// ActiveItems returns all currently downloading or queued items.
 func (m *Manager) ActiveItems() []*Item {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -458,8 +417,6 @@ func (m *Manager) ActiveItems() []*Item {
 	return res
 }
 
-// ActiveCount returns the number of in-flight downloads, including paused ones
-// that still own a partial file.
 func (m *Manager) ActiveCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -473,14 +430,12 @@ func (m *Manager) ActiveCount() int {
 	return count
 }
 
-// TotalCount returns the total number of items tracked.
 func (m *Manager) TotalCount() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.items)
 }
 
-// OverallProgress calculates the combined 0.0..100.0 progress across active downloads.
 func (m *Manager) OverallProgress() float64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -504,7 +459,6 @@ func (m *Manager) OverallProgress() float64 {
 	return p
 }
 
-// ClearCompleted purges completed, failed, and canceled downloads from memory.
 func (m *Manager) ClearCompleted() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -521,7 +475,6 @@ func (m *Manager) ClearCompleted() {
 	m.byID = newByID
 }
 
-// Subscribe adds an observer notified whenever any item state changes.
 func (m *Manager) Subscribe(fn func(*Item)) func() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -530,7 +483,6 @@ func (m *Manager) Subscribe(fn func(*Item)) func() {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		for i, l := range m.listeners {
-			// Compare address of function isn't trivial in Go, so we can clean if needed
 			_ = i
 			_ = l
 		}
@@ -546,7 +498,6 @@ func (m *Manager) notify(item *Item) {
 	}
 }
 
-// ShowInFolder reveals the file at path in the native file manager (Finder / Explorer / Files).
 func ShowInFolder(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -563,7 +514,6 @@ func ShowInFolder(path string) error {
 	}
 }
 
-// OpenFile launches the downloaded file with its system default associated application.
 func OpenFile(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {

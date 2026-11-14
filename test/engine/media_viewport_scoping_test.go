@@ -10,7 +10,6 @@ import (
 
 const mediaHTML = `<html><body><p id="p">hi</p></body></html>`
 
-// narrowSheet paints the paragraph red only on a viewport 600 px wide or less.
 const narrowSheet = `@media (max-width: 600px) { p { color: rgb(255, 0, 0); } }`
 
 var mediaRed = css.Color{R: 255, G: 0, B: 0, A: 255}
@@ -24,11 +23,6 @@ func mediaColor(t *testing.T, s *engine.Session) css.Color {
 	return st.Color
 }
 
-// A document restyled at a new width is re-parsed for that width by layout and
-// by the viewport units, but @media was already decided while the text was
-// tokenised - against a process-wide width that only NewSession updates. So a
-// narrow restyle of a document that loaded wide keeps the wide document's media
-// matches, whatever the width its caller passed.
 func TestRefreshMatchesMediaAgainstItsOwnWidth(t *testing.T) {
 	s, err := engine.NewSession(mediaHTML, []string{narrowSheet}, 1200)
 	if err != nil {
@@ -49,9 +43,6 @@ func TestRefreshMatchesMediaAgainstItsOwnWidth(t *testing.T) {
 	}
 }
 
-// Tab loads run on their own goroutines (`loadURLCtx` is called from `go func`
-// blocks at cmd/goosie/main.go:527 and :699), so every write of the media width
-// and every read of it by a parser happen off the UI thread and unsynchronised.
 func TestConcurrentLoadsDoNotShareMediaWidth(t *testing.T) {
 	const tabs = 24
 	var wg sync.WaitGroup

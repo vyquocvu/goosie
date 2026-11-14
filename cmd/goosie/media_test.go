@@ -16,15 +16,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// These tests drive the browser side of video: the wiring between a pointer press
-// and a playback command. The engine's own state machine and the native decoder
-// have their own tests; what is being pinned here is that the host marks a real
-// gesture as trusted, routes it to the right control, and does not route it to a
-// text selection instead.
-
-// stubBackend is a synchronous player. It reports state the moment it is asked
-// rather than asynchronously, so a test can press a control and read the result
-// without polling — the point of these tests is the routing, not the timing.
 type stubBackend struct {
 	mu      sync.Mutex
 	players []*stubPlayer
@@ -122,9 +113,6 @@ func (p *stubPlayer) counts() (plays, pauses int, seeks []float64, mutes []bool)
 
 const stubMP4Body = "\x00\x00\x00\x14ftypisom\x00\x00\x02\x00isom"
 
-// mediaTestPath builds a browser frame path whose active tab shows a page with one
-// <video controls>, loaded through the real navigation path so the fetcher, the
-// downloader and the temporary file are all in the loop.
 func mediaTestPath(t *testing.T, b *stubBackend) *framePath {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -161,8 +149,6 @@ func mediaTestPath(t *testing.T, b *stubBackend) *framePath {
 	tab.SetSession(sess)
 	t.Cleanup(sess.Close)
 
-	// Bring the source in the way a press on the play button would, and let the
-	// download land so there is a player to command.
 	c := sess.MediaController(videoElement(t, sess))
 	if c == nil {
 		t.Fatal("the loaded document produced no media controller")
@@ -188,8 +174,6 @@ func videoElement(t *testing.T, sess *engine.Session) *dom.Node {
 	return nodes[0]
 }
 
-// videoBox is the element's content rectangle in CSS pixels, read from the arena
-// the painter reads.
 func videoBox(t *testing.T, sess *engine.Session) frame.Rect {
 	t.Helper()
 	for i := range sess.Arena.Objects {
@@ -203,8 +187,6 @@ func videoBox(t *testing.T, sess *engine.Session) frame.Rect {
 	return frame.Rect{}
 }
 
-// centre is a device-pixel point inside r, which at dpr 1 and zoom 1 is also a
-// content-area point.
 func centre(r frame.Rect) (int32, int32) {
 	return (r.X0 + r.X1) / 2, (r.Y0 + r.Y1) / 2
 }
@@ -247,8 +229,6 @@ func TestMediaDamageUnionsAndScales(t *testing.T) {
 	if got := mediaDamage(nil, 2); !got.Empty() {
 		t.Fatalf("mediaDamage of nothing = %v, want empty", got)
 	}
-	// A fractional scale must round outward: a damage rect that stops short of the
-	// pixel it was meant to cover leaves a stale edge on screen.
 	got = mediaDamage([]frame.RectF{{X0: 0.25, Y0: 0.25, X1: 10.5, Y1: 10.5}}, 1)
 	if got.X0 > 0 || got.Y0 > 0 || got.X1 < 11 || got.Y1 < 11 {
 		t.Fatalf("mediaDamage at 1x rounded inwards: %v", got)
@@ -283,10 +263,6 @@ func TestMediaControlPressPlaysAndPauses(t *testing.T) {
 	}
 }
 
-// TestMediaControlPressIsTrusted pins the half of the contract that is easy to get
-// wrong: the play command reaches the player at all, which it only does if the
-// host marked the press as a user gesture. Without that the engine refuses it and
-// the button looks broken.
 func TestMediaControlPressIsTrusted(t *testing.T) {
 	b := &stubBackend{}
 	f := mediaTestPath(t, b)
@@ -298,8 +274,6 @@ func TestMediaControlPressIsTrusted(t *testing.T) {
 	if plays, _, _, _ := b.first().counts(); plays == 0 {
 		t.Fatal("a real press did not authorize playback: activation was not set around it")
 	}
-	// And it is not left set afterwards, or every later script-initiated play()
-	// in the document would be treated as a gesture.
 	ctrl := sess.MediaController(videoElement(t, sess))
 	if _, err := ctrl.Play(); err != media.ErrNotAllowed {
 		t.Fatalf("play() outside a gesture = %v, want ErrNotAllowed", err)
@@ -316,7 +290,6 @@ func TestMediaControlTrackSeeks(t *testing.T) {
 	}
 	p := b.first()
 
-	// A quarter of the way along a 10 second asset is 2.5 seconds.
 	x := c.Track.X0 + (c.Track.X1-c.Track.X0)/4
 	y := (c.Track.Y0 + c.Track.Y1) / 2
 	if !f.handleMediaControl(x, y) {
@@ -350,10 +323,6 @@ func TestMediaControlMuteToggles(t *testing.T) {
 	}
 }
 
-// TestMediaControlMissFallsThrough pins that a press anywhere else on the video —
-// the picture itself, or the empty part of the bar — is not swallowed. A browser
-// that ate every click inside a video box would make the page underneath
-// unclickable for 320x180 pixels.
 func TestMediaControlMissFallsThrough(t *testing.T) {
 	b := &stubBackend{}
 	f := mediaTestPath(t, b)
@@ -381,19 +350,14 @@ func TestMediaKeySpaceTogglesAFocusedVideo(t *testing.T) {
 	tab := f.tabMgr.Active()
 	p := b.first()
 
-	// Nothing focused: space belongs to the page, not to the video.
 	if f.mediaKey(tab, ' ') {
 		t.Fatal("space was consumed by a video that does not have focus")
 	}
 
-	// Nothing focused: space belongs to the page, not to the video.
 	if f.mediaKey(tab, ' ') {
 		t.Fatal("space was consumed by a video that does not have focus")
 	}
 
-	// Pressing a control focuses the element, which is the only route by which a
-	// video can hold focus: it is not one of the form controls the engine's
-	// activatable set admits.
 	c := paint.VideoControlLayout(videoBox(t, sess), 1)
 	x, y := centre(c.Play)
 	f.handleMediaControl(x, y)
@@ -452,10 +416,6 @@ func TestPauseMediaStopsTheDepartingTab(t *testing.T) {
 	}
 }
 
-// TestMediaFetcherGoesThroughTheBrowserClient pins that a media download is an
-// ordinary subresource fetch: same client, same policy context. A video is the one
-// resource the browser hands to a native stack, so it is the one that must not be
-// allowed to fetch for itself.
 func TestMediaFetcherGoesThroughTheBrowserClient(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

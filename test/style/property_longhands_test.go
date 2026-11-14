@@ -10,16 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// These longhands reach the layout and paint layers but no test fed them, so the code that
-// parses them had never run in CI: `clear`, the overflow trio, `flex-wrap`,
-// `background-repeat`, the border width/style/color and shorthand family, the elliptical
-// corner radii, `flex`, and the grid line forms. Each case below resolves a real document
-// through style.Resolve and asserts the computed field, so a refactor of the parser cannot
-// pass by returning the same wrong thing from a different function.
-//
-// The last test in the file is the one that matters most: every property is fed values a
-// hand-written page can actually contain, and none of them is allowed to panic.
-
 func TestClearAndOverflowLonghands(t *testing.T) {
 	for _, tc := range []struct{ decl, want string }{
 		{"clear: left", "ClearLeft"},
@@ -142,14 +132,10 @@ func TestBorderShorthandPartsInAnyOrder(t *testing.T) {
 		{"width last", "border: solid red 2px", 2, "solid", 255, 0, 0, 255},
 		{"explicit zero width", "border: 0 solid red", 0, "solid", 255, 0, 0, 255},
 		{"explicit zero length", "border: 0px solid red", 0, "solid", 255, 0, 0, 255},
-		// `medium` is the initial border-width, and the engine spells it 3px.
 		{"style only", "border: solid", 3, "solid", 0, 0, 0, 0},
 		{"none stays zero", "border: none", 0, "none", 0, 0, 0, 0},
 		{"width only", "border: 4px", 4, "", 0, 0, 0, 0},
 		{"hex colour", "border: 1px dashed #0088ee", 1, "dashed", 0, 136, 238, 255},
-		// Authoring style puts a space after every comma, so the colour arrives as
-		// several whitespace-separated tokens. Splitting the value on spaces alone
-		// loses it.
 		{"rgb with spaces", "border: 1px solid rgb(0, 136, 238)", 1, "solid", 0, 136, 238, 255},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,8 +251,6 @@ func TestCornerRadiusIncludingElliptical(t *testing.T) {
 
 	s = styleFor(t, `<html><body><div class="y">y</div></body></html>`,
 		`.y { border-bottom-right-radius: 50% }`, "div")
-	// A percentage radius cannot be resolved until the box is known, so css.Value carries it
-	// unresolved as -2-pct and layout turns it back into a share of the corner's box.
 	if got := s.BorderRadius[2][0]; got != -52 {
 		t.Errorf("bottom-right radius = %v, want -52 (the 50%% sentinel encoding), not a dropped or literal 50", got)
 	}
@@ -305,9 +289,6 @@ func TestGridLineFormsReduceToSpan(t *testing.T) {
 	}
 }
 
-// The style attribute is the highest-priority author origin and the one route every property
-// takes without a stylesheet. It is asserted here so the inline parser and the cascade entry
-// point are both exercised, and so an inline border reaches the same fields as a rule's.
 func TestInlineStyleAttributeReachesComputedFields(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div style="clear: both; border-top: 2px dashed red; background-repeat: repeat-x">x</div></body></html>`,
@@ -339,11 +320,6 @@ func TestInlineStyleLosesToImportantAndBeatsRules(t *testing.T) {
 	}
 }
 
-// GOOSIE-TABLEALIGN-001 (closed 2026-11-06): Inherited text-align: center now flows
-// through table boxes and centers their cell content, matching Chromium. Measured with
-// a 300px table under body{text-align:center}: Chromium centres the cell's content at
-// the same x as a 300px div (scripts/verify-br087-bidi-residuals.js). The engine
-// previously reset inherited center to start at table boxes; the reset has been removed.
 func TestInheritedTextAlignFlowsThroughTable(t *testing.T) {
 	fromParent := styleFor(t, `<html><body><table><tbody><tr><td>x</td></tr></tbody></table></body></html>`,
 		`body { text-align: center }`, "table")
@@ -362,9 +338,6 @@ func TestInheritedTextAlignFlowsThroughTable(t *testing.T) {
 	}
 }
 
-// hostile are values a real page, a truncated stylesheet, or a fuzzed response body can
-// contain. A property value must never take the renderer down: the parse either lands on the
-// keyword's default or is ignored, and the document keeps painting.
 func TestMalformedPropertyValuesNeverPanic(t *testing.T) {
 	props := []string{
 		"clear", "overflow", "overflow-x", "overflow-y", "flex-wrap", "flex",
@@ -383,9 +356,6 @@ func TestMalformedPropertyValuesNeverPanic(t *testing.T) {
 		for _, value := range values {
 			decl := prop + ": " + value
 			t.Run(decl, func(t *testing.T) {
-				// Recovered per combination rather than left to the testing package: a
-				// repanic kills the binary, so the first bad value would hide every property
-				// after it, and the point of this sweep is the full list of them.
 				sheet := ".x { " + decl + " }"
 				resolveSurvives(t, func() { styleFor(t, `<html><body><div class="x">x</div></body></html>`, sheet, "div") })
 				inlineHTML := `<html><body><div style="` + decl + `">x</div></body></html>`
@@ -405,11 +375,6 @@ func resolveSurvives(t *testing.T, f func()) {
 	f()
 }
 
-// TestInlineDataURIBackgroundSurvivesSemicolons pins declaration splitting
-// for style attributes carrying base64 data URIs: the semicolon in
-// `data:image/png;base64,...` sits inside url(...) and must not end the
-// background-image declaration, or the image silently vanishes while a
-// later background-size still parses.
 func TestInlineDataURIBackgroundSurvivesSemicolons(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div style="background-image:url('data:image/png;base64,iVBORw0KGgo=');background-size:50px">x</div></body></html>`,
@@ -422,9 +387,6 @@ func TestInlineDataURIBackgroundSurvivesSemicolons(t *testing.T) {
 	}
 }
 
-// TestBackgroundRepeatTwoAxes pins per-axis repeat parsing: `repeat round`
-// repeats horizontally and rounds vertically, and each axis falls back
-// independently.
 func TestBackgroundRepeatTwoAxes(t *testing.T) {
 	for _, c := range []struct {
 		decl string
@@ -443,9 +405,6 @@ func TestBackgroundRepeatTwoAxes(t *testing.T) {
 	}
 }
 
-// TestBackgroundOriginClipBoxes pins the box keywords and their initials:
-// origins position against the padding box, clips paint through the border
-// box, and clip:text parses for the cascade even though paint cannot mask it.
 func TestBackgroundOriginClipBoxes(t *testing.T) {
 	s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
 		`.x { background-origin: content-box; background-clip: text; }`, "div")
@@ -461,9 +420,6 @@ func TestBackgroundOriginClipBoxes(t *testing.T) {
 	}
 }
 
-// TestBackgroundPositionThreeFourValues pins keyword-plus-offset positions:
-// `left 50px` offsets from the start edge, `right 25px` from the end edge,
-// and a percentage offset resolves against the free space.
 func TestBackgroundPositionThreeFourValues(t *testing.T) {
 	s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
 		`.x { background-position: left 50px center; }`, "div")
@@ -483,9 +439,6 @@ func TestBackgroundPositionThreeFourValues(t *testing.T) {
 	}
 }
 
-// TestBackgroundShorthandKeepsFirstLayer pins that later comma-separated
-// layers never bleed into the painted layer's fields: their positions,
-// sizes and repeats belong to layers the painter does not draw.
 func TestBackgroundShorthandKeepsFirstLayer(t *testing.T) {
 	s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
 		`.x { background: linear-gradient(to right, yellow 50%, blue 50%) 0 0 / 100% 100% no-repeat, radial-gradient(farthest-side at 0 50%, black, transparent) 0 0 / 20px 100% no-repeat; }`, "div")
@@ -500,10 +453,6 @@ func TestBackgroundShorthandKeepsFirstLayer(t *testing.T) {
 	}
 }
 
-// TestBoxShadowCurrentColorResolvesAgainstOwnColor pins used-value timing:
-// an omitted shadow color stays flagged through the cascade (paint resolves
-// it against the element's own final `color`), and an explicit color survives
-// untouched.
 func TestBoxShadowCurrentColorResolvesAgainstOwnColor(t *testing.T) {
 	s := styleFor(t, `<html><body><span>x</span></body></html>`,
 		`span { color: limegreen; box-shadow: -3em 0em; }`, "span")
@@ -520,8 +469,6 @@ func TestBoxShadowCurrentColorResolvesAgainstOwnColor(t *testing.T) {
 	}
 }
 
-// TestBoxShadowInheritCopiesParentLayers pins the `inherit` keyword: the
-// child takes the parent's computed layers verbatim.
 func TestBoxShadowInheritCopiesParentLayers(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div><p>x</p></div></body></html>`)
 	sheets := []*css.Stylesheet{css.Parse(`
@@ -555,9 +502,6 @@ func TestBoxShadowInheritCopiesParentLayers(t *testing.T) {
 	}
 }
 
-// TestBoxShadowInheritKeepsCurrentColorFlag pins that an inherited
-// `currentcolor` layer stays flagged: paint resolves it against the child,
-// not the parent whose cascade already ran.
 func TestBoxShadowInheritKeepsCurrentColorFlag(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div><p>x</p></div></body></html>`)
 	sheets := []*css.Stylesheet{css.Parse(`
@@ -583,10 +527,6 @@ func TestBoxShadowInheritKeepsCurrentColorFlag(t *testing.T) {
 	}
 }
 
-// TestBackgroundClipBorderAreaParses pins the border-area keyword for clip
-// (and origin, where it sizes like the border box): the ring between the
-// border box and the padding box is what shows a background through a
-// transparent border.
 func TestBackgroundClipBorderAreaParses(t *testing.T) {
 	s := styleFor(t, `<html><body><div>x</div></body></html>`,
 		`div { background-clip: border-area; }`, "div")
@@ -595,9 +535,6 @@ func TestBackgroundClipBorderAreaParses(t *testing.T) {
 	}
 }
 
-// TestUsedBorderWidthsZeroesStylelessSides pins CSS 2.1 8.5.3: none/hidden
-// (or absent) style forces the used width to zero while the declared width
-// stays put for number-multiple resolutions.
 func TestUsedBorderWidthsZeroesStylelessSides(t *testing.T) {
 	s := styleFor(t, `<html><body><div>x</div></body></html>`,
 		`div { border: red 100px; }`, "div")

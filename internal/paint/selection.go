@@ -6,22 +6,14 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// SelSpan marks the rune range [Start, End) of one word box as selected.
-// Key names the same box the builder's arena walk visits, so paint matches by
-// document-lifetime identity instead of holding an arena pointer.
 type SelSpan struct {
 	Key   layout.BoxKey
 	Start int
 	End   int
 }
 
-// selectionColor is the unfocused-selection blue macOS text fields use. The
-// text keeps its own color on top, matching how a real browser paints
-// selection rather than inverting the glyph pixels.
 var selectionColor = frame.RGB(178, 215, 255)
 
-// paintSelectionHighlight fills the selected rune range of a word box with the
-// selection color, under the text appendRun is about to emit.
 func (b *Builder) paintSelectionHighlight(obj *layout.Object, rect frame.Rect, s *style.ComputedStyle, sp SelSpan, opacity float32) {
 	runes := []rune(obj.Node.DataContent)
 	start, end := sp.Start, sp.End
@@ -51,12 +43,6 @@ func (b *Builder) paintSelectionHighlight(obj *layout.Object, rect frame.Rect, s
 	})
 }
 
-// runeX returns the device-pixel x of the left edge of logical rune i, walking
-// the same pen appendRun places glyphs with, so highlight edges line up with
-// the glyph boundaries instead of a proportional guess. When order is non-nil
-// (a bidi-reordered word), it maps the logical index through the visual
-// permutation: the left edge of logical rune i is the cumulative advance of
-// every visual slot that precedes the slot holding i.
 func runeX(text string, rect frame.Rect, s *style.ComputedStyle, i int, scale float32, metrics layout.Metrics, order []int) int32 {
 	runes := []rune(text)
 	if i <= 0 {
@@ -98,9 +84,6 @@ func runeX(text string, rect frame.Rect, s *style.ComputedStyle, i int, scale fl
 	return rect.X0 + pen
 }
 
-// runeXBidi computes the visual x of logical rune i when order is non-nil.
-// It finds the visual slot holding i, then sums the advances of every visual
-// slot before it, using the same 26.6 fixed-point pen appendRunOrdered uses.
 func runeXBidi(runes []rune, rect frame.Rect, fontSize, letterSpacing, wordSpacing int32, slot frame.FontSlot, i int, metrics layout.Metrics, order []int) int32 {
 	visualSlot := len(order)
 	for k, log := range order {

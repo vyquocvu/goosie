@@ -110,7 +110,6 @@ func TestBuildErrorPageRender(t *testing.T) {
 		t.Fatal("buildErrorPage produced zero background color")
 	}
 
-	// Apply nav result with error to active tab
 	tab := f.tabMgr.Active()
 	tab.Nav.Serial = 10
 	f.applyNavResult(navResult{

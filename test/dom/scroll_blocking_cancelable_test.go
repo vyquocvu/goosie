@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// WPT dom/events/non-cancelable-when-passive, measured against Chromium: a
-// generated scroll-blocking event reports cancelable only while the dispatch
-// can reach a listener that may prevent the scroll. The answer is one value per
-// dispatch, shared by every listener, not a value per listener context.
 func TestGeneratedScrollBlockingEventCancelabilityFollowsItsListeners(t *testing.T) {
 	e := dom.NewTrustedEvent("wheel", true, true)
 	e.SetScrollCancelableByListener(false)
@@ -21,8 +17,6 @@ func TestGeneratedScrollBlockingEventCancelabilityFollowsItsListeners(t *testing
 		t.Errorf("generated wheel with a non-passive listener: Cancelable() = false, want true")
 	}
 
-	// A type that blocks no scroll keeps its flag whichever way the listeners go,
-	// which is what generic-events-stay-cancelable.html asserts.
 	for _, passive := range []bool{false, true} {
 		generic := dom.NewTrustedEvent("test", true, true)
 		generic.SetScrollCancelableByListener(passive)
@@ -31,8 +25,6 @@ func TestGeneratedScrollBlockingEventCancelabilityFollowsItsListeners(t *testing
 		}
 	}
 
-	// An event the page constructed keeps its own flag; the listener state is
-	// only consulted for generated events.
 	for _, typ := range []string{"wheel", "mousewheel", "touchstart", "touchmove"} {
 		synthetic := dom.NewEvent(typ, true, true)
 		synthetic.SetScrollCancelableByListener(false)
@@ -41,7 +33,6 @@ func TestGeneratedScrollBlockingEventCancelabilityFollowsItsListeners(t *testing
 		}
 	}
 
-	// A flag set at construction is never restored by listener state.
 	created := dom.NewTrustedEvent("wheel", true, false)
 	created.SetScrollCancelableByListener(true)
 	if created.Cancelable() {
@@ -49,7 +40,6 @@ func TestGeneratedScrollBlockingEventCancelabilityFollowsItsListeners(t *testing
 	}
 }
 
-// A passive listener still cannot cancel, whatever it reports about cancelable.
 func TestPassiveListenerCannotPreventDefaultRegardlessOfListenerState(t *testing.T) {
 	e := dom.NewTrustedEvent("wheel", true, true)
 	e.SetScrollCancelableByListener(true)

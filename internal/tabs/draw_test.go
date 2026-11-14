@@ -57,13 +57,9 @@ func TestDrawTabTextTruncation(t *testing.T) {
 func TestDrawTabTextNilFonts(t *testing.T) {
 	buf := frame.NewBitmap(200, 36)
 	tabRect := frame.Rect4(0, 0, 150, 36)
-	// Should not panic with nil fonts
 	drawTabText(buf, "Test Tab", tabRect, frame.RGB(30, 30, 30), nil, 1)
 }
 
-// chevronMarkCount counts dark pixels in the strip's right 56px at the given
-// offset: chevron glyphs are the only thing ever drawn there (at max offset
-// the tabs end left of the zone), so the count is the control.
 func chevronMarkCount(t *testing.T, mgr *TabManager, width, offset int32) int {
 	t.Helper()
 	buf := frame.NewBitmap(int(width), TabBarHeight)
@@ -80,8 +76,6 @@ func chevronMarkCount(t *testing.T, mgr *TabManager, width, offset int32) int {
 	return n
 }
 
-// TestDrawTabBarChevrons pins chevron visibility end to end: an overflowing
-// strip draws the controls, a fitting one leaves the zone clean background.
 // qc:BR-033
 func TestDrawTabBarChevrons(t *testing.T) {
 	full := NewManager(nil)
@@ -100,9 +94,6 @@ func TestDrawTabBarChevrons(t *testing.T) {
 	}
 }
 
-// TestDrawTabBarDragIndicator pins the drop feedback: with a drag active the
-// strip draws an insertion line at the drop slot; without one the same band
-// is clean background.
 func TestDrawTabBarDragIndicator(t *testing.T) {
 	mgr := NewManager(nil)
 	for i := 0; i < 4; i++ {
@@ -143,7 +134,6 @@ func TestDrawIncognitoTabDarkTheme(t *testing.T) {
 	buf := frame.NewBitmap(400, TabBarHeight)
 	DrawTabBar(buf, mgr, 0, nil, 1)
 
-	// An active incognito tab body should have dark background frame.RGB(40, 44, 52)
 	hasDarkPixels := false
 	for y := int32(4); y < TabBarHeight-2; y++ {
 		for x := int32(20); x < int32(100); x++ {

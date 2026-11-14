@@ -8,9 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// TestMisnestedFormatting_BI tests the classic misnested formatting case:
-// <b>...<i>...</b>...</i> should produce two separate formatting elements
-// rather than nesting i inside b incorrectly.
 func TestMisnestedFormatting_BI(t *testing.T) {
 	doc := domtest.Parse(`<html><body><b>bold<i>bold-italic</b>italic</i></body></html>`)
 	if doc.Body == nil {
@@ -27,7 +24,6 @@ func TestMisnestedFormatting_BI(t *testing.T) {
 		t.Errorf("body text missing 'italic': %q", text)
 	}
 
-	// The tree should have b and i elements, not crash or produce empty output.
 	var bCount, iCount int
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
@@ -83,7 +79,6 @@ func TestFragmentParseSeedsFormPointerFromContextAncestors(t *testing.T) {
 	}
 }
 
-// TestMisnestedFormatting_IB tests the reverse: <i>...<b>...</i>...</b>
 func TestMisnestedFormatting_IB(t *testing.T) {
 	doc := domtest.Parse(`<html><body><i>italic<b>italic-bold</i>bold</b></body></html>`)
 	if doc.Body == nil {
@@ -127,15 +122,12 @@ func TestAdoptionAgencyDoesNotUseAnotherSameTagEntry(t *testing.T) {
 	}
 }
 
-// TestPInsideDiv tests that <p> inside <div> followed by a block element
-// properly closes the paragraph: <p>text<div>block</p>
 func TestPInsideDiv(t *testing.T) {
 	doc := domtest.Parse(`<html><body><p>text<div>block</div></body></html>`)
 	if doc.Body == nil {
 		t.Fatal("no body element")
 	}
 
-	// The <p> should be closed before the <div>.
 	var p, div *dom.Node
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
@@ -158,15 +150,12 @@ func TestPInsideDiv(t *testing.T) {
 	if div == nil {
 		t.Fatal("no <div> element found")
 	}
-	// p and div should be siblings (both children of body).
 	if p.Parent != div.Parent {
 		t.Errorf("p and div are not siblings: p.Parent=%v, div.Parent=%v",
 			p.Parent.Data, div.Parent.Data)
 	}
 }
 
-// TestTableContentOutsideTable tests that content appearing after a table
-// is placed correctly, not foster-parented into the table.
 func TestTableContentOutsideTable(t *testing.T) {
 	doc := domtest.Parse(`<html><body><table><tr><td>cell</td></tr></table><p>after</p></body></html>`)
 	if doc.Body == nil {
@@ -186,8 +175,6 @@ func TestTableContentOutsideTable(t *testing.T) {
 	}
 }
 
-// TestImpliedTableStructure tests that table content without explicit tbody
-// gets the implied tbody wrapper.
 func TestImpliedTableStructure(t *testing.T) {
 	doc := domtest.Parse(`<html><body><table><tr><td>cell</td></tr></table></body></html>`)
 	if doc.Body == nil {
@@ -208,8 +195,6 @@ func TestImpliedTableStructure(t *testing.T) {
 	}
 }
 
-// TestNestedFormattingSurvives tests that basic nested formatting elements
-// produce the expected tree structure.
 func TestNestedFormattingSurvives(t *testing.T) {
 	doc := domtest.Parse(`<html><body><b>bold <i>bold-italic</i> bold</b></body></html>`)
 	if doc.Body == nil {
@@ -228,9 +213,7 @@ func TestNestedFormattingSurvives(t *testing.T) {
 	}
 }
 
-// TestInsertionModeDoctype tests that doctype processing sets quirks mode.
 func TestInsertionModeDoctype(t *testing.T) {
-	// Standard doctype.
 	doc := domtest.Parse(`<!DOCTYPE html><html><body><p>text</p></body></html>`)
 	if doc.DocType == nil {
 		t.Error("no doctype element")
@@ -244,14 +227,11 @@ func TestInsertionModeDoctype(t *testing.T) {
 	}
 }
 
-// TestInsertionModeCommentBeforeHTML tests that a comment before <html>
-// is placed correctly.
 func TestInsertionModeCommentBeforeHTML(t *testing.T) {
 	doc := domtest.Parse(`<!-- comment --><html><body><p>text</p></body></html>`)
 	if doc.Body == nil {
 		t.Fatal("no body element")
 	}
-	// The comment should be in the tree somewhere.
 	var found bool
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
@@ -269,7 +249,6 @@ func TestInsertionModeCommentBeforeHTML(t *testing.T) {
 	}
 }
 
-// TestSelectMode tests basic select element parsing.
 func TestSelectMode(t *testing.T) {
 	doc := domtest.Parse(`<html><body><select><option>A</option><option>B</option></select></body></html>`)
 	sel := findFirst(&doc.Node, "select")
@@ -301,20 +280,16 @@ func TestCustomizableSelectParsesSelectedContent(t *testing.T) {
 	}
 }
 
-// TestTemplateMode tests basic template element parsing.
 func TestTemplateMode(t *testing.T) {
 	doc := domtest.Parse(`<html><body><template><p>inside</p></template><p>outside</p></body></html>`)
 	tmpl := findFirst(&doc.Node, "template")
 	if tmpl == nil {
 		t.Fatal("no <template> element found")
 	}
-	// Template contents belong to the separate DocumentFragment, not the
-	// template element's ordinary child list.
 	innerP := findFirst(tmpl.TemplateContent(), "p")
 	if innerP == nil {
 		t.Error("no <p> inside template")
 	}
-	// There should also be a <p> outside the template.
 	body := doc.Body
 	var outerP *dom.Node
 	for c := body.FirstChild; c != nil; c = c.NextSibling {
@@ -328,7 +303,6 @@ func TestTemplateMode(t *testing.T) {
 	}
 }
 
-// findFirst returns the first element with the given tag name in the tree.
 func findFirst(n *dom.Node, tag string) *dom.Node {
 	if n == nil {
 		return nil

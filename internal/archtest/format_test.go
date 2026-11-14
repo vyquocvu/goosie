@@ -1,15 +1,5 @@
 package archtest_test
 
-// CONTRIBUTING.md tells every contributor to run `gofmt -w .` before committing, and that
-// command cannot fail: it rewrites the files and exits 0 either way. A documented check
-// with no way to report a miss is not a check, so skipping it was free, and 17 of this
-// module's files are committed unformatted - one of them indented with spaces throughout.
-//
-// The rule lives in this package's non-test file like the others, so the gate suite can
-// apply it too. What is here is the reporting, plus the cases that prove the rule can
-// fail: a gate that reported nothing for any input would pass TestRepoIsGofmtFormatted
-// and be worthless.
-
 import (
 	"os"
 	"path/filepath"
@@ -30,10 +20,6 @@ func TestRepoIsGofmtFormatted(t *testing.T) {
 	}
 }
 
-// The two bodies a formatter test needs: gofmt's own output for a function, and the same
-// function written without it. The dirty one is a realistic miss rather than a
-// contrived one - space indentation and no space after a comma are what an editor with
-// tabs off produces.
 const (
 	cleanGo = "package p\n\nfunc F(a int, b int) int {\n\treturn a + b\n}\n"
 	dirtyGo = "package p\n\nfunc F(a int,b int) int {\n  return a + b\n}\n"
@@ -51,8 +37,6 @@ func writeGo(t *testing.T, dir, name, body string) string {
 	return path
 }
 
-// relPaths renders the rule's answer relative to the tree it walked, so an assertion
-// reads as the directory layout rather than as a wall of temp-dir prefixes.
 func relPaths(t *testing.T, root string, files []string) []string {
 	t.Helper()
 	out := make([]string, len(files))
@@ -66,9 +50,6 @@ func relPaths(t *testing.T, root string, files []string) []string {
 	return out
 }
 
-// The non-vacuity case: a tree with one clean file and two drifted ones has to report
-// exactly the drifted two. Reporting nothing would pass the repo-wide check above, and
-// reporting everything would be a gate nobody can satisfy.
 func TestUnformattedGoFilesFlagsDriftedFiles(t *testing.T) {
 	root := t.TempDir()
 	writeGo(t, root, "clean.go", cleanGo)
@@ -82,12 +63,6 @@ func TestUnformattedGoFilesFlagsDriftedFiles(t *testing.T) {
 	}
 }
 
-// .worktrees/ holds a second full checkout of this module, so the rule that skipped it
-// would be the only thing in CI that reads a stale copy as current - and the rule that
-// walked it would fail on files nobody is editing. `gofmt -l .` at the repo root does
-// report that checkout's 17 files, which is why this rule is not that command.
-// testdata is what `go list ./...` never builds: a deliberately malformed fixture is
-// input for a parser test, not drift.
 func TestUnformattedGoFilesPrunesExcludedDirs(t *testing.T) {
 	root := t.TempDir()
 	writeGo(t, root, "clean.go", cleanGo)
@@ -102,8 +77,6 @@ func TestUnformattedGoFilesPrunesExcludedDirs(t *testing.T) {
 	}
 }
 
-// A file gofmt cannot parse is not "unformatted", and quietly skipping it is the same
-// fail-open in a new costume: the tree would read clean while one file is not Go at all.
 func TestUnformattedGoFilesErrorsOnUnparseable(t *testing.T) {
 	root := t.TempDir()
 	writeGo(t, root, "clean.go", cleanGo)

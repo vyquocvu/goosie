@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// TestTabStripThemePaintsMatchingChrome pins the tab strip side of the theme:
-// SetTheme must darken the strip and the active tab body, and in every theme
-// the active tab must be the same color as the toolbar below it so the two
-// chrome surfaces read as one.
 // qc:BR-141
 func TestTabStripThemePaintsMatchingChrome(t *testing.T) {
 	fonts, err := raster.NewFonts()
@@ -48,8 +44,6 @@ func TestTabStripThemePaintsMatchingChrome(t *testing.T) {
 	}
 }
 
-// TestTabStripThemeDefaultsToLight keeps unknown theme names on the light
-// palette.
 // qc:BR-141
 func TestTabStripThemeDefaultsToLight(t *testing.T) {
 	mgr := NewManager(nil)

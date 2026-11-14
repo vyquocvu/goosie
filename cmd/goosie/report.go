@@ -9,20 +9,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/platform"
 )
 
-// report is what a run leaves behind: a few greppable lines on stderr and, with -out,
-// the recorder's own JSON artifact.
-//
-// The split is deliberate. The JSON is the timing record - the frame marks and the
-// summary a pacing gate reads - and it is written by the instrument that produced it,
-// so the numbers in the file cannot disagree with the ring. The lines on stderr are
-// the counters and the environment, which the frame recorder has no business knowing:
-// they describe the whole pipeline and the machine it ran on, and a wall-clock gate on
-// one runner is meaningless to the next without them.
 func (f *framePath) report(d *driver) error {
 	c := f.config
-	// The grid's accounting goes into the recorder before the summary comes out of it,
-	// because the tile cache is not part of the window the recorder rolls: it is the one
-	// memory figure in the report that has to be handed in from outside.
 	grid := f.sched.GridStats()
 	f.rec.SetTileLedger(grid)
 	f.rec.SetContent(f.document, int64(f.docHeight))
@@ -32,14 +20,7 @@ func (f *framePath) report(d *driver) error {
 	ps := f.pool.Stats()
 
 	elapsed := time.Since(f.started)
-	// The window names the run, not the machine. A gate run that fell back to headless
-	// because it could not reach a display still drew every frame and still produced
-	// timings; if its report says "darwin", those timings read as display-paced macOS
-	// numbers, which is the one thing this line exists to distinguish.
 	name := platform.WindowName(f.window)
-	// A native window that opened has pixels on a display by construction - reaching no
-	// window server is an error from the shim rather than an invisible window - so
-	// interactivity is a fact about the window that exists, not a second question.
 	interactive := name != platform.Headless
 	backend := c.backend
 	if backend == "" {
@@ -57,9 +38,6 @@ func (f *framePath) report(d *driver) error {
 	if dv, ok := f.window.(platform.DroppedVsyncer); ok {
 		dropped = dv.DroppedVsyncs()
 	}
-	// The window's own geometry, not the one that was configured. A surface that ended
-	// up a different shape measured a different frame path, and every other number in
-	// this report would look exactly as good either way.
 	actual := c.devSize()
 	if sz, ok := f.window.(platform.Sizer); ok && !sz.Size().Empty() {
 		actual = sz.Size()
@@ -68,16 +46,10 @@ func (f *framePath) report(d *driver) error {
 	if d != nil {
 		stamped = d.Frames()
 	}
-	// The cold start, spelled the way the artifact spells it. A run whose window
-	// never presented a frame has no number to report here rather than a fast one:
-	// a zero would be the best startup possible, which is the opposite of what
-	// happened.
 	startup := "startup_ms=not_measured"
 	if rep.StartupMS != nil {
 		startup = fmt.Sprintf("startup_ms=%.3f", *rep.StartupMS)
 	}
-	// The scene key names what the run was configured to draw; this says what it drew, which
-	// is the same thing except when a document was loaded.
 	doc := ""
 	if f.document != "" {
 		doc = fmt.Sprintf(" document=%q", f.document)
@@ -94,9 +66,6 @@ func (f *framePath) report(d *driver) error {
 		f.sched.PlanStats().Published, f.sched.PlanStats().Dropped)
 	fmt.Fprintf(os.Stderr, "goosie: env goos=%s goarch=%s go=%s cpu=%d workers=%d\n",
 		runtime.GOOS, runtime.GOARCH, runtime.Version(), runtime.NumCPU(), ps.Workers)
-	// What the display did with the frames, told apart from what the loop drew. A run
-	// whose commits did not keep up with its presents is a run whose mean is a
-	// measurement of work nobody saw.
 	if pc, ok := f.window.(platform.PresentCounter); ok {
 		queued, pdropped, committed := pc.Presents()
 		fmt.Fprintf(os.Stderr, "goosie: present queued=%d dropped=%d committed=%d\n", queued, pdropped, committed)

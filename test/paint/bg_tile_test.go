@@ -7,11 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// TestBGTileVectorNoRatio pins tile negotiation for sources without an
-// intrinsic ratio: cover and contain fill the positioning area, auto keeps
-// the natural (fallback) size the decoder baked the mapping into, explicit
-// lengths resolve per axis. The engine rasterizes these at the same tile,
-// so both sides of the boundary must agree.
 func TestBGTileVectorNoRatio(t *testing.T) {
 	mk := func(size style.BgSize, w, h float32, wpct, hpct bool) *style.ComputedStyle {
 		return &style.ComputedStyle{BackgroundSize: size, BgSizeW: w, BgSizeH: h, BgSizeWPct: wpct, BgSizeHPct: hpct}
@@ -37,10 +32,6 @@ func TestBGTileVectorNoRatio(t *testing.T) {
 	}
 }
 
-// TestBGTileRatioKept pins the ratio path: with a ratio, cover/contain
-// scale by it, an auto width resolves from the declared height, and auto
-// keeps nature. preserveAspectRatio=none never reaches here as noRatio:
-// the viewBox ratio still sizes the tile.
 func TestBGTileRatioKept(t *testing.T) {
 	mk := func(size style.BgSize, w, h float32, wpct, hpct bool) *style.ComputedStyle {
 		return &style.ComputedStyle{BackgroundSize: size, BgSizeW: w, BgSizeH: h, BgSizeWPct: wpct, BgSizeHPct: hpct}

@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// document.documentElement is the entry point boot scripts use for global
-// listeners (Google: document.documentElement.addEventListener("click"...)).
 func TestDocumentElementExists(t *testing.T) {
 	doc := domtest.Parse(`<html><head></head><body><p>hi</p></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})

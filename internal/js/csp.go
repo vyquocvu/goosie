@@ -5,15 +5,11 @@ import (
 	"strings"
 )
 
-// Content Security Policy parsing and enforcement.
-
-// CSPPolicy holds a parsed Content-Security-Policy header.
 type CSPPolicy struct {
 	Directives map[string][]string
 	ReportOnly bool
 }
 
-// ParseCSP parses a Content-Security-Policy header value.
 func ParseCSP(header string) *CSPPolicy {
 	policy := &CSPPolicy{
 		Directives: make(map[string][]string),
@@ -38,7 +34,6 @@ func ParseCSP(header string) *CSPPolicy {
 	return policy
 }
 
-// AllowsScript returns true if the script source is allowed by the policy.
 func (p *CSPPolicy) AllowsScript(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -46,13 +41,10 @@ func (p *CSPPolicy) AllowsScript(src string, documentURL string) bool {
 	return p.allows("script-src", src, documentURL)
 }
 
-// AllowsScriptURL reports whether the runtime's document policy permits an
-// external script URL. Hosts use it when admitting dynamically inserted tags.
 func (r *Runtime) AllowsScriptURL(src, documentURL string) bool {
 	return r != nil && r.opts.CSP.AllowsScript(src, documentURL)
 }
 
-// AllowsScriptWithNonce returns true if the script is allowed by source or by nonce.
 func (p *CSPPolicy) AllowsScriptWithNonce(src, nonce, documentURL string) bool {
 	if p == nil {
 		return true
@@ -63,7 +55,6 @@ func (p *CSPPolicy) AllowsScriptWithNonce(src, nonce, documentURL string) bool {
 	return p.AllowsScript(src, documentURL)
 }
 
-// AllowsStyle returns true if the style source is allowed by the policy.
 func (p *CSPPolicy) AllowsStyle(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -71,7 +62,6 @@ func (p *CSPPolicy) AllowsStyle(src string, documentURL string) bool {
 	return p.allows("style-src", src, documentURL)
 }
 
-// AllowsStyleWithNonce returns true if the style is allowed by source or by nonce.
 func (p *CSPPolicy) AllowsStyleWithNonce(src, nonce, documentURL string) bool {
 	if p == nil {
 		return true
@@ -82,7 +72,6 @@ func (p *CSPPolicy) AllowsStyleWithNonce(src, nonce, documentURL string) bool {
 	return p.AllowsStyle(src, documentURL)
 }
 
-// AllowsImage returns true if the image source is allowed by the policy.
 func (p *CSPPolicy) AllowsImage(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -90,7 +79,6 @@ func (p *CSPPolicy) AllowsImage(src string, documentURL string) bool {
 	return p.allows("img-src", src, documentURL)
 }
 
-// AllowsConnect returns true if the connect source is allowed by the policy.
 func (p *CSPPolicy) AllowsConnect(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -98,7 +86,6 @@ func (p *CSPPolicy) AllowsConnect(src string, documentURL string) bool {
 	return p.allows("connect-src", src, documentURL)
 }
 
-// AllowsFont returns true if the font source is allowed by the policy.
 func (p *CSPPolicy) AllowsFont(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -106,7 +93,6 @@ func (p *CSPPolicy) AllowsFont(src string, documentURL string) bool {
 	return p.allows("font-src", src, documentURL)
 }
 
-// AllowsMedia returns true if the media source is allowed by the policy.
 func (p *CSPPolicy) AllowsMedia(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -114,7 +100,6 @@ func (p *CSPPolicy) AllowsMedia(src string, documentURL string) bool {
 	return p.allows("media-src", src, documentURL)
 }
 
-// AllowsFrame returns true if frame/iframe source is allowed by the policy.
 func (p *CSPPolicy) AllowsFrame(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -122,7 +107,6 @@ func (p *CSPPolicy) AllowsFrame(src string, documentURL string) bool {
 	return p.allows("frame-src", src, documentURL)
 }
 
-// AllowsWorker returns true if dedicated or shared worker source is allowed by the policy.
 func (p *CSPPolicy) AllowsWorker(src string, documentURL string) bool {
 	if p == nil {
 		return true
@@ -130,7 +114,6 @@ func (p *CSPPolicy) AllowsWorker(src string, documentURL string) bool {
 	return p.allows("worker-src", src, documentURL)
 }
 
-// AllowsInlineScript returns true if inline scripts are allowed.
 func (p *CSPPolicy) AllowsInlineScript() bool {
 	if p == nil {
 		return true
@@ -138,7 +121,6 @@ func (p *CSPPolicy) AllowsInlineScript() bool {
 	return p.allowsInline("script-src")
 }
 
-// AllowsInlineScriptWithNonce returns true if inline script is allowed either by nonce or 'unsafe-inline'.
 func (p *CSPPolicy) AllowsInlineScriptWithNonce(nonce string) bool {
 	if p == nil {
 		return true
@@ -149,7 +131,6 @@ func (p *CSPPolicy) AllowsInlineScriptWithNonce(nonce string) bool {
 	return p.AllowsInlineScript()
 }
 
-// AllowsInlineStyle returns true if inline styles are allowed.
 func (p *CSPPolicy) AllowsInlineStyle() bool {
 	if p == nil {
 		return true
@@ -157,7 +138,6 @@ func (p *CSPPolicy) AllowsInlineStyle() bool {
 	return p.allowsInline("style-src")
 }
 
-// AllowsInlineStyleWithNonce returns true if inline style is allowed either by nonce or 'unsafe-inline'.
 func (p *CSPPolicy) AllowsInlineStyleWithNonce(nonce string) bool {
 	if p == nil {
 		return true
@@ -168,7 +148,6 @@ func (p *CSPPolicy) AllowsInlineStyleWithNonce(nonce string) bool {
 	return p.AllowsInlineStyle()
 }
 
-// AllowsEval returns true if eval() is allowed.
 func (p *CSPPolicy) AllowsEval() bool {
 	if p == nil {
 		return true
@@ -244,7 +223,6 @@ func (p *CSPPolicy) getSources(directive string) []string {
 	if sources, ok := p.Directives[directive]; ok {
 		return sources
 	}
-	// Fallback hierarchy per CSP Level 3:
 	switch directive {
 	case "frame-src":
 		if sources, ok := p.Directives["child-src"]; ok {
@@ -258,7 +236,6 @@ func (p *CSPPolicy) getSources(directive string) []string {
 			return sources
 		}
 	case "child-src":
-		// child-src falls back directly to default-src
 	}
 	if directive != "default-src" {
 		if sources, ok := p.Directives["default-src"]; ok {
@@ -290,12 +267,10 @@ func matchesSource(src, pattern string) bool {
 		return false
 	}
 
-	// Scheme source matching (e.g. "https:", "http:", "data:", "blob:")
 	if strings.HasSuffix(pattern, ":") && !strings.Contains(pattern, "/") {
 		return strings.EqualFold(u.Scheme+":", pattern)
 	}
 
-	// Host / URL pattern matching
 	targetScheme := ""
 	targetHost := pattern
 	targetPath := ""
@@ -311,12 +286,10 @@ func matchesSource(src, pattern string) bool {
 		targetHost = targetHost[:slash]
 	}
 
-	// If scheme is specified, verify scheme matches
 	if targetScheme != "" && !strings.EqualFold(u.Scheme, targetScheme) {
 		return false
 	}
 
-	// Port matching
 	srcHost := u.Hostname()
 	srcPort := u.Port()
 
@@ -330,7 +303,6 @@ func matchesSource(src, pattern string) bool {
 		return false
 	}
 
-	// Domain / Subdomain matching
 	if targetHost != "" && targetHost != "*" {
 		if strings.HasPrefix(targetHost, "*.") {
 			baseDomain := strings.ToLower(targetHost[2:])
@@ -345,7 +317,6 @@ func matchesSource(src, pattern string) bool {
 		}
 	}
 
-	// Path prefix matching
 	if targetPath != "" {
 		if !strings.HasPrefix(u.Path, targetPath) {
 			return false

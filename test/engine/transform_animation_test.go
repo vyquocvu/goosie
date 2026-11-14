@@ -9,9 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// TestSessionHasAnimationController verifies that a session with @keyframes
-// animations creates a non-nil AnimationController and TickAnimations reports
-// active while the animation is running.
 func TestSessionHasAnimationController(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head>
 <style>
@@ -29,17 +26,13 @@ div { animation: fadeIn 2s linear }
 		t.Fatal("session.Animations is nil, want non-nil for document with @keyframes animation")
 	}
 
-	// TickAnimations at the start should report active.
 	active := sess.TickAnimations(time.Now())
 	if !active {
 		t.Error("TickAnimations() = false at start, want true")
 	}
 }
 
-// TestAnimationTickReason verifies that AnimationTick is a valid invalidation
-// reason distinct from other reasons.
 func TestAnimationTickReason(t *testing.T) {
-	// AnimationTick must be a distinct value from every other reason.
 	reasons := []engine.Reason{
 		engine.Scroll,
 		engine.Hover,
@@ -58,7 +51,6 @@ func TestAnimationTickReason(t *testing.T) {
 		seen[r] = true
 	}
 
-	// Verify it can be used in an Invalidation batch.
 	var inv engine.Invalidation
 	inv.Add(engine.AnimationTick, frame.RectF{}, 0)
 	plan := inv.Resolve(frame.Viewport{}, nil)
@@ -67,8 +59,6 @@ func TestAnimationTickReason(t *testing.T) {
 	}
 }
 
-// TestTransformInComputedStyle verifies that an element with a CSS transform
-// declaration has the Transform field populated in its computed style.
 func TestTransformInComputedStyle(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head>
 <style>
@@ -108,8 +98,6 @@ div { transform: translate(10px, 20px) }
 	}
 }
 
-// TestAnimationPropertiesInComputedStyle verifies that the animation shorthand
-// populates all animation fields in the computed style.
 func TestAnimationPropertiesInComputedStyle(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head>
 <style>
@@ -143,8 +131,6 @@ div { animation: fade 1s ease }
 	}
 }
 
-// TestAnimationLonghandProperties verifies that individual animation longhand
-// properties are parsed correctly.
 func TestAnimationLonghandProperties(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head>
 <style>
@@ -198,8 +184,6 @@ div {
 	}
 }
 
-// TestKeyframesInStylesheet verifies that a stylesheet with a @keyframes rule
-// has its Keyframes field populated.
 func TestKeyframesInStylesheet(t *testing.T) {
 	sheet := css.Parse(`
 @keyframes fadeIn {
@@ -231,8 +215,6 @@ func TestKeyframesInStylesheet(t *testing.T) {
 	}
 }
 
-// TestAnimationInfiniteIteration verifies that animation-iteration-count: infinite
-// is parsed as 0 (the sentinel for infinite).
 func TestAnimationInfiniteIteration(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head>
 <style>

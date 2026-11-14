@@ -38,16 +38,6 @@ func TestRangeContentsConstructsPartiallyContainedCustomElementsInTreeOrder(t *t
 	}
 }
 
-// rangeDOM builds a small DOM tree for Range tests:
-//
-//	<html>
-//	  <head></head>
-//	  <body>
-//	    <p id="p1">Hello World</p>
-//	    <p id="p2">Foo Bar</p>
-//	    <div id="d1"><span id="s1">Inner</span></div>
-//	  </body>
-//	</html>
 func rangeDOM(t *testing.T) *dom.Document {
 	t.Helper()
 	doc := dom.NewDocument()
@@ -96,10 +86,6 @@ func newRangeRuntime(t *testing.T, d *dom.Document) *js.Runtime {
 	t.Cleanup(func() { r.Close() })
 	return r
 }
-
-// ---------------------------------------------------------------------------
-// document.createRange()
-// ---------------------------------------------------------------------------
 
 func TestCreateRange(t *testing.T) {
 	d := rangeDOM(t)
@@ -299,10 +285,6 @@ func TestRangeStartEndContainer(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.setStart / setEnd
-// ---------------------------------------------------------------------------
-
 func TestRangeSetStart(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -339,10 +321,6 @@ func TestRangeSetEnd(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.selectNode
-// ---------------------------------------------------------------------------
-
 func TestRangeSelectNode(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -374,10 +352,6 @@ func TestRangeSelectNode(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.selectNodeContents
-// ---------------------------------------------------------------------------
-
 func TestRangeSelectNodeContents(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -395,10 +369,6 @@ func TestRangeSelectNodeContents(t *testing.T) {
 		t.Errorf("selectNodeContents start: %q, want %q", val, "true")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Range.toString()
-// ---------------------------------------------------------------------------
 
 func TestRangeToString(t *testing.T) {
 	d := rangeDOM(t)
@@ -433,10 +403,6 @@ func TestRangeToStringCollapsed(t *testing.T) {
 		t.Errorf("collapsed toString() = %q, want %q", val, "")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Range.collapse
-// ---------------------------------------------------------------------------
 
 func TestRangeCollapse(t *testing.T) {
 	d := rangeDOM(t)
@@ -476,10 +442,6 @@ func TestRangeCollapseToEnd(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.cloneRange
-// ---------------------------------------------------------------------------
-
 func TestRangeCloneRange(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -502,15 +464,10 @@ func TestRangeCloneRange(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.detach
-// ---------------------------------------------------------------------------
-
 func TestRangeDetach(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
 
-	// detach() is a no-op in modern browsers but must not throw.
 	_, err := r.Evaluate(`
 		var range = document.createRange();
 		range.detach();
@@ -520,10 +477,6 @@ func TestRangeDetach(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Range.setStartBefore / setStartAfter / setEndBefore / setEndAfter
-// ---------------------------------------------------------------------------
 
 func TestRangeSetStartBefore(t *testing.T) {
 	d := rangeDOM(t)
@@ -597,10 +550,6 @@ func TestRangeSetEndAfter(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.commonAncestorContainer
-// ---------------------------------------------------------------------------
-
 func TestRangeCommonAncestorContainer(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -621,10 +570,6 @@ func TestRangeCommonAncestorContainer(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.deleteContents
-// ---------------------------------------------------------------------------
-
 func TestRangeDeleteContents(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -639,7 +584,6 @@ func TestRangeDeleteContents(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// After deleting, p1 should have no children.
 	val, err := r.Evaluate(`
 		var p1 = document.getElementById('p1');
 		p1.childNodes.length
@@ -651,10 +595,6 @@ func TestRangeDeleteContents(t *testing.T) {
 		t.Errorf("after deleteContents, childNodes.length = %q, want %q", val, "0")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Range.cloneContents
-// ---------------------------------------------------------------------------
 
 func TestRangeCloneContents(t *testing.T) {
 	d := rangeDOM(t)
@@ -778,10 +718,6 @@ func TestRangeExtractContentsFromDetachedCharacterData(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.insertNode
-// ---------------------------------------------------------------------------
-
 func TestRangeInsertNode(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -799,7 +735,6 @@ func TestRangeInsertNode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// p1 should now have 2 children: the span and the text node.
 	val, err := r.Evaluate(`
 		var p1 = document.getElementById('p1');
 		p1.childNodes.length
@@ -811,10 +746,6 @@ func TestRangeInsertNode(t *testing.T) {
 		t.Errorf("after insertNode, childNodes.length = %q, want %q", val, "2")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Range.isPointInRange
-// ---------------------------------------------------------------------------
 
 func TestRangeIsPointInRange(t *testing.T) {
 	d := rangeDOM(t)
@@ -853,10 +784,6 @@ func TestRangeIsPointInRangeOutside(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Range.comparePoint
-// ---------------------------------------------------------------------------
-
 func TestRangeComparePoint(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -870,15 +797,10 @@ func TestRangeComparePoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 0 means the point is in the range.
 	if val != "0" {
 		t.Errorf("comparePoint(p1, 0) = %q, want %q", val, "0")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Range.compareBoundaryPoints
-// ---------------------------------------------------------------------------
 
 func TestRangeCompareBoundaryPoints(t *testing.T) {
 	d := rangeDOM(t)
@@ -896,7 +818,6 @@ func TestRangeCompareBoundaryPoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// START_TO_START: range1 start < range2 start, so result should be -1.
 	if val != "-1" {
 		t.Errorf("compareBoundaryPoints(START_TO_START) = %q, want %q", val, "-1")
 	}
@@ -952,10 +873,6 @@ func TestRangeDeleteContentsAcrossTextNodes(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// window.getSelection()
-// ---------------------------------------------------------------------------
-
 func TestGetSelection(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -1008,10 +925,6 @@ func TestSelectionType(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Selection.addRange / getRangeAt
-// ---------------------------------------------------------------------------
-
 func TestSelectionAddRange(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -1053,10 +966,6 @@ func TestSelectionGetRangeAt(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Selection.collapse
-// ---------------------------------------------------------------------------
-
 func TestSelectionCollapse(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -1074,10 +983,6 @@ func TestSelectionCollapse(t *testing.T) {
 		t.Errorf("after collapse, isCollapsed = %q, want %q", val, "true")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Selection.selectAllChildren
-// ---------------------------------------------------------------------------
 
 func TestSelectionSelectAllChildren(t *testing.T) {
 	d := rangeDOM(t)
@@ -1097,10 +1002,6 @@ func TestSelectionSelectAllChildren(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Selection.toString()
-// ---------------------------------------------------------------------------
-
 func TestSelectionToString(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -1118,10 +1019,6 @@ func TestSelectionToString(t *testing.T) {
 		t.Errorf("selection.toString() = %q, want %q", val, "Hello World")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Selection.removeAllRanges
-// ---------------------------------------------------------------------------
 
 func TestSelectionRemoveAllRanges(t *testing.T) {
 	d := rangeDOM(t)
@@ -1144,10 +1041,6 @@ func TestSelectionRemoveAllRanges(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Selection.extend
-// ---------------------------------------------------------------------------
-
 func TestSelectionExtend(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -1167,10 +1060,6 @@ func TestSelectionExtend(t *testing.T) {
 		t.Errorf("after extend, type = %q, want %q", val, "true")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Selection.collapseToStart / collapseToEnd
-// ---------------------------------------------------------------------------
 
 func TestSelectionCollapseToStart(t *testing.T) {
 	d := rangeDOM(t)
@@ -1210,10 +1099,6 @@ func TestSelectionCollapseToEnd(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Selection.containsNode
-// ---------------------------------------------------------------------------
-
 func TestSelectionContainsNode(t *testing.T) {
 	d := rangeDOM(t)
 	r := newRangeRuntime(t, d)
@@ -1242,10 +1127,6 @@ func TestSelectionContainsNode(t *testing.T) {
 		t.Errorf("containsNode(p2) = %q, want %q", val, "false")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Selection.anchorNode / focusNode
-// ---------------------------------------------------------------------------
 
 func TestSelectionAnchorFocusNodes(t *testing.T) {
 	d := rangeDOM(t)

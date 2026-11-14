@@ -279,8 +279,6 @@ func TestHistoryOnWindow(t *testing.T) {
 	}
 }
 
-// TestLocalStorageLengthIsProperty pins Web Storage conformance: length is
-// a live numeric property, not a callable. Pages read it as a number.
 func TestLocalStorageLengthIsProperty(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`
@@ -299,9 +297,6 @@ func TestLocalStorageLengthIsProperty(t *testing.T) {
 	}
 }
 
-// TestLocalStorageQuotaEnforced pins the 5 MiB admission bound: writes past
-// it throw a QuotaExceededError-named failure, keep prior contents, and do
-// not grow the store.
 func TestLocalStorageQuotaEnforced(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`
@@ -325,8 +320,6 @@ func TestLocalStorageQuotaEnforced(t *testing.T) {
 	}
 }
 
-// TestStorageQuotaIsPerStore: one store hitting quota must not spend the
-// other's budget.
 func TestStorageQuotaIsPerStore(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`
@@ -342,7 +335,6 @@ func TestStorageQuotaIsPerStore(t *testing.T) {
 	}
 }
 
-// TestStorageRemoveFreesQuota: deleting frees budget for new writes.
 func TestStorageRemoveFreesQuota(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`

@@ -2,14 +2,6 @@ package paint
 
 import "testing"
 
-// outerAxisProfile is the measured falloff, and the collapsed case is the part of
-// it that has to be stated rather than left to arithmetic: when a negative spread
-// takes the shadow rect's end before its start, the two distribution terms swap
-// and their difference goes negative. A negative float converting to a uint8 mask
-// byte is implementation-defined (Go spec, Conversions), so "the clamp turns it
-// into nothing" is a fact about this host, not a law. The law is measured: Chromium
-// leaves every pixel of `0 0 16px -30px` on a 120x60 box at the page's own colour,
-// and so does a zero-size box declaring a blur, whose rect is a point.
 // qc:BR-281
 func TestOuterAxisProfileOfACollapsedRectIsZeroEverywhere(t *testing.T) {
 	for _, tc := range []struct {
@@ -32,9 +24,6 @@ func TestOuterAxisProfileOfACollapsedRectIsZeroEverywhere(t *testing.T) {
 	}
 }
 
-// The same function on a rect that does have a span must stay a probability: never
-// negative, never above 1, and heaviest inside the rect. That is what makes the
-// mask byte a coverage and not an artefact of the subtraction.
 // qc:BR-281
 func TestOuterAxisProfileStaysACoverageOnARealSpan(t *testing.T) {
 	const lo, hi = int32(20), int32(40)

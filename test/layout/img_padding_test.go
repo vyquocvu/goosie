@@ -4,11 +4,6 @@ import (
 	"testing"
 )
 
-// TestReplacedImgKeepsStylePadding pins that an inline <img> carries its
-// style padding/border into the arena: replaced boxes never pass through
-// resolveBoxSizes, so without an explicit copy the content box (where paint
-// draws the pixels) sat at the border edge and reference pages using padded
-// <img> elements compared shifted.
 func TestReplacedImgKeepsStylePadding(t *testing.T) {
 	a := layoutAtViewport(t,
 		`<html><body><img src="x.png" style="padding-left:16px;padding-top:16px;"></body></html>`,

@@ -11,15 +11,6 @@ import (
 	"testing"
 )
 
-// GOOSIE-LIVE-001 is not one bug about pixels: it is nine real pages that paint
-// nothing with rc 0 and an empty stderr, so nothing downstream - the sweep's
-// report, the operator, the bug - could say why. The engine held the reason
-// (uncaught exceptions) and dropped it. These two cases pin the ends of the new
-// path at the level the defect was observed: the binary, on a served document.
-//
-// The unit tests in ./cmd/goosie pin what reportScriptErrors writes; only this
-// file can pin that the document load calls it at all.
-
 // qc:BR-190
 func TestGoosieScreenshotReportsUncaughtScriptErrors(t *testing.T) {
 	bin := buildBinary(t, "goosie")
@@ -52,8 +43,6 @@ func TestGoosieScreenshotReportsUncaughtScriptErrors(t *testing.T) {
 	if n := strings.Count(got, "uncaught script error"); n != 1 {
 		t.Fatalf("report lines = %d, want exactly 1: %q", n, got)
 	}
-	// The line has to be actionable, which means naming both the document and
-	// the script that broke, plus what the page reached for.
 	if !strings.Contains(got, server.URL) {
 		t.Errorf("report %q does not name the document it came from", got)
 	}

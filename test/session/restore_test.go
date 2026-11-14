@@ -9,21 +9,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/session"
 )
 
-// Session restore data-integrity tests. The existing session_test.go
-// covers the round-trip, missing-file, corrupt-file, and cap cases.
-// These tests cover the clamp function's finer points: URL re-syncing
-// when the history index and URL disagree, negative active index
-// handling, empty-state persistence, and the atomic-write contract.
-
-// TestLoadReSyncsURLFromHistory verifies that when a saved tab has a
-// URL that disagrees with its history entry at HistoryIndex, the
-// history entry wins. The current URL is a cache of the history; if
-// they diverge, the history is authoritative because it is the
-// structured data.
 func TestLoadReSyncsURLFromHistory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
-	// The tab says URL is "https://stale/" but HistoryIndex 1 points to
-	// "https://current/". The loader must re-sync.
 	raw := `{
 		"tabs": [{
 			"url": "https://stale/",
@@ -48,9 +35,6 @@ func TestLoadReSyncsURLFromHistory(t *testing.T) {
 	}
 }
 
-// TestLoadClampsNegativeActive verifies that a negative Active index
-// is clamped to 0 rather than left negative, which would cause an
-// out-of-bounds access in any consumer that indexes into Tabs.
 func TestLoadClampsNegativeActive(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 	raw := `{"tabs":[{"url":"https://a/"}],"active":-5}`
@@ -66,9 +50,6 @@ func TestLoadClampsNegativeActive(t *testing.T) {
 	}
 }
 
-// TestSaveEmptyStateProducesValidJSON verifies that saving an empty
-// state (no tabs) produces valid JSON that can be loaded back. This
-// is the fresh-exit case: the user closed every tab before quitting.
 func TestSaveEmptyStateProducesValidJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 	if err := session.Save(path, session.State{}); err != nil {
@@ -87,9 +68,6 @@ func TestSaveEmptyStateProducesValidJSON(t *testing.T) {
 	}
 }
 
-// TestSaveOverwritesPreviousState verifies that saving twice replaces
-// the earlier file rather than appending or corrupting it. This is the
-// normal usage pattern: save on every navigation.
 func TestSaveOverwritesPreviousState(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 
@@ -112,9 +90,6 @@ func TestSaveOverwritesPreviousState(t *testing.T) {
 	}
 }
 
-// TestLoadHistoryIndexClampToNegativeOne verifies that a history index
-// of -1 is preserved (it means "no current entry"), while values below
-// -1 are clamped.
 func TestLoadHistoryIndexClampToNegativeOne(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 	raw := `{
@@ -140,9 +115,6 @@ func TestLoadHistoryIndexClampToNegativeOne(t *testing.T) {
 	}
 }
 
-// TestSaveDoesNotLeaveTempFiles verifies that the atomic write does
-// not leave behind temporary files in the target directory. A temp
-// file left behind would indicate a crash between create and rename.
 func TestSaveDoesNotLeaveTempFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.json")
@@ -163,9 +135,6 @@ func TestSaveDoesNotLeaveTempFiles(t *testing.T) {
 	}
 }
 
-// TestLoadWithNoHistoryFields verifies that a tab saved without
-// history or historyIndex fields (the minimal form) loads correctly
-// with empty history and the default index.
 func TestLoadWithNoHistoryFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 	raw := `{"tabs":[{"url":"https://minimal/"}],"active":0}`

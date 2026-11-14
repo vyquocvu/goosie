@@ -23,8 +23,7 @@ func TestDownloadManagerLifecycle(t *testing.T) {
 		t.Errorf("SetDir failed: got %q", mgr.Dir())
 	}
 
-	// 1. Create item
-	item := mgr.CreateItem("https://example.com/file.zip", "file.zip", 1024*1024*10) // 10 MB
+	item := mgr.CreateItem("https://example.com/file.zip", "file.zip", 1024*1024*10)
 	if item.ID != "dl-1" {
 		t.Errorf("expected ID dl-1, got %q", item.ID)
 	}
@@ -38,8 +37,7 @@ func TestDownloadManagerLifecycle(t *testing.T) {
 		t.Errorf("TotalCount = %d, want 1", mgr.TotalCount())
 	}
 
-	// 2. Progress update
-	mgr.UpdateProgress(item.ID, 1024*1024*5) // 5 MB (50%)
+	mgr.UpdateProgress(item.ID, 1024*1024*5)
 	it := mgr.Get(item.ID)
 	if it == nil {
 		t.Fatal("Get(item.ID) returned nil")
@@ -54,12 +52,10 @@ func TestDownloadManagerLifecycle(t *testing.T) {
 		t.Errorf("FormattedSize() = %q", sz)
 	}
 
-	// Overall progress
 	if op := mgr.OverallProgress(); op < 49.9 || op > 50.1 {
 		t.Errorf("OverallProgress() = %f, want ~50.0", op)
 	}
 
-	// 3. Complete
 	mgr.Complete(item.ID, filepath.Join(dir, "file.zip"))
 	it = mgr.Get(item.ID)
 	if it.Status != StatusCompleted {
@@ -72,7 +68,6 @@ func TestDownloadManagerLifecycle(t *testing.T) {
 		t.Errorf("ActiveCount after completion = %d, want 0", mgr.ActiveCount())
 	}
 
-	// 4. Cancel
 	item2 := mgr.CreateItem("https://example.com/cancel.tar", "cancel.tar", 500)
 	mgr.Cancel(item2.ID)
 	it2 := mgr.Get(item2.ID)
@@ -80,7 +75,6 @@ func TestDownloadManagerLifecycle(t *testing.T) {
 		t.Errorf("status = %v, want StatusCanceled", it2.Status)
 	}
 
-	// 5. Fail
 	item3 := mgr.CreateItem("https://example.com/broken.iso", "broken.iso", 1000)
 	mgr.Fail(item3.ID, errors.New("network timeout"))
 	it3 := mgr.Get(item3.ID)
@@ -88,7 +82,6 @@ func TestDownloadManagerLifecycle(t *testing.T) {
 		t.Errorf("failed item: %v, error: %s", it3.Status, it3.Error)
 	}
 
-	// 6. ClearCompleted
 	if mgr.TotalCount() != 3 {
 		t.Errorf("TotalCount before clear = %d, want 3", mgr.TotalCount())
 	}

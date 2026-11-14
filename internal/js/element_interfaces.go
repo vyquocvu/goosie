@@ -16,32 +16,10 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-// This file is the element-interface half of the DOM binding. It installs the
-// WebIDL prototype chain once per runtime (EventTarget > Node > Element >
-// HTMLElement > per-tag interface) and the reflected attribute accessors on
-// those prototypes, so a property read or write reaches the real attribute
-// instead of a dead own-property snapshot.
-//
-// The measured Chromium answers every rule here implements are recorded in
-// docs/tasks/TASK-052-ELEMENT-INTERFACES.md §4; the tables below are the
-// table-driven oracle's source of truth.
-
-// ImageLoader resolves the source a script assigned to an HTMLImageElement.
-// The engine installs it so script-created images pass internal/image's
-// encoded-size, dimension and pixel caps and the session's imageReservation.
-// Implementations may call done from any goroutine; the runtime queues the
-// state change as a microtask, so load state never changes in the middle of a
-// script task.
 type ImageLoader interface {
 	LoadScriptImage(src string, done func(LoadedImage))
 }
 
-// LoadedImage is the outcome of one script-image load. Width and Height are
-// the intrinsic dimensions of the decoded image; Src is the absolute source
-// that answered (or the raw source a failed load named); Err reports why a
-// load did not produce pixels. Pixels is the decoded image, carried opaquely
-// so the binding can hand it back to the embedder without importing the
-// packages that know how to paint it.
 type LoadedImage struct {
 	Width, Height int
 	Src           string
@@ -49,20 +27,12 @@ type LoadedImage struct {
 	Pixels        any
 }
 
-// SetImageLoader installs the script-image load path. The engine calls it
-// before any script runs.
 func (r *Runtime) SetImageLoader(l ImageLoader) {
 	r.mu.Lock()
 	r.opts.ImageLoader = l
 	r.mu.Unlock()
 }
 
-// SetImagePixelSink installs the receiver for the pixels a successful script
-// image load produced. It is called from applyImageResult after the element's
-// load state is updated and before the load event is dispatched, so a load
-// handler already observes the settled state. The binding never inspects the
-// value; only the embedder knows what it is. The engine installs its sink
-// next to SetImageLoader, before any script runs.
 func (r *Runtime) SetImagePixelSink(sink func(node *dom.Node, rawSrc string, pixels any)) {
 	r.mu.Lock()
 	r.opts.ImagePixelSink = sink
@@ -78,9 +48,6 @@ const (
 	imageFailed
 )
 
-// imageLoadState is the live state one script-created HTMLImageElement
-// reflects. Parsed <img> elements have no entry and answer from their
-// attributes alone.
 type imageLoadState struct {
 	gen        int
 	status     imageStatus
@@ -91,9 +58,6 @@ type imageLoadState struct {
 	waiters    []*promiseObj
 }
 
-// jsEventHandler is one on<type> property. The callback is registered with
-// internal/dom on first assignment so dispatch order matches
-// addEventListener; replacing the handler only swaps fn.
 type jsEventHandler struct {
 	fn         goja.Value
 	realm      *Runtime
@@ -104,8 +68,6 @@ type jsEventHandler struct {
 	compiled   bool
 }
 
-// globalEventHandlerTypes is the GlobalEventHandlers IDL surface shared by
-// HTML elements, Document, and Window in the HTML Standard.
 var globalEventHandlerTypes = []string{
 	"abort", "auxclick", "beforeinput", "beforematch", "beforetoggle", "blur",
 	"cancel", "canplay", "canplaythrough", "change", "click", "close", "command",
@@ -138,12 +100,6 @@ func (r *Runtime) installGlobalEventHandlerAttributes() {
 	r.installEventHandler(r.documentProto, "visibilitychange")
 }
 
-// ---------------------------------------------------------------------------
-// Prototype chain and interface constructors
-// ---------------------------------------------------------------------------
-
-// setupProtoChain builds the shared interfaces. It runs once per runtime from
-// setupDOM, before any wrapper exists.
 func (r *Runtime) setupProtoChain() {
 	r.tagProtos = make(map[string]*goja.Object)
 	r.ifaceCtors = make(map[string]*goja.Object)
@@ -408,9 +364,6 @@ func (r *Runtime) setupProtoChain() {
 	r.defineConstructor("Comment", r.commentProto)
 	r.installCharacterDataAccessors()
 
-	// The interfaces whose constructors a page probes even before it creates
-	// an element. Per-tag prototypes for other tags are minted lazily by
-	// protoForTag, so a document pays only for the tags it actually wraps.
 	for _, tag := range []string{
 		"html", "head", "body", "title", "div", "span", "p", "a", "img",
 		"input", "button", "form", "select", "option", "textarea", "canvas",
@@ -420,9 +373,6 @@ func (r *Runtime) setupProtoChain() {
 	}
 	r.setupHTMLFormCollectionInterfaces()
 
-	// The Image constructor allocates a detached <img>; the factory is an
-	// internal document method so createElement and Image share the same
-	// node-creation path (and the same wrapper registry).
 	if doc, ok := r.vm.Get("document").(*goja.Object); ok {
 		_ = doc.Set("__createImage__", func(call goja.FunctionCall) goja.Value {
 			if r.domDoc == nil {
@@ -432,8 +382,6 @@ func (r *Runtime) setupProtoChain() {
 		})
 	}
 
-	// window.Image is a real constructor: new Image() returns a detached
-	// <img>, and new Image(w,h) applies the width/height IDL setters.
 	r.installImageConstructor()
 }
 
@@ -612,17 +560,12 @@ func (r *Runtime) newChildProto(parent *goja.Object) *goja.Object {
 	return p
 }
 
-// defineConstructor publishes an illegal-constructor function whose prototype
-// is p, which is what `instanceof` walks. Calling it throws, as the WebIDL
-// [LegacyNoInterfaceObject]/illegal-constructor interfaces do in Chromium.
 func (r *Runtime) defineConstructor(name string, p *goja.Object) *goja.Object {
 	r.defineInterfaceToStringTag(name, p)
 	if c, ok := r.ifaceCtors[name]; ok {
 		return c
 	}
 	if name == "HTMLElement" || r.isHTMLTagInterface(name) {
-		// HTML element interface constructors remain illegal on their own, but
-		// serve as the base constructor for autonomous and customized built-ins.
 		ctor, ok := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
 			definition, owner := r.customElementDefinitionForConstructor(call.NewTarget)
 			if call.NewTarget == nil || call.NewTarget == r.ifaceCtors[name] {
@@ -641,10 +584,6 @@ func (r *Runtime) defineConstructor(name string, p *goja.Object) *goja.Object {
 				if name != "HTMLElement" && !primitivePrototype {
 					panic(r.vm.NewTypeError("Custom element constructor must inherit the matching HTML element interface"))
 				}
-				// Reflect.construct() can call an HTML constructor with a
-				// registered NewTarget whose prototype is not in the matching HTML
-				// interface chain. Return the ordinary object from ECMAScript
-				// construction with HTMLConstructor's realm-specific fallback proto.
 				r.applyHTMLConstructorFallbackPrototype(call.This, definition, r.functionRealm(call.NewTarget, definition.constructorRealm), primitivePrototype)
 				return call.This
 			}
@@ -732,11 +671,6 @@ func (r *Runtime) defineConstructor(name string, p *goja.Object) *goja.Object {
 				return ordinaryHasInstance
 			},
 			Construct: func(target *goja.Object, arguments []goja.Value, newTarget *goja.Object) *goja.Object {
-				// ECMAScript normally reads newTarget.prototype while allocating
-				// `this`, before entering an HTML element constructor. The HTML
-				// constructor has registration and interface checks that must run
-				// first, so guard construction at the Proxy boundary and only then
-				// delegate allocation to Goja's ordinary construct operation.
 				if newTarget == nil || newTarget == htmlConstructor {
 					panic(r.vm.NewTypeError("Illegal constructor"))
 				}
@@ -829,8 +763,6 @@ func (r *Runtime) defineConstructor(name string, p *goja.Object) *goja.Object {
 	}
 	ctor := v.ToObject(r.vm)
 	r.ifaceCtors[name] = ctor
-	// window IS the global object (see setupWindow), so one Set reaches both
-	// `Image` and `window.Image`.
 	_ = r.vm.Set(name, v)
 	return ctor
 }
@@ -888,10 +820,6 @@ func (r *Runtime) isHTMLTagInterface(name string) bool {
 	return false
 }
 
-// defineInterfaceToStringTag implements Web IDL's @@toStringTag property on
-// interface prototypes. Object.prototype.toString consults this property, so
-// platform objects stringify with their interface brand (for example,
-// [object HTMLStyleElement]) instead of [object Object].
 func (r *Runtime) defineInterfaceToStringTag(name string, proto *goja.Object) {
 	if proto == nil || name == "" {
 		return
@@ -905,9 +833,6 @@ func (r *Runtime) defineInterfaceToStringTag(name string, proto *goja.Object) {
 	_ = r.vm.Set("__goosieInterfaceName__", nil)
 }
 
-// htmlTagInterfaces maps a tag to its Chromium interface. Tags not listed
-// answer HTMLElement, which is what Chromium does for an unknown tag until a
-// custom element is defined for it.
 var htmlTagInterfaces = map[string]string{
 	"a": "HTMLAnchorElement", "area": "HTMLAreaElement", "audio": "HTMLAudioElement", "base": "HTMLBaseElement",
 	"body": "HTMLBodyElement", "br": "HTMLBRElement", "button": "HTMLButtonElement",
@@ -930,8 +855,6 @@ var htmlTagInterfaces = map[string]string{
 	"font":     "HTMLFontElement",
 }
 
-// protoForTag returns the per-tag interface prototype, creating it (and its
-// constructor and reflected properties) on first use.
 func (r *Runtime) protoForTag(tag string) *goja.Object {
 	if p, ok := r.tagProtos[tag]; ok {
 		return p
@@ -973,7 +896,6 @@ func (r *Runtime) ensureHTMLInterfaceConstructor(name string) {
 	}
 }
 
-// protoForNode returns the [[Prototype]] for one wrapper.
 func (r *Runtime) protoForNode(node *dom.Node) *goja.Object {
 	if node.Element() && node.Namespace == dom.NSSVG {
 		return r.svgElementProto
@@ -1318,9 +1240,6 @@ func optionValue(option *dom.Node) string {
 }
 
 func normalizeHTMLOptionText(text string) string {
-	// One owner for the rule: internal/dom carries the measured byte scan
-	// (which whitespace collapses, and why U+000B does not), so the binding
-	// cannot drift from what paint and the accessibility tree answer.
 	return dom.NormalizeOptionText(text)
 }
 
@@ -1400,10 +1319,6 @@ func (r *Runtime) installOptionInterface(proto *goja.Object) {
 		if node == nil {
 			return r.vm.ToValue("")
 		}
-		// IDL line of scripts/verify-br101-option-dom.js: text answers the
-		// normalised text content ("Charcoal" for a textContent of
-		// "\n    Charcoal\n  ", "" for whitespace-only text) while textContent
-		// itself keeps its raw bytes.
 		return r.vm.ToValue(normalizeHTMLOptionText(node.TextContent()))
 	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -1455,10 +1370,6 @@ func (r *Runtime) installButtonInterface(p *goja.Object) {
 	r.installEnumReflection(p, "formMethod", "formmethod", "get", []string{"get", "post", "dialog"})
 }
 
-// installCrossOriginReflection installs the nullable-enum crossOrigin IDL
-// attribute shared by image and link. Absent reads null, an unknown value
-// reads "anonymous" (measured in Chromium), and assigning null removes the
-// attribute.
 func (r *Runtime) installCrossOriginReflection(p *goja.Object) {
 	_ = p.DefineAccessorProperty("crossOrigin", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -1533,10 +1444,6 @@ func (r *Runtime) installDoubleReflection(p *goja.Object, prop, attr string, def
 }
 
 func (r *Runtime) installWindowReflectingBodyHandlers(p *goja.Object) {
-	// HTMLBodyElement and HTMLFrameSetElement reflect the legacy body/window
-	// handlers onto Window. The six GlobalEventHandlers entries listed here
-	// are the body-specific reflected handlers; WindowEventHandlers are also
-	// exposed through the same legacy interface surface.
 	reflected := map[string]bool{
 		"blur": true, "error": true, "focus": true, "load": true,
 		"resize": true, "scroll": true,
@@ -1661,10 +1568,6 @@ func (r *Runtime) flattenAssignedNodes(slot *dom.Node, assigned []*dom.Node) []*
 	return result
 }
 
-// ---------------------------------------------------------------------------
-// Reflection helpers
-// ---------------------------------------------------------------------------
-
 func (r *Runtime) setReflectedAttribute(node *dom.Node, attr, value string, present bool) {
 	if node == nil {
 		return
@@ -1703,9 +1606,6 @@ func (r *Runtime) setReflectedAttribute(node *dom.Node, attr, value string, pres
 	}
 }
 
-// installStringReflection installs a DOMString attribute reflection: getter
-// returns the attribute or "", setter stores String(value). Chromium stores
-// "null" for null and "undefined" for undefined, which String already does.
 func (r *Runtime) installStringReflection(p *goja.Object, prop, attr string) {
 	getter := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -1729,8 +1629,6 @@ func (r *Runtime) installStringReflection(p *goja.Object, prop, attr string) {
 	_ = p.DefineAccessorProperty(prop, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// installBoolReflection installs a boolean attribute reflection: true sets
-// the attribute to "", false removes it.
 func (r *Runtime) installBoolReflection(p *goja.Object, prop, attr string) {
 	getter := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -1747,15 +1645,8 @@ func (r *Runtime) installBoolReflection(p *goja.Object, prop, attr string) {
 	_ = p.DefineAccessorProperty(prop, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// longSetter validates a value on its way to the attribute. A nil setter
-// clamps to zero, which is what the unsigned reflections do with a negative
-// number.
 type longSetter func(v int64) (int64, *goja.Object)
 
-// installUnsignedReflection installs a reflected unsigned long with def as
-// the getter fallback for a missing or invalid attribute. The getter parses
-// the leading HTML integer, so "12px" reads 12, and a negative attribute
-// reads def. The setter truncates, then lets check clamp or throw.
 func (r *Runtime) installUnsignedReflection(p *goja.Object, prop, attr string, def int64, check longSetter) {
 	getter := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -1790,9 +1681,6 @@ func (r *Runtime) installUnsignedReflection(p *goja.Object, prop, attr string, d
 	_ = p.DefineAccessorProperty(prop, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// installLongReflection installs a signed long attribute reflection
-// (tabIndex): the getter parses a leading integer and falls back to def; the
-// setter stores the truncated value without a non-negative clamp.
 func (r *Runtime) installLongReflection(p *goja.Object, prop, attr string, def int64) {
 	getter := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -1816,11 +1704,6 @@ func (r *Runtime) installLongReflection(p *goja.Object, prop, attr string, def i
 	_ = p.DefineAccessorProperty(prop, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// installEnumReflection installs a "limited to only known values" attribute
-// reflection. The getter lowercases a matching value and returns def
-// otherwise; the setter stores the raw string, as Chromium does (setting
-// `loading = 'bogus'` leaves the attribute "bogus" while the property reads
-// "auto").
 func (r *Runtime) installEnumReflection(p *goja.Object, prop, attr, def string, values []string) {
 	allowed := make(map[string]bool, len(values))
 	for _, v := range values {
@@ -1858,11 +1741,6 @@ func asciiLowerString(value string) string {
 	return string(bytes)
 }
 
-// installURLReflection installs a DOMString reflected with the URL parsing
-// mechanism. The getter resolves against the document base; the setter stores
-// the raw string. Missing attributes answer "", and a value the URL parser
-// rejects reads back exactly as written (measured Chromium: "http://[::1"
-// stays "http://[::1").
 func (r *Runtime) installURLReflection(p *goja.Object, prop, attr string) {
 	getter := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -1888,9 +1766,6 @@ func (r *Runtime) installURLReflection(p *goja.Object, prop, attr string) {
 	_ = p.DefineAccessorProperty(prop, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// parseHTMLInteger is the signed sibling of parseHTMLUnsigned: leading spaces
-// then an optional sign and digits. Anything else, including an empty string,
-// reports !ok so the caller can fall back to its default.
 func parseHTMLInteger(s string) (int64, bool) {
 	s = strings.TrimLeft(s, " \t\n\r\f")
 	i := 0
@@ -1911,9 +1786,6 @@ func parseHTMLInteger(s string) (int64, bool) {
 	return n, true
 }
 
-// parseHTMLUnsigned parses the leading non-negative HTML integer in s. It is
-// deliberately lenient past the digits ("12px" -> 12) and rejects a negative
-// or digitless value, matching Chromium's reflected unsigned long.
 func parseHTMLUnsigned(s string) (int64, bool) {
 	s = strings.TrimLeft(s, " \t\n\r\f")
 	if s == "" {
@@ -1939,11 +1811,6 @@ func parseHTMLUnsigned(s string) (int64, bool) {
 	return n, true
 }
 
-// ---------------------------------------------------------------------------
-// URL helpers
-// ---------------------------------------------------------------------------
-
-// documentURL is the base every URL reflection resolves against.
 func (r *Runtime) documentURL() *url.URL {
 	if r.locURL != nil {
 		return r.locURL
@@ -2047,9 +1914,6 @@ func baseURLForDocument(doc *dom.Document, documentURL *url.URL) *url.URL {
 	return documentURL.ResolveReference(ref)
 }
 
-// resolveURLString resolves raw against the document base and returns the
-// serialised absolute URL. A value Go's parser rejects is returned verbatim,
-// as Chromium does for an invalid href.
 func (r *Runtime) resolveURLString(raw string) string {
 	if href, _, ok := r.resolveURL(raw); ok {
 		return href
@@ -2057,9 +1921,6 @@ func (r *Runtime) resolveURLString(raw string) string {
 	return raw
 }
 
-// resolveURL resolves raw, with the URL parser's leading/trailing whitespace
-// strip. It reports ok=false when the reference or the document base does not
-// parse; href is then the raw value and u is nil.
 func (r *Runtime) resolveURL(raw string) (href string, u *url.URL, ok bool) {
 	return r.resolveURLAgainst(raw, r.documentBaseURL(), "UTF-8")
 }
@@ -2073,9 +1934,6 @@ func (r *Runtime) resolveURLForNode(raw string, node *dom.Node) (href string, u 
 }
 
 func (r *Runtime) resolveURLAgainst(raw string, base *url.URL, encoding string) (href string, u *url.URL, ok bool) {
-	// The WHATWG URL parser removes ASCII tab/newline characters throughout
-	// input, then trims leading/trailing C0 controls and spaces. In particular,
-	// data URLs used as form actions often contain line breaks around markup.
 	raw = strings.ReplaceAll(raw, "\t", "")
 	raw = strings.ReplaceAll(raw, "\n", "")
 	raw = strings.ReplaceAll(raw, "\r", "")
@@ -2084,17 +1942,10 @@ func (r *Runtime) resolveURLAgainst(raw string, base *url.URL, encoding string) 
 		return raw, nil, false
 	}
 	if raw == "" {
-		// An empty reference resolves to the base; an href with no attribute
-		// is handled by the caller before reaching here.
 		return canonicalURLStringWithEncoding(base, encoding), base, true
 	}
 	ref, err := url.Parse(raw)
 	if err != nil {
-		// WHATWG URL parsing treats a colon in the first path segment as a
-		// scheme only when the preceding bytes form a valid ASCII scheme. Go's
-		// parser rejects any such colon in a relative first segment, including
-		// when that segment starts with Unicode whitespace; force that case into
-		// path-reference parsing while keeping malformed authorities rejected.
 		if strings.Contains(err.Error(), "first path segment in URL cannot contain colon") {
 			ref, err = url.Parse("./" + raw)
 		}
@@ -2103,14 +1954,11 @@ func (r *Runtime) resolveURLAgainst(raw string, base *url.URL, encoding string) 
 		}
 	}
 	resolved := base.ResolveReference(ref)
-	// Go preserves the host's case; Chromium lowercases it.
 	resolved.Host = strings.ToLower(resolved.Host)
 	resolved.RawQuery = percentEncodeURLQueryWithEncoding(resolved.RawQuery, encoding)
 	return canonicalURLStringWithEncoding(resolved, encoding), resolved, true
 }
 
-// canonicalURLString serialises a resolved URL. Opaque URLs (data:, mailto:,
-// javascript:) keep their opaque payload untouched.
 func canonicalURLString(u *url.URL) string {
 	return canonicalURLStringWithEncoding(u, "UTF-8")
 }
@@ -2136,9 +1984,6 @@ func canonicalURLStringWithEncoding(u *url.URL, encoding string) string {
 	return copy.String()
 }
 
-// percentEncodeURLPath applies the path percent-encode set to a URL path while
-// preserving existing percent escapes. Go's URL serializer leaves Unicode
-// path bytes literal; browsers serialize them as UTF-8 percent escapes.
 func percentEncodeURLPath(path string) string {
 	const hex = "0123456789ABCDEF"
 	var out strings.Builder
@@ -2165,9 +2010,6 @@ func isHexByte(b byte) bool {
 	return b >= '0' && b <= '9' || b >= 'a' && b <= 'f' || b >= 'A' && b <= 'F'
 }
 
-// percentEncodeURLQuery applies the URL query percent-encode set. url.URL
-// intentionally preserves RawQuery verbatim, but HTMLAnchorElement.href
-// serializes non-ASCII code points and spaces as UTF-8 percent escapes.
 func percentEncodeURLQuery(query string) string {
 	return percentEncodeURLQueryWithEncoding(query, "UTF-8")
 }
@@ -2195,9 +2037,6 @@ func percentEncodeURLQueryWithEncoding(query, label string) string {
 	return out.String()
 }
 
-// urlPart returns one component of the anchor URL. ok=false means the source
-// did not parse, in which case every part is empty except protocol, which
-// Chromium answers as ":".
 func urlPart(u *url.URL, part string) string {
 	if u == nil {
 		if part == "protocol" {
@@ -2258,9 +2097,6 @@ func urlPart(u *url.URL, part string) string {
 	return ""
 }
 
-// anchorURL returns the URL the href attribute resolves to, and whether it
-// parsed. A missing href is the empty URL with ok=true origin "" handled by
-// the caller.
 func (r *Runtime) anchorURL(node *dom.Node) (*url.URL, bool) {
 	if node == nil || !node.HasAttribute("href") {
 		return nil, false
@@ -2269,13 +2105,6 @@ func (r *Runtime) anchorURL(node *dom.Node) (*url.URL, bool) {
 	return u, ok
 }
 
-// setAnchorURLPart rewrites one URL component and stores the serialisation in
-// href, which is what Chromium's protocol/host/hostname/port/pathname/search/
-// hash setters do (measured in probe5: six successive writes produced
-// https://o.test/n?q=9#z, then http://o.test:81/n?q=9#z). The current value is
-// resolved against the document base first, so an anchor without href starts
-// from the page URL instead of failing. Opaque URLs (data:, mailto:) cannot
-// carry these components and the write is ignored.
 func (r *Runtime) setAnchorURLPart(node *dom.Node, part, value string) {
 	base := r.documentBaseURLForNode(node)
 	if base == nil {
@@ -2365,13 +2194,6 @@ func (r *Runtime) setAnchorURLPart(node *dom.Node, part, value string) {
 	r.notifyMutation()
 }
 
-// ---------------------------------------------------------------------------
-// Node / Element / HTMLElement accessors
-// ---------------------------------------------------------------------------
-
-// installNodeAccessors installs textContent and the child-list reads on
-// Node.prototype. Every getter resolves the receiver through __nid__, so one
-// definition serves every wrapper.
 func (r *Runtime) installNodeAccessors() {
 	_ = r.vm.Set("__nodeProto__", r.nodeProto)
 	_, _ = r.vm.RunString(`
@@ -2392,9 +2214,6 @@ func (r *Runtime) installNodeAccessors() {
 	`)
 	_ = r.vm.Set("__nodeProto__", nil)
 
-	// nodeName for HTML elements is the uppercase tag. Foreign-content and XML
-	// elements preserve their qualified name; leaf nodes use the DOM Standard's
-	// fixed name ("#text", "#comment", ...).
 	_ = r.nodeProto.DefineAccessorProperty("nodeName", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
 		if node == nil {
@@ -2495,8 +2314,6 @@ func (r *Runtime) installNodeAccessors() {
 		return r.wrapNode(node.Parent)
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 
-	// document.baseURI is the document URL every URL reflection resolves
-	// against (measured in probe3 as https://example.test/docs/page.html).
 	_ = r.documentProto.DefineAccessorProperty("URL", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
 		if documentURL := r.documentURLForNode(node); documentURL != nil {
@@ -2520,8 +2337,6 @@ func (r *Runtime) installNodeAccessors() {
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 }
 
-// installElementAccessors installs the Element interface: tagName, id,
-// className, classList, attributes, innerHTML and the child-element reads.
 func (r *Runtime) installElementAccessors() {
 	_ = r.elementProto.DefineAccessorProperty("customElementRegistry", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -2560,7 +2375,6 @@ func (r *Runtime) installElementAccessors() {
 		if node == nil {
 			return r.vm.ToValue("")
 		}
-		// XML documents preserve tag-name case; HTML documents uppercase it.
 		if (node.Doc != nil && node.Doc.IsXML) || node.Namespace != dom.NSHTML {
 			return r.vm.ToValue(node.Data)
 		}
@@ -2639,18 +2453,11 @@ func (r *Runtime) installElementAccessors() {
 		return goja.Undefined()
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 
-	// shadowRoot and attachShadow stay on Node.prototype (installed by
-	// setupShadowDOM) and are inherited by Element.prototype.
-
 	r.installElementCollectionMethods()
 
 	r.installHTMLElementAccessors()
 }
 
-// installARIAMixin exposes the reflected string-valued ARIA IDL attributes
-// shared by Element and its HTML element subclasses. Using the normal
-// reflected-attribute path keeps custom-element reactions and mutation
-// observation aligned with setAttribute().
 func (r *Runtime) installARIAMixin(prototype *goja.Object) {
 	properties := []string{
 		"role", "ariaAtomic", "ariaAutoComplete", "ariaBrailleLabel", "ariaBrailleRoleDescription", "ariaBusy", "ariaChecked", "ariaColCount", "ariaColIndex", "ariaColIndexText", "ariaColSpan", "ariaCurrent", "ariaDescription", "ariaDisabled", "ariaExpanded", "ariaHasPopup", "ariaHidden", "ariaInvalid", "ariaKeyShortcuts", "ariaLabel", "ariaLevel", "ariaLive", "ariaModal", "ariaMultiLine", "ariaMultiSelectable", "ariaOrientation", "ariaPlaceholder", "ariaPosInSet", "ariaPressed", "ariaReadOnly", "ariaRelevant", "ariaRequired", "ariaRoleDescription", "ariaRowCount", "ariaRowIndex", "ariaRowIndexText", "ariaRowSpan", "ariaSelected", "ariaSetSize", "ariaSort", "ariaValueMax", "ariaValueMin", "ariaValueNow", "ariaValueText",
@@ -2830,10 +2637,6 @@ func (r *Runtime) activateInsertedSubtree(node *dom.Node) {
 	r.activateInsertedSubtreeWithDetailsPolicy(node, false)
 }
 
-// activateDOMInsertedSubtree applies connection effects for nodes inserted by
-// DOM mutation APIs. If an inserted details element is already open and a
-// group peer is open, the previously connected peer wins even when the new
-// element was inserted earlier in tree order.
 func (r *Runtime) activateDOMInsertedSubtree(node *dom.Node) {
 	r.activateInsertedSubtreeWithDetailsPolicy(node, true)
 }
@@ -2871,11 +2674,6 @@ func (r *Runtime) activateInsertedSubtreeWithDetailsPolicy(node *dom.Node, domIn
 	}
 }
 
-// thisNID reads the registry key from the receiver without allocating a
-// *dom.Node lookup; 0 means "not a wrapped node".
-// installParentNodeAccessors implements the ParentNode mixin on its three
-// specified interfaces. `children` is a live HTMLCollection, while the
-// element-child endpoints and count are reflected reads over the live tree.
 func (r *Runtime) installParentNodeAccessors() {
 	prototypes := []*goja.Object{r.elementProto, r.documentProto, r.documentFragmentProto}
 	for _, proto := range prototypes {
@@ -2933,7 +2731,6 @@ func (r *Runtime) installParentNodeAccessors() {
 			return r.vm.ToValue(count)
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
-	// NonDocumentTypeChildNode exposes these live sibling reads on Element.
 	for _, name := range []string{"nextElementSibling", "previousElementSibling"} {
 		name := name
 		_ = r.elementProto.DefineAccessorProperty(name, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -2969,9 +2766,6 @@ func thisNID(call goja.FunctionCall) int {
 	return int(v.ToInteger())
 }
 
-// innerHTMLLive and documentSetInnerHTML mirror the document helpers so the
-// Element.prototype accessors keep one implementation. They are thin
-// wrappers over the same node operations.
 func (r *Runtime) innerHTMLLive(nid int) string {
 	node := r.nodeRegistry[nid]
 	if node == nil {
@@ -2985,10 +2779,6 @@ func (r *Runtime) innerHTMLLive(nid int) string {
 
 func documentSetInnerHTML(r *Runtime, nid int, html string, forceHTMLFragment ...bool) {
 	if fn, ok := goja.AssertFunction(r.vm.Get("document").ToObject(r.vm).Get("__setInnerHTML__")); ok {
-		// The bridge throws QuotaExceededError when admission rejects the
-		// fragment. A goja call reports that as an *Exception; rethrow it so
-		// the assignment the page made still fails instead of succeeding
-		// silently with the old children intact.
 		args := []goja.Value{r.vm.ToValue(nid), r.vm.ToValue(html)}
 		if len(forceHTMLFragment) > 0 && forceHTMLFragment[0] {
 			args = append(args, r.vm.ToValue(true))
@@ -3066,8 +2856,6 @@ func (r *Runtime) installHTMLElementAccessors() {
 		return goja.Undefined()
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 
-	// dataset is a Proxy over the live data-* attributes, as before, but the
-	// accessor lives on the prototype and reads __nid__ from the receiver.
 	_ = r.vm.Set("__htmlProto__", r.elementProto)
 	_, _ = r.vm.RunString(`(function(datasetProto) {
 		Object.defineProperty(__htmlProto__, 'dataset', {
@@ -3228,9 +3016,6 @@ func (r *Runtime) installHTMLElementAccessors() {
 	r.installBoolReflection(p, "hidden", "hidden")
 	r.installBoolReflection(p, "autofocus", "autofocus")
 	r.installBoolReflection(p, "inert", "inert")
-	// tabIndex is the one signed long reflection measured in probe5: negatives
-	// are legal (a negative value means "not sequentially focusable"), and the
-	// setter stores the truncated integer.
 	r.installLongReflection(p, "tabIndex", "tabindex", -1)
 }
 
@@ -3250,14 +3035,6 @@ func asciiEqualFold(value, keyword string) bool {
 	return true
 }
 
-// ---------------------------------------------------------------------------
-// DOMTokenList and NamedNodeMap
-// ---------------------------------------------------------------------------
-
-// classListObject returns the per-element DOMTokenList. Identity is stable, as
-// in Chromium, and every read comes from the live class attribute: a dynamic
-// object is what makes `Array.prototype.join.call(classList, '+')` see fresh
-// indices after setAttribute changed the class.
 func (r *Runtime) classListObject(node *dom.Node) *goja.Object {
 	return r.tokenListObject(node, "class")
 }
@@ -3299,9 +3076,6 @@ func (t *domTokenList) setTokens(tokens []string) {
 	}
 	newValue, hasNew := t.node.GetAttribute(t.attribute), t.node.HasAttribute(t.attribute)
 	changed := oldValue != newValue || hadOld != hasNew
-	// DOMTokenList mutators run the associated attribute setter even when the
-	// serialized value is unchanged. That setter still enqueues a CEReactions
-	// attributeChanged callback for an observed attribute.
 	t.r.notifyCustomElementAttributeChanged(t.node, t.attribute, oldValue, hadOld, newValue, hasNew, "")
 	var old *string
 	if hadOld {
@@ -3378,8 +3152,6 @@ func (t *domTokenList) Get(key string) goja.Value {
 			if found {
 				t.setTokens(filtered)
 			} else if t.node.HasAttribute(t.attribute) {
-				// remove() still runs the token list's attribute update step when
-				// the requested token is absent but the attribute is present.
 				t.setTokens(existing)
 			}
 			return goja.Undefined()
@@ -3509,9 +3281,6 @@ func (t *domTokenList) Keys() []string {
 	return append(keys, "length", "value")
 }
 
-// attributesObject returns the per-element NamedNodeMap. A dynamic object
-// keeps `attributes[0]` and `attributes.length` live while identity stays
-// stable, matching Chromium.
 func (r *Runtime) attributesObject(node *dom.Node) *goja.Object {
 	if obj := r.attributesObjects[node]; obj != nil {
 		return obj
@@ -3718,10 +3487,6 @@ func (m *namedNodeMap) Keys() []string {
 	return keys
 }
 
-// ---------------------------------------------------------------------------
-// HTMLAnchorElement
-// ---------------------------------------------------------------------------
-
 func (r *Runtime) installAnchorInterface(p *goja.Object) {
 	r.installHyperlinkURLInterface(p)
 
@@ -3806,8 +3571,6 @@ func (r *Runtime) installHyperlinkURLInterface(p *goja.Object) {
 	})
 }
 
-// setNodeTextContent replaces a node's children with one text node, charging
-// the insertion through the same admission path as textContent.
 func (r *Runtime) setNodeTextContent(node *dom.Node, text string) {
 	var children []*dom.Node
 	var textNode *dom.Node
@@ -3840,10 +3603,6 @@ func (r *Runtime) setNodeTextContent(node *dom.Node, text string) {
 	r.notifyDisconnected(old, wasConnected)
 	r.notifyMutation()
 }
-
-// ---------------------------------------------------------------------------
-// HTMLImageElement
-// ---------------------------------------------------------------------------
 
 func (r *Runtime) installImageInterface(p *goja.Object) {
 	_ = p.DefineAccessorProperty("src", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -3882,9 +3641,6 @@ func (r *Runtime) installImageInterface(p *goja.Object) {
 		return r.vm.ToValue("")
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 
-	// width/height reflect the attribute and fall back to the intrinsic size
-	// once a load has completed. Chromium's attribute-less value is the
-	// laid-out box, which this binding cannot see (see §9).
 	for _, dim := range []string{"width", "height"} {
 		dim := dim
 		_ = p.DefineAccessorProperty(dim, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -3957,9 +3713,6 @@ func (r *Runtime) installImageInterface(p *goja.Object) {
 	r.installURLReflection(p, "longDesc", "longdesc")
 	r.installReferrerPolicyReflection(p)
 
-	// x/y are the image's position in the document. Layout geometry does not
-	// reach internal/js (see §9), so a detached image answers 0, which is what
-	// Chromium answers for the only case the binding can see.
 	for _, prop := range []string{"x", "y"} {
 		_ = p.DefineAccessorProperty(prop, r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 			return r.vm.ToValue(0)
@@ -3993,14 +3746,10 @@ func (r *Runtime) installImageInterface(p *goja.Object) {
 		return p.obj
 	})
 
-	// onload/onerror are handler properties backed by a real DOM listener, so
-	// dispatch order follows registration like addEventListener.
 	r.installEventHandler(p, "load")
 	r.installEventHandler(p, "error")
 }
 
-// installReferrerPolicyReflection is the enumerated referrer policy shared by
-// <img> and <a>. Unknown and missing values read "".
 func (r *Runtime) installReferrerPolicyReflection(p *goja.Object) {
 	r.installEnumReflection(p, "referrerPolicy", "referrerpolicy", "", []string{
 		"no-referrer", "no-referrer-when-downgrade", "origin",
@@ -4009,9 +3758,6 @@ func (r *Runtime) installReferrerPolicyReflection(p *goja.Object) {
 	})
 }
 
-// installImageConstructor publishes window.Image. The constructor returns a
-// detached <img>, applies width/height when arguments are supplied, and shares
-// HTMLImageElement.prototype so `new Image() instanceof HTMLImageElement`.
 func (r *Runtime) installImageConstructor() {
 	imgProto := r.protoForTag("img")
 	_ = r.vm.Set("__imgProto__", imgProto)
@@ -4040,10 +3786,6 @@ func (r *Runtime) imageState(node *dom.Node) *imageLoadState {
 	return st
 }
 
-// startImageLoad begins a script-image load. The state flips to loading
-// synchronously (so `complete` reads false for the rest of the task, as
-// Chromium does) and settles in a microtask, because a loader may answer from
-// another goroutine.
 func (r *Runtime) startImageLoad(node *dom.Node, raw string) {
 	st := r.imageState(node)
 	st.gen++
@@ -4116,11 +3858,6 @@ func (r *Runtime) applyImageResult(node *dom.Node, st *imageLoadState, res Loade
 		r.resolvePromise(p, goja.Undefined())
 	}
 	st.waiters = nil
-	// Hand the pixels to the embedder after the element state is settled and
-	// before the load event, so a load handler observes a state the engine has
-	// already been told about. st.src is the raw attribute value this result
-	// belongs to; the engine reconciles it against the live attribute rather
-	// than re-resolving a URL against a possibly different base.
 	r.mu.Lock()
 	sink := r.opts.ImagePixelSink
 	r.mu.Unlock()
@@ -4130,15 +3867,12 @@ func (r *Runtime) applyImageResult(node *dom.Node, st *imageLoadState, res Loade
 	dom.DispatchEvent(node, dom.NewTrustedEvent("load", false, false))
 }
 
-// encodingError is the DOMException-shaped rejection decode() reports, which
-// Chromium names EncodingError.
 func (r *Runtime) encodingError(msg string) goja.Value {
 	e := r.vm.NewGoError(errors.New(msg))
 	_ = e.Set("name", "EncodingError")
 	return e
 }
 
-// installEventHandler wires on<typ> as a real listener on first assignment.
 func (r *Runtime) installEventHandler(p *goja.Object, typ string) {
 	_ = p.DefineAccessorProperty("on"+typ, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -4267,9 +4001,6 @@ func (r *Runtime) activateEventHandler(node *dom.Node, typ string, h *jsEventHan
 	}, false, key)
 }
 
-// syncEventHandlerContentAttribute installs or removes an inline event
-// handler's listener when its content attribute changes. Compilation is lazy,
-// as required by HTML's event-handler processing model.
 func (r *Runtime) syncEventHandlerContentAttribute(node *dom.Node, name string, value string, present bool) {
 	if node == nil || node.Type != dom.NodeElement || node.Namespace != dom.NSHTML || !r.nodeHasBrowsingContext(node) || r.opts.ScriptingDisabled {
 		return
@@ -4343,15 +4074,9 @@ func (r *Runtime) nodeHasBrowsingContext(node *dom.Node) bool {
 		if node.Doc == r.domDoc {
 			return true
 		}
-		// Same-origin iframe Documents are wrapped by the parent Runtime when
-		// reached through contentDocument. Their nodes still have a browsing
-		// context while the corresponding frame is current and connected.
 		frame := r.iframeForDocument(node.Doc)
 		return frame != nil && r.iframeDocuments[frame] == node.Doc && frame.IsConnected()
 	}
-	// Some embedders build a Document value directly and populate its tree
-	// before assigning Node.Doc. A node connected to this document still has
-	// its browsing context; detached nodes with no owner document do not.
 	for current := node; current != nil; current = current.Parent {
 		if current.Type == dom.NodeDocument {
 			return current == &r.domDoc.Node
@@ -4386,10 +4111,6 @@ func (r *Runtime) compileContentEventHandler(node *dom.Node, typ string, h *jsEv
 		h.realm = r
 	}
 }
-
-// ---------------------------------------------------------------------------
-// HTMLInputElement
-// ---------------------------------------------------------------------------
 
 func (r *Runtime) installInputInterface(p *goja.Object) {
 	_ = p.Set("showPicker", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -4508,9 +4229,6 @@ func (r *Runtime) installInputInterface(p *goja.Object) {
 	r.installBoolReflection(p, "multiple", "multiple")
 	r.installBoolReflection(p, "readOnly", "readonly")
 
-	// maxLength/minLength read -1 when absent or invalid and throw IndexSizeError
-	// on negative assignments; size defaults to 20, throws on 0, and resets a
-	// negative assignment to the default.
 	r.installTextControlLengthReflections(p, "HTMLInputElement")
 	r.installUnsignedReflection(p, "size", "size", 20, func(v int64) (int64, *goja.Object) {
 		if v == 0 {
@@ -4548,9 +4266,6 @@ func (r *Runtime) showPicker(node *dom.Node, isSelect bool) {
 	if isSelect && !r.nodeIsRendered(node) {
 		panic(r.domError("NotSupportedError", "The select element is not being rendered"))
 	}
-	// The host owns the picker UI. A file control hands it a request; every
-	// other picker type still has no host implementation, but the activation
-	// preconditions and the activation step are the same.
 	if !isSelect && inputType(node) == "file" {
 		r.requestFilePicker(node)
 	}
@@ -4638,8 +4353,6 @@ func inputType(node *dom.Node) string {
 	return "text"
 }
 
-// HTML's dimension-attribute parser accepts a signed integer prefix when its
-// numeric value is non-negative (so -0 is valid), unlike unsigned IDL reflection.
 func parseDimensionAttribute(s string) (int64, bool) {
 	n, ok := parseHTMLInteger(s)
 	return n, ok && n >= 0 && n <= math.MaxUint32
@@ -4653,8 +4366,6 @@ func (r *Runtime) inputImageDimension(node *dom.Node, dim string) int64 {
 	if loaded {
 		w, h = int64(st.naturalW), int64(st.naturalH)
 	}
-	// A hidden or detached image button uses the natural dimensions, with each
-	// valid dimension attribute overriding its corresponding side.
 	hidden := !node.IsConnected() || r.computedValues(node)["display"] == "none"
 	if hidden {
 		if dim == "width" {
@@ -4668,8 +4379,6 @@ func (r *Runtime) inputImageDimension(node *dom.Node, dim string) int64 {
 		}
 		return h
 	}
-	// A rendered image button preserves its image ratio when one dimension is
-	// supplied. Without an available image, dimensions come only from attributes.
 	if dim == "width" {
 		if attrOK {
 			return attr
@@ -4716,17 +4425,12 @@ func (r *Runtime) installTextControlLengthReflections(proto *goja.Object, interf
 	}
 }
 
-// inputTypeValues is the HTML input type keyword set. An attribute outside it
-// reads back as "text", as Chromium's limited-to-known-values reflection.
 var inputTypeValues = []string{
 	"hidden", "text", "search", "tel", "url", "email", "password", "date",
 	"month", "week", "time", "datetime-local", "number", "range", "color",
 	"checkbox", "radio", "file", "submit", "image", "reset", "button",
 }
 
-// installInputValueAccessors keeps the live value separate from the value
-// content attribute for states where HTMLInputElement.value is in value mode.
-// Checkbox and radio values continue to use their attribute/default behavior.
 func (r *Runtime) installInputValueAccessors(p *goja.Object) {
 	_ = p.DefineAccessorProperty("indeterminate", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
@@ -4815,10 +4519,6 @@ func (r *Runtime) installTextareaValueAccessors(p *goja.Object) {
 	_ = p.DefineAccessorProperty("defaultValue", defaultGet, defaultSet, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// installTextareaInterface adds the textarea-only IDL attributes that are not
-// shared with inputs. cols and rows use positive-value fallback semantics;
-// their setters still reflect zero as an attribute value, whose getter then
-// falls back to the specified default.
 func (r *Runtime) installTextareaInterface(p *goja.Object) {
 	r.installStringReflection(p, "name", "name")
 	_ = p.DefineAccessorProperty("type", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
@@ -4839,10 +4539,6 @@ func (r *Runtime) installTextareaInterface(p *goja.Object) {
 	r.installStringReflection(p, "wrap", "wrap")
 }
 
-// installOutputInterface implements the output element's value/default-value
-// override model. The current value is the descendant text; setting value
-// first snapshots the default value, while setting defaultValue updates the
-// override only after value has been set.
 func (r *Runtime) installOutputInterface(p *goja.Object) {
 	r.installStringReflection(p, "name", "name")
 	r.installFormControlValidation(p)
@@ -4913,8 +4609,6 @@ func (r *Runtime) installOutputInterface(p *goja.Object) {
 	_ = p.DefineAccessorProperty("defaultValue", defaultGet, defaultSet, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// ResetOutputElement applies an output element's reset algorithm while keeping
-// the runtime's mutation and reflow observers in sync.
 func (r *Runtime) ResetOutputElement(node *dom.Node) {
 	if r == nil || node == nil || node.Data != "output" {
 		return
@@ -4940,9 +4634,6 @@ func (r *Runtime) installPositiveUnsignedReflection(p *goja.Object, prop, attr s
 		if node == nil {
 			return goja.Undefined()
 		}
-		// Web IDL's unsigned long conversion truncates and wraps modulo 2^32;
-		// [ReflectPositiveWithFallback] then substitutes the default unless the
-		// result is in the range 1..2147483647.
 		number := call.Argument(0).ToFloat()
 		var value uint64
 		if !math.IsNaN(number) && !math.IsInf(number, 0) && number != 0 {
@@ -4961,8 +4652,6 @@ func (r *Runtime) installPositiveUnsignedReflection(p *goja.Object, prop, attr s
 	_ = p.DefineAccessorProperty(prop, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// parseTextareaPositiveDimension applies HTML's non-negative-integer parser,
-// then the unsigned-long and positive-fallback bounds for cols and rows.
 func parseTextareaPositiveDimension(s string) (int64, bool) {
 	s = strings.TrimLeft(s, " \t\n\r\f")
 	if strings.HasPrefix(s, "+") {
@@ -4985,9 +4674,6 @@ func parseTextareaPositiveDimension(s string) (int64, bool) {
 	return value, true
 }
 
-// domError builds a DOMException-shaped object with the given name, which is
-// how internal/dom reports the IndexSize/InvalidCharacter errors Chromium
-// throws from these setters.
 func (r *Runtime) domError(name, msg string) *goja.Object {
 	if constructor, ok := goja.AssertConstructor(r.vm.Get("DOMException")); ok {
 		if exception, err := constructor(nil, r.vm.ToValue(msg), r.vm.ToValue(name)); err == nil {

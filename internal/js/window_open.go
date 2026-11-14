@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// setupWindowOpen exposes window.open through the same browsing-context path
-// used for iframe documents. The returned proxy stays stable while navigation
-// replaces the child document, as a WindowProxy does.
 func (r *Runtime) setupWindowOpen(win *goja.Object) {
 	if r.iframeParent == nil {
 		_ = win.Set("frameElement", goja.Null())
@@ -43,8 +40,6 @@ func (r *Runtime) openWindowCall(call goja.FunctionCall) goja.Value {
 	}
 	noOpener := windowFeatureEnabled(features, "noopener") || windowFeatureEnabled(features, "noreferrer")
 	if noOpener {
-		// The noopener feature forces a new unnamed top-level context rather
-		// than reusing the named target, and window.open returns null.
 		name = ""
 		opened := r.openBrowsingContext(url, name, goja.Null())
 		if goja.IsNull(opened) || goja.IsUndefined(opened) {
@@ -59,9 +54,6 @@ func (r *Runtime) openExistingBrowsingContext(target, url string) goja.Value {
 	owner, frame := runtimeBrowsingContext(r)
 	switch target {
 	case "_parent":
-		// A window opened as a top-level context has itself as parent. In
-		// Goosie's single-process model that is represented by an iframe marked
-		// as an opened browsing context.
 		if owner == nil || frame == nil || !owner.iframeOpenedContexts[frame] {
 			owner, frame = runtimeBrowsingContext(owner)
 		}

@@ -26,7 +26,6 @@ func TestBookmarksBarToggle(t *testing.T) {
 
 	initialH := cw.chromeHeight()
 
-	// Toggle with Cmd+Shift+B
 	toggleEv := surface.Event{
 		Kind: surface.EvKey,
 		Key:  'b',
@@ -42,7 +41,6 @@ func TestBookmarksBarToggle(t *testing.T) {
 		t.Fatalf("chrome height want %d, got %d", initialH+bookmarksBarHeight, toggledH)
 	}
 
-	// Toggle off
 	consumed2 := cw.intercept(toggleEv)
 	if !consumed2 || cw.showBookmarksBar {
 		t.Fatalf("Cmd+Shift+B did not hide bookmarks bar: consumed=%v show=%v", consumed2, cw.showBookmarksBar)
@@ -52,8 +50,6 @@ func TestBookmarksBarToggle(t *testing.T) {
 	}
 }
 
-// TestBookmarksBarRenderingAndClick verifies a saved bookmark is rendered in
-// the bar and a click hands its stored URL to the navigation entry point.
 // qc:BR-047
 func TestBookmarksBarRenderingAndClick(t *testing.T) {
 	cw2 := &capWin{}
@@ -81,7 +77,6 @@ func TestBookmarksBarRenderingAndClick(t *testing.T) {
 	cw.bookmarks = bmStore
 	cw.showBookmarksBar = true
 
-	// Check pills
 	pills := cw.bookmarkPills()
 	if len(pills) != 2 {
 		t.Fatalf("want 2 pills, got %d", len(pills))
@@ -90,13 +85,11 @@ func TestBookmarksBarRenderingAndClick(t *testing.T) {
 		t.Fatalf("pill 0 URL mismatch: %s", pills[0].entry.URL)
 	}
 
-	// Present to verify rendering
 	content := frame.NewBitmap(800, 600)
 	if err := cw.Present(content, nil); err != nil {
 		t.Fatal(err)
 	}
 
-	// Hit test clicking on the first pill
 	clickPos := frame.Point{X: pills[0].rect.X0 + 5, Y: pills[0].rect.Y0 + 5}
 	clickEv := surface.Event{
 		Kind:   surface.EvPointer,
@@ -109,7 +102,6 @@ func TestBookmarksBarRenderingAndClick(t *testing.T) {
 		t.Fatalf("click on bookmark pill failed: consumed=%v clickedURL=%s", consumed, clickedURL)
 	}
 
-	// Hover test
 	motionEv := surface.Event{
 		Kind:   surface.EvPointer,
 		Action: surface.PointerMotion,

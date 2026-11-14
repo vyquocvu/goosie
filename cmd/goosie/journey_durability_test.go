@@ -17,11 +17,6 @@ type durableTab struct {
 }
 
 // qc:BR-169
-//
-// Twenty documents across ten tabs, each tab switched to and validated, then
-// half of them closed through the real Cmd+W path. The remaining tabs must
-// keep their own document, history and rendered layer rather than inheriting
-// state from a neighbour.
 func TestJourneyTwentyURLsAcrossTenTabsSwitchAndCloseHalf(t *testing.T) {
 	const (
 		tabCount   = 10
@@ -45,10 +40,6 @@ func TestJourneyTwentyURLsAcrossTenTabsSwitchAndCloseHalf(t *testing.T) {
 	states := make([]durableTab, 0, tabCount)
 	for i := 0; i < tabCount; i++ {
 		if i > 0 {
-			// NewTab publishes the new count before SwitchTo activates it, and this
-			// test observes the manager from outside the loop. Waiting only on the
-			// count can capture the tab that was active a moment earlier, and then
-			// every assertion below is aimed at the wrong tab.
 			previous := b.f.tabMgr.Active()
 			previousID := uint64(0)
 			if previous != nil {

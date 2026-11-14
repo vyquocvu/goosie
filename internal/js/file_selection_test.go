@@ -124,10 +124,6 @@ func TestClickOnFileInputWithoutActivationRecordsNothing(t *testing.T) {
 	}
 }
 
-// HTML applies its "not being rendered" check to select pickers only. File
-// inputs are exempt, so a display:none upload control still opens the picker
-// when transient activation allows it - the same behavior Chromium exposes for
-// the common hidden-input-plus-styled-label pattern.
 func TestHiddenFileInputPickerRequestFollowsActivation(t *testing.T) {
 	for _, tc := range []struct {
 		name string

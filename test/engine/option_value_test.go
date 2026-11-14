@@ -9,27 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// TASK-037: the value contract of <option>. Hand-written markup indents its
-// options, so an option's text content arrives at the form layer carrying
-// newlines and runs of spaces - "?c=%0A++Charcoal%0A" is a value no server can
-// match (GOOSIE-FORMVALUE-001). Every expectation below quotes a line of
-// `node scripts/verify-task037-option-value.js`, run against Chromium
-// 153.0.8010.12 on this host through Playwright 1.63.0; the script is in the
-// same commit as this file, so a rule that was measured can be re-measured.
-//
-// The two rules the measurements settled:
-//
-//	text content  -> leading/trailing ASCII whitespace stripped, every internal
-//	                       run of it collapsed to one U+0020 (TAB, LF, FF, CR and
-//	                       SPACE collapse; U+000B and U+00A0 do not).
-//	value attribute -> used verbatim, whitespace and all, including the empty
-//	                       string, which is NOT the absent attribute.
-//
-// Submission, the keyboard path and the accessibility tree all read optionValue
-// in internal/engine/focus.go, so one control cannot answer with two values.
-
-// charcoalFormHTML is the markup from the defect report: one option written
-// across three lines, selected, plus a second option with a value attribute.
 const charcoalFormHTML = `<html><body><form id="f"><select id="s" name="c">
 <option selected>
   Charcoal
@@ -57,14 +36,6 @@ func submittedValue(t *testing.T, s *engine.Session, formID, name string) string
 	return got
 }
 
-// TestSubmittedOptionValueStripsSurroundingWhitespace is the defect itself: the
-// indented option must reach the form as "Charcoal", and the encoding must not
-// carry the newlines. Chromium:
-//
-//	OPTION name=charcoal -> {"textContent":"\n    Charcoal\n  ","value":"Charcoal","label":"Charcoal"}
-//	FORMDATA -> [["charcoal","Charcoal"],...]
-//	ENCODED  -> "charcoal=Charcoal&..."
-//
 // qc:BR-104
 func TestSubmittedOptionValueStripsSurroundingWhitespace(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)
@@ -81,20 +52,6 @@ func TestSubmittedOptionValueStripsSurroundingWhitespace(t *testing.T) {
 	}
 }
 
-// TestSubmittedOptionValueCollapsesInnerWhitespaceRuns covers the part a
-// strip-only implementation gets wrong. Chromium collapses every internal run:
-//
-//	OPTION name=hiruns       -> {"textContent":"  Hi   there ","value":"Hi there"}
-//	OPTION name=tabinside    -> {"textContent":"Tab\tin\tside","value":"Tab in side"}
-//	OPTION name=crlfinside   -> {"textContent":"a\n   b","value":"a b"}
-//	OPTION name=formfeed     -> {"textContent":"a\f\fb","value":"a b"}
-//	OPTION name=elementkids  -> {"textContent":"a bold   c","value":"a bold c"}
-//
-// and the two it deliberately does NOT touch:
-//
-//	OPTION name=vtabinside   -> {"textContent":"a\u000b\u000bb","value":"a\u000b\u000bb"}
-//	OPTION name=nbsp         -> {"textContent":"\u00a0nbsp edge\u00a0","value":"\u00a0nbsp edge\u00a0"}
-//
 // qc:BR-104
 func TestSubmittedOptionValueCollapsesInnerWhitespaceRuns(t *testing.T) {
 	cases := []struct {
@@ -122,19 +79,6 @@ func TestSubmittedOptionValueCollapsesInnerWhitespaceRuns(t *testing.T) {
 	}
 }
 
-// TestOptionValueAttributeIsSubmittedVerbatim pins the branch that must NOT be
-// normalised. Chromium hands the content attribute through untouched:
-//
-//	OPTION name=attrpad     -> {"value":"  pad  me  "}     (attribute, not text)
-//	OPTION name=attrnewline -> {"value":"a\n b\tc"}
-//	OPTION name=attrnbsp    -> {"value":"\u00a0x\u00a0"}
-//	OPTION name=attrempty   -> {"value":""}   with text "ignored text"
-//	FORMDATA -> [...,["attrpad","  pad  me  "],["attrnewline","a\n b\tc"],["attrempty",""],...]
-//
-// So `value=""` submits the empty string rather than falling back to the text,
-// and an indented attribute keeps its indentation. A server that received
-// "pad me" instead of "  pad  me  " would be reading a value the author never
-// wrote.
 // qc:BR-106
 func TestOptionValueAttributeIsSubmittedVerbatim(t *testing.T) {
 	cases := []struct {
@@ -154,8 +98,6 @@ func TestOptionValueAttributeIsSubmittedVerbatim(t *testing.T) {
 			}
 		})
 	}
-	// The encoding keeps what the attribute held, which is the observable
-	// difference from the text-content branch.
 	s := newFocusSession(t, `<html><body><form id="f"><select id="s" name="c"><option selected value="  pad  me  ">t</option></select></form></body></html>`)
 	encoded := engine.EncodeFormURLEncoded(engine.CollectFormData(s.Doc.ElementByID("f"), nil))
 	if encoded != "c=++pad++me++" {
@@ -163,15 +105,6 @@ func TestOptionValueAttributeIsSubmittedVerbatim(t *testing.T) {
 	}
 }
 
-// TestLastAuthoredSelectedOptionWins is the tie-break. Two options both carry
-// `selected`; Chromium resolves it at read time in favour of the last one and
-// leaves the markup alone:
-//
-//	TIEBREAK two-selected -> {"selectedIndex":1,"value":"b","optionFlags":[false,true,false],
-//	                         "attrFlags":[true,true,false],"formdata":[["c","b"]]}
-//
-// Goosie submitted "a" here because SelectedOption returned at the first
-// `selected` it saw.
 // qc:BR-101
 func TestLastAuthoredSelectedOptionWins(t *testing.T) {
 	html := `<html><body><form id="f"><select id="s" name="c">` +
@@ -188,16 +121,11 @@ func TestLastAuthoredSelectedOptionWins(t *testing.T) {
 	if got := engine.SelectedOption(sel); got == nil || got.GetAttribute("id") != "b" {
 		t.Fatalf("SelectedOption returned %v, want option#b", got)
 	}
-	// The document is not rewritten: both content attributes survive, exactly as
-	// attrFlags [true,true,false] shows in Chromium.
 	for _, id := range []string{"a", "b"} {
 		if n := s.Doc.ElementByID(id); n == nil || !n.HasAttribute("selected") {
 			t.Fatalf("option#%q lost the selected attribute it was authored with", id)
 		}
 	}
-	// Three authored selections still collapse to the last, and the fallback when
-	// nothing is authored selected stays the first option (TestSelectedOption-
-	// Default, select_keyboard_test.go).
 	three := newFocusSession(t, `<html><body><form id="f"><select id="s" name="c">`+
 		`<option id="a" selected>one</option>`+
 		`<option id="b" selected>two</option>`+
@@ -208,20 +136,6 @@ func TestLastAuthoredSelectedOptionWins(t *testing.T) {
 	}
 }
 
-// TestAccessibilityOptionAnnouncesANameAndNoValue is the cross-check on the shape
-// that used to drift: an AX option node whose Label was trimmed while its Value
-// kept the newlines. The name is the normalised text and the value is gone
-// altogether - scripts/verify-optionax-roles.js reads "option nodes carry no
-// value: [null,null]" in every one of its seventeen cases, including the ones
-// whose value attribute differs from the text. The control's announcement is a
-// third surface and deliberately differs - measured
-// {"role":"combobox","name":"","value":"Alpha Beta"} for
-// <option value="v1" selected>Alpha Beta</option> while `select.value` stays
-// "v1" (scripts/verify-optionax-surfaces.js, 2026-11-05).
-//
-//	OPTION name=charcoal -> {"label":"Charcoal"} and no value of its own
-//	INDENTED initial     -> {"selectedIndex":0,"value":"Charcoal","optionLabel":"Charcoal"}
-//
 // qc:BR-139
 func TestAccessibilityOptionAnnouncesANameAndNoValue(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)
@@ -248,8 +162,6 @@ func TestAccessibilityOptionAnnouncesANameAndNoValue(t *testing.T) {
 		t.Fatalf("the form submits %q while the tree announces the name %q: the option's text is the value here",
 			submitted, charcoal.Label)
 	}
-	// The whitespace shape has to agree too, not just the value: an option whose
-	// text is "  Hi   there " is named "Hi there" and carries nothing else.
 	runs := newFocusSession(t, `<html><body><form id="f"><select id="s" name="c">`+
 		`<option selected>  Hi   there </option></select></form></body></html>`)
 	runsCombo := axCombo(t, runs, "s")
@@ -260,11 +172,6 @@ func TestAccessibilityOptionAnnouncesANameAndNoValue(t *testing.T) {
 		t.Fatalf("option node is labelled %q and valued %q, want %q and no value",
 			got.Label, got.Value, "Hi there")
 	}
-	// The three surfaces only have to be *distinguishable*, and the reference says
-	// they are: the control announces the display, the option announces its name,
-	// and the form sends the value attribute. Quoted from the same run -
-	// {"role":"combobox","value":"My   Label"} against `select.value === "sub"` for
-	// <option selected label="  My   Label  " value="sub">WWWWW</option>.
 	mixed := newFocusSession(t, `<html><body><form id="f"><select id="s" name="c">`+
 		`<option selected value="slate-blue">
    Slate blue
@@ -299,12 +206,6 @@ func axCombo(t *testing.T, s *engine.Session, id string) *ax.Node {
 	return nil
 }
 
-// TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX joins the journey the way
-// TASK-032 joined it: a real key press on the indented markup, then the value
-// the shell reads, the value the form would send and the tree the screen reader
-// walks must all agree.
-//
-// INDENTED initial -> {"selectedIndex":0,"value":"Charcoal"}
 // qc:BR-101
 func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)
@@ -325,9 +226,6 @@ func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 		t.Fatalf("form would submit c=%q after EditDown, want c=b", got)
 	}
 	combo := axCombo(t, s, "s")
-	// The announced string is the display and the submitted one is the value
-	// attribute - two surfaces, measured apart: {"role":"combobox",
-	// "value":"Alpha Beta"} for <option value="v1" selected>Alpha Beta</option>.
 	if combo.Value != "B" {
 		t.Fatalf("combo box announces %q after EditDown, want the display string %q", combo.Value, "B")
 	}
@@ -335,9 +233,6 @@ func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 	for _, o := range combo.Children {
 		if o.Selected {
 			selected++
-			// The node names the row and carries no value: the same anchor reads
-			// "option nodes carry no value" for every option, whatever its value
-			// attribute holds.
 			if o.Label != "B" || o.Value != "" {
 				t.Fatalf("selected option node = %+v, want the name B and no value", o)
 			}
@@ -346,8 +241,6 @@ func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 	if selected != 1 {
 		t.Fatalf("%d option nodes report Selected after one move, want 1", selected)
 	}
-	// Back up: the whitespace option is reached again with its normalised value,
-	// not the three lines of markup it was written on.
 	if !s.MoveSelect(engine.EditUp) {
 		t.Fatal("MoveSelect(EditUp) did not consume the key")
 	}
@@ -356,18 +249,6 @@ func TestKeyboardSelectOnIndentedMarkupMovesAndUpdatesAX(t *testing.T) {
 	}
 }
 
-// TestMoveSelectStepsFromTheLastAuthoredSelection keeps the keyboard and the
-// value on the same tie-break. Chromium steps from the option it treats as
-// selected, not from the first one authored:
-//
-//	LISTBOX two-selected initial        -> {"selectedIndex":1,"value":"b"}
-//	LISTBOX two-selected after ArrowDown-> {"selectedIndex":2,"value":"c"}
-//	LISTBOX two-selected after ArrowUp  -> {"selectedIndex":1,"value":"b"}
-//
-// (Measured on size=3 because a closed select ignores arrow keys in headless
-// Chromium: CLOSED two-selected after ArrowDown -> {"selectedIndex":1}.)
-// Stepping from the first authored selection would make the first key press
-// look dead, because the control already carries the last one's value.
 // qc:BR-101
 func TestMoveSelectStepsFromTheLastAuthoredSelection(t *testing.T) {
 	html := `<html><body style="margin: 0;"><select id="sel" name="opt">` +
@@ -395,7 +276,6 @@ func TestMoveSelectStepsFromTheLastAuthoredSelection(t *testing.T) {
 	if got := s.FocusedSelectValue(); got != "2" {
 		t.Fatalf("value after EditUp = %q, want 2", got)
 	}
-	// The move updates live selectedness without rewriting authored defaults.
 	n := 0
 	for _, id := range []string{"o1", "o2", "o3"} {
 		if o := s.Doc.ElementByID(id); o != nil && o.OptionSelected() {
@@ -407,11 +287,6 @@ func TestMoveSelectStepsFromTheLastAuthoredSelection(t *testing.T) {
 	}
 }
 
-// TestPaintSelectFollowsTheKeyboardSelection is the paint half of the row: the
-// glyphs in the display list have to be the option the control announces and
-// would submit, before and after a keyboard move. The indented option paints
-// its normalised label, not the three lines of markup it was written on.
-//
 // qc:BR-101
 func TestPaintSelectFollowsTheKeyboardSelection(t *testing.T) {
 	s := newFocusSession(t, charcoalFormHTML)

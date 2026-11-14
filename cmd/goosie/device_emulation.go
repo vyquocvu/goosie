@@ -7,7 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// DevicePreset represents an emulated mobile or tablet device.
 type DevicePreset struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
@@ -18,7 +17,6 @@ type DevicePreset struct {
 	Mobile    bool    `json:"mobile"`
 }
 
-// Built-in popular mobile and tablet presets.
 var DevicePresets = []DevicePreset{
 	{
 		ID:        "iphone-15-pro",
@@ -49,7 +47,6 @@ var DevicePresets = []DevicePreset{
 	},
 }
 
-// DevicePresetByID finds a preset by its unique ID.
 func DevicePresetByID(id string) *DevicePreset {
 	for i := range DevicePresets {
 		if DevicePresets[i].ID == id {
@@ -59,12 +56,10 @@ func DevicePresetByID(id string) *DevicePreset {
 	return nil
 }
 
-// ActiveEmulation returns the current device preset, or nil if desktop.
 func (f *framePath) ActiveEmulation() *DevicePreset {
 	return f.emulationPreset
 }
 
-// SetDeviceEmulation enables or disables device emulation.
 func (f *framePath) SetDeviceEmulation(preset *DevicePreset) {
 	f.emulationPreset = preset
 	if f.tabMgr == nil {
@@ -85,7 +80,6 @@ func (f *framePath) SetDeviceEmulation(preset *DevicePreset) {
 	f.repaintTab(tab, frame.Rect{})
 }
 
-// cycleDeviceEmulation toggles through Desktop -> iPhone -> Pixel -> iPad -> Desktop.
 func (f *framePath) cycleDeviceEmulation() {
 	if f.emulationPreset == nil {
 		f.SetDeviceEmulation(&DevicePresets[0])
@@ -96,7 +90,7 @@ func (f *framePath) cycleDeviceEmulation() {
 			if i+1 < len(DevicePresets) {
 				f.SetDeviceEmulation(&DevicePresets[i+1])
 			} else {
-				f.SetDeviceEmulation(nil) // cycle back to desktop
+				f.SetDeviceEmulation(nil)
 			}
 			return
 		}

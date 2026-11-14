@@ -17,11 +17,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
-// profile holds the stores every window of one invocation shares: one cookie
-// jar, one history, one bookmark store, one localStorage per origin, one
-// permissions store, one glyph atlas. The windowManager creates it once and
-// hands the same pointers to each framePath, so a bookmark added in one window
-// is visible in every other. It is an owned value, never a package global.
 type profile struct {
 	client                net.HTTP
 	privateClient         net.HTTP
@@ -40,10 +35,6 @@ type profile struct {
 	theme                 string
 }
 
-// buildProfile creates the shared stores once. It is the profile-level half of
-// the old build: preferences/download-dir resolution, fonts, HTTP clients,
-// bookmark/history load, and the registry/manager constructors, plus the
-// userscripts/flags/perms Load calls that used to run per build.
 func buildProfile(c config) (*profile, error) {
 	profilePreferences, prefErr := preferences.Load(c.preferencesFile)
 	if prefErr != nil {
@@ -120,7 +111,6 @@ func buildProfile(c config) (*profile, error) {
 	return p, nil
 }
 
-// close releases the shared HTTP clients once, after every window is gone.
 func (p *profile) close() {
 	if p.client != nil {
 		if err := p.client.Close(); err != nil {

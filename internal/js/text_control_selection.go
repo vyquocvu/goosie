@@ -53,7 +53,6 @@ func textSelectionApplies(node *dom.Node) bool {
 	case "email", "date", "month", "week", "time", "datetime-local", "number", "range", "color", "checkbox", "radio", "file", "hidden", "submit", "image", "reset", "button":
 		return false
 	default:
-		// The missing and invalid states both use the Text state.
 		return true
 	}
 }
@@ -127,8 +126,6 @@ func (r *Runtime) resetTextSelectionAfterValueSet(node *dom.Node, value string) 
 	r.setTextSelection(node, end, end, "none")
 }
 
-// SetTextControlSelection synchronizes an engine-owned user selection with
-// the script-visible selection on an input or textarea.
 func (r *Runtime) SetTextControlSelection(node *dom.Node, start, end int, direction string) {
 	if r == nil || !textSelectionApplies(node) {
 		return
@@ -136,8 +133,6 @@ func (r *Runtime) SetTextControlSelection(node *dom.Node, start, end int, direct
 	r.setTextSelection(node, start, end, direction)
 }
 
-// TextControlSelection returns the script-visible UTF-16 selection for node.
-// The engine uses it when a user action follows a script selection update.
 func (r *Runtime) TextControlSelection(node *dom.Node) (start, end int, direction string, ok bool) {
 	if r == nil || node == nil {
 		return 0, 0, "", false

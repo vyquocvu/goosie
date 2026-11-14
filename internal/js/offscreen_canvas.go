@@ -6,8 +6,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// offscreenCanvasData keeps the small, bounded subset of OffscreenCanvas used
-// by scripts and structured clone. Pixels are copied with the canvas.
 type offscreenCanvasData struct {
 	width, height int
 	context       *canvasContext2D

@@ -1,5 +1,3 @@
-// Package pdf implements a pure Go PDF document inspector, text extractor,
-// and viewer page renderer for in-browser PDF viewing without external tools.
 package pdf
 
 import (
@@ -16,13 +14,11 @@ import (
 	"strings"
 )
 
-// Page represents a single page in a PDF document.
 type Page struct {
 	Number int
 	Lines  []string
 }
 
-// Document represents a parsed PDF document.
 type Document struct {
 	Version string
 	Title   string
@@ -30,7 +26,6 @@ type Document struct {
 	Pages   []Page
 }
 
-// IsPDF reports whether data, contentType, or URL represents a PDF document.
 func IsPDF(data []byte, contentType, rawURL string) bool {
 	if bytes.HasPrefix(data, []byte("%PDF-")) {
 		return true
@@ -48,10 +43,8 @@ func IsPDF(data []byte, contentType, rawURL string) bool {
 	return false
 }
 
-// Parse extracts text content and metadata from a PDF byte slice.
 func Parse(data []byte, fallbackTitle string) (*Document, error) {
 	if !bytes.HasPrefix(data, []byte("%PDF-")) {
-		// Tolerant search for header within first 1024 bytes
 		idx := bytes.Index(data, []byte("%PDF-"))
 		if idx == -1 || idx > 1024 {
 			return nil, fmt.Errorf("pdf: invalid PDF header")
@@ -64,7 +57,6 @@ func Parse(data []byte, fallbackTitle string) (*Document, error) {
 		Title:   fallbackTitle,
 	}
 
-	// Extract version from header: %PDF-1.x
 	if len(data) >= 8 && string(data[:5]) == "%PDF-" {
 		end := bytes.IndexByte(data[:15], '\n')
 		if end == -1 {
@@ -75,7 +67,6 @@ func Parse(data []byte, fallbackTitle string) (*Document, error) {
 		}
 	}
 
-	// Extract Title from /Title (Value)
 	if titleMatch := regexp.MustCompile(`(?i)/Title\s*\(([^)]+)\)`).FindSubmatch(data); len(titleMatch) > 1 {
 		doc.Title = decodePDFString(string(titleMatch[1]))
 	}
@@ -83,7 +74,6 @@ func Parse(data []byte, fallbackTitle string) (*Document, error) {
 		doc.Title = fallbackTitle
 	}
 
-	// Find all streams
 	streams := extractStreams(data)
 	var allLines []string
 
@@ -97,7 +87,6 @@ func Parse(data []byte, fallbackTitle string) (*Document, error) {
 		}
 	}
 
-	// If stream extraction produced no lines, scan for uncompressed text literals
 	if len(allLines) == 0 {
 		reText := regexp.MustCompile(`\(([^\r\n()]{3,})\)\s*(?:Tj|'|")`)
 		matches := reText.FindAllSubmatch(data, -1)
@@ -111,7 +100,6 @@ func Parse(data []byte, fallbackTitle string) (*Document, error) {
 		}
 	}
 
-	// Group extracted lines into pages (e.g. ~40 lines per page, or split on /Page markers)
 	const linesPerPage = 45
 	if len(allLines) == 0 {
 		doc.Pages = []Page{
@@ -133,7 +121,6 @@ func Parse(data []byte, fallbackTitle string) (*Document, error) {
 	return doc, nil
 }
 
-// extractStreams locates all stream...endstream blocks and decodes /FlateDecode if compressed.
 func extractStreams(data []byte) [][]byte {
 	var streams [][]byte
 	streamTag := []byte("stream")
@@ -161,7 +148,6 @@ func extractStreams(data []byte) [][]byte {
 		streamData := data[start : start+endIdx]
 		offset = start + endIdx + len(endStreamTag)
 
-		// Check if preceding dictionary declared /FlateDecode
 		dictSearchStart := absStreamStart - 200
 		if dictSearchStart < 0 {
 			dictSearchStart = 0
@@ -185,12 +171,10 @@ func extractStreams(data []byte) [][]byte {
 	return streams
 }
 
-// extractTextFromStream parses PDF text operators: BT, ET, Tj, TJ, ', "
 func extractTextFromStream(stream []byte) string {
 	var sb strings.Builder
 	s := string(stream)
 
-	// Pattern 1: Tj string literals: (Hello World) Tj
 	reTj := regexp.MustCompile(`\(([^()]+)\)\s*Tj`)
 	matchesTj := reTj.FindAllStringSubmatch(s, -1)
 	for _, m := range matchesTj {
@@ -198,7 +182,6 @@ func extractTextFromStream(stream []byte) string {
 		sb.WriteString("\n")
 	}
 
-	// Pattern 2: Hex string literals: <48656c6c6f> Tj
 	reHex := regexp.MustCompile(`<([0-9A-Fa-f]+)>\s*Tj`)
 	matchesHex := reHex.FindAllStringSubmatch(s, -1)
 	for _, m := range matchesHex {
@@ -209,7 +192,6 @@ func extractTextFromStream(stream []byte) string {
 		}
 	}
 
-	// Pattern 3: Array of text chunks: [ (Chunk1) 20 (Chunk2) ] TJ
 	reTJ := regexp.MustCompile(`\[([^\]]+)\]\s*TJ`)
 	matchesTJ := reTJ.FindAllStringSubmatch(s, -1)
 	for _, m := range matchesTJ {
@@ -225,7 +207,6 @@ func extractTextFromStream(stream []byte) string {
 	return sb.String()
 }
 
-// decodePDFString unescapes standard PDF string escapes.
 func decodePDFString(s string) string {
 	var sb strings.Builder
 	for i := 0; i < len(s); i++ {
@@ -245,7 +226,6 @@ func decodePDFString(s string) string {
 			case '(', ')', '\\':
 				sb.WriteByte(s[i])
 			case '0', '1', '2', '3', '4', '5', '6', '7':
-				// Octal escape \ddd
 				oct := string(s[i])
 				if i+1 < len(s) && s[i+1] >= '0' && s[i+1] <= '7' {
 					i++
@@ -268,7 +248,6 @@ func decodePDFString(s string) string {
 	return sb.String()
 }
 
-// RenderHTML generates a full HTML page for the PDF viewer.
 func RenderHTML(doc *Document, rawURL string) string {
 	title := doc.Title
 	if title == "" {

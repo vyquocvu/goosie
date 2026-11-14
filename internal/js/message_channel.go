@@ -8,8 +8,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// messagePortEndpoint is one side of a channel. Transferring a port replaces
-// its wrapper while preserving the endpoint and its entanglement.
 type messagePortEndpoint struct {
 	peer  *messagePortEndpoint
 	owner *messagePort
@@ -144,8 +142,6 @@ func (r *Runtime) newMessagePort(state *messageChannelState, endpoint *messagePo
 			}
 		}
 		transfers := transferList(r.vm, transfer)
-		// Validate the complete list before detaching any entry. The source port
-		// itself cannot be transferred through its own postMessage call.
 		validated := make(map[*goja.Object]bool, len(transfers))
 		for _, value := range transfers {
 			obj, isObject := value.(*goja.Object)
@@ -180,10 +176,6 @@ func (r *Runtime) newMessagePort(state *messageChannelState, endpoint *messagePo
 				panic(r.dataCloneError("MessagePort is already closed"))
 			}
 		}
-		// Structured serialization must succeed before transferables are detached.
-		// Otherwise a DataCloneError could leave a port closed even though no
-		// message was posted. The direct ArrayBuffer transfer case is substituted
-		// below and does not need to be cloned here.
 		p.mu.Lock()
 		preflightEndpoint := p.endpoint
 		preflightClosed := p.closed
@@ -311,9 +303,6 @@ func (r *Runtime) newMessagePort(state *messageChannelState, endpoint *messagePo
 		if preclonedReady {
 			data = precloned
 		} else {
-			// postMessage snapshots its payload when called, even when both ports
-			// live in the same runtime. Never queue the sender's object directly:
-			// later mutations must not affect the receiver's message data.
 			cloned, err := cloneMessageValue(r, peer.r, data)
 			if err != nil {
 				panic(r.dataCloneError(err.Error()))
@@ -391,10 +380,6 @@ func isArrayBufferObject(vm *goja.Runtime, obj *goja.Object) bool {
 	if !ok {
 		return false
 	}
-	// Identify the buffer by its prototype chain rather than by exporting it:
-	// exporting a detached typed-array view panics inside goja, and a view's
-	// chain never reaches ArrayBuffer.prototype. Only a real ArrayBuffer is
-	// exported below, which is safe even when detached.
 	for p := obj.Prototype(); p != nil; p = p.Prototype() {
 		if p == proto {
 			buffer, ok := obj.Export().(goja.ArrayBuffer)
@@ -448,7 +433,6 @@ func messagePortFromObject(vm *goja.Runtime, value goja.Value) *messagePort {
 	return nil
 }
 
-// DrainMessagePortEvents dispatches queued messages on the runtime thread.
 func (r *Runtime) DrainMessagePortEvents() {
 	state, _ := r.vm.Get(messageChannelStateKey).Export().(*messageChannelState)
 	if state == nil {
@@ -482,7 +466,6 @@ func (r *Runtime) DrainMessagePortEvents() {
 			_ = init.Set("ports", portsArray)
 			event, err := r.vm.New(r.vm.Get("MessageEvent"), r.vm.ToValue("message"), init)
 			if err != nil || event == nil {
-				// Keep port delivery working if page code replaces MessageEvent.
 				event = r.vm.NewObject()
 				_ = event.Set("type", "message")
 				_ = event.Set("data", msg.data)

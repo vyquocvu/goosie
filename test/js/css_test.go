@@ -130,7 +130,6 @@ func TestCSS_RegisterProperty_Errors(t *testing.T) {
 	}
 	defer rt.Close()
 
-	// 1. Missing '--' prefix
 	err = rt.Run(`
 		CSS.registerProperty({
 			name: 'brand-color',
@@ -143,7 +142,6 @@ func TestCSS_RegisterProperty_Errors(t *testing.T) {
 		t.Errorf("CSS.registerProperty without '--' should throw SyntaxError, got nil")
 	}
 
-	// 2. Invalid syntax
 	err = rt.Run(`
 		CSS.registerProperty({
 			name: '--bad-syntax',
@@ -156,7 +154,6 @@ func TestCSS_RegisterProperty_Errors(t *testing.T) {
 		t.Errorf("CSS.registerProperty with invalid syntax should throw SyntaxError, got nil")
 	}
 
-	// 3. Missing inherits
 	err = rt.Run(`
 		CSS.registerProperty({
 			name: '--no-inherits',
@@ -168,7 +165,6 @@ func TestCSS_RegisterProperty_Errors(t *testing.T) {
 		t.Errorf("CSS.registerProperty without inherits should throw TypeError, got nil")
 	}
 
-	// 4. Initial value mismatch
 	err = rt.Run(`
 		CSS.registerProperty({
 			name: '--mismatch',
@@ -181,7 +177,6 @@ func TestCSS_RegisterProperty_Errors(t *testing.T) {
 		t.Errorf("CSS.registerProperty with mismatched initialValue should throw SyntaxError, got nil")
 	}
 
-	// 5. Duplicate registration
 	err = rt.Run(`
 		CSS.registerProperty({
 			name: '--dup',

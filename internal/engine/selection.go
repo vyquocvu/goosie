@@ -10,15 +10,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// selPos is one end of a selection: an index into the tree-order word list
-// plus a rune offset inside that word. Positions index the current arena, so
-// they are only meaningful until the next Reflow rebuilds it.
 type selPos struct {
 	word int
 	rune int
 }
 
-// SelectDirection is one arrow-key step for keyboard selection extension.
 type SelectDirection int
 
 const (
@@ -28,15 +24,6 @@ const (
 	SelectDown
 )
 
-// The selection state. selActive is true from press until reflow or a new
-// press; anchor is where the drag started, head where it currently reaches.
-// Both live on Session next to focus state, which Reflow also keeps while
-// selection dies, because word positions cannot survive an arena rebuild.
-
-// ExtendSelectionByKey moves the selection head one rune left or right, or one
-// visual line up or down, while the anchor stays where the selection started.
-// With no selection it starts at the beginning of the document, so Shift+Arrow
-// works before any pointer press. It reports whether the head moved.
 func (s *Session) ExtendSelectionByKey(dir SelectDirection) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -101,8 +88,6 @@ func (s *Session) ExtendSelectionByKey(dir SelectDirection) bool {
 	return true
 }
 
-// selWords returns the laid-out text word boxes in document order, skipping
-// whitespace-only runs the same way Find skips them when joining text.
 func (s *Session) selWords() []*layout.Object {
 	if s.Arena == nil {
 		return nil
@@ -130,9 +115,6 @@ func (s *Session) selWords() []*layout.Object {
 	return words
 }
 
-// HasTextAt reports whether a document-space point lies on a selectable text
-// line. The hit is the line box, not the glyph box: line-height leading
-// between wrapped lines must keep the I-beam down instead of flickering.
 func (s *Session) HasTextAt(x, y float32) bool {
 	for _, b := range s.textLineBands() {
 		if x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1 {
@@ -144,10 +126,6 @@ func (s *Session) HasTextAt(x, y float32) bool {
 
 type textBand struct{ x0, y0, x1, y1 float32 }
 
-// textLineBands merges word line-rects into visual lines. Document order is
-// not vertical order (absolute/float/flex content), so sort first; merge only
-// when bands overlap vertically and touch horizontally, keeping the gutter
-// between side-by-side columns out of the hit area.
 func (s *Session) textLineBands() []textBand {
 	words := s.selWords()
 	bands := make([]textBand, 0, len(words))
@@ -181,9 +159,6 @@ func (s *Session) textLineBands() []textBand {
 	return merged
 }
 
-// textLineRect grows the border box by half the explicit line-height leading.
-// line-height:normal (LineHeight <= 0) keeps the border rect; its font leading
-// is handled with the shaping work.
 func textLineRect(w *layout.Object) (x0, y0, x1, y1 float32) {
 	if w == nil {
 		return
@@ -202,10 +177,6 @@ func textLineRect(w *layout.Object) (x0, y0, x1, y1 float32) {
 	return
 }
 
-// posAt maps a document-space point to a selection position. It picks the
-// word whose vertical band contains y (or the nearest band when y falls
-// outside every word, e.g. past the end of the document), expands to the
-// whole visual line, and splits horizontally by rune.
 func (s *Session) posAt(words []*layout.Object, x, y float32) selPos {
 	if len(words) == 0 {
 		return selPos{}
@@ -240,8 +211,6 @@ func (s *Session) posAt(words []*layout.Object, x, y float32) selPos {
 	return selPos{word: lineEnd, rune: runeLen(words[lineEnd])}
 }
 
-// lineBounds returns the first and last word index sharing idx's vertical
-// band: the visual line a selection position sits on.
 func lineBounds(words []*layout.Object, idx int) (start, end int) {
 	_, by0, _, by1 := words[idx].BorderRect()
 	start, end = idx, idx
@@ -262,9 +231,6 @@ func lineBounds(words []*layout.Object, idx int) (start, end int) {
 	return start, end
 }
 
-// lineWordAtX returns the word in a visual line under x. A point in the gap
-// between words, or left of the line, resolves to the next word's start; a
-// point past the line resolves to the last word's end.
 func lineWordAtX(words []*layout.Object, start, end int, x float32) int {
 	for i := start; i <= end; i++ {
 		_, _, x1, _ := words[i].BorderRect()
@@ -275,11 +241,6 @@ func lineWordAtX(words []*layout.Object, start, end int, x float32) int {
 	return end
 }
 
-// runeX is the inverse of runeOffset: the x coordinate after idx runes,
-// advancing the pen with the same font metrics the paint builder uses.
-// When the word carries a GlyphOrder (bidi-reordered), the logical index is
-// mapped through the visual permutation so the caret lands where the glyph
-// edge actually sits on screen.
 func (s *Session) runeX(w *layout.Object, idx int) float32 {
 	runes := []rune(w.Node.DataContent)
 	x0, _, _, _ := w.BorderRect()
@@ -343,7 +304,6 @@ func (s *Session) runeX(w *layout.Object, idx int) float32 {
 	return x0 + float32((pen+32)>>6)
 }
 
-// nearestBand returns the word whose vertical band is closest to y.
 func nearestBand(words []*layout.Object, y float32) int {
 	best, bestDist := 0, float32(0)
 	for i, w := range words {
@@ -368,12 +328,6 @@ func runeLen(w *layout.Object) int {
 	return len([]rune(w.Node.DataContent))
 }
 
-// runeOffset converts an x inside a word's box to a rune index, walking the
-// same 26.6 fixed-point pen the paint builder places glyphs with, so the caret
-// boundary lands where the glyph edge is. A click in the left part of a rune
-// selects before it. When the word carries a GlyphOrder (bidi-reordered), the
-// walk iterates visual slots and maps each back to its logical rune, so the
-// returned index is the logical offset the rest of the selection code expects.
 func (s *Session) runeOffset(w *layout.Object, x float32) int {
 	runes := []rune(w.Node.DataContent)
 	x0, _, _, _ := w.BorderRect()
@@ -436,11 +390,6 @@ func (s *Session) runeOffset(w *layout.Object, x float32) int {
 	return len(runes)
 }
 
-// SelectAt starts a selection gesture at a document-space point, replacing any
-// selection in progress. It reports whether anything visible changed: a press
-// collapses to an empty point, so it only clears a previous highlight. A press
-// with no highlight before and none after changes no pixel and returns false,
-// letting the caller skip a repaint (and the full re-raster flash behind it).
 func (s *Session) SelectAt(x, y float32) bool {
 	had := s.HasSelection()
 	p := s.posAt(s.selWords(), x, y)
@@ -450,9 +399,6 @@ func (s *Session) SelectAt(x, y float32) bool {
 	return had
 }
 
-// SelectTo extends the active selection to a document-space point. It reports
-// whether the head moved, so a caller can skip repaints when a drag twitches
-// within one rune boundary.
 func (s *Session) SelectTo(x, y float32) bool {
 	if !s.selActive {
 		return false
@@ -465,14 +411,11 @@ func (s *Session) SelectTo(x, y float32) bool {
 	return true
 }
 
-// HasSelection reports whether a non-empty span is selected.
 func (s *Session) HasSelection() bool {
 	_, _, ok := s.orderedSel()
 	return ok
 }
 
-// orderedSel returns the selection ends in reading order. ok is false when no
-// selection is active or the ends collapsed to the same point.
 func (s *Session) orderedSel() (from, to selPos, ok bool) {
 	if !s.selActive {
 		return selPos{}, selPos{}, false
@@ -484,9 +427,6 @@ func (s *Session) orderedSel() (from, to selPos, ok bool) {
 	return from, to, from != to
 }
 
-// selCoverage resolves the selection against the current arena's word list.
-// A head past the end of the words (a stale position after a partial arena
-// change) reads as no selection rather than a panic.
 func (s *Session) selCoverage() (words []*layout.Object, from, to selPos, ok bool) {
 	from, to, ok = s.orderedSel()
 	if !ok {
@@ -499,8 +439,6 @@ func (s *Session) selCoverage() (words []*layout.Object, from, to selPos, ok boo
 	return words, from, to, true
 }
 
-// SelectionText joins the selected words, separated by spaces within a line
-// and newlines where the band gap says a line break intervened.
 func (s *Session) SelectionText() string {
 	words, from, to, ok := s.selCoverage()
 	if !ok {
@@ -536,10 +474,7 @@ func (s *Session) SelectionText() string {
 	return b.String()
 }
 
-// selectionSpans returns the paint-side highlight rects, one per selected
-// word box, with edge words clipped to the selected rune range.
 func (s *Session) selectionSpans() []paint.SelSpan {
-	// IME composition: highlight the marked range in contenteditable.
 	if s.imeComposing && s.markedHasNode && s.marked != "" {
 		if spans := s.imeMarkedSpans(); len(spans) > 0 {
 			return spans
@@ -566,14 +501,10 @@ func (s *Session) selectionSpans() []paint.SelSpan {
 	return spans
 }
 
-// imeMarkedSpans returns the selection spans for the IME marked range in
-// contenteditable. The marked text is already in the DOM node; this finds the
-// layout object for the node and returns a span covering the marked range.
 func (s *Session) imeMarkedSpans() []paint.SelSpan {
 	if s.Arena == nil {
 		return nil
 	}
-	// Find the layout object for the marked node.
 	var markedObj *layout.Object
 	for i := range s.Arena.Objects {
 		if s.Arena.Objects[i].Node != nil && s.Arena.Objects[i].Node.ID == s.markedNode {
@@ -584,13 +515,11 @@ func (s *Session) imeMarkedSpans() []paint.SelSpan {
 	if markedObj == nil {
 		return nil
 	}
-	// The marked range starts at markedOffset and extends for len(marked) runes.
 	start := s.markedOffset
 	end := start + len([]rune(s.marked))
 	return []paint.SelSpan{{Key: markedObj.Key, Start: start, End: end}}
 }
 
-// SelectAll selects all text in the document. It returns true if there is text to select.
 func (s *Session) SelectAll() bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -605,7 +534,6 @@ func (s *Session) SelectAll() bool {
 	return true
 }
 
-// ClearSelection removes any active document text selection.
 func (s *Session) ClearSelection() bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()

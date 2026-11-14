@@ -7,18 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// GOOSIE-FADESETTLE-001 owns the readiness rule, and the rule is only as good
-// as the distinction this package makes: the timers a page queued while it was
-// still loading are the ones a host must wait for, and every timer it queues
-// afterwards is polling or interaction that a screenshot must not wait for.
-// These are white-box because the mark is per-Runtime state no exported call
-// reads directly. Measured reference for why the split matters: Chromium
-// 131.0.6778.33 sampling https://www.gov.vn with setTimeout/setInterval hooked
-// from document start (2026-11-13, viewport 1280x800) logged 81 timers before
-// the load event, one of them 24 hours out, and the visible layout area never
-// moved after 0ms; vnexpress logged 938 before load and moved once, between
-// 200ms and 300ms.
-
 func markedRuntime(t *testing.T, url string) *Runtime {
 	t.Helper()
 	limits := dom.ParseLimits{Nodes: 64, Depth: 16, Attributes: 16, AttributeBytes: 1024}
@@ -47,7 +35,6 @@ func TestTimersQueuedBeforeLoadAreMarkedAsStartupWork(t *testing.T) {
 	if due <= 300*time.Millisecond || due > 400*time.Millisecond {
 		t.Fatalf("startup timer due in %v, want just under 400ms", due)
 	}
-	// The earliest one answers the question, not the first one scheduled.
 	if err := rt.Run(`setTimeout(function(){}, 20)`, "boot2.js"); err != nil {
 		t.Fatal(err)
 	}
@@ -68,10 +55,6 @@ func TestTimersQueuedAfterTheLoadStepAreNotStartupWork(t *testing.T) {
 	}
 }
 
-// One firing is the whole debt. A repeating timer the page boots
-// has to be waited for once and then dropped, or a 100ms heartbeat would hold
-// every screenshot run on the page for as long as the run is allowed to live.
-//
 // qc:BR-283
 func TestStartupIntervalCountsUntilItsFirstFire(t *testing.T) {
 	rt := markedRuntime(t, "https://example.test/")

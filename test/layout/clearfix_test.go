@@ -20,8 +20,6 @@ func findByID(arena *layout.Arena, id string) *layout.Object {
 	return nil
 }
 
-// sessionSheets resolves with the document's own <style> blocks (the plain
-// session helper ignores them, so CSS-dependent tests must collect sheets).
 func sessionSheets(t *testing.T, html string, viewportW float32) *layout.Arena {
 	t.Helper()
 	doc := domtest.Parse(html)
@@ -43,10 +41,6 @@ func sessionSheets(t *testing.T, html string, viewportW float32) *layout.Arena {
 	return arena
 }
 
-// The float-containment clearfix (.row:after{content:"";display:table;
-// clear:both}) is how float grids keep their height. content:"" is generated
-// content per CSS (an empty box), not no content: without the clearing box
-// the row collapses and everything after slides up over the floats.
 func TestClearfixContainsFloats(t *testing.T) {
 	arena := sessionSheets(t, `<html><head><style>
 .w3-row:after{content:"";display:table;clear:both}

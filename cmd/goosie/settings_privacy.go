@@ -12,10 +12,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 )
 
-// clearDataRequest is the set of browsing-data scopes the settings page asked
-// to clear. History has a time range because the store already supports one;
-// cookies, local storage, the response cache, and the saved session are all
-// all-or-nothing.
 type clearDataRequest struct {
 	History      bool
 	HistoryScope string
@@ -77,9 +73,6 @@ func (r clearDataRequest) labels() []string {
 	return labels
 }
 
-// buildPrivacySettingsCard renders the browsing-data controls. Private sessions
-// never write this data to the profile, so the card explains that instead of
-// offering a destructive action that would have nothing to clear.
 func (f *framePath) buildPrivacySettingsCard(values url.Values) string {
 	var b strings.Builder
 	b.WriteString(`<div class="card"><h1>Privacy &amp; browsing data</h1>`)
@@ -156,8 +149,6 @@ func (f *framePath) buildPrivacySettingsCard(values url.Values) string {
 	return b.String()
 }
 
-// cookieSite is one domain that currently holds cookies, as listed by the
-// per-site clear control. Counts are exact-domain, matching RemoveForDomain.
 type cookieSite struct {
 	domain string
 	count  int
@@ -234,9 +225,6 @@ func siteCookieConfirmHTML(site string, count int) string {
 	return b.String()
 }
 
-// clearSiteCookies removes one exact domain's cookies and rewrites the profile
-// file so the deletion survives a restart. Other sites stay in memory and on
-// disk; a failed save is reported instead of being hidden.
 func (f *framePath) clearSiteCookies(site string) (removed int, problem string) {
 	if f.client == nil || f.client.Jar() == nil {
 		return 0, "cookies are unavailable in this session"
@@ -253,8 +241,6 @@ func (f *framePath) clearSiteCookies(site string) (removed int, problem string) 
 	return removed, ""
 }
 
-// privacyConfirmHTML carries the requested scopes into a second GET request so
-// clearing only happens after the user has seen exactly what will be removed.
 func privacyConfirmHTML(req clearDataRequest) string {
 	var b strings.Builder
 	b.WriteString(`<div role="alertdialog" aria-label="Confirm clearing browsing data" style="background:#fef7e0;border:1px solid #f9ab00;border-radius:6px;padding:12px 16px;margin:16px 0;font-size:13px;color:#b06000;">
@@ -289,9 +275,6 @@ func privacyConfirmHTML(req clearDataRequest) string {
 	return b.String()
 }
 
-// clearProfileData erases the requested scopes in memory and on disk. It
-// reports what was fully cleared and what failed, so a partial clear is visible
-// rather than silent.
 func (f *framePath) clearProfileData(req clearDataRequest) (removed, problems []string) {
 	if req.History {
 		if f.history == nil {

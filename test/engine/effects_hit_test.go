@@ -10,22 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// BR-073 asks that border-radius, outline and box-shadow effects do not break
-// bounds or hit testing. The bounds half is scored by
-// TestLayoutParityWithChromium through testdata/layout-parity/effects-001.html;
-// these probes are the hit-testing half, measured against
-// scripts/verify-br073-effects.js on this host:
-//
-//	HIT 260,50  -> radius   # centre of the rounded box
-//	HIT 202,22  -> under    # inside the border box, outside the corner curve
-//	HIT 230,22  -> radius   # inside the corner curve
-//	HIT 192,170 -> under    # the outline ring is not part of the hit area
-//	HIT 196,170 -> under    # gap between border box and outline
-//	HIT 330,300 -> under    # the shadow band right of the box
-//	HIT 250,330 -> under    # the shadow band below the box
-//	HIT 260,290 -> shadow   # interior still hits the casting box
-//	HIT 10,10   -> under    # plain underlay
-//
 // qc:BR-073
 func TestHitTestingIgnoresPaintOrderOfEffects(t *testing.T) {
 	sess := newEffectsSession(t)
@@ -39,10 +23,6 @@ func TestHitTestingIgnoresPaintOrderOfEffects(t *testing.T) {
 	}
 }
 
-// The click path resolves a control through activatableAt, so it has to cut the
-// same corner paint cuts: a pointer landing on the tip of a rounded button
-// belongs to what is underneath, and only the interior activates the control.
-//
 // qc:BR-073
 func TestClickOnARoundedCornerDoesNotActivateThatControl(t *testing.T) {
 	html := `<!doctype html><html><head><style>` +
@@ -56,8 +36,6 @@ func TestClickOnARoundedCornerDoesNotActivateThatControl(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 	defer sess.Close()
-	// Box-relative (1,1) with a 40px corner: outside the quarter ellipse, and
-	// Chromium reports the div there.
 	if sess.ClickAt(21, 21) {
 		t.Error("ClickAt on the cut-away corner activated the rounded button")
 	}

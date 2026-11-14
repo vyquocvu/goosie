@@ -29,26 +29,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// This file is the only place the whole stack meets: a real HTTP server, the
-// engine's real download pipeline and controller, the real AVFoundation decoder,
-// and the real paint output. Everything else in the media tests drives one of
-// those against a fake for the others, which is how it should be — but a fake on
-// every side of a boundary can agree with itself and still be wrong about the
-// thing in the middle.
-//
-// It needs no display. AVPlayer owns the audio and the clock and hands pixels
-// over instead of drawing them, so the only thing the process must supply is a
-// main-thread run loop, which TestMain below does the way the browser's own
-// GoosieAppRun does.
-//
-// There is no build tag here on purpose. A tag would take this file out of a
-// CGO_ENABLED=0 build entirely, and a suite that never runs is a suite that
-// reports green; instead the tests compile everywhere and skip where there is no
-// decoder, which is the one report a reader can trust. cgo stays confined to
-// internal/platform/darwin, which is where the archtest requires it.
-
-// nativeBackend returns the real decoder, or skips the test on a build that has
-// none.
 func nativeBackend(t *testing.T) media.Backend {
 	t.Helper()
 	b := darwin.NewMediaBackend()
@@ -58,13 +38,6 @@ func nativeBackend(t *testing.T) media.Backend {
 	return b
 }
 
-// TestMain pins the main goroutine to the process main thread and services that
-// thread's run loop while the tests run. AVPlayer will not prepare its item on any
-// other thread: a worker with its own CFRunLoop turns the loop faithfully and the
-// item's status still never leaves Unknown, with no error to explain it.
-//
-// A build with no backend gets the plain runner. Pumping a run loop that has no
-// shim behind it would spin the default case at full speed for the whole suite.
 func TestMain(m *testing.M) {
 	if darwin.NewMediaBackend() == nil {
 		os.Exit(m.Run())
@@ -86,9 +59,6 @@ func TestMain(m *testing.M) {
 	}
 }
 
-// nativeMediaSession serves a real MP4 over HTTP and builds a session that plays
-// it through the real backend. It returns the session, the element's controller
-// and the server, with everything cleaned up on test end.
 func nativeMediaSession(t *testing.T, extra ...engine.Option) (*engine.Session, media.Controller, *httptest.Server) {
 	t.Helper()
 	backend := nativeBackend(t)
@@ -137,9 +107,6 @@ func nativeMediaSession(t *testing.T, extra ...engine.Option) (*engine.Session, 
 	return sess, c, srv
 }
 
-// pumpNative polls the session until want holds. It allows longer than the fake
-// backend's tests because a real decoder has to read a file and initialise a
-// hardware or software pipeline before the first frame exists.
 func pumpNative(t *testing.T, sess *engine.Session, what string, want func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(30 * time.Second)
@@ -153,15 +120,9 @@ func pumpNative(t *testing.T, sess *engine.Session, what string, want func() boo
 	t.Fatalf("%s never happened", what)
 }
 
-// TestNativeEndToEndPlaysARealVideo is the acceptance test for the whole feature,
-// short of a human looking at a screen: a page loads a real MP4 over HTTP, the
-// browser downloads it, AVFoundation decodes it, and a real decoded frame reaches
-// the display list that the compositor presents.
 func TestNativeEndToEndPlaysARealVideo(t *testing.T) {
 	sess, c, _ := nativeMediaSession(t)
 
-	// The src attribute was recorded at construction and nothing was fetched for
-	// it: this engine ignores preload hints.
 	if got := c.Snapshot().State; got != media.StateEmpty {
 		t.Fatalf("state before any request = %v, want StateEmpty", got)
 	}
@@ -169,7 +130,6 @@ func TestNativeEndToEndPlaysARealVideo(t *testing.T) {
 		t.Fatalf("currentSrc before loading = %q, want empty", got)
 	}
 
-	// A gesture, then play — which is what a press on the painted control does.
 	sess.SetMediaActivation(true)
 	op, err := c.Play()
 	sess.SetMediaActivation(false)
@@ -195,8 +155,6 @@ func TestNativeEndToEndPlaysARealVideo(t *testing.T) {
 	pumpNative(t, sess, "playback", func() bool {
 		return c.Snapshot().State == media.StatePlaying
 	})
-	// The play request settles only when playback has actually begun, which is
-	// the whole reason play() is not a resolved promise handed back on success.
 	var resolved bool
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && !resolved {
@@ -212,7 +170,6 @@ func TestNativeEndToEndPlaysARealVideo(t *testing.T) {
 		t.Fatal("the play request never settled after playback started")
 	}
 
-	// A real decoded frame, through the real paint path, into a real display list.
 	var view paint.VideoView
 	pumpNative(t, sess, "a decoded frame", func() bool {
 		v, ok := sess.MediaView(videoNode(t, sess.Doc))
@@ -249,14 +206,11 @@ func TestNativeEndToEndPlaysARealVideo(t *testing.T) {
 		t.Fatal("the decoded frame never reached the display list")
 	}
 
-	// The position advances on its own, which is what distinguishes a video that
-	// is playing from one that decoded a single frame and stopped.
 	first := c.Snapshot().Position
 	pumpNative(t, sess, "the position to advance", func() bool {
 		return c.Snapshot().Position > first+0.05
 	})
 
-	// Pause, then seek: the two things a user does next.
 	c.Pause()
 	pumpNative(t, sess, "the pause", func() bool { return c.Snapshot().State == media.StatePaused })
 	before := c.Snapshot().Seq
@@ -266,16 +220,12 @@ func TestNativeEndToEndPlaysARealVideo(t *testing.T) {
 		return s.Position > 1.3 && s.Position < 1.7 && s.Seq > before
 	})
 
-	// Teardown stops the player and removes the file it was handed.
 	sess.Close()
 	if got := c.Snapshot().State; got != media.StateClosed {
 		t.Fatalf("state after Close = %v, want StateClosed", got)
 	}
 }
 
-// TestNativeEndToEndLeavesNothingBehind pins the cleanup half of the same journey:
-// a document that goes away takes its decoder, its temporary directory and its
-// audio with it.
 func TestNativeEndToEndLeavesNothingBehind(t *testing.T) {
 	sess, c, _ := nativeMediaSession(t)
 	sess.SetMediaActivation(true)
@@ -302,11 +252,6 @@ func TestNativeEndToEndLeavesNothingBehind(t *testing.T) {
 	}
 }
 
-// opaqueEnough reports whether a decoded frame has visible content. The test
-// pattern is bright and busy, so a frame that came through the BGRA conversion
-// with its alpha zeroed fails here — which is the mistake worth catching, because
-// a fully transparent frame composites to nothing and looks exactly like a video
-// that never started.
 func opaqueEnough(img *image.RGBA) bool {
 	opaque := 0
 	for i := 3; i < len(img.Pix); i += 4 {
@@ -317,20 +262,12 @@ func opaqueEnough(img *image.RGBA) bool {
 	return opaque*4 >= len(img.Pix)/4
 }
 
-// refFrames is testdata/media/ref-frames.json: what the clip's pixels are,
-// measured by a decoder that is not this one.
 type refFrames struct {
 	Grid      [2]int                  `json:"grid"`
 	Tolerance float64                 `json:"tolerancePerChannel"`
 	Frames    map[string][][3]float64 `json:"frames"`
 }
 
-// blockMeans reduces a frame to the mean R, G and B of each cell of a cols x rows
-// grid, row-major. A block mean rather than a per-pixel diff because the question
-// is whether AVFoundation decoded the right picture, and a mean survives the
-// one-or-two-unit rounding a different YUV matrix produces while a per-pixel
-// comparison would not. The frames are premultiplied, which is the same as
-// straight RGB here: the clip is fully opaque, and opaqueEnough is what proves it.
 func blockMeans(img *image.RGBA, cols, rows int) [][3]float64 {
 	b := img.Bounds()
 	bw, bh := b.Dx()/cols, b.Dy()/rows
@@ -354,15 +291,6 @@ func blockMeans(img *image.RGBA, cols, rows int) [][3]float64 {
 	return out
 }
 
-// settleFrames pumps until the decoder has stopped handing samples over, and
-// returns the frame sequence it settled on.
-//
-// The quiet period is the point, not the return value. A sample that was already
-// in flight when the pause landed increments Seq *after* the seek is issued, so a
-// wait for "Seq changed" is satisfied by the pre-seek picture and the test reads
-// the frame the player was showing a moment ago rather than the one it seeked to.
-// Nothing can be in flight once Seq has held still, and after that a change means
-// the seek's own frame arrived.
 func settleFrames(t *testing.T, sess *engine.Session, c media.Controller) uint64 {
 	t.Helper()
 	const quietPolls = 10
@@ -383,15 +311,6 @@ func settleFrames(t *testing.T, sess *engine.Session, c media.Controller) uint64
 	return last
 }
 
-// TestNativeFramesMatchTheSourceDecode is the visual-comparison half of the
-// acceptance evidence, and it is the one test here that can be wrong about
-// colour rather than about plumbing. It seeks a paused player to two timestamps
-// and compares the frame AVFoundation handed over against a decode of the same
-// bitstream taken with ffmpeg, cell by cell.
-//
-// The seek is frame-accurate on both sides — the native player passes
-// kCMTimeZero for both tolerances — so there is no timing slack to hide behind
-// and the only allowance is the colour one the fixture declares.
 func TestNativeFramesMatchTheSourceDecode(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "media", "ref-frames.json"))
 	if err != nil {
@@ -486,17 +405,6 @@ func TestNativeFramesMatchTheSourceDecode(t *testing.T) {
 	}
 }
 
-// TestNativeDumpCompositedPage writes the whole page — a real decoded frame in
-// the video, the control bar over it — to $GOOSIE_MEDIA_DUMP/goosie-page.png.
-// It is an inspection tool rather than an assertion: the assertions about the
-// same pixels live in TestNativeFramesMatchTheSourceDecode, and this is the one
-// place the frame can be seen in its element instead of only measured. Skipped
-// unless the variable is set, so a plain test run never spends a compositor on a
-// picture nobody asked for.
-//
-// The wiring is cmd/goosie-headless's — the real tile rasterizer, composer and
-// present path against a headless window — which is as close to the pixels a
-// display would show as a process without one can get.
 func TestNativeDumpCompositedPage(t *testing.T) {
 	dir := os.Getenv("GOOSIE_MEDIA_DUMP")
 	if dir == "" {
@@ -523,15 +431,11 @@ func TestNativeDumpCompositedPage(t *testing.T) {
 		return s.Seq > before && math.Abs(s.Position-0.5) < 0.05
 	})
 
-	// The frame reaches the layout arena on a reflow, which is where the
-	// browser's own frame picks it up between paints.
 	if err := sess.Reflow(800); err != nil {
 		t.Fatalf("Reflow: %v", err)
 	}
 	dumpCompositedPage(t, sess, fonts, filepath.Join(dir, "goosie-page.png"))
 
-	// The muted mark is drawn geometry too, and it is only ever visible on a
-	// muted player, so the dump takes one of each.
 	c.SetMuted(true)
 	pumpNative(t, sess, "the mute", func() bool { return c.Snapshot().Muted })
 	if err := sess.Reflow(800); err != nil {
@@ -540,7 +444,6 @@ func TestNativeDumpCompositedPage(t *testing.T) {
 	dumpCompositedPage(t, sess, fonts, filepath.Join(dir, "goosie-page-muted.png"))
 }
 
-// dumpCompositedPage renders one presented frame of the session to path.
 func dumpCompositedPage(t *testing.T, sess *engine.Session, fonts *raster.Fonts, path string) {
 	t.Helper()
 	const dpr = 2

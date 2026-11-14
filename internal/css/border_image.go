@@ -4,7 +4,6 @@ import (
 	"strings"
 )
 
-// BorderImageRepeat is one axis of border-image-repeat.
 type BorderImageRepeat uint8
 
 const (
@@ -14,56 +13,32 @@ const (
 	BiRepeatSpace
 )
 
-// BorderImageWidthUnit says how one border-image-width edge resolves.
 type BorderImageWidthUnit uint8
 
 const (
-	// BiWidthAuto uses the intrinsic size of the slice region.
 	BiWidthAuto BorderImageWidthUnit = iota
-	// BiWidthNumber multiplies the corresponding border-width.
 	BiWidthNumber
-	// BiWidthLength is an absolute CSS-px length.
 	BiWidthLength
 )
 
-// BorderImage is one parsed border-image declaration set. Slice edges are
-// numbers (source px) or percentages of the source dimensions; Width edges
-// resolve against the border widths (number), absolute lengths, or the slice
-// intrinsics (auto). Slice/Width/Outset follow CSS TRBL order.
 type BorderImage struct {
-	// Source is the url() payload; empty means no image (border-image-source:
-	// none or unparseable).
-	Source string
-	// HasSlice reports an explicit border-image-slice (the initial 100%
-	// behaves the same, but explicitness gates nothing here).
-	HasSlice bool
-	Slice    [4]float32
-	// SlicePct marks percentage edges; number edges are source px. Fill
-	// paints the middle region; without it the middle stays transparent.
-	SlicePct [4]bool
-	Fill     bool
-	// HasWidth reports an explicit border-image-width (initial 1, i.e. one
-	// border-width, paints the same when width is uniform).
-	HasWidth bool
-	Width    [4]float32
-	WidthU   [4]BorderImageWidthUnit
-	// WidthPct marks percentage edges, resolved against the border-image
-	// area at paint time (stored alongside a Length unit).
+	Source    string
+	HasSlice  bool
+	Slice     [4]float32
+	SlicePct  [4]bool
+	Fill      bool
+	HasWidth  bool
+	Width     [4]float32
+	WidthU    [4]BorderImageWidthUnit
 	WidthPct  [4]bool
 	HasOutset bool
 	Outset    [4]float32
-	// OutsetN marks number edges (multiples of the border width); length
-	// edges are CSS px.
-	OutsetN [4]bool
-	// HasRepeat marks an explicit border-image-repeat: stretch is both the
-	// zero value and the initial, so modes alone cannot tell "declared".
+	OutsetN   [4]bool
 	HasRepeat bool
 	RepeatX   BorderImageRepeat
 	RepeatY   BorderImageRepeat
 }
 
-// ParseBorderImageSource reads border-image-source: none | url(...). Only
-// url() payloads return a source; gradients and none return "".
 func ParseBorderImageSource(value string) string {
 	v := strings.TrimSpace(value)
 	if strings.EqualFold(v, "none") || v == "" {
@@ -75,10 +50,6 @@ func ParseBorderImageSource(value string) string {
 	return ""
 }
 
-// borderImageURL returns the URL the first url() in v denotes, escapes decoded.
-// It defers to the shared ScanURL so a border-image-source whose payload contains
-// a ')' — an SVG data URI like url("…fill='rgb(0,0,255)'…") — is kept whole rather
-// than cut at the first parenthesis.
 func borderImageURL(v string) (string, bool) {
 	t, ok := ScanURL(v)
 	if !ok {
@@ -91,8 +62,6 @@ func borderImageURL(v string) (string, bool) {
 	return u, true
 }
 
-// ParseBorderImageSlice reads border-image-slice: 1-4 numbers/percentages
-// with an optional fill keyword in any position.
 func ParseBorderImageSlice(value string) (BorderImage, bool) {
 	var bi BorderImage
 	toks := strings.Fields(value)
@@ -138,9 +107,6 @@ func ParseBorderImageSlice(value string) (BorderImage, bool) {
 	return bi, true
 }
 
-// ParseBorderImageWidth reads border-image-width: 1-4 of length | number |
-// percentage | auto. Percentages resolve against the border-image area;
-// numbers multiply the border width.
 func ParseBorderImageWidth(value string) (BorderImage, bool) {
 	var bi BorderImage
 	toks := strings.Fields(value)
@@ -196,8 +162,6 @@ func ParseBorderImageWidth(value string) (BorderImage, bool) {
 	return bi, true
 }
 
-// ParseBorderImageOutset reads border-image-outset: 1-4 lengths or numbers
-// (multiples of the border width). Negatives are invalid.
 func ParseBorderImageOutset(value string) (BorderImage, bool) {
 	var bi BorderImage
 	toks := strings.Fields(value)
@@ -231,8 +195,6 @@ func ParseBorderImageOutset(value string) (BorderImage, bool) {
 	return bi, true
 }
 
-// ParseBorderImageRepeat reads border-image-repeat: 1-2 of stretch | repeat
-// | round | space.
 func ParseBorderImageRepeat(value string) (BorderImage, bool) {
 	var bi BorderImage
 	toks := strings.Fields(value)
@@ -264,17 +226,11 @@ func ParseBorderImageRepeat(value string) (BorderImage, bool) {
 	return bi, true
 }
 
-// ParseBorderImageShorthand splits border-image into its longhand sources:
-// source and slice before the first slash, width between the slashes, outset
-// after the second, and repeat keywords (which may sit in any section after
-// the source). It returns the longhand value strings for the caller to parse.
 func ParseBorderImageShorthand(value string) (source, slice, width, outset, repeat string, ok bool) {
 	parts := splitTopLevel(value, '/')
 	if len(parts) == 0 || len(parts) > 3 {
 		return "", "", "", "", "", false
 	}
-	// Repeat keywords may appear in any section; pull them out first so the
-	// section parsers see only their own grammar.
 	var repToks []string
 	strip := func(s string) string {
 		var keep []string
@@ -295,8 +251,6 @@ func ParseBorderImageShorthand(value string) (source, slice, width, outset, repe
 		return "", "", "", "", "", false
 	}
 	repeat = strings.Join(repToks, " ")
-	// The source is the url()/none/gradient token: the first token of the
-	// first section that opens url( or names none.
 	toks := strings.Fields(parts[0])
 	srcIdx := -1
 	for i, tok := range toks {
@@ -309,11 +263,6 @@ func ParseBorderImageShorthand(value string) (source, slice, width, outset, repe
 	if srcIdx < 0 {
 		return "", "", "", "", "", false
 	}
-	// A url() payload may itself contain spaces and ')'; let the shared scanner
-	// find the token's end rather than stopping at the first token that contains
-	// a ')' — a quoted payload like `url("…rgb(0,0,255) …")` has one in the
-	// middle, and splitting there would truncate the source and misread the rest
-	// as slice values.
 	source = toks[srcIdx]
 	rest := append([]string{}, toks[:srcIdx]...)
 	if strings.HasPrefix(strings.ToLower(source), "url(") {
@@ -337,9 +286,6 @@ func ParseBorderImageShorthand(value string) (source, slice, width, outset, repe
 	return source, slice, width, outset, repeat, true
 }
 
-// strictNumber parses a bare CSS number: no units, no trailing garbage.
-// parseFloat64 accepts numeric prefixes ("10px" reads as 10), which is right
-// for error-tolerant grammars but wrong for slice, where a length is invalid.
 func strictNumber(s string) (float32, bool) {
 	if s == "" {
 		return 0, false
@@ -358,7 +304,6 @@ func strictNumber(s string) (float32, bool) {
 	return float32(f), true
 }
 
-// expandBox spreads 1-4 TRBL values the way all CSS box shorthands do.
 func expandBox(v []float32) [4]float32 {
 	var o [4]float32
 	switch len(v) {
@@ -374,7 +319,6 @@ func expandBox(v []float32) [4]float32 {
 	return o
 }
 
-// expandBoxBools spreads 1-4 TRBL flags alongside expandBox.
 func expandBoxBools(v []bool) [4]bool {
 	var o [4]bool
 	switch len(v) {
@@ -390,7 +334,6 @@ func expandBoxBools(v []bool) [4]bool {
 	return o
 }
 
-// expandBoxUnits spreads 1-4 TRBL width units alongside expandBox.
 func expandBoxUnits(v []BorderImageWidthUnit) [4]BorderImageWidthUnit {
 	var o [4]BorderImageWidthUnit
 	switch len(v) {

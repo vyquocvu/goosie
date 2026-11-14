@@ -13,7 +13,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// EditAction is one keyboard edit operation applied to the focused control.
 type EditAction uint8
 
 const (
@@ -32,7 +31,6 @@ const (
 	EditPageDown
 )
 
-// controlEditable reports whether n is a control the engine can focus and edit.
 func controlEditable(n *dom.Node) bool {
 	return n != nil && n.Element() &&
 		(n.DataAtom == dom.AtomInput || n.DataAtom == dom.AtomTextarea)
@@ -56,12 +54,6 @@ func textSelectableControl(n *dom.Node) bool {
 	}
 }
 
-// clickFocusable reports whether a click on n should give it focus. Pointer
-// focus follows the same focusable-area rules as element.focus(): text
-// controls, selects, contenteditable, and elements focusable by tabindex or by
-// their element type (buttons, links, summaries). Chromium focuses these on
-// mousedown, so refusing the click would leave the focus state — and the
-// interaction-parity final state — divergent.
 func clickFocusable(n *dom.Node) bool {
 	if n == nil || !n.Element() || dom.IsFormControlDisabled(n) {
 		return false
@@ -69,9 +61,6 @@ func clickFocusable(n *dom.Node) bool {
 	return programmaticallyFocusable(n)
 }
 
-// controlAtMatching walks the arena in reverse paint order for the box
-// containing the point, then walks that box's ancestors for an element the
-// caller's predicate admits.
 func (s *Session) controlAtMatching(x, y float32, admit func(*dom.Node) bool) *dom.Node {
 	if s.Arena == nil {
 		return nil
@@ -98,27 +87,16 @@ func (s *Session) controlAtMatching(x, y float32, admit func(*dom.Node) bool) *d
 	return nil
 }
 
-// controlAt finds the editable control at a point. Hover uses it to decide
-// where the text cursor belongs, so it stays narrower than click-to-focus.
 func (s *Session) controlAt(x, y float32) *dom.Node {
 	return s.controlAtMatching(x, y, controlEditable)
 }
 
-// HasControlAt reports whether an editable control is laid out at the
-// document-space point. Hover uses it to ask for the text cursor.
 func (s *Session) HasControlAt(x, y float32) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.controlAt(x, y) != nil
 }
 
-// FocusControl focuses the control at the document point, blurring any current
-// focus. Clicking empty space blurs; clicking a text control can also move its
-// caret without changing focus. Returns whether focus or caret state changed.
-// Any focus change ends composition: the marked text belonged to the control
-// that had focus.
-// Fires "blur" and "focus" events on the affected controls, and a "change"
-// event on the blurred control if its value was modified during focus.
 func (s *Session) FocusControl(x, y float32) bool {
 	s.opMu.Lock()
 	n := s.controlAtMatching(x, y, clickFocusable)
@@ -140,11 +118,6 @@ func (s *Session) FocusControl(x, y float32) bool {
 	return changed || caretChanged
 }
 
-// placeTextControlCaretLocked maps a pointer's x coordinate to the nearest
-// rune boundary in a single-line text input. The input paint path uses the same
-// glyph advances from the content-box origin. Textarea line wrapping and
-// horizontal scrolling need separate geometry and are intentionally not
-// approximated here.
 func (s *Session) placeTextControlCaretLocked(n *dom.Node, x float32) bool {
 	if n == nil || n.DataAtom != dom.AtomInput || !textSelectableControl(n) {
 		return false
@@ -175,8 +148,6 @@ func (s *Session) placeTextControlCaretLocked(n *dom.Node, x float32) bool {
 			}
 			pen += advance
 			if rel < float32((pen+32)>>6) {
-				// Split each glyph at its midpoint, matching ordinary text
-				// hit testing instead of always placing before the glyph.
 				prev := pen - advance
 				if rel >= float32((prev+advance/2+32)>>6) {
 					caret = i + 1
@@ -198,15 +169,10 @@ placed:
 	return changed
 }
 
-// FocusNode handles an element.focus() call from the document's JavaScript
-// runtime. Programmatic focus works for form controls and elements with a
-// valid tabindex, even when they are not editable controls.
 func (s *Session) FocusNode(n *dom.Node) bool {
 	return s.focusNode(n, true)
 }
 
-// RestoreFocusNode performs the focus restoration step used when a dialog
-// closes. Restoring focus must not scroll the previously focused node.
 func (s *Session) RestoreFocusNode(n *dom.Node) bool {
 	return s.focusNode(n, false)
 }
@@ -225,8 +191,6 @@ func (s *Session) focusNode(n *dom.Node, scroll bool) bool {
 		return false
 	}
 	if scroll {
-		// Script can append and focus a control in the same task. Flush pending
-		// layout before computing the focus-induced scroll adjustment.
 		s.refreshLayoutForCSSOMRead()
 	}
 	changed := s.changeFocusedNode(focusTarget)
@@ -248,8 +212,6 @@ func (s *Session) focusNode(n *dom.Node, scroll bool) bool {
 	return changed
 }
 
-// fixupDisabledFocus runs during a rendering update after DOM mutations. A
-// control that became disabled through a fieldset must stop owning focus.
 func (s *Session) fixupDisabledFocus() {
 	s.opMu.Lock()
 	focused := s.focus
@@ -260,7 +222,6 @@ func (s *Session) fixupDisabledFocus() {
 	}
 }
 
-// BlurNode handles HTMLElement.blur() for the currently focused element.
 func (s *Session) BlurNode(n *dom.Node) bool {
 	s.opMu.Lock()
 	focused := s.focus
@@ -350,9 +311,6 @@ func (s *Session) delegatesFocusHost(target *dom.Node) *dom.Node {
 	return find(&s.Doc.Node)
 }
 
-// changeFocusedNode ends an active composition before the old host blurs. The
-// event is dispatched without opMu held because page listeners can reenter the
-// engine; if they change focus themselves, their focus decision wins.
 func (s *Session) changeFocusedNode(n *dom.Node) bool {
 	s.opMu.Lock()
 	if n == s.focus {
@@ -360,14 +318,9 @@ func (s *Session) changeFocusedNode(n *dom.Node) bool {
 		return false
 	}
 	prev := s.focus
-	// A listbox belongs to the control that raised it: focus moving on - by
-	// Tab, by a press on another control, or by a blur - dismisses it, the same
-	// way Escape and a press outside the rows do.
 	if s.selectPopup != nil && s.selectPopup != n {
 		s.selectPopup = nil
 	}
-	// A held Space activation ends when its control loses focus, even if the
-	// host action sequence has not delivered keyup yet.
 	s.clearKeyboardActiveLocked()
 	composing := s.imeComposing
 	oldMarked := s.marked
@@ -417,10 +370,6 @@ func (s *Session) changeFocusedNode(n *dom.Node) bool {
 	return true
 }
 
-// trustedEvent is one page-visible event collected while opMu is held. Events
-// are dispatched only after the lock is released: a listener may call back
-// into the session (getComputedStyle, focus, submit), and taking opMu again
-// from inside a dispatch would self-deadlock.
 type trustedEvent struct {
 	target *dom.Node
 	event  *dom.Event
@@ -432,9 +381,6 @@ func dispatchTrustedEvents(events []trustedEvent) {
 	}
 }
 
-// dispatchFocusEvents fires the blur phase, then the focus phase only if focus
-// still rests on n: a blur listener may have moved focus itself, and its
-// decision wins.
 func (s *Session) dispatchFocusEvents(blurEvents, focusEvents []trustedEvent, n *dom.Node) {
 	dispatchTrustedEvents(blurEvents)
 	s.opMu.Lock()
@@ -445,9 +391,6 @@ func (s *Session) dispatchFocusEvents(blurEvents, focusEvents []trustedEvent, n 
 	}
 }
 
-// setFocusedNodeUnlocked moves focus to n without opMu held. The focus state
-// changes before the blur events fire, matching the browser's focus manager,
-// so a blur listener that refocuses does not re-blur the same node.
 func (s *Session) setFocusedNodeUnlocked(n *dom.Node) bool {
 	s.opMu.Lock()
 	if n == s.focus {
@@ -460,18 +403,12 @@ func (s *Session) setFocusedNodeUnlocked(n *dom.Node) bool {
 	return true
 }
 
-// setFocusedNodeLocked applies the whole focus change while the caller holds
-// opMu and returns the blur-phase and focus-phase events for dispatch after
-// the lock is released.
 func (s *Session) setFocusedNodeLocked(n *dom.Node) ([]trustedEvent, []trustedEvent) {
 	blurEvents := s.focusBlurEventsLocked()
 	focusEvents := s.applyFocusLocked(n)
 	return blurEvents, focusEvents
 }
 
-// focusBlurEventsLocked retires the old focus target's state and collects its
-// blur-phase events. The caller holds opMu and must dispatch the returned
-// events after releasing it.
 func (s *Session) focusBlurEventsLocked() []trustedEvent {
 	prev := s.focus
 	if prev == nil {
@@ -500,9 +437,6 @@ func (s *Session) focusBlurEventsLocked() []trustedEvent {
 	return events
 }
 
-// applyFocusLocked installs n as the focused node and collects its focus-phase
-// events. The caller holds opMu and must dispatch the returned events after
-// releasing it.
 func (s *Session) applyFocusLocked(n *dom.Node) []trustedEvent {
 	s.focus = n
 	s.focusState.Store(n)
@@ -539,9 +473,6 @@ func (s *Session) applyFocusLocked(n *dom.Node) []trustedEvent {
 	return events
 }
 
-// focusVisibleByDefault follows the browser heuristic for pointer or
-// programmatic focus: controls that accept text input keep a visible indicator,
-// while buttons and other non-text controls show one after keyboard navigation.
 func focusVisibleByDefault(n *dom.Node) bool {
 	if n == nil || !n.Element() {
 		return false
@@ -583,9 +514,6 @@ func programmaticallyFocusable(n *dom.Node) bool {
 	}
 }
 
-// focusDetachedLocked reports whether the focused node is no longer connected
-// to this document. DOM removal can happen inside a script before the next
-// style pass; retaining that node would leave :focus and :focus-within stale.
 func (s *Session) focusDetachedLocked() bool {
 	if s.focus == nil || s.Doc == nil {
 		return false
@@ -598,8 +526,6 @@ func (s *Session) focusDetachedLocked() bool {
 	return true
 }
 
-// clearDetachedFocus drops focus when its node left the document. The blur
-// events dispatch without opMu held so listeners can reenter the engine.
 func (s *Session) clearDetachedFocus() {
 	s.opMu.Lock()
 	detached := s.focusDetachedLocked()
@@ -609,16 +535,12 @@ func (s *Session) clearDetachedFocus() {
 	}
 }
 
-// Focused returns the focused control node, or nil.
 func (s *Session) Focused() *dom.Node {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.focus
 }
 
-// MarkUserInput records a text-control edit performed by a host input adapter.
-// It lets adapters distinguish a simulated user edit from script assignments
-// when deciding whether blur should dispatch change.
 func (s *Session) MarkUserInput(n *dom.Node) bool {
 	if s == nil || n == nil || (n.Data != "input" && n.Data != "textarea") {
 		return false
@@ -633,10 +555,6 @@ func (s *Session) MarkUserInput(n *dom.Node) bool {
 	return focused
 }
 
-// SetMarked updates the active IME composition at the focused control's caret
-// or contenteditable Selection. Text controls and contenteditable Text nodes
-// update live when the active passage can be represented; an empty string
-// cancels the active composition.
 func (s *Session) SetMarked(text string) bool {
 	s.opMu.Lock()
 	host := s.focus
@@ -778,29 +696,20 @@ func (s *Session) SetMarked(text string) bool {
 	return true
 }
 
-// Marked returns the current composition text, empty when not composing.
 func (s *Session) Marked() string {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.marked
 }
 
-// CommitText ends composition by inserting text at the focused control's
-// caret, respecting maxlength like any other insert. Returns whether the
-// value changed, which is when the caller must reflow.
 func (s *Session) CommitText(text string) bool {
 	return s.commitTextWithInputType(text, "")
 }
 
-// PasteText inserts plain clipboard text using the paste-specific editing
-// input type. Editable content receives the text/plain DataTransfer payload.
 func (s *Session) PasteText(text string) bool {
 	return s.PasteData(text, "")
 }
 
-// PasteData inserts clipboard formats into the focused editable target.
-// Contenteditable hosts prefer text/html when present; text controls consume
-// only text/plain.
 func (s *Session) PasteData(text, html string) bool {
 	s.opMu.Lock()
 	host := s.focus
@@ -841,15 +750,11 @@ func (s *Session) PasteData(text, html string) bool {
 	return s.commitTextWithInputType(text, "insertFromPaste")
 }
 
-// CopySelection dispatches a trusted copy event for the selected text and
-// returns the text/plain payload to the host clipboard.
 func (s *Session) CopySelection() string {
 	text, _ := s.CopySelectionData()
 	return text
 }
 
-// CopySelectionData dispatches copy and returns both supported clipboard
-// formats for the host clipboard.
 func (s *Session) CopySelectionData() (string, string) {
 	host, rt, text := s.clipboardSelection()
 	if host == nil || text == "" {
@@ -868,16 +773,11 @@ func (s *Session) CopySelectionData() (string, string) {
 	return plainResult, htmlResult
 }
 
-// CutSelection dispatches a trusted cut event, then the deleteByCut editing
-// operation when the clipboard event was not canceled. It returns clipboard
-// text and whether the selected content was deleted.
 func (s *Session) CutSelection() (string, bool) {
 	text, _, changed := s.CutSelectionData()
 	return text, changed
 }
 
-// CutSelectionData dispatches cut and returns the formats supplied by the
-// event handlers along with whether the selected content was deleted.
 func (s *Session) CutSelectionData() (string, string, bool) {
 	host, rt, text := s.clipboardSelection()
 	if host == nil || text == "" {
@@ -1141,16 +1041,10 @@ func (s *Session) commitTextWithInputType(text, requestedInputType string) bool 
 	return true
 }
 
-// CloseTopmostModalDialog finds and closes the topmost open modal dialog element.
-// It fires a cancelable "cancel" event; if not canceled, it removes the open attribute,
-// clears the modal flag, and fires a "close" event.
 func (s *Session) CloseTopmostModalDialog() bool {
 	return s.closeTopmostModalDialog()
 }
 
-// closeTopmostModalDialog runs the cancel gate and the close steps without
-// opMu held across any page-visible dispatch, so cancel and focus listeners
-// can reenter the engine.
 func (s *Session) closeTopmostModalDialog() bool {
 	s.opMu.Lock()
 	topmost := topmostModalDialog(s.Doc)
@@ -1160,11 +1054,10 @@ func (s *Session) closeTopmostModalDialog() bool {
 	}
 	cancelEv := dom.NewTrustedEvent("cancel", false, true)
 	if !dom.DispatchEvent(topmost, cancelEv) {
-		return false // preventDefault was called
+		return false
 	}
 	s.opMu.Lock()
 	if !topmost.IsModal || !topmost.HasAttribute("open") {
-		// A cancel listener already closed the dialog.
 		s.opMu.Unlock()
 		return true
 	}
@@ -1179,9 +1072,6 @@ func (s *Session) closeTopmostModalDialog() bool {
 	return true
 }
 
-// dialogFocusReturnLocked computes the node that should regain focus when a
-// dialog closes. The caller holds opMu and applies the focus change after
-// releasing it.
 func (s *Session) dialogFocusReturnLocked(dialog *dom.Node) *dom.Node {
 	if s == nil || dialog == nil {
 		return nil
@@ -1205,40 +1095,27 @@ func (s *Session) dialogFocusReturnLocked(dialog *dom.Node) *dom.Node {
 	return previous
 }
 
-// Edit applies one keyboard edit to the focused control. It returns whether
-// the value or focus changed, which is when the caller must reflow;
-// caret-only movement returns false but still needs a repaint.
 func (s *Session) Edit(action EditAction, r rune) bool {
 	return s.EditWithShift(action, r, false)
 }
 
-// EditWithShift applies a keyboard edit while preserving or extending the
-// focused text control's selection when Shift is held.
 func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 	switch action {
 	case EditRune, EditEnter, EditBackspace, EditDelete, EditEscape:
-		// Any edit or the Escape dismissal is user intent that retires the
-		// validation bubble; a blocked submission may set a fresh one.
 		s.dismissValidationBubble()
 	}
 	if action == EditRune || action == EditEnter || action == EditBackspace || action == EditDelete || action == EditLeft || action == EditRight || action == EditHome || action == EditEnd {
-		// Contenteditable uses the document Selection rather than the form
-		// control caret maintained below. Run its insertion command outside the
-		// session lock because script event handlers can call back into Session.
 		s.opMu.Lock()
 		editable := dom.IsContentEditable(s.focus)
 		composing := s.imeComposing
 		s.opMu.Unlock()
-		// The input method owns Enter while a candidate is marked: it commits or
-		// cancels the composition. Letting it also insert a newline or submit the
-		// form would navigate away from a half-typed word.
 		if action == EditEnter && composing {
 			return false
 		}
 		if editable {
 			if action == EditLeft || action == EditRight || action == EditHome || action == EditEnd {
 				s.moveContentEditableCaret(action)
-				return false // caret movement does not change document geometry
+				return false
 			}
 			if action == EditBackspace {
 				return s.deleteContentEditable(false)
@@ -1259,9 +1136,6 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 			return s.insertContentEditableText(string(r))
 		}
 	}
-	// Route ordinary text-control edits through Input Events before mutating
-	// the value. Event handlers run JavaScript and may call back into Session,
-	// so the edit path must not hold opMu while dispatching beforeinput.
 	if action == EditRune || action == EditBackspace || action == EditDelete || action == EditEnter {
 		s.opMu.Lock()
 		s.syncControlSelectionFromRuntimeLocked()
@@ -1287,8 +1161,6 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 		}
 	}
 	if action == EditEnter {
-		// Implicit submission dispatches a cancelable submit event; run it
-		// without opMu so the listener can reenter the engine.
 		s.opMu.Lock()
 		s.syncControlSelectionFromRuntimeLocked()
 		host := s.focus
@@ -1300,13 +1172,6 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 		if form != nil {
 			submitter := FirstSubmitButton(form)
 			if submitter != nil && dom.IsFormControlDisabled(submitter) {
-				// The disabled default button is still the chosen submitter, so
-				// the press submits nothing at all - it does not fall through to
-				// the next enabled button and it does not validate. Measured in
-				// Chromium 131.0.6778.33: Enter in /tmp/v2/probe5.html form #f2
-				// (disabled submit first, enabled one second) records no
-				// navigation and no invalid event, while removing the disabled
-				// button submits /s2?t2=keep.
 				return true
 			}
 			s.submitForm(form, submitter)
@@ -1323,9 +1188,6 @@ func (s *Session) EditWithShift(action EditAction, r rune, shift bool) bool {
 	return changed
 }
 
-// editEscape dismisses the topmost popover or modal dialog, then blurs the
-// focused control. The dismissal and the blur dispatch run without opMu so
-// their listeners can reenter the engine.
 func (s *Session) editEscape() bool {
 	s.opMu.Lock()
 	s.syncControlSelectionFromRuntimeLocked()
@@ -1356,9 +1218,6 @@ func (s *Session) editEscape() bool {
 	return true
 }
 
-// editControlLocked applies one keyboard edit to the focused control while the
-// caller holds opMu. Page-visible events are collected and returned for
-// dispatch after the lock is released.
 func (s *Session) editControlLocked(action EditAction, r rune, shift bool) (bool, []trustedEvent) {
 	s.syncControlSelectionFromRuntimeLocked()
 	if isRangeInput(s.focus) {
@@ -1653,9 +1512,6 @@ func (s *Session) controlSelectionBounds(length int) (int, int, bool) {
 	return caret, anchor, true
 }
 
-// syncControlSelectionFromRuntimeLocked imports a script-updated text-control
-// selection before a host editing action reads the engine's rune-indexed state.
-// Callers hold opMu; runtime selection access is a read of its current DOM state.
 func (s *Session) syncControlSelectionFromRuntimeLocked() {
 	if s.jsRT == nil || !textSelectableControl(s.focus) {
 		return
@@ -1738,8 +1594,6 @@ func isRangeInput(n *dom.Node) bool {
 	return n != nil && n.DataAtom == dom.AtomInput && strings.EqualFold(n.GetAttribute("type"), "range")
 }
 
-// adjustRangeLocked applies the keyboard value steps used by a range input.
-// The caller holds Session.opMu.
 func (s *Session) adjustRangeLocked(n *dom.Node, action EditAction) bool {
 	if n == nil || dom.IsFormControlDisabled(n) {
 		return false
@@ -1812,8 +1666,6 @@ func parseRangeNumber(value string) (float64, bool) {
 	return number, err == nil && !math.IsNaN(number) && !math.IsInf(number, 0)
 }
 
-// setRangeValueAtLocked maps a pointer x coordinate to the range control's
-// horizontal value domain. The caller holds Session.opMu.
 func (s *Session) setRangeValueAtLocked(n *dom.Node, x float32) bool {
 	if n == nil || dom.IsFormControlDisabled(n) || s.Arena == nil {
 		return false
@@ -1888,9 +1740,6 @@ func (s *Session) setRangeValueAtLocked(n *dom.Node, x float32) bool {
 	return true
 }
 
-// BeginRangePointerDragAt starts the pointer interaction for a range input.
-// Value changes are committed during movement; click and change are dispatched
-// when the pointer is released. It returns true when the point hit a range.
 func (s *Session) BeginRangePointerDragAt(x, y float32) bool {
 	n := s.nodeAt(x, y)
 	if !isRangeInput(n) || dom.IsFormControlDisabled(n) {
@@ -1912,7 +1761,6 @@ func (s *Session) BeginRangePointerDragAt(x, y float32) bool {
 	return true
 }
 
-// MoveRangePointerDragAt updates the value during an active range drag.
 func (s *Session) MoveRangePointerDragAt(x, y float32) bool {
 	s.opMu.Lock()
 	n := s.rangePointerNode
@@ -1932,9 +1780,6 @@ func (s *Session) MoveRangePointerDragAt(x, y float32) bool {
 	return true
 }
 
-// EndRangePointerDragAt completes the click gesture and emits change once if
-// any drag position changed the value. A release over another element is not
-// a click on the range input.
 func (s *Session) EndRangePointerDragAt(x, y float32) bool {
 	s.opMu.Lock()
 	n := s.rangePointerNode
@@ -2020,10 +1865,6 @@ func (s *Session) deleteContentEditableWithDeletionMode(forward, byWord, softLin
 		}
 	}
 	if !forward {
-		// A caret immediately before the first visible character can sit after
-		// leading collapsible whitespace in the underlying text node. Browsers
-		// remove that invisible prefix without dispatching Input Events; word
-		// delete shortcuts share this boundary.
 		atRenderedStart, boundaryErr := rt.Evaluate(`(function(){
 			var selection=getSelection();if(!selection||!selection.isCollapsed)return false;
 			var node=selection.anchorNode,offset=selection.anchorOffset;
@@ -2513,9 +2354,6 @@ func (s *Session) deleteContentEditableWithDeletionMode(forward, byWord, softLin
 	if v == "true" {
 		return true
 	}
-	// Empty editing hosts still report the paired input event for the WPT
-	// testdriver deletion action. At a boundary in a nonempty host, leave only
-	// beforeinput because no editing operation changed the DOM.
 	empty, emptyErr := rt.Evaluate(`(function(){var host=document.activeElement;if(!host||!host.isContentEditable||host.textContent!=="")return false;var visit=function(node){for(var child=node.firstChild;child;child=child.nextSibling){if(child.nodeType===1){if(String(child.localName||"").toLowerCase()!=="br")return false;if(!visit(child))return false}}return true};return visit(host)})()`)
 	if emptyErr == nil && empty == "true" && host.IsConnected() {
 		rt.DispatchTrustedInput(host, nil, inputType, false)
@@ -2523,8 +2361,6 @@ func (s *Session) deleteContentEditableWithDeletionMode(forward, byWord, softLin
 	return false
 }
 
-// maxLen parses maxlength using HTML's non-negative-integer parsing rules.
-// The boolean result distinguishes an absent/invalid limit from maxlength=0.
 func maxLen(n *dom.Node) (int, bool) {
 	return dom.MaxLength(n)
 }
@@ -2533,8 +2369,6 @@ func utf16Length(value string) int {
 	return dom.UTF16Length(value)
 }
 
-// InsertText inserts text into the currently focused editable control at the caret
-// position, respecting maxlength and firing an "input" event.
 func (s *Session) InsertText(text string) bool {
 	s.opMu.Lock()
 	s.clearValidationBubbleLocked()
@@ -2582,9 +2416,6 @@ func (s *Session) InsertText(text string) bool {
 	return true
 }
 
-// insertContentEditableText routes user text through the document's existing
-// Selection-aware insertText command. The runtime call is made without opMu:
-// beforeinput/input listeners may synchronously call back into Session.
 func (s *Session) insertContentEditableText(text string) bool {
 	return s.insertContentEditableTextWithType(text, "insertText")
 }
@@ -2609,8 +2440,6 @@ func (s *Session) insertContentEditableTextWithDataTransfer(text, inputType stri
 	if err != nil {
 		return false
 	}
-	// beforeinput is a trusted user-agent event; its cancellation suppresses
-	// the default editing command. The command then updates the live Selection.
 	accepted := false
 	if dataTransfer != nil {
 		accepted = rt.DispatchTrustedBeforeInputEventWithDataTransfer(host, nil, inputType, false, true, dataTransfer)
@@ -2656,7 +2485,6 @@ func (s *Session) insertContentEditableHTMLWithDataTransfer(markup string, dataT
 	return err == nil && result == "true"
 }
 
-// FocusedText returns the current value of the focused control, or empty if none.
 func (s *Session) FocusedText() string {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2675,18 +2503,12 @@ func (s *Session) FocusedText() string {
 	return string(runes[start:end])
 }
 
-// FocusedEditable reports whether the currently focused control is editable.
 func (s *Session) FocusedEditable() bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return controlEditable(s.focus) || dom.IsContentEditable(s.focus)
 }
 
-// SetFocusedText replaces the value of the focused editable control. It is the
-// programmatic equivalent of selecting all and typing, used by accessibility
-// clients that set a text field's AXValue. Like ordinary typing it respects
-// maxlength, dispatches input only when the value changes, and leaves focus in
-// the control with the caret at the end.
 func (s *Session) SetFocusedText(value string) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2712,10 +2534,6 @@ func (s *Session) SetFocusedText(value string) bool {
 	return true
 }
 
-// SelectAllInFocus selects what Cmd+A should select for the current focus: a
-// focused text control's whole value, a contenteditable element's children, or
-// the document when nothing editable owns focus. Hosts route Cmd+A here so a
-// contenteditable never falls through to selecting the rest of the page.
 func (s *Session) SelectAllInFocus() bool {
 	s.opMu.Lock()
 	focus := s.focus
@@ -2725,8 +2543,6 @@ func (s *Session) SelectAllInFocus() bool {
 		return s.SelectAllControl()
 	}
 	if dom.IsContentEditable(focus) && rt != nil {
-		// selectAllChildren keeps the range inside the editable host: the
-		// surrounding document text must not join the selection.
 		result, err := rt.Evaluate(`(function(){var h=document.activeElement,sel=getSelection();if(h&&h.isContentEditable&&sel){sel.selectAllChildren(h);return true}return false})()`)
 		if err == nil && result == "true" {
 			return true
@@ -2735,7 +2551,6 @@ func (s *Session) SelectAllInFocus() bool {
 	return s.SelectAll()
 }
 
-// SelectAllControl selects the full value of the focused text control.
 func (s *Session) SelectAllControl() bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2750,7 +2565,6 @@ func (s *Session) SelectAllControl() bool {
 	return true
 }
 
-// controlValue reads the current form value for a control.
 func (s *Session) controlValue(n *dom.Node) string {
 	if n.DataAtom == dom.AtomSelect {
 		if option := SelectedOption(n); option != nil {
@@ -2767,9 +2581,6 @@ func (s *Session) controlValue(n *dom.Node) string {
 	return n.InputControlValue()
 }
 
-// replaceControlCompositionLocked replaces the previously marked scalar-value
-// span in an input or textarea. The caller holds opMu and updates the marked
-// state after the corresponding input event sequence has been dispatched.
 func (s *Session) replaceControlCompositionLocked(n *dom.Node, start int, oldText, newText string) {
 	if !controlEditable(n) {
 		return
@@ -2793,14 +2604,6 @@ func (s *Session) replaceControlCompositionLocked(n *dom.Node, start int, oldTex
 	s.setControlValue(n, string(out))
 	s.caret = start + len(inserted)
 	s.markedOffset = start
-	// While a passage is marked the control reports it as SELECTED: Chromium
-	// gave ss=0 se=2 for "ti" and se=5 for "tiếng", with selectionDirection
-	// "none" throughout (scripts/verify-br111-ime-composition.js, 2026-11-05).
-	// A page watching the selection, and the host that has to place a candidate
-	// window over the marked text, both read this range - a caret collapsed at
-	// its start tells them nothing is marked. The engine's own anchor/caret
-	// model stays untouched here, because a selection published through it would
-	// also claim a direction and paint a highlight the IME does not own.
 	if s.jsRT != nil {
 		markedEnd := start + len(inserted)
 		if markedEnd > len(out) {
@@ -2832,9 +2635,6 @@ func (s *Session) setControlValue(n *dom.Node, v string) {
 	}
 }
 
-// IsChecked reports whether a checkbox or radio input is checked.
-// The checked state is tracked via the "checked" boolean attribute:
-// presence means checked, absence means unchecked.
 func IsChecked(n *dom.Node) bool {
 	if n == nil {
 		return false
@@ -2842,7 +2642,6 @@ func IsChecked(n *dom.Node) bool {
 	return n.InputChecked()
 }
 
-// SetChecked sets or removes the checked attribute on a node.
 func SetChecked(n *dom.Node, checked bool) {
 	if n == nil {
 		return
@@ -2850,8 +2649,6 @@ func SetChecked(n *dom.Node, checked bool) {
 	n.SetInputChecked(checked, true)
 }
 
-// IsActivatable reports whether a node is a clickable control
-// (button, submit, reset, etc.).
 func IsActivatable(n *dom.Node) bool {
 	if n == nil || !n.Element() {
 		return false
@@ -2871,24 +2668,6 @@ func IsActivatable(n *dom.Node) bool {
 	return false
 }
 
-// optionValue is an <option>'s form value: its value attribute when present,
-// otherwise its text content normalised the way Chromium reports it.
-// Submission, the editing path and the accessibility tree all read it here so
-// they cannot drift apart.
-//
-// The two branches are deliberately different, and both are measured rather
-// than remembered (scripts/verify-task037-option-value.js, Chromium 1.63 on
-// this host):
-//
-//	<option selected>\n    Charcoal\n  </option>  -> value "Charcoal"
-//	<option selected>  Hi   there </option>       -> value "Hi there"
-//	<option selected value="  pad  me  ">        -> value "  pad  me  "
-//	<option selected value="a\n b\tc">            -> value "a\n b\tc"
-//	<option selected value="">                    -> value ""
-//
-// The value content attribute is used verbatim, including when it is empty (an
-// empty attribute is not the absent one: Chromium submits the empty string, not
-// the text). Only the text-content fallback is normalised.
 func optionValue(n *dom.Node) string {
 	if n.HasAttribute("value") {
 		return n.GetAttribute("value")
@@ -2896,29 +2675,14 @@ func optionValue(n *dom.Node) string {
 	return optionTextValue(n.TextContent())
 }
 
-// optionTextValue keeps the accessibility tree, form submission and paint on
-// one normalisation rule: the same bytes are collapsed whether the text becomes
-// a submitted value, an announced label, or the glyphs drawn in the control.
 func optionTextValue(text string) string {
 	return dom.NormalizeOptionText(text)
 }
 
-// SelectedOption returns the currently selected <option> node within a <select>.
-// When several options carry the "selected" attribute the last one in tree order
-// wins, which is what Chromium reports for the same markup: for
-// `<option value="a" selected><option value="b" selected>` it gives
-// `selectedIndex 1`, `value "b"` and FormData `[["c","b"]] while leaving both
-// content attributes in the DOM (scripts/verify-task037-option-value.js,
-// TIEBREAK). Resolving the tie at read time keeps the serialised document
-// untouched. If no option has the "selected" attribute, the first <option> child
-// is returned. Returns nil if selectNode is nil or has no <option> children.
 func SelectedOption(selectNode *dom.Node) *dom.Node {
 	return selectNode.SelectedOption()
 }
 
-// ToggleControl toggles the checked state of a checkbox or radio input.
-// For radio buttons, it also unchecks other radios in the same group
-// (same parent form or document). Returns true if the control was toggled.
 func (s *Session) ToggleControl(n *dom.Node) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2927,10 +2691,6 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 		return false
 	}
 	if dom.IsDisableableFormControl(n) && dom.IsFormControlDisabled(n) {
-		// The disabled state itself blocks the toggle, so no activation path
-		// has to remember to check first. Measured in Chromium 131.0.6778.33:
-		// a press and `element.click()` both leave a disabled checkbox
-		// unchecked (/tmp/v2/run4.py, run5.py, 2026-11-13).
 		return false
 	}
 	typ := strings.ToLower(n.GetAttribute("type"))
@@ -2941,9 +2701,7 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 		dom.DispatchEvent(n, dom.NewTrustedEvent("input", true, true))
 		return true
 	case "radio":
-		// Uncheck all radios in the same group (same name, same form).
 		name := n.GetAttribute("name")
-		// Walk up to find the form ancestor.
 		form := n.Parent
 		for form != nil && form.Data != "form" {
 			form = form.Parent
@@ -2952,7 +2710,6 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 		if form != nil {
 			root = form
 		}
-		// Uncheck siblings with the same name.
 		uncheckRadioGroup(root, name, n)
 		SetChecked(n, true)
 		dom.DispatchEvent(n, dom.NewTrustedEvent("change", true, true))
@@ -2962,8 +2719,6 @@ func (s *Session) ToggleControl(n *dom.Node) bool {
 	return false
 }
 
-// uncheckRadioGroup walks the subtree rooted at root and removes the checked
-// attribute from every radio input with the given name, except for keep.
 func uncheckRadioGroup(root *dom.Node, name string, keep *dom.Node) {
 	if root == nil {
 		return
@@ -2978,8 +2733,6 @@ func uncheckRadioGroup(root *dom.Node, name string, keep *dom.Node) {
 	}
 }
 
-// objectFor returns the arena object laid out for n, or nil when the node has
-// no box (e.g. display:none) or the arena has not been built.
 func (s *Session) objectFor(n *dom.Node) *layout.Object {
 	if s.Arena == nil || n == nil {
 		return nil
@@ -2992,16 +2745,10 @@ func (s *Session) objectFor(n *dom.Node) *layout.Object {
 	return nil
 }
 
-// FocusNext cycles focus to the next tabbable control in the document.
-// Tabbable controls: input (not hidden), textarea, select, button, a[href].
-// Wraps around to the first control when at the end.
 func (s *Session) FocusNext() {
 	s.FocusFrom(nil, false)
 }
 
-// FocusFrom advances sequential focus navigation relative to a non-focusable
-// interaction target. This lets pointer actions inside static content move
-// focus to the next control in tree order.
 func (s *Session) FocusFrom(from *dom.Node, backwards bool) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -3054,7 +2801,6 @@ func (s *Session) FocusFrom(from *dom.Node, backwards bool) {
 	}
 	next := controls[(idx+step+len(controls))%len(controls)]
 	s.clearKeyboardActiveLocked()
-	// Fire blur/change on old focus.
 	if s.focus != nil {
 		s.noteControlBlur(s.focus)
 		css.SetFocus(s.focus, false)
@@ -3106,8 +2852,6 @@ func focusTreePositions(doc *dom.Document) map[*dom.Node]int {
 	return positions
 }
 
-// FocusPrev cycles focus to the previous tabbable control in the document.
-// Wraps around to the last control when at the beginning.
 func (s *Session) FocusPrev() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -3132,7 +2876,6 @@ func (s *Session) FocusPrev() {
 	}
 	prev := controls[(idx-1+len(controls))%len(controls)]
 	s.clearKeyboardActiveLocked()
-	// Fire blur/change on old focus.
 	if s.focus != nil {
 		s.noteControlBlur(s.focus)
 		css.SetFocus(s.focus, false)
@@ -3159,10 +2902,6 @@ func (s *Session) FocusPrev() {
 	s.scrollFocusedNodeIntoViewLocked(prev)
 }
 
-// scrollFocusedNodeIntoViewLocked applies the viewport scroll adjustment that
-// accompanies focusing an element outside the visible vertical range. The
-// layout arena keeps document coordinates; the JS runtime owns the document's
-// CSSOM View scroll offset.
 func (s *Session) scrollFocusedNodeIntoViewLocked(n *dom.Node) {
 	if s == nil || s.jsRT == nil || s.viewportH <= 0 {
 		return
@@ -3184,10 +2923,6 @@ func (s *Session) scrollFocusedNodeIntoViewLocked(n *dom.Node) {
 	s.jsRT.SetWindowScrollY(float64(scrollY))
 }
 
-// TabbableControls returns sequentially focusable controls in tree order.
-// Tabbable elements: input (not hidden, not disabled), textarea, select,
-// button, and a[href]. Named radio groups contribute one stop: the checked
-// enabled member, or the first enabled member when none is checked.
 func TabbableControls(doc *dom.Document) []*dom.Node {
 	if doc == nil {
 		return nil
@@ -3370,9 +3105,6 @@ func nodeWithin(node, ancestor *dom.Node) bool {
 	return false
 }
 
-// SetHover updates the hover state for the element at the given document point.
-// It unhoversthe previously hovered element (if any) and hovers the new one.
-// Returns whether the hover state changed.
 func (s *Session) SetHover(x, y float32) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -3380,7 +3112,6 @@ func (s *Session) SetHover(x, y float32) bool {
 		return false
 	}
 
-	// Find the topmost element at the point.
 	var hovered *dom.Node
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
@@ -3401,7 +3132,6 @@ func (s *Session) SetHover(x, y float32) bool {
 
 	prev := s.hovered
 
-	// Unhover the previous element and fire mouseleave.
 	if prev != nil {
 		for current := prev; current != nil && current.Element(); current = current.Parent {
 			css.SetHover(current, false)
@@ -3411,7 +3141,6 @@ func (s *Session) SetHover(x, y float32) bool {
 
 	s.hovered = hovered
 
-	// Hover the new element and fire mouseenter.
 	if hovered != nil {
 		for current := hovered; current != nil && current.Element(); current = current.Parent {
 			css.SetHover(current, true)
@@ -3422,9 +3151,6 @@ func (s *Session) SetHover(x, y float32) bool {
 	return true
 }
 
-// SetActiveAt updates the element currently being activated by the primary
-// pointer. Active state follows the hit target while the button is held and is
-// cleared on release; ancestors match as they do for :hover.
 func (s *Session) SetActiveAt(x, y float32, pressed bool) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()

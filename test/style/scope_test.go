@@ -45,7 +45,6 @@ p {
 	if sP1 == nil {
 		t.Fatal("no style for p1")
 	}
-	// Blue: #0000ff -> r:0, g:0, b:255
 	if sP1.Color != (css.Color{R: 0, G: 0, B: 255, A: 255}) {
 		t.Errorf("p1 color = %v, want blue", sP1.Color)
 	}
@@ -54,7 +53,6 @@ p {
 	if sP2 == nil {
 		t.Fatal("no style for p2")
 	}
-	// Black: #000000 -> r:0, g:0, b:0
 	if sP2.Color != (css.Color{R: 0, G: 0, B: 0, A: 255}) {
 		t.Errorf("p2 color = %v, want black", sP2.Color)
 	}
@@ -87,7 +85,6 @@ p {
 	if sArt == nil {
 		t.Fatal("no style for p-art")
 	}
-	// Green: #008000 -> R:0, G:128, B:0, A:255
 	if sArt.Color != (css.Color{R: 0, G: 128, B: 0, A: 255}) {
 		t.Errorf("p-art color = %v, want green", sArt.Color)
 	}
@@ -96,7 +93,6 @@ p {
 	if sComm == nil {
 		t.Fatal("no style for p-comm")
 	}
-	// Inside comments limit: should be black (scoping limit blocked green)
 	if sComm.Color != (css.Color{R: 0, G: 0, B: 0, A: 255}) {
 		t.Errorf("p-comm color = %v, want black (excluded by donut scope)", sComm.Color)
 	}

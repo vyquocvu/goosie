@@ -9,25 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// The engine half of window.getComputedStyle and of the document lifecycle: what
-// the session resolves, and what the render does with it.
-//
-// internal/js may only import {internal/dom, internal/media} (internal/archtest
-// rules.go), so every value a page sees through getComputedStyle is produced
-// here. Two things could not be pinned in test/js, and both are the point of this
-// file:
-//
-//   - That the numbers are the resolver's and the layout box's rather than the
-//     binding's invention. test/js/computed_style_test.go feeds a stub map, and a
-//     stub that agrees with itself proves nothing about the cascade. The values
-//     below are what a real `<style>` block plus a real layout pass produce,
-//     including a used width (784px, which no declaration in the page says) and a
-//     colour the engine normalised (rgb(0, 0, 0)).
-//   - That firing DOMContentLoaded/load reaches the render. A content script's
-//     whole trick is to change the DOM from that handler; a session that ran the
-//     handler without re-resolving style would paint the page as if nothing had
-//     happened, and the only symptom would be a blank or a stuck ad.
-
 func engineComputed(t *testing.T, rt *js.Runtime, src string) string {
 	t.Helper()
 	v, err := rt.Evaluate(src)
@@ -37,9 +18,6 @@ func engineComputed(t *testing.T, rt *js.Runtime, src string) string {
 	return v
 }
 
-// The cascade under test: a stylesheet rule, an inline style that overrides one
-// of its properties, and a node with nothing of its own so inheritance and the
-// layout box are the only sources a value can come from.
 const computedPage = `<!DOCTYPE html><html><head>
 <style>
   body { font-size: 16px; }
@@ -64,11 +42,8 @@ func TestGetComputedStyleReportsTheSessionsOwnResolve(t *testing.T) {
 	defer sess.Close()
 
 	cases := []struct{ name, script, want string }{
-		// Inherited from body through the cascade: the value can only be there if
-		// the resolver ran and its result reached the binding.
 		{"inherited font-size", `getComputedStyle(document.getElementById("bare")).fontSize`, "16px"},
 		{"inherited colour normalised", `getComputedStyle(document.getElementById("bare")).color`, "rgb(0, 0, 0)"},
-		// The rule's own values, in the spelling CSS uses.
 		{"cascade font-size", `getComputedStyle(document.getElementById("cascaded")).fontSize`, "18px"},
 		{"cascade display", `getComputedStyle(document.getElementById("cascaded")).display`, "block"},
 		{"cascade text-align", `getComputedStyle(document.getElementById("cascaded")).textAlign`, "center"},
@@ -78,22 +53,12 @@ func TestGetComputedStyleReportsTheSessionsOwnResolve(t *testing.T) {
 		{"initial visibility", `getComputedStyle(document.getElementById("cascaded")).visibility`, "visible"},
 		{"unset line-height is normal", `getComputedStyle(document.getElementById("bare")).lineHeight`, "normal"},
 		{"unset position is static", `getComputedStyle(document.getElementById("bare")).position`, "static"},
-		// Used values from the layout box, which is the part of this an author
-		// cannot write: 784px is the body's content width in an 800px viewport
-		// (8px margin each side), and no declaration in the page says it.
 		{"used width of a block", `getComputedStyle(document.getElementById("bare")).width`, "784px"},
 		{"declared width survives as the used value", `getComputedStyle(document.getElementById("cascaded")).width`, "200px"},
 		{"used height from the line box", `getComputedStyle(document.getElementById("cascaded")).height`, "21.6px"},
 		{"zero margin is a length", `getComputedStyle(document.getElementById("cascaded")).marginTop`, "0px"},
-		// The inline style wins, and it wins in the author's own spelling:
-		// internal/js cannot import internal/css, so it re-renders nothing and the
-		// merge is the node's declaration over the snapshot. The decision and its
-		// cost are recorded in internal/js/computed_style.go.
 		{"inline beats cascade", `getComputedStyle(document.getElementById("cascaded")).color`, "#ee0000"},
 		{"inline beats cascade by name", `getComputedStyle(document.getElementById("cascaded")).getPropertyValue("color")`, "#ee0000"},
-		// A property this engine does not model has two shapes and both are
-		// asserted, because they are different contracts: getPropertyValue
-		// answers the empty string (CSSOM), an own property is absent (undefined).
 		{"unmodelled by name", `getComputedStyle(document.getElementById("cascaded")).getPropertyValue("transform")`, ""},
 		{"unmodelled as property", `typeof getComputedStyle(document.getElementById("cascaded")).transform`, "undefined"},
 		{"unknown name", `getComputedStyle(document.getElementById("cascaded")).getPropertyValue("not-a-property")`, ""},
@@ -105,9 +70,6 @@ func TestGetComputedStyleReportsTheSessionsOwnResolve(t *testing.T) {
 	}
 }
 
-// getComputedStyle performs a synchronous style refresh for script-created and
-// script-mutated nodes, so CSSOM reads observe the current tree before the next
-// paint pump runs.
 // qc:BR-206
 func TestGetComputedStyleForANodeTheSessionNeverResolved(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/page"})
@@ -136,20 +98,17 @@ func TestGetComputedStyleForANodeTheSessionNeverResolved(t *testing.T) {
 		return [empty, after.getPropertyValue("display"), after.getPropertyValue("width"), after.color, typeof after.fontSize].join(" / ")
 	})()`)
 	want := strings.Join([]string{
-		"block|16px|string|string", // resolved UA display and inherited font size
-		"block",                    // the declarations the page wrote are known at once
+		"block|16px|string|string",
+		"block",
 		"120px",
 		"#0f0",
-		"string", // inherited font size remains resolved after the mutation
+		"string",
 	}, " / ")
 	if got != want {
 		t.Errorf("unresolved node computed style: got %q want %q", got, want)
 	}
 }
 
-// visiblePaintText collects the text a display list would actually draw, so a
-// render assertion is about content rather than about command counts, which move
-// for reasons unrelated to a reveal.
 func visiblePaintText(t *testing.T, sess *engine.Session) string {
 	t.Helper()
 	list, err := sess.PaintChecked(1)
@@ -168,15 +127,6 @@ func visiblePaintText(t *testing.T, sess *engine.Session) string {
 	return b.String()
 }
 
-// The lifecycle has to reach the render. Pages reveal content from their
-// DOMContentLoaded handler all the time, and the engine used to run scripts at a
-// point where nothing could still change the load-time layout the session had
-// already resolved.
-//
-// The assertions cover the three quiet ways this fails: the handler never runs
-// (no dispatch at all), it runs but the session does not re-resolve (the paint
-// list keeps the pre-reveal tree), or it re-resolves but readyState is wrong, so
-// a handler that checks document.readyState first bails out.
 // qc:BR-206
 func TestLifecycleRevealRepaintsTheDocument(t *testing.T) {
 	html := `<!DOCTYPE html><html><head></head><body>
@@ -212,9 +162,6 @@ window.addEventListener("load", function(){ window.__loadState = document.readyS
 	if got := engineComputed(t, rt, `[window.__readyStateInHandler, window.__createdNodeType, window.__loadState, document.readyState, String(document.getElementById("reveal-holder").getAttribute("style") === null)].join("|")`); got != "interactive|1|complete|complete|true" {
 		t.Errorf("lifecycle state seen by page handlers: got %q want %q", got, "interactive|1|complete|complete|true")
 	}
-	// The revealed node is styled and laid out, not merely present in the tree:
-	// its span reports the inline display the cascade gives it once the
-	// display:none is gone, which is what makes the paint list grow.
 	if got := engineComputed(t, rt, `getComputedStyle(document.getElementById("reveal")).display`); got != "inline" {
 		t.Errorf("revealed node display: got %q want %q", got, "inline")
 	}
@@ -223,10 +170,6 @@ window.addEventListener("load", function(){ window.__loadState = document.readyS
 	}
 }
 
-// The other direction: a lifecycle handler that hides content must also take it
-// out of the render. Without the mutation-triggered re-resolve the page keeps
-// painting text its own script removed from view, which shows up as "the engine
-// renders things a browser does not".
 // qc:BR-206
 func TestLifecycleHideRemovesFromTheRender(t *testing.T) {
 	html := `<!DOCTYPE html><html><head></head><body>
@@ -258,13 +201,6 @@ document.addEventListener("DOMContentLoaded", function(){
 	}
 }
 
-// Scripts that never touch the DOM must not cost a second resolve, and a script
-// that does must cost exactly one. The session asks FireDocumentLifecycle
-// whether the tree changed and only then re-runs style+layout, so both halves of
-// that sentence are measurable with the pipeline counters: a page whose handler
-// writes nothing resolves exactly as many times as a page with no handler at
-// all, and a page whose handler reveals content resolves once more, not once per
-// mutation.
 // qc:BR-206
 func TestLifecycleReResolvesOnlyWhenTheHandlerMutated(t *testing.T) {
 	const noHandler = "<!DOCTYPE html><html><head></head><body><div id=\"s\">STATIC CONTENT</div></body></html>"
@@ -311,10 +247,6 @@ func TestLifecycleReResolvesOnlyWhenTheHandlerMutated(t *testing.T) {
 	}
 }
 
-// A node a script creates and inserts is resolved synchronously on the next
-// CSSOM read, and that declaration is a list with the same names it answers by.
-// This is the shape jQuery's defaultDisplay probe walks: it needs the UA display
-// of a node that did not exist at load time, in the same task that inserted it.
 // qc:BR-206
 func TestGetComputedStyleListsTheNamesOfANodeInsertedThisTask(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/page"})

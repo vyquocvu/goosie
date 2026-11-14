@@ -66,10 +66,6 @@ func TestTotalChromeHeight(t *testing.T) {
 	}
 }
 
-// Ten tabs at 1000px cannot fit at full width: the strip must shrink every tab
-// uniformly so the last tab and the new-tab button stay on screen and every
-// tab stays reachable. Fixed 200px tabs run off the bitmap and strand the
-// button beyond the clickable area.
 // qc:BR-033
 func TestTabStripShrinksToFit(t *testing.T) {
 	const tabCount, width = 10, 1000
@@ -97,8 +93,6 @@ func TestTabStripShrinksToFit(t *testing.T) {
 	}
 }
 
-// Shrinking has a floor: tabs must stay wide enough for an ellipsis and the
-// close affordance instead of collapsing to slivers.
 // qc:BR-033
 func TestTabStripMinWidthClamp(t *testing.T) {
 	if tabs.MinTabWidth < 80 {
@@ -112,8 +106,6 @@ func TestTabStripMinWidthClamp(t *testing.T) {
 	}
 }
 
-// StripMaxOffset is zero while the strip fits and the clipped excess once
-// tabs sit at MinTabWidth: it is the only legal scroll range.
 func TestStripMaxOffset(t *testing.T) {
 	if got := tabs.StripMaxOffset(3, 1000); got != 0 {
 		t.Fatalf("StripMaxOffset(3, 1000) = %d, want 0 (fits)", got)
@@ -121,17 +113,12 @@ func TestStripMaxOffset(t *testing.T) {
 	if got := tabs.StripMaxOffset(10, 1000); got != 0 {
 		t.Fatalf("StripMaxOffset(10, 1000) = %d, want 0 (shrinks to fit)", got)
 	}
-	// 40 tabs at MinTabWidth: 8 + 40*(MinTabWidth+1) + 32 - (1000-56) = 2336.
-	// The max leaves the new-tab button visible left of the chevron zone.
 	wantMax := int32(8 + 40*(tabs.MinTabWidth+1) + 32 - (1000 - 56))
 	if got := tabs.StripMaxOffset(40, 1000); got != wantMax {
 		t.Fatalf("StripMaxOffset(40, 1000) = %d, want %d", got, wantMax)
 	}
 }
 
-// EnsureTabVisible scrolls a clipped strip just enough to show idx: the last
-// tab pins the offset at the maximum, the first resets it, and a visible tab
-// leaves the offset alone.
 // qc:BR-033
 func TestEnsureTabVisible(t *testing.T) {
 	const tabCount, width = 40, 1000
@@ -150,8 +137,6 @@ func TestEnsureTabVisible(t *testing.T) {
 	}
 }
 
-// Chevrons appear exactly when the strip overflows: two 24px buttons pinned
-// to the strip's right end. A fitting strip has none, so the zone stays tabs.
 // qc:BR-033
 func TestChevronRects(t *testing.T) {
 	if _, _, ok := tabs.ChevronRects(3, 1000); ok {
@@ -161,7 +146,6 @@ func TestChevronRects(t *testing.T) {
 	if !ok {
 		t.Fatal("ChevronRects(40, 1000) hidden, want shown (overflows)")
 	}
-	// Right button: 4px margin; 24px buttons with a 4px gap.
 	if right.X1 != 1000-4 || right.W() != 24 {
 		t.Fatalf("right chevron = %+v, want 24px ending 4px from the edge", right)
 	}
@@ -174,21 +158,15 @@ func TestChevronRects(t *testing.T) {
 	}
 }
 
-// A chevron page keeps one tab of context: visible strip minus one tab,
-// floored at one tab so a narrow strip still moves.
 // qc:BR-033
 func TestTabScrollPage(t *testing.T) {
-	// 40 tabs at 1000: visible 1000-8-56, minus one MinTabWidth tab.
 	want := int32(1000 - 8 - 56 - tabs.MinTabWidth)
 	if got := tabs.TabScrollPage(40, 1000); got != want {
 		t.Fatalf("TabScrollPage(40, 1000) = %d, want %d", got, want)
 	}
 }
 
-// DropIndexAt maps a strip X to the insertion slot whose center is nearest,
-// clamped to the strip: drop geometry shared by hit-testing and drawing.
 func TestDropIndexAt(t *testing.T) {
-	// 4 full-width tabs at 1000: slots start every 201px from x=8.
 	if got := tabs.DropIndexAt(50, 4, 1000, 0); got != 0 {
 		t.Fatalf("DropIndexAt(50) = %d, want 0", got)
 	}
@@ -201,7 +179,6 @@ func TestDropIndexAt(t *testing.T) {
 	if got := tabs.DropIndexAt(5000, 4, 1000, 0); got != 3 {
 		t.Fatalf("DropIndexAt(5000) = %d, want 3 (clamped)", got)
 	}
-	// Scrolled strips measure in content coordinates, at the clamped width.
 	pitch := int32(tabs.MinTabWidth + tabs.TabGap)
 	want := int((600 - int32(tabs.LeftMargin) + 1000) / pitch)
 	if got := tabs.DropIndexAt(600, 40, 1000, 1000); got != want {

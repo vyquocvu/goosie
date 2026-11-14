@@ -5,18 +5,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// FindMark is one find-in-page highlight rectangle in document CSS pixels.
-// Key names the text box whose painting emits the fill: emitting it there puts
-// the highlight underneath that run's glyphs, before they are painted.
 type FindMark struct {
 	Key    layout.BoxKey
 	Rect   frame.RectF
 	Active bool
 }
 
-// paintFindHighlights fills the match rects that belong to obj's run. The
-// inactive color is the browser-standard yellow background; the active match
-// uses a darker orange so the focused hit stands out.
 func (b *Builder) paintFindHighlights(marks []FindMark, opacity float32, clip *frame.Rect) {
 	for _, m := range marks {
 		r := m.Rect.ToDevice(b.scale)

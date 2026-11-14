@@ -7,46 +7,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// The window object as an EventTarget, plus the document lifecycle states.
-//
-// Why this exists is a count, not an opinion. On the saved vnexpress home page
-// (201,234-byte copy, sha1 1cd00f06…, measured offline against the pre-change
-// engine; the artifact is named in docs/tasks/TASK-047-DOM-JQUERY-APIS.md §1.2)
-// the inline boot scripts register:
-//
-//	window.addEventListener('DOMContentLoaded', ...)   x4
-//	window.addEventListener('load', ...)               x1
-//	window.addEventListener('pageshow', ...)           x1
-//
-// and every one of them threw `Object has no member 'addEventListener'`, which
-// is three of the six script errors that page produces. jQuery 3.6 adds its own
-// `C.addEventListener("load", B)` next to `E.addEventListener("DOMContentLoaded",
-// B)` (C is window, E is document), so a window without listeners cannot reach
-// `$(document.ready)` at all - and gov.vn keeps its entire body inside a
-// `display:none` form that only that reveal opens.
-//
-// window is not a *dom.Node, so it cannot live in internal/dom's listener
-// registry: that map is keyed by node pointer, and pretending otherwise would
-// put a fake node into a tree the parser, style and layout walks all trust.
-// The registry therefore belongs to the runtime, and the DOM Standard's window
-// step of the propagation path is appended by dispatchWithWindowStep - after
-// the document, in bubble order, and not at all once a listener stopped
-// propagation.
-
-// Ready-state values, spelled exactly as the standard spells them: pages
-// compare these strings, so a typo is a silent never-ready page.
 const (
 	ReadyLoading     = "loading"
 	ReadyInteractive = "interactive"
 	ReadyComplete    = "complete"
 )
 
-// windowListener is one entry of the window object's listener list. fnVal keeps
-// the JS function value the page passed in, which is what makes a second
-// registration of the same function a no-op and what lets
-// removeEventListener find the entry - neither is possible from a Go closure,
-// because every wrapper closure has a distinct identity from the page's point
-// of view and an identical code pointer from Go's.
 type windowListener struct {
 	typ        string
 	fn         goja.Callable
@@ -55,14 +21,12 @@ type windowListener struct {
 	once       bool
 	passive    bool
 	signal     *goja.Object
-	handler    bool // callback came from an on* IDL attribute
+	handler    bool
 	content    string
 	hasContent bool
 	compiled   bool
 }
 
-// setupWindowEvents installs the EventTarget API on window and seeds the
-// lifecycle state. Called from setupWindow, before any script runs.
 func (r *Runtime) setupWindowEvents() {
 	win := r.vm.GlobalObject()
 	_ = win.DefineAccessorProperty("crossOriginIsolated", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
@@ -87,9 +51,6 @@ func (r *Runtime) setupWindowEvents() {
 	})
 	r.setupWindowPostMessage(win)
 
-	// document.readyState is a read-only accessor: `document.readyState = "x"`
-	// is ignored rather than throwing, which is what a non-strict page expects
-	// and what keeps a `try { } catch { }`-less boot script alive.
 	_ = r.docObj().DefineAccessorProperty("readyState", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(r.readyState())
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
@@ -143,8 +104,6 @@ func installWindowEventHandlerAttribute(r *Runtime, win *goja.Object, typ string
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
-// syncWindowContentEventHandler maps body/frameset content attributes into
-// Window's event-handler slots while retaining the listener's original order.
 func (r *Runtime) syncWindowContentEventHandler(node *dom.Node, typ, source string, present bool) {
 	if node == nil || (node.Data != "body" && node.Data != "frameset") {
 		return
@@ -196,9 +155,6 @@ func (r *Runtime) compileWindowContentEventHandler(listener *windowListener) {
 	}
 }
 
-// docObj returns the global document object. setupDocument installs it as a
-// global before any DOM binding runs, so the lookup cannot fail in a runtime
-// this package built.
 func (r *Runtime) docObj() *goja.Object {
 	if v := r.vm.Get("document"); v != nil {
 		if o, ok := v.(*goja.Object); ok {
@@ -356,12 +312,8 @@ func windowListenerCapture(vm *goja.Runtime, args []goja.Value) bool {
 	return false
 }
 
-// fireWindowListeners runs the window step of one event. capture picks the
-// group, in registration order, exactly as dom.fireListeners does.
 func (r *Runtime) fireWindowListeners(ev *dom.Event, capture bool) {
 	r.winMu.Lock()
-	// Copy the slice: a listener may add or remove a listener while the pass
-	// is running, and the standard dispatches against a snapshot.
 	listeners := make([]*windowListener, len(r.winListeners))
 	copy(listeners, r.winListeners)
 	r.winMu.Unlock()
@@ -407,8 +359,6 @@ func (r *Runtime) fireWindowListeners(ev *dom.Event, capture bool) {
 				result, err = fn(r.vm.GlobalObject(), wrapped)
 			}
 			if l.handler && ev.Type == "beforeunload" && err == nil && result != nil && !goja.IsNull(result) && !goja.IsUndefined(result) {
-				// HTML coerces an onbeforeunload return value while the legacy
-				// current-event value is still installed for this callback.
 				_ = result.ToString()
 			}
 		}
@@ -438,9 +388,6 @@ func (r *Runtime) fireWindowListeners(ev *dom.Event, capture bool) {
 	}
 }
 
-// wrapWindowEvent changes currentTarget for a callback on Window. The DOM
-// event's currentTarget slot stores nodes only; Window is a separate event
-// target in this implementation, so its wrapper supplies that final path step.
 func (r *Runtime) wrapWindowEvent(ev *dom.Event, capture bool) *goja.Object {
 	wrapped := r.wrapEvent(ev).(*goja.Object)
 	win := r.vm.GlobalObject()
@@ -456,21 +403,11 @@ func (r *Runtime) wrapWindowEvent(ev *dom.Event, capture bool) *goja.Object {
 	return wrapped
 }
 
-// dispatchWithWindowStep dispatches an event whose target is a node along the
-// document path, adding Window's capture step before the node path and its
-// bubble step after the document. dom.DispatchEvent stops at the document
-// because that is the top of the node tree.
 func (r *Runtime) dispatchWithWindowStep(target *dom.Node, ev *dom.Event) bool {
 	if target == nil {
 		return true
 	}
-	// Snapshot the node path before Window capture listeners run. Those
-	// listeners are part of this event dispatch and may move or remove target;
-	// the path for the in-progress event must retain the original ancestors.
 	path := dom.EventPath(target)
-	// Only this Runtime's associated Document has this Window's event-target
-	// step. A connected tree inside a cloned or otherwise detached Document
-	// must not leak events to the Runtime's Window.
 	includeWindow := false
 	if r.domDoc != nil {
 		for current := target; current != nil; current = current.Parent {
@@ -531,7 +468,6 @@ func (r *Runtime) dispatchWithWindowStep(target *dom.Node, ev *dom.Event) bool {
 	if shadow := r.shadowRootContainingNode(target); shadow != nil && !ev.PropagationStopped() {
 		r.fireShadowRootEvent(shadow, ev)
 	}
-	// The element path runs between Window's capture and bubble steps.
 	ok := dom.DispatchEventWithPathWhile(target, ev, path, func() bool { return r.isFullyActiveDocument(target.Doc) })
 	if includeWindow && ev.Bubbles() && !ev.PropagationStopped() {
 		r.fireWindowListeners(ev, false)
@@ -628,9 +564,6 @@ func (r *Runtime) jsWindowDispatchEvent(call goja.FunctionCall) goja.Value {
 		ev.StopPropagation()
 	}
 	defer ev.ClearPropagationFlags()
-	// window is the target, so the path is just [window]: the document is not
-	// an ancestor of window in the standard's event path, and a browser does
-	// not deliver `window.dispatchEvent(new Event("x"))` to document listeners.
 	if r.isFullyActiveBrowsingContext() && !ev.PropagationStopped() {
 		r.fireWindowListeners(ev, true)
 		if r.isFullyActiveBrowsingContext() && !ev.PropagationStopped() {
@@ -643,9 +576,6 @@ func (r *Runtime) jsWindowDispatchEvent(call goja.FunctionCall) goja.Value {
 	return r.vm.ToValue(!ev.DefaultPrevented())
 }
 
-// FireDocumentDOMContentLoaded runs the post-parse DOMContentLoaded step.
-// The engine fires the later load step only after pending child browsing
-// contexts have completed loading.
 func (r *Runtime) FireDocumentDOMContentLoaded() bool {
 	if r.domDoc == nil {
 		return false
@@ -668,9 +598,6 @@ func (r *Runtime) FireDocumentDOMContentLoaded() bool {
 	return r.mutationStamp() != before
 }
 
-// FireDocumentLoad runs the load and pageshow steps after DOMContentLoaded
-// and after the embedding browser has completed the document's load-delaying
-// work, including child browsing contexts.
 func (r *Runtime) FireDocumentLoad() bool {
 	if r.domDoc == nil {
 		return false
@@ -696,45 +623,12 @@ func (r *Runtime) FireDocumentLoad() bool {
 	return mutated || r.mutationStamp() != before
 }
 
-// FireDocumentLifecycle runs both document lifecycle phases in order. It is
-// used by detached child documents without load-delaying subresources; the
-// embedding engine uses the two phase methods so it can wait for iframes.
-// readyState changes to "interactive" before DOMContentLoaded and to
-// "complete" before load. jQuery's boot reads exactly that:
-//
-//	"complete" === E.readyState || "loading" !== E.readyState && !E.documentElement.doScroll
-//	  ? C.setTimeout(S.ready)
-//	  : (E.addEventListener("DOMContentLoaded", B), C.addEventListener("load", B))
-//
-// so readyState must still read "loading" while a document's own scripts run,
-// or the library resolves ready inline, before the listeners it is about to
-// register exist. The engine calls this after the pipeline has run, so a
-// ready handler that reads a computed style or reflows the page sees the load
-// cascade rather than an empty map; that is a deliberate deviation from the
-// browser's incremental-parse timing, recorded in
-// docs/tasks/TASK-047-DOM-JQUERY-APIS.md, and it is the timing that makes
-// `$(document).ready(fn)` work at all in a parse-then-run engine.
-//
-// It reports whether user code mutated the DOM, so the caller can decide
-// whether another style/layout pass is owed. Each phase is idempotent.
 func (r *Runtime) FireDocumentLifecycle() bool {
 	return r.FireDocumentLoad()
 }
 
-// mutationStamp counts the DOM writes user code has made. FireDocumentLifecycle
-// compares two stamps instead of consulting the invalidation batch, because a
-// session that was built without invalidation tracking still has to learn that
-// a ready handler changed the tree.
 func (r *Runtime) mutationStamp() int64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.mutations
 }
-
-// winMu guards the window listener list. Nothing in the current call graph
-// reaches it from two goroutines - scripts, timers and the lifecycle pass all
-// run on the document's own thread - but the list is read from the accessor
-// path and written from page code, so the lock states the rule instead of
-// relying on the schedule. The list itself is per-Runtime: no process-global
-// listener map exists, which is the archtest rule that keeps two tabs from
-// reading each other's handlers.

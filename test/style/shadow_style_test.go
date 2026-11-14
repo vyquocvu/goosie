@@ -32,7 +32,6 @@ func findDescendantByID(n *dom.Node, id string) *dom.Node {
 }
 
 func TestShadowStyle_ScopedStylesheet(t *testing.T) {
-	// Styles declared inside <style> in shadow root apply to shadow tree elements
 	html := `<!DOCTYPE html>
 <html>
 <head>
@@ -54,7 +53,6 @@ func TestShadowStyle_ScopedStylesheet(t *testing.T) {
 </html>`
 
 	doc := domtest.Parse(html)
-	// Collect document stylesheets
 	var docSheets []*css.Stylesheet
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
 		if c.Data == "html" {
@@ -87,13 +85,11 @@ func TestShadowStyle_ScopedStylesheet(t *testing.T) {
 		t.Fatal("styles not computed for outer or inner")
 	}
 
-	// Outer should be blue (#0000ff)
 	if outerStyle.Color.B != 255 || outerStyle.Color.R != 0 {
 		t.Fatalf("expected outer to be blue, got rgba(%d,%d,%d,%d)",
 			outerStyle.Color.R, outerStyle.Color.G, outerStyle.Color.B, outerStyle.Color.A)
 	}
 
-	// Inner should be red (#ff0000) from scoped shadow stylesheet
 	if innerStyle.Color.R != 255 || innerStyle.Color.B != 0 {
 		t.Fatalf("expected inner to be red from scoped shadow style, got rgba(%d,%d,%d,%d)",
 			innerStyle.Color.R, innerStyle.Color.G, innerStyle.Color.B, innerStyle.Color.A)
@@ -144,13 +140,11 @@ func TestShadowStyle_HostSelector(t *testing.T) {
 		t.Fatal("styles not resolved for buttons")
 	}
 
-	// btn1 has .active -> should match :host(.active) -> magenta (#ff00ff: R=255, G=0, B=255)
 	if s1.BackgroundColor.R != 255 || s1.BackgroundColor.G != 0 || s1.BackgroundColor.B != 255 {
 		t.Fatalf("expected btn1 to be magenta, got rgba(%d,%d,%d,%d)",
 			s1.BackgroundColor.R, s1.BackgroundColor.G, s1.BackgroundColor.B, s1.BackgroundColor.A)
 	}
 
-	// btn2 lacks .active -> matches :host -> green (#00ff00: R=0, G=255, B=0)
 	if s2.BackgroundColor.R != 0 || s2.BackgroundColor.G != 255 || s2.BackgroundColor.B != 0 {
 		t.Fatalf("expected btn2 to be green, got rgba(%d,%d,%d,%d)",
 			s2.BackgroundColor.R, s2.BackgroundColor.G, s2.BackgroundColor.B, s2.BackgroundColor.A)

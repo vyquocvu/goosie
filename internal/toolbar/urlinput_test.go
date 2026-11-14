@@ -24,7 +24,6 @@ func TestVerifyURLInputBehavesLikeNormalInput(t *testing.T) {
 	s.Clipboard = &memClip{}
 	s.Navigate("https://example.com/hello")
 
-	// 1. First click focuses and selects all.
 	s.HandlePointer(addrPos(s, 0.5), surface.ButtonLeft, surface.PointerPress)
 	if s.GetFocus() != FocusAddress {
 		t.Fatal("click did not focus address bar")
@@ -34,7 +33,6 @@ func TestVerifyURLInputBehavesLikeNormalInput(t *testing.T) {
 	}
 	s.HandlePointer(addrPos(s, 0.5), surface.ButtonLeft, surface.PointerRelease)
 
-	// 2. Second click places the caret (no selection).
 	s.HandlePointer(addrPos(s, 0.05), surface.ButtonLeft, surface.PointerPress)
 	s.HandlePointer(addrPos(s, 0.05), surface.ButtonLeft, surface.PointerRelease)
 	if s.hasSelection() {
@@ -44,7 +42,6 @@ func TestVerifyURLInputBehavesLikeNormalInput(t *testing.T) {
 		t.Fatal("caret not placed at click")
 	}
 
-	// 3. Drag selects a range.
 	start := addrPos(s, 0.2)
 	end := addrPos(s, 0.6)
 	s.HandlePointer(start, surface.ButtonLeft, surface.PointerPress)
@@ -54,14 +51,12 @@ func TestVerifyURLInputBehavesLikeNormalInput(t *testing.T) {
 	}
 	s.HandlePointer(end, surface.ButtonLeft, surface.PointerRelease)
 
-	// 4. Cmd+C copies the selection (this was broken: editKeyLocked dropped it).
 	s.HandleKeyEvent('c', surface.ModCommand)
 	mc := s.Clipboard.(*memClip)
 	if mc.text == "" {
 		t.Fatal("Cmd+C copied nothing")
 	}
 
-	// 5. Cmd+X cuts, Cmd+V pastes.
 	before := len([]rune(s.Input))
 	s.HandleKeyEvent('x', surface.ModCommand)
 	if len([]rune(s.Input)) >= before {
@@ -72,7 +67,6 @@ func TestVerifyURLInputBehavesLikeNormalInput(t *testing.T) {
 		t.Fatalf("Cmd+V did not restore, got %q", s.Input)
 	}
 
-	// 6. Cmd+A selects all.
 	s.HandlePointer(addrPos(s, 0.05), surface.ButtonLeft, surface.PointerPress)
 	s.HandlePointer(addrPos(s, 0.05), surface.ButtonLeft, surface.PointerRelease)
 	s.HandleKeyEvent('a', surface.ModCommand)
@@ -80,8 +74,7 @@ func TestVerifyURLInputBehavesLikeNormalInput(t *testing.T) {
 		t.Fatal("Cmd+A did not select all")
 	}
 
-	// 7. Esc reverts an edit and blurs.
-	s.HandleKeyEvent('z', 0) // type something (inserts 'z' over selection)
+	s.HandleKeyEvent('z', 0)
 	if s.Input == "https://example.com/hello" {
 		t.Fatal("typing did not replace selection")
 	}
@@ -93,13 +86,11 @@ func TestVerifyURLInputBehavesLikeNormalInput(t *testing.T) {
 		t.Fatalf("Esc did not revert edit, got %q", s.Input)
 	}
 
-	// 8. FocusURL selects all (Cmd+L path).
 	s.FocusURL()
 	if s.GetFocus() != FocusAddress || !s.hasSelection() {
 		t.Fatal("FocusURL did not focus+select-all")
 	}
 
-	// 9. Pasted newlines are stripped.
 	s.pasteTextLocked("https://example.com/a\nb\r\nc")
 	for _, r := range s.Input {
 		if r == '\n' || r == '\r' {

@@ -8,8 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// ShowPopover opens a popover element if it is not already open.
-// Returns true if the popover transitioned from closed to open.
 func (s *Session) ShowPopover(n *dom.Node) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -26,15 +24,13 @@ func (s *Session) showPopoverLocked(n *dom.Node) bool {
 	}
 	beforeEv := dom.NewTrustedEvent("beforetoggle", false, true)
 	if !dom.DispatchEvent(n, beforeEv) {
-		return false // canceled
+		return false
 	}
 	n.IsPopoverOpen = true
 	dom.DispatchEvent(n, dom.NewTrustedEvent("toggle", false, false))
 	return true
 }
 
-// HidePopover closes a popover element if it is currently open.
-// Returns true if the popover transitioned from open to closed.
 func (s *Session) HidePopover(n *dom.Node) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -47,15 +43,13 @@ func (s *Session) hidePopoverLocked(n *dom.Node) bool {
 	}
 	beforeEv := dom.NewTrustedEvent("beforetoggle", false, true)
 	if !dom.DispatchEvent(n, beforeEv) {
-		return false // canceled
+		return false
 	}
 	n.IsPopoverOpen = false
 	dom.DispatchEvent(n, dom.NewTrustedEvent("toggle", false, false))
 	return true
 }
 
-// TogglePopover toggles the open state of a popover element.
-// An optional force parameter can force open (true) or closed (false).
 func (s *Session) TogglePopover(n *dom.Node, force ...bool) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -86,7 +80,6 @@ func (s *Session) togglePopoverLocked(n *dom.Node, force ...bool) bool {
 	return s.showPopoverLocked(n)
 }
 
-// CloseTopmostAutoPopover finds and closes the topmost open auto popover element.
 func (s *Session) CloseTopmostAutoPopover() bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -132,7 +125,6 @@ func (s *Session) closeOpenAutoPopoversLocked(except *dom.Node) {
 		if n != except && n.Element() && n.IsPopoverOpen {
 			pType := strings.ToLower(n.GetAttribute("popover"))
 			if pType == "" || pType == "auto" {
-				// Don't close ancestors of except
 				if !isDescendantOrSelf(except, n) {
 					beforeEv := dom.NewTrustedEvent("beforetoggle", false, true)
 					if dom.DispatchEvent(n, beforeEv) {
@@ -168,13 +160,11 @@ func (s *Session) handlePopoverTarget(targetID, action string) {
 		if target.IsPopoverOpen {
 			s.hidePopoverLocked(target)
 		}
-	default: // "toggle" or empty
+	default:
 		s.togglePopoverLocked(target)
 	}
 }
 
-// dismissAutoPopoversExcept light-dismisses open auto popovers when a click
-// occurs outside them.
 func (s *Session) dismissAutoPopoversExcept(hitNode *dom.Node) bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -217,7 +207,6 @@ func (s *Session) dismissAutoPopoversExcept(hitNode *dom.Node) bool {
 	return dismissedAny
 }
 
-// nodeAt returns the deepest DOM node at the given document coordinates, or nil.
 func (s *Session) nodeAt(x, y float32) *dom.Node {
 	if s.Arena == nil {
 		return nil
@@ -228,8 +217,6 @@ func (s *Session) nodeAt(x, y float32) *dom.Node {
 		if obj.Style != nil && obj.Style.PointerEvents == "none" {
 			continue
 		}
-		// Adjust the test point by the cumulative scroll offset of ancestor
-		// scroll containers, so hit-testing matches the painted position.
 		adjX, adjY := s.ancestorScrollOffset(obj)
 		tx, ty := x+adjX, y+adjY
 		if !hitBoxContains(obj, tx, ty) {
@@ -242,9 +229,6 @@ func (s *Session) nodeAt(x, y float32) *dom.Node {
 	return nil
 }
 
-// ancestorScrollOffset returns the cumulative scroll offset applied by ancestor
-// scroll containers. The paint builder shifts children by (-scrollLeft, -scrollTop),
-// so hit-testing must add those offsets back to the test point.
 func (s *Session) ancestorScrollOffset(obj *layout.Object) (float32, float32) {
 	if s.jsRT == nil || obj.Node == nil {
 		return 0, 0

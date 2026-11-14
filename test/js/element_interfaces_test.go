@@ -9,9 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// staticImageLoader answers data: sources with fixed dimensions. The real
-// decode path (fetcher, Probe, pixel reservation) is an engine concern; this
-// stub only proves the binding drives the injected loader and settles state.
 type staticImageLoader struct{}
 
 func (staticImageLoader) LoadScriptImage(src string, done func(js.LoadedImage)) {
@@ -21,18 +18,6 @@ func (staticImageLoader) LoadScriptImage(src string, done func(js.LoadedImage)) 
 	}
 	done(js.LoadedImage{Src: src, Err: errors.New("test loader: unsupported source")})
 }
-
-// TASK-052 / GOOSIE-IDLREFLECT-001, GOOSIE-IMAGE-001.
-//
-// Every expectation in this file was measured in Chromium first with the
-// throwaway Playwright probes under /tmp/t052 (probe1..probe6). The document
-// URL is https://example.test/docs/page.html and the fixture matches §1:
-// <div id=d class="c0">, <a id=a href="/p?q=1">link</a>, <img id=i src="x.png"
-// width="10">, <input id=in value="v0">.
-//
-// Scripts return primitives because js.Runtime.Evaluate stringifies the result;
-// arrays are joined explicitly so null and undefined cannot hide behind an
-// empty Array slot (the lesson from test/js/document_implementation_test.go).
 
 func interfacesRuntime(t *testing.T) *js.Runtime {
 	t.Helper()
@@ -90,8 +75,6 @@ func TestElementPrototypeChainIsInherited(t *testing.T) {
 			return out.join('>');
 		})()`, "HTMLInputElement>HTMLElement>Element>Node>EventTarget>Object"},
 		{"created and parsed share one prototype", `Object.getPrototypeOf(document.createElement('div')) === Object.getPrototypeOf(document.getElementById('d'))`, "true"},
-		// Unknown HTML names use HTMLUnknownElement while remaining in the
-		// HTMLElement inheritance chain.
 		{"unknown tag inherits HTMLElement", `document.createElement('foo') instanceof HTMLElement`, "true"},
 		{"unknown tag has HTMLUnknownElement interface", `document.createElement('foo').constructor === HTMLUnknownElement`, "true"},
 		{"custom element name uses HTMLElement", `document.createElement('x-widget').constructor === HTMLElement`, "true"},
@@ -266,11 +249,6 @@ func TestSelectMultipleAndSizeChangesRecomputeSelection(t *testing.T) {
 	}
 }
 
-// The text getter strip-and-collapses; it does not echo raw bytes. IDL lines of
-// scripts/verify-br101-option-dom.js (Chromium 1.63, 2026-11-04): text
-// "Charcoal" for a textContent of "\n    Charcoal\n  ", and text "Hi there" for
-// "  Hi   there ". This oracle asserted the raw bytes before that measurement.
-//
 // qc:BR-101
 func TestOptionFormIndexTextLabelAndDisabledIDL(t *testing.T) {
 	doc := domtest.Parse(`<form id="f"><select><option id="o"> Alpha   Beta </option><option id="empty" label="">Visible text</option></select></form>`)
@@ -483,8 +461,6 @@ func TestAnchorURLReflectionResolvesAgainstTheDocumentBase(t *testing.T) {
 		{"Unicode path is percent-encoded", `(function(){var e=document.createElement('a');e.setAttribute('href','/\u1680javascript:alert(1)');return e.href})()`, "https://example.test/%E1%9A%80javascript:alert(1)"},
 		{"Unicode path beginning with whitespace and colon is relative", `(function(){var e=document.createElement('a');e.setAttribute('href','\u1680javascript:alert(1)');return e.href})()`, "https://example.test/docs/%E1%9A%80javascript:alert(1)"},
 		{"data URL stays opaque", `(function(){var e=document.createElement('a');e.setAttribute('href','data:text/plain,hi');return [e.href,e.protocol,e.pathname,e.origin].join('|')})()`, "data:text/plain,hi|data:|text/plain,hi|null"},
-		// probe3.out: href keeps the raw text, protocol is the lone ":" that
-		// survived parsing, and hostname/pathname/origin are empty.
 		{"unparseable keeps the raw href", `(function(){var e=document.createElement('a');e.setAttribute('href','http://[::1');return [e.href,e.protocol,e.hostname,e.pathname,e.origin].join('|')})()`, "http://[::1|:|||"},
 		{"scheme relative inherits https", `(function(){var e=document.createElement('a');e.setAttribute('href','//other.test/y');return e.href})()`, "https://other.test/y"},
 		{"mailto is opaque", `(function(){var e=document.createElement('a');e.setAttribute('href','mailto:a@b');return [e.href,e.pathname,e.origin].join('|')})()`, "mailto:a@b|a@b|null"},
@@ -818,7 +794,6 @@ func TestNamedElementInterfacesReflectTheirAttributes(t *testing.T) {
 		<canvas id="c" width="10" height="20"></canvas>
 	</body></html>`)
 	rt := newRuntime(t, js.Options{URL: "https://example.test/docs/page.html", DOM: doc})
-	// Expectations measured in Chromium 153 over the same fixture at the same URL.
 	runJSCases(t, rt, []jsCase{
 		{"link is an HTMLLinkElement", `document.getElementById('l') instanceof HTMLLinkElement`, "true"},
 		{"link href resolves against the document", `document.getElementById('l').href`, "https://example.test/s.css"},

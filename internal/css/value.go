@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// Value represents a parsed CSS value.
 type Value struct {
 	Type  ValueType
 	Num   float64
@@ -16,7 +15,6 @@ type Value struct {
 	Func  string
 }
 
-// ValueType identifies the kind of CSS value.
 type ValueType uint8
 
 const (
@@ -34,15 +32,11 @@ const (
 	ValueUnset
 )
 
-// Color is a parsed CSS color in RGBA.
 type Color struct {
 	R, G, B, A uint8
 }
 
-// ParseValue parses a CSS value string into a Value.
 func ParseValue(s string) Value {
-	// Inline style attributes never pass the stylesheet parser, so comments
-	// would reach the value tokenizer raw; strip them here the same way.
 	if strings.Contains(s, "/*") {
 		s = stripComments(s)
 	}
@@ -84,10 +78,6 @@ func ParseValue(s string) Value {
 	}
 
 	if fn, ok := lengthFuncName(s); ok {
-		// The expression stays as text: `em` and viewport terms can only be
-		// resolved once the cascade knows this element's font size and the frame
-		// it is laid out in, which is later than parsing. EvalFunc reads it back
-		// at that point.
 		inner := s[strings.Index(s, "(")+1 : len(s)-1]
 		return Value{Type: ValueFunc, Func: fn, Str: strings.TrimSpace(inner)}
 	}
@@ -127,9 +117,6 @@ func ParseValue(s string) Value {
 	return Value{Type: ValueKeyword, Str: lower}
 }
 
-// lengthFuncName recognises the functions whose whole value is one length.
-// They keep their argument text unevaluated, unlike rgb() or var(), because
-// their arguments are expressions rather than lists of components.
 func lengthFuncName(s string) (string, bool) {
 	idx := strings.IndexByte(s, '(')
 	if idx <= 0 || !strings.HasSuffix(s, ")") {
@@ -140,8 +127,6 @@ func lengthFuncName(s string) (string, bool) {
 		"sin", "cos", "tan", "asin", "acos", "atan", "atan2",
 		"pow", "sqrt", "hypot", "log", "exp", "abs", "sign",
 		"round", "mod", "rem":
-		// The trailing ')' has to close this function: `max(1px,2px) * 2` is an
-		// expression around the call, not a call around the expression.
 		depth := 0
 		for i := idx; i < len(s); i++ {
 			switch s[i] {
@@ -184,7 +169,6 @@ func ParseColor(s string) (Color, bool) {
 	return ParseColorWithScheme(s, "")
 }
 
-// ParseColorWithScheme parses a CSS color value in the context of a color scheme ("light" or "dark").
 func ParseColorWithScheme(s, colorScheme string) (Color, bool) {
 	if strings.Contains(s, "/*") {
 		s = stripComments(s)
@@ -261,10 +245,6 @@ func ParseColorWithScheme(s, colorScheme string) (Color, bool) {
 	return Color{}, false
 }
 
-// parseSystemColor supplies the browser's default light and dark system-color
-// palette. Platform-backed UI themes may replace these values at the browser
-// boundary; CSS color consumers still need a deterministic UA palette when no
-// native theme provider is available.
 func parseSystemColor(name, colorScheme string) (Color, bool) {
 	dark := strings.EqualFold(colorScheme, "dark")
 	switch name {
@@ -321,9 +301,6 @@ func parseSystemColor(name, colorScheme string) (Color, bool) {
 	}
 }
 
-// colorFunctionArgs returns the argument list of a color function named by any
-// of the given prefixes. rgb()/hsl() take an alpha argument in CSS Color 4, so
-// rgba()/hsla() are aliases rather than separate syntaxes.
 func colorFunctionArgs(s string, prefixes ...string) (string, bool) {
 	lower := strings.ToLower(s)
 	if !strings.HasSuffix(lower, ")") {
@@ -337,10 +314,6 @@ func colorFunctionArgs(s string, prefixes ...string) (string, bool) {
 	return "", false
 }
 
-// colorComponents splits a color function's arguments into three components and
-// an optional alpha. It accepts both the legacy comma form (`r, g, b, a`) and
-// the CSS Color 4 space form (`r g b / a`) because the two differ only in
-// separator; dropping either one silently discards the whole declaration.
 func colorComponents(body string) (vals []string, alpha string, hasAlpha bool, ok bool) {
 	if i := strings.IndexByte(body, '/'); i >= 0 {
 		alpha, hasAlpha = strings.TrimSpace(body[i+1:]), true
@@ -394,8 +367,6 @@ func parseHSLPercent(value string) float64 {
 	return math.Max(0, math.Min(1, percentage))
 }
 
-// parseHueAngle accepts a bare number, which CSS Color 4 reads as degrees, as
-// well as the angle units the space form makes common.
 func parseHueAngle(s string) float64 {
 	s = strings.TrimSpace(s)
 	lower := strings.ToLower(s)
@@ -693,17 +664,10 @@ var namedColors = map[string]Color{
 	"yellowgreen":          {154, 205, 50, 255},
 }
 
-// FuncHasPercent reports whether a math-function value holds a `%` term.
-// Percentages resolve against a length only layout (or a parent font) knows,
-// so the cascade defers such values instead of evaluating them to zero.
 func (v Value) FuncHasPercent() bool {
 	return v.Type == ValueFunc && strings.Contains(v.Str, "%")
 }
 
-// ToLength converts a value to a float32 length in pixels. Returns 0 for
-// non-length values. Unit conversion uses CSS defaults: em/ex default to 16px,
-// rem to 16px, pt to 1.333px, pc to 16px, in to 96px, cm to 37.795px, mm to
-// 3.7795px.
 func (v Value) ToLength() float32 {
 	switch v.Type {
 	case ValueFunc:
@@ -721,29 +685,18 @@ func (v Value) ToLength() float32 {
 	return 0
 }
 
-// ToLengthWithEm is like ToLength but resolves em, rem, and ex units against
-// the provided font-size rather than the hardcoded 16px default. Use this for
-// all non-font-size lengths (margin, padding, top/right/bottom/left, etc.) so
-// that e.g. "0.67em" on an h1 with font-size:32px correctly yields 21.44px
-// instead of 10.72px.
 func (v Value) ToLengthWithEm(fontSize float32) float32 {
 	return v.ToLengthWithFullContext(fontSize, 16, 1440, 900)
 }
 
-// ToLengthWithEmAndRem resolves em against the element's font-size and rem against
-// the root font-size.
 func (v Value) ToLengthWithEmAndRem(fontSize, rootFontSize float32) float32 {
 	return v.ToLengthWithFullContext(fontSize, rootFontSize, 1440, 900)
 }
 
-// ToLengthWithContext resolves length units with full context: font size for
-// em/rem/ex, and viewport width/height for vw/vh/vmin/vmax.
 func (v Value) ToLengthWithContext(em, vw, vh float32) float32 {
 	return v.ToLengthWithFullContext(em, 16, vw, vh)
 }
 
-// ToLengthWithFullContext resolves length units with full context: font size for
-// em/ex, root font size for rem, and viewport width/height for vw/vh/vmin/vmax.
 func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 	if vw <= 0 {
 		vw = 1440
@@ -800,17 +753,11 @@ func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 			}
 			return float32(v.Num) * 16
 		case "ch":
-			// One `ch` is the advance of the font's `0`. Every face this engine
-			// draws digits at sits near half the font size, and the measure has to
-			// follow the element's own size: `max-width: 60ch` on a 20px heading is
-			// 600px, not the 60px an untreated unit suffix used to yield.
 			if em <= 0 {
 				em = 16
 			}
 			return float32(v.Num) * em * 0.5
 		case "rem":
-			// rem is relative to the root element's font size, not the element's
-			// own.
 			return float32(v.Num) * rem
 		default:
 			return toPixels(v.Num, v.Unit)
@@ -823,8 +770,6 @@ func (v Value) ToLengthWithFullContext(em, rem, vw, vh float32) float32 {
 	return 0
 }
 
-// ToLengthWithContainerContext resolves length units taking container width/height into account
-// for container query units (cqw, cqh, cqi, cqb, cqmin, cqmax).
 func (v Value) ToLengthWithContainerContext(em, rem, vw, vh, cqW, cqH float32) float32 {
 	if cqW <= 0 {
 		cqW = vw

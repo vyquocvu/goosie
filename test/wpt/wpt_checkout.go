@@ -12,18 +12,10 @@ import (
 	"time"
 )
 
-// Checkout downloads or verifies a WPT repository checkout at the pinned
-// commit. It uses the GitHub tarball API to fetch a specific commit without
-// requiring git to be installed.
 type Checkout struct {
 	cfg Config
 }
 
-// checkoutReusable reports whether dir already holds the pinned checkout: a
-// marker matching commit plus content behind it. A marker with nothing else
-// in the directory (interrupted download, external cleanup) is not reusable:
-// reusing it runs an empty suite that reports zero tests as a pass. Pure
-// filesystem so unit tests never touch the network.
 func checkoutReusable(dir, commit string) bool {
 	data, err := os.ReadFile(filepath.Join(dir, ".goosie-wpt-commit"))
 	if err != nil || strings.TrimSpace(string(data)) != commit {
@@ -33,33 +25,25 @@ func checkoutReusable(dir, commit string) bool {
 	return err == nil && len(entries) > 1
 }
 
-// NewCheckout creates a Checkout for the given configuration.
 func NewCheckout(cfg Config) *Checkout {
 	return &Checkout{cfg: cfg}
 }
 
-// Ensure downloads the WPT repository if it is not already present at the
-// expected commit. Returns the path to the checkout directory.
 func (c *Checkout) Ensure() (string, error) {
 	dir := c.cfg.WPTCheckoutDir()
 
-	// If the directory holds the pinned checkout, reuse it (see
-	// checkoutReusable). Anything else falls through to a fresh download.
 	if checkoutReusable(dir, c.cfg.Commit) {
 		return dir, nil
 	}
 
-	// Clean up any existing checkout.
 	if err := os.RemoveAll(dir); err != nil {
 		return "", fmt.Errorf("wpt: clean old checkout: %w", err)
 	}
 
-	// Download the tarball.
 	if err := c.download(dir); err != nil {
 		return "", err
 	}
 
-	// Write the commit marker.
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("wpt: create checkout dir: %w", err)
 	}
@@ -70,7 +54,6 @@ func (c *Checkout) Ensure() (string, error) {
 	return dir, nil
 }
 
-// download fetches the WPT tarball from GitHub and extracts it.
 func (c *Checkout) download(destDir string) error {
 	url := fmt.Sprintf("%s/archive/%s.tar.gz", WPTRepo, c.cfg.Commit)
 	fmt.Fprintf(os.Stderr, "wpt: downloading %s...\n", url)
@@ -100,8 +83,6 @@ func extractWPTTarball(source io.Reader, destDir string) error {
 	defer gz.Close()
 
 	tr := tar.NewReader(gz)
-	// GitHub tarballs have a top-level directory like "wpt-<commit>/".
-	// We strip it so files land directly in destDir.
 	var prefix string
 	extractedFiles := 0
 
@@ -114,14 +95,10 @@ func extractWPTTarball(source io.Reader, destDir string) error {
 			return fmt.Errorf("tar read: %w", err)
 		}
 
-		// A GitHub archive can start with a PAX global header whose name has
-		// no path separator. It is metadata, not the archive's root prefix.
 		if header.Typeflag == tar.TypeXGlobalHeader || header.Typeflag == tar.TypeXHeader {
 			continue
 		}
 
-		// Determine the prefix from the first path-bearing entry rather than
-		// the first tar header, which may be PAX metadata.
 		if prefix == "" {
 			parts := strings.SplitN(header.Name, "/", 2)
 			if len(parts) < 2 {
@@ -130,7 +107,6 @@ func extractWPTTarball(source io.Reader, destDir string) error {
 			prefix = parts[0] + "/"
 		}
 
-		// Strip the top-level directory.
 		name := header.Name
 		if !strings.HasPrefix(name, prefix) {
 			continue
@@ -142,8 +118,6 @@ func extractWPTTarball(source io.Reader, destDir string) error {
 
 		target := filepath.Join(destDir, relPath)
 
-		// Verify the target stays within destDir. filepath.Rel avoids the
-		// sibling-prefix escape that a plain strings.HasPrefix check permits.
 		absTarget, err := filepath.Abs(target)
 		if err != nil {
 			return fmt.Errorf("resolve archive path %q: %w", header.Name, err)
@@ -188,10 +162,6 @@ func extractWPTTarball(source io.Reader, destDir string) error {
 	return nil
 }
 
-// MinimalCheckout creates a minimal WPT-like directory with just the resources
-// needed for the curated tests. This is used when the full WPT download is not
-// available and we want to run against locally-authored test pages that follow
-// the WPT format.
 func MinimalCheckout(destDir string, testFiles map[string]string) error {
 	for relPath, content := range testFiles {
 		fullPath := filepath.Join(destDir, relPath)

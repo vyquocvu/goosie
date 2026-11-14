@@ -7,21 +7,10 @@ import (
 	"strings"
 )
 
-// EvalCalc resolves a CSS `calc()` expression to CSS pixels, with `em` and
-// viewport units read from the same context ToLengthWithContext uses.
-//
-// Sums of lengths and scaling by unitless numbers are the whole grammar a
-// property value needs in practice. A percentage is the one term that cannot be
-// answered here: it resolves against the containing block, which a declaration
-// does not know yet. An expression containing one therefore reports itself
-// unsupported rather than returning a sum that silently dropped it. Callers
-// that do know the base - layout with the containing block, the cascade with
-// a parent font size - use EvalFuncWithBase instead.
 func EvalCalc(expr string, em, vw, vh float32) (float32, bool) {
 	return EvalFunc("calc", expr, em, vw, vh)
 }
 
-// EvalFuncWithRem resolves one of the value-bearing CSS functions with rem support.
 func EvalFuncWithRem(name, expr string, em, rem, vw, vh float32) (float32, bool) {
 	if em <= 0 {
 		em = 16
@@ -39,15 +28,10 @@ func EvalFuncWithRem(name, expr string, em, rem, vw, vh float32) (float32, bool)
 	return p.combine(name, splitArgs(expr))
 }
 
-// EvalFunc resolves one of the value-bearing CSS functions - `calc()`,
-// `min()`, `max()`, and `clamp(min, val, max)`. Each argument is its own
-// expression in calc()'s grammar, so a clamp can nest a calc and a max can nest
-// a clamp.
 func EvalFunc(name, expr string, em, vw, vh float32) (float32, bool) {
 	return EvalFuncWithRem(name, expr, em, 16, vw, vh)
 }
 
-// EvalFuncWithBaseAndRem is EvalFuncWithRem for a caller that can answer percentages.
 func EvalFuncWithBaseAndRem(name, expr string, em, rem, vw, vh, pctBase float32) (float32, bool) {
 	if em <= 0 {
 		em = 16
@@ -65,44 +49,14 @@ func EvalFuncWithBaseAndRem(name, expr string, em, rem, vw, vh, pctBase float32)
 	return p.combine(name, splitArgs(expr))
 }
 
-// EvalFuncWithBase is EvalFunc for a caller that can answer percentages: a
-// `%` term resolves against pctBase, the containing-block length the property
-// speaks. Layout passes the containing width (or height) it already resolved;
-// the cascade passes a parent font size for font-relative percentages. A
-// percentage with no base still reports itself unsupported.
 func EvalFuncWithBase(name, expr string, em, vw, vh, pctBase float32) (float32, bool) {
 	return EvalFuncWithBaseAndRem(name, expr, em, 16, vw, vh, pctBase)
 }
 
-// viewportTerm matches a viewport unit inside an expression's text.
 var viewportTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(svmin|svmax|dvmin|dvmax|lvmin|lvmax|svw|svh|dvw|dvh|lvw|lvh|vi|vb|vw|vh|vmin|vmax)`)
 
-// viewportTermHints is the set of two-letter sequences that every alternative above
-// contains.
 var viewportTermHints = []string{"vw", "vh", "vi", "vb", "mi", "ma"}
 
-// ResolveViewportUnits rewrites the viewport terms in an expression as pixels,
-// leaving every other term alone. A `calc()` only reaches its `em` terms once the
-// cascade has settled the element's font size, and by then the frame's size is no
-// longer in scope, so the two halves of the context are applied where each is
-// known.
-//
-// The cascade runs this on the text of every declaration of every element, so the
-// overwhelmingly common case - a value that says nothing about the viewport - is
-// answered by the hint scan below rather than by the regexp. Skipping the regexp
-// exactly reproduces running it and finding no match, because a string that holds
-// none of those four bigrams cannot hold a viewport unit at all.
-// ResolveViewportUnits rewrites the viewport terms in an expression as pixels,
-// leaving every other term alone. A `calc()` only reaches its `em` terms once the
-// cascade has settled the element's font size, and by then the frame's size is no
-// longer in scope, so the two halves of the context are applied where each is
-// known.
-//
-// The cascade runs this on the text of every declaration of every element, so the
-// overwhelmingly common case - a value that says nothing about the viewport - is
-// answered by the hint scan below rather than by the regexp. Skipping the regexp
-// exactly reproduces running it and finding no match, because a string that holds
-// none of those four bigrams cannot hold a viewport unit at all.
 func ResolveViewportUnits(expr string, vw, vh float32) (string, bool) {
 	possible := false
 	for _, h := range viewportTermHints {
@@ -128,12 +82,10 @@ func ResolveViewportUnits(expr string, vw, vh float32) (string, bool) {
 	return out, found
 }
 
-// containerTerm matches a container query unit inside an expression's text.
 var containerTerm = regexp.MustCompile(`([0-9]*\.?[0-9]+)(cqw|cqh|cqi|cqb|cqmin|cqmax)`)
 
 var containerTermHints = []string{"cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"}
 
-// ResolveContainerUnits rewrites the container query unit terms in an expression as pixels.
 func ResolveContainerUnits(expr string, cqW, cqH float32) (string, bool) {
 	possible := false
 	for _, h := range containerTermHints {
@@ -185,9 +137,6 @@ func ResolveContainerUnits(expr string, cqW, cqH float32) (string, bool) {
 	return out, found
 }
 
-// foldOne evaluates one min()/max() argument list in the caller's context,
-// so a percentage inside any argument sees the same base as the rest of the
-// expression.
 func (p *calcExpr) foldOne(args []string, smallest bool) (float32, bool) {
 	best := float32(0)
 	for i, a := range args {
@@ -221,10 +170,6 @@ func evalSum(expr string, em, vw, vh float32) (float32, bool) {
 	return p.evalSum(expr)
 }
 
-// calcTokens splits an expression into numbers-with-units, function names,
-// operators, and parentheses. Whitespace carries no meaning beyond separating
-// tokens, so a multi-line expression with comments already stripped tokenizes
-// the same as a single-line one.
 func calcTokens(s string) []string {
 	var out []string
 	for i := 0; i < len(s); {
@@ -252,12 +197,8 @@ type calcExpr struct {
 	toks            []string
 	pos             int
 	em, rem, vw, vh float32
-	// pctBase answers `%` terms when allowPct is set. It is the
-	// containing-block length for box sizes, or the parent font size for
-	// font-relative percentages. Without it a percentage still reports
-	// itself unsupported rather than silently dropping.
-	pctBase  float32
-	allowPct bool
+	pctBase         float32
+	allowPct        bool
 }
 
 func (p *calcExpr) sum() (float32, bool) {
@@ -333,9 +274,6 @@ func (p *calcExpr) factor() (float32, bool) {
 		p.pos++
 		return sign * v, true
 	}
-	// A bare word before a parenthesis opens another function, and its arguments
-	// are evaluated in this same context so a nested `em` still means the
-	// element's font.
 	if p.pos+1 < len(p.toks) && p.toks[p.pos+1] == "(" && !isNumericToken(p.toks[p.pos]) {
 		name := p.toks[p.pos]
 		p.pos += 2
@@ -354,9 +292,6 @@ func (p *calcExpr) factor() (float32, bool) {
 	return sign * v, true
 }
 
-// call evaluates `calc()`, `min()`, `max()` or `clamp()` whose opening
-// parenthesis the caller already consumed. Arguments are re-joined as text and
-// recursed through evalSum, so a nested function is parsed by the same code.
 func (p *calcExpr) call(name string) (float32, bool) {
 	var args []string
 	start, depth := p.pos, 0
@@ -400,7 +335,6 @@ func (p *calcExpr) combine(name string, args []string) (float32, bool) {
 		}
 		return p.foldOne(args, false)
 	case "clamp":
-		// clamp(a, b, c) is max(a, min(b, c)): the value, capped, then floored.
 		if len(args) != 3 {
 			return 0, false
 		}
@@ -643,7 +577,7 @@ func roundWithStrategy(v, step float32, strat string) float32 {
 		ratio = math.Floor(ratio)
 	case "to-zero":
 		ratio = math.Trunc(ratio)
-	default: // "nearest"
+	default:
 		ratio = math.Round(ratio)
 	}
 	return float32(ratio * float64(step))
@@ -695,9 +629,6 @@ func (p *calcExpr) length(tok string) (float32, bool) {
 	case "turn":
 		return num * 2 * math.Pi, true
 	case "%":
-		// A percentage only answers when the caller supplied its base: the
-		// containing-block length for box sizes, the parent font for
-		// font-relative percentages. Without one it stays unsupported.
 		if !p.allowPct {
 			return 0, false
 		}

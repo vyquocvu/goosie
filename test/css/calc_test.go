@@ -7,7 +7,6 @@ import (
 )
 
 func TestEvalCalcSumsUnits(t *testing.T) {
-	// The rule a real page writes: a header's parts, added up, in mixed units.
 	got, ok := css.EvalCalc("10px + 18px + 0.25rem + 0.25rem", 16, 1280, 800)
 	if !ok || got != 36 {
 		t.Fatalf("EvalCalc(10px + 18px + 0.25rem + 0.25rem) = %g, ok=%v; want 36", got, ok)
@@ -36,10 +35,6 @@ func TestEvalCalcPrecedenceAndParentheses(t *testing.T) {
 	}
 }
 
-// A percentage inside calc resolves against the containing block, which a
-// declaration does not have. Summing the rest would answer with a length that
-// silently dropped that term, so such an expression - like a unit the engine
-// cannot name - reports itself unsupported.
 func TestEvalCalcLeavesUnresolvableTermsUnsupported(t *testing.T) {
 	for _, expr := range []string{"50% + 10px", "1lh + 2px", "10px +"} {
 		if _, ok := css.EvalCalc(expr, 16, 1280, 800); ok {
@@ -48,10 +43,6 @@ func TestEvalCalcLeavesUnresolvableTermsUnsupported(t *testing.T) {
 	}
 }
 
-// TestScientificNotationNumbers pins exponent support in the number grammar:
-// `1.2e2` is 120, and several WPT color swatches spell hues that way. The
-// hand-rolled parser used to stop at the `e`, reading a green 120-degree hue
-// as near-red 1.2.
 func TestScientificNotationNumbers(t *testing.T) {
 	got, ok := css.ParseColor("hsl(1.2e2, 75%, 50%)")
 	if !ok {

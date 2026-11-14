@@ -22,7 +22,6 @@ func TestResolvePseudoElements(t *testing.T) {
 		t.Fatal("expected pseudo-element styles, got none")
 	}
 
-	// Find the div element
 	var findDiv func(n *dom.Node) *dom.Node
 	findDiv = func(n *dom.Node) *dom.Node {
 		for c := n; c != nil; c = c.NextSibling {

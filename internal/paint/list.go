@@ -8,29 +8,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// List is a grow-only slab of display commands owned by one producer. It exists
-// because the frame path has two very different lifetimes: building a list, where
-// appending and occasional sorting are fine, and reading one a thousand times per
-// scroll, where neither an append nor an allocation may happen. Splitting those
-// into List (mutable) and LayerDL (frozen) makes the split enforceable, which is
-// the only way "workers read it without a lock" is a fact rather than a hope.
-//
-// A List is not safe for concurrent use, and is not meant to be: the engine
-// thread owns it.
 type List struct {
-	cmds   []DisplayCmd
-	bounds frame.Rect
-	// pending holds the groups registered during the walk, each as an append-
-	// ordinal span. Build re-derives them as sorted index spans and clears this.
+	cmds    []DisplayCmd
+	bounds  frame.Rect
 	pending []pendingGroup
 }
 
-// Group is one clean faded opacity group: the contiguous half-open command range
-// [Start,End) in paint order that an opacity-declaring box emitted, to be faded
-// once by OwnOpacity and composited onto the destination by the rasterizer.
-// Bounds is the device-pixel union of the range's command bounds (a tile fast
-// reject and a damage hint). Only clean groups are recorded (builder isClean-
-// FadedGroup), which is what keeps [Start,End) contiguous through SortStable.
 type Group struct {
 	OwnOpacity float32
 	Bounds     frame.Rect
@@ -38,16 +21,11 @@ type Group struct {
 	End        int
 }
 
-// pendingGroup is a group as the walk leaves it: its own opacity over the append
-// ordinals [first,last), before the list has been sorted.
 type pendingGroup struct {
 	own         float32
 	first, last int32
 }
 
-// NewList returns a builder with room for n commands. The capacity is a hint
-// rather than a limit; passing the box count from layout is what keeps a
-// first paint from growing the slab repeatedly.
 func NewList(n int) *List {
 	if n < 0 {
 		n = 0
@@ -55,13 +33,7 @@ func NewList(n int) *List {
 	return &List{cmds: make([]DisplayCmd, 0, n)}
 }
 
-// Reset truncates the builder for the next content version while keeping the
-// backing array. This is the reason a rebuild after a DOM mutation costs one
-// pass rather than a fresh allocation: the slab survives, only its length does
-// not.
 func (l *List) Reset() {
-	// Zero before reuse so a stale Glyphs slice or image reference cannot be
-	// retained by the backing array and keep decoded pixels alive.
 	for i := range l.cmds {
 		l.cmds[i] = DisplayCmd{}
 	}
@@ -70,10 +42,6 @@ func (l *List) Reset() {
 	l.pending = l.pending[:0]
 }
 
-// Append adds a command and folds it into the running bounds, so Bounds is O(1)
-// and a frame never recomputes the union. The command's Seq is stamped to its
-// append ordinal here; a faded group recorded with AddGroup spans ordinals, and
-// Build maps those onto the sorted slab through this field.
 func (l *List) Append(c DisplayCmd) {
 	c.Seq = int32(len(l.cmds))
 	l.cmds = append(l.cmds, c)
@@ -86,11 +54,6 @@ func (l *List) Append(c DisplayCmd) {
 	}
 }
 
-// AddGroup records a clean faded group covering the most recent count commands,
-// faded once by own opacity at composite time. The builder calls it right after
-// painting a clean opacity box, whose whole subtree is exactly those commands.
-// A count that does not resolve to a positive opacity is a no-op: an opaque or
-// fully transparent box is not a group (the latter is dropped before it paints).
 func (l *List) AddGroup(own float32, count int) {
 	if count <= 0 || own <= 0 || own >= 1 {
 		return
@@ -99,28 +62,14 @@ func (l *List) AddGroup(own float32, count int) {
 	l.pending = append(l.pending, pendingGroup{own: own, first: last - int32(count), last: last})
 }
 
-// Len returns the number of commands.
 func (l *List) Len() int { return len(l.cmds) }
 
-// At returns the i'th command in paint order.
 func (l *List) At(i int) DisplayCmd { return l.cmds[i] }
 
-// All returns the commands in paint order. It is the same slice the builder
-// owns, so callers must not mutate it; the frozen path is Publish on the
-// LayerDL returned by Build.
 func (l *List) All() []DisplayCmd { return l.cmds }
 
-// Bounds returns the union of every command's bounds, which is the layer's
-// content extent. Empty for a list with nothing to paint.
 func (l *List) Bounds() frame.Rect { return l.bounds }
 
-// SortStable orders the slab by Z, preserving append order within equal Z.
-//
-// Sorting is exposed as an explicit call rather than folded into Append because
-// append order is paint order for normal flow, and a producer that resolves
-// z-index into Z before calling this gets correct overlap for free. It runs once
-// per content version: a sort in the frame path would be the regression this
-// whole design exists to remove.
 func (l *List) SortStable() {
 	slices.SortStableFunc(l.cmds, func(a, b DisplayCmd) int {
 		switch {
@@ -133,16 +82,8 @@ func (l *List) SortStable() {
 	})
 }
 
-// Build hands the slab to a LayerDL of the given content version, still
-// unfrozen. The builder is left empty and must not be reused for this version:
-// transferring ownership rather than copying or sharing the slice is what makes
-// the published list safe for concurrent reads.
 func (l *List) Build(version uint64) *LayerDL {
 	dl := &LayerDL{cmds: l.cmds, version: version, bounds: l.bounds}
-	// Freeze each command's bounds once: Intersecting runs per tile per frame,
-	// and a text command's bounds walk its glyphs, so recomputing them there
-	// costs O(tiles x commands x glyphs) per frame. The sidecar pays the same
-	// walk exactly once per content version; values are identical to Bounds().
 	var cb []cmdBounds
 	if n := len(l.cmds); n > 0 {
 		cb = make([]cmdBounds, n)
@@ -152,9 +93,6 @@ func (l *List) Build(version uint64) *LayerDL {
 		}
 		dl.cb = cb
 	}
-	// Recover groups from the sorted slab. Build is always called after
-	// SortStable (engine/paint.go), and a clean group's members share one Z, so
-	// they stayed a contiguous run; Start is where the head landed, End Start+len.
 	if len(l.pending) > 0 {
 		dl.groups, dl.firstGroupAt = reconstructGroups(l.cmds, cb, l.pending)
 	}
@@ -164,12 +102,6 @@ func (l *List) Build(version uint64) *LayerDL {
 	return dl
 }
 
-// reconstructGroups maps every recorded ordinal span onto the sorted command
-// list. posOf[Seq] gives the sorted position of the command appended as ordinal
-// Seq; a clean group's span is contiguous there, so End = Start + (last-first).
-// Groups are ordered by Start then by End descending, so a parent precedes each
-// group it encloses in the result; nesting itself is discovered by containment
-// via firstGroupAt, so no parent index is stored.
 func reconstructGroups(cmds []DisplayCmd, cb []cmdBounds, pending []pendingGroup) ([]Group, []int32) {
 	firstGroupAt := make([]int32, len(cmds))
 	for i := range firstGroupAt {
@@ -212,39 +144,21 @@ func reconstructGroups(cmds []DisplayCmd, cb []cmdBounds, pending []pendingGroup
 	return groups, firstGroupAt
 }
 
-// LayerDL is one layer's display list after publication: immutable, self-
-// describing, and safe for any number of raster workers to read at once.
-//
-// It satisfies frame.Content, which is how the frame package tracks layer
-// versions without importing paint and creating a cycle.
 type LayerDL struct {
-	cmds      []DisplayCmd
-	version   uint64
-	bounds    frame.Rect
-	published bool
-	// cb caches Bounds() per command, filled by Build. Intersecting reads it
-	// instead of re-walking glyphs per tile; nil (a LayerDL built outside
-	// List.Build, only in tests) falls back to live Bounds calls.
-	cb []cmdBounds
-	// groups holds the clean faded groups reconstructed by Build, in paint order.
-	// A list with no groups leaves it nil.
-	groups []Group
-	// firstGroupAt[i] is the index into groups of the group starting at command
-	// i, or -1. It lets the rasterizer find a group's start in O(1) while walking
-	// the list once, without a scan per command.
+	cmds         []DisplayCmd
+	version      uint64
+	bounds       frame.Rect
+	published    bool
+	cb           []cmdBounds
+	groups       []Group
 	firstGroupAt []int32
 }
 
-// cmdBounds is one frozen command bounds entry.
 type cmdBounds struct {
 	r  frame.Rect
 	ok bool
 }
 
-// Publish freezes the list and returns it for chaining. Calling it twice panics
-// on purpose: a second mutation point means some producer still holds the
-// builder, and the resulting torn tile would be diagnosed as a rasterizer bug
-// three layers away from the cause.
 func (d *LayerDL) Publish() *LayerDL {
 	if d.published {
 		panic("paint: LayerDL published twice; a display list is frozen after publication")
@@ -253,38 +167,22 @@ func (d *LayerDL) Publish() *LayerDL {
 	return d
 }
 
-// Frozen reports whether the list has been published, and therefore whether any
-// read of it is race-free.
 func (d *LayerDL) Frozen() bool { return d.published }
 
-// Version returns the content version the list describes.
 func (d *LayerDL) Version() uint64 { return d.version }
 
-// Extent returns the content-space box the list paints. It is frame.Content's
-// second method and the box the tile grid is built over.
 func (d *LayerDL) Extent() frame.Rect { return d.bounds }
 
-// Bounds is an alias for Extent, kept because callers that already speak of
-// display lists say bounds.
 func (d *LayerDL) Bounds() frame.Rect { return d.bounds }
 
-// Len returns the command count.
 func (d *LayerDL) Len() int { return len(d.cmds) }
 
-// At returns the i'th command. Reading a command is the concurrent access the
-// freeze exists to permit.
 func (d *LayerDL) At(i int) DisplayCmd { return d.cmds[i] }
 
-// All returns every command in paint order. The slice is shared and read-only.
 func (d *LayerDL) All() []DisplayCmd { return d.cmds }
 
-// Groups returns the clean faded groups in paint order. Nested groups appear
-// after their parent and inside its [Start,End). Nil when the list has none.
 func (d *LayerDL) Groups() []Group { return d.groups }
 
-// GroupAt returns the group whose range starts at command i. The rasterizer
-// jumps the whole range when a group starts at the walk index, so nested groups
-// are discovered by containment rather than a separate traversal.
 func (d *LayerDL) GroupAt(i int) (Group, bool) {
 	if i < 0 || i >= len(d.firstGroupAt) {
 		return Group{}, false
@@ -296,7 +194,6 @@ func (d *LayerDL) GroupAt(i int) (Group, bool) {
 	return d.groups[gi], true
 }
 
-// ContentDamage includes old and new ink, so reflow cannot leave displaced pixels cached.
 func ContentDamage(before, after frame.Content) frame.Rect {
 	old, oldOK := before.(*LayerDL)
 	next, nextOK := after.(*LayerDL)
@@ -342,12 +239,6 @@ func ContentDamage(before, after frame.Content) frame.Rect {
 	return dirty.Union(groupDamage(old, next))
 }
 
-// groupDamage unions the bounds of every group whose description changed
-// between two frozen lists, so an opacity-only mutation repaints. A membership
-// change is already caught by the command diff (members move or their
-// per-command opacity changes), but a pure OwnOpacity change is invisible to
-// sameCommand and would otherwise read as undamaged and leave stale pixels. When
-// the group counts differ, conservatively paint every group's range in both.
 func groupDamage(a, b *LayerDL) frame.Rect {
 	var dirty frame.Rect
 	if len(a.groups) != len(b.groups) {
@@ -380,7 +271,6 @@ func sameCommand(a, b DisplayCmd) bool {
 		slices.Equal(a.RadialGradient.Stops, b.RadialGradient.Stops)
 }
 
-// Images are immutable; compare identity without walking decoded pixels or assuming a comparable implementation.
 func sameImage(a, b image.Image) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -389,19 +279,6 @@ func sameImage(a, b image.Image) bool {
 	return typ == reflect.TypeOf(b) && typ.Comparable() && a == b
 }
 
-// Intersecting returns the tightest contiguous span of the paint order that
-// contains every command touching r.
-//
-// It is a span, not a filtered copy, and that is deliberate: a filtered result
-// would need either an allocation per tile or a scratch buffer per worker, and
-// the frame path may do neither. The caller still clips each command it draws,
-// so the only cost of the over-approximation is a bounds test per command in the
-// span. Returns nil when nothing intersects, which is the common case for tiles
-// over whitespace and is why the empty result is worth distinguishing.
-// CachedIntersects reports whether command i touches r using the frozen bounds
-// sidecar instead of re-walking glyphs. It answers exactly what At(i).Intersects
-// would, so the rasterizer's per-tile filter stays identical while dropping
-// from O(glyphs) to O(1) per command.
 func (d *LayerDL) CachedIntersects(i int, r frame.Rect) bool {
 	if len(d.cb) == len(d.cmds) && i >= 0 && i < len(d.cmds) {
 		return d.cb[i].ok && d.cb[i].r.Intersects(r)

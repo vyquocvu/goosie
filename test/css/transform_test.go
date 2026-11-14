@@ -183,7 +183,6 @@ func TestResolveTransformTranslate(t *testing.T) {
 	funcs := css.ParseTransform("translate(10px, 20px)")
 	origin := css.TransformOrigin{X: 0, Y: 0}
 	m := paint.ResolveTransform(funcs, origin, 100, 50)
-	// With origin at (0,0), translate(10,20) should give tx=10, ty=20.
 	if m.Tx != 10 || m.Ty != 20 {
 		t.Errorf("translate resolve: Tx=%g Ty=%g, want 10, 20", m.Tx, m.Ty)
 	}
@@ -202,39 +201,32 @@ func TestResolveTransformScale(t *testing.T) {
 }
 
 func TestResolveTransformWithOrigin(t *testing.T) {
-	// scale(2) with origin at center (50, 25) of a 100x50 element.
 	funcs := css.ParseTransform("scale(2)")
-	origin := css.DefaultTransformOrigin() // 50% 50%
+	origin := css.DefaultTransformOrigin()
 	m := paint.ResolveTransform(funcs, origin, 100, 50)
 
-	// The center point (50,25) should map to itself.
 	x, y := m.TransformPoint(50, 25)
 	if !fApprox(x, 50) || !fApprox(y, 25) {
 		t.Errorf("center after scale with center origin: (%g, %g), want (50, 25)", x, y)
 	}
 
-	// The matrix should not be identity.
 	if m.IsIdentity() {
 		t.Fatal("scale(2) with origin should not be identity")
 	}
 
-	// A should be 2, D should be 2 (scale is preserved regardless of origin).
 	if !fApprox(m.A, 2) || !fApprox(m.D, 2) {
 		t.Errorf("A=%g D=%g, want 2, 2", m.A, m.D)
 	}
 
-	// Tx = ox - sx*ox = 50 - 2*50 = -50
-	// Ty = oy - sy*oy = 25 - 2*25 = -25
 	if !fApprox(m.Tx, -50) || !fApprox(m.Ty, -25) {
 		t.Errorf("Tx=%g Ty=%g, want -50, -25", m.Tx, m.Ty)
 	}
 }
 
 func TestParseTransformAngleUnits(t *testing.T) {
-	// Test different angle units.
 	tests := []struct {
 		input string
-		want  float32 // radians
+		want  float32
 	}{
 		{"rotate(180deg)", float32(math.Pi)},
 		{"rotate(3.14159rad)", float32(math.Pi)},
@@ -267,8 +259,6 @@ func TestResolveTransformMatrix(t *testing.T) {
 }
 
 func TestResolveTransformProducesCorrectAABB(t *testing.T) {
-	// Verify that the resolved transform, when applied to a rect, gives the
-	// correct AABB.
 	funcs := css.ParseTransform("translate(10px, 20px)")
 	origin := css.TransformOrigin{X: 0, Y: 0}
 	m := paint.ResolveTransform(funcs, origin, 100, 50)

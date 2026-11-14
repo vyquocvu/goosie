@@ -11,8 +11,6 @@ import (
 
 const helloWorldSHA256 = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
 
-// FR-AST-04: a completed stream carries the SHA-256 of exactly the bytes that
-// reached disk, so the saved file can be verified after the transfer.
 func TestSaveStreamReportsSHA256(t *testing.T) {
 	path, written, sum, err := SaveStream(context.Background(), t.TempDir(), "hello.txt",
 		bytes.NewReader([]byte("hello world")), nil)

@@ -28,8 +28,6 @@ func newSelectionTestPath(t *testing.T, html string, opts ...engine.Option) (*fr
 	return f, sess
 }
 
-// selectionWordRect returns the border rect of the last laid-out word box with
-// this text, matching the document-order walk the engine selects by.
 func selectionWordRect(t *testing.T, s *engine.Session, text string) frame.Rect {
 	t.Helper()
 	var out frame.Rect
@@ -65,10 +63,6 @@ func clipboardHTML(cb interface{ Read() string }) string {
 }
 
 // qc:BR-108
-//
-// A mouse drag selects the words under the pointer and paints the highlight,
-// and Shift+Arrow then continues that selection from the pressed anchor: right
-// grows one rune at a time, left shrinks, and no form control steals focus.
 func TestMouseDragAndShiftArrowSelectPageText(t *testing.T) {
 	f, sess := newSelectionTestPath(t,
 		`<html><body style="margin:0;"><p style="font-size:16px;">hello brave world</p></body></html>`)
@@ -118,10 +112,6 @@ func TestMouseDragAndShiftArrowSelectPageText(t *testing.T) {
 }
 
 // qc:BR-109
-//
-// Copying a page selection through the shortcut's handler puts exactly the
-// visible text on the clipboard with no markup, and pasting it into a form
-// control yields that text unchanged.
 func TestPageSelectionCopyIsPlainTextAndPastesIntoAControl(t *testing.T) {
 	cb := platform.NewClipboard()
 	if cb == nil {
@@ -141,8 +131,6 @@ func TestPageSelectionCopyIsPlainTextAndPastesIntoAControl(t *testing.T) {
 		t.Fatalf("setup selection = %q, want copy me exactly", got)
 	}
 
-	// copySelection is the handler the Cmd+C shortcut and the context menu
-	// both call for a page selection.
 	if !f.copySelection() {
 		t.Fatal("copy declined an active page selection")
 	}
@@ -166,9 +154,6 @@ func TestPageSelectionCopyIsPlainTextAndPastesIntoAControl(t *testing.T) {
 }
 
 // qc:BR-110
-//
-// Cmd+A in a text control selects that control's value and nothing else; the
-// page selection stays empty so the paragraph outside it is not copied.
 func TestCmdASelectsOnlyTheFocusedTextControl(t *testing.T) {
 	f, sess := newSelectionTestPath(t,
 		`<html><body><p>outside words</p><input id="field" value="inside value"></body></html>`)
@@ -187,10 +172,6 @@ func TestCmdASelectsOnlyTheFocusedTextControl(t *testing.T) {
 }
 
 // qc:BR-110
-//
-// Cmd+A in a contenteditable selects the editable subtree only: the script's
-// getSelection excludes sibling page text, and the engine's page selection
-// stays empty.
 func TestCmdASelectsOnlyTheContentEditableSubtree(t *testing.T) {
 	rt, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://selection.example.test/"})
 	if err != nil {

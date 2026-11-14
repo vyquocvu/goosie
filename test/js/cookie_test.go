@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// document.cookie is the switch dynamic pages read before booting: Wikipedia
-// parses its preference cookie, then flips client-nojs to client-js. With no
-// cookie binding the read throws, the flip never happens, and the page stays
-// in its no-JS layout with expanded dropdowns pushing the article down.
 func TestDocumentCookieEmpty(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`var out = document.cookie === "";`, "inline"); err != nil {
@@ -76,8 +72,6 @@ var out = document.cookie;`
 	}
 }
 
-// Wikipedia's exact startup read: match on an empty jar must yield null,
-// not a throw, so the boot proceeds to the className flip.
 func TestWikipediaCookieMatch(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://en.wikipedia.org/wiki/Web_browser"})
 	src := `
@@ -91,8 +85,6 @@ var out = (cookie === null);`
 	}
 }
 
-// A host-supplied store backs the binding when present: reads come from it
-// (HttpOnly excluded by the store) and writes go to it.
 func TestDocumentCookieUsesStore(t *testing.T) {
 	store := &memCookieStore{}
 	r := newRuntime(t, js.Options{URL: "https://example.test/", Cookies: store})

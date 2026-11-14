@@ -18,19 +18,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// faceDPI is the resolution faces are created at. opentype converts a point size
-// to pixels as Size * DPI / 72, so holding DPI at 72 makes FaceOptions.Size the
-// pixel size outright. That is what lets a GlyphRun carry a device-pixel size
-// and the rasterizer to do no unit conversion at all.
 const faceDPI = 72
 
-// Glyph is one rasterized glyph in a face at one size.
-//
-// Bounds is the mask's box relative to the pen position, in device pixels: a
-// glyph that hangs below the baseline has a positive Y1, one with a left
-// side bearing has a positive X0. Mask is a private copy of the coverage the
-// face produced, which is what makes a Glyph safe to hand to any number of
-// workers at once.
 type Glyph struct {
 	Mask    *image.Alpha
 	Bounds  frame.Rect
@@ -39,8 +28,6 @@ type Glyph struct {
 	Missing bool
 }
 
-// Bytes returns the mask's allocation, which is what the atlas budgets against.
-// A glyph with no mask (a space) costs only its own struct.
 func (g Glyph) Bytes() int64 {
 	if g.Mask == nil {
 		return 0
@@ -48,39 +35,11 @@ func (g Glyph) Bytes() int64 {
 	return int64(len(g.Mask.Pix))
 }
 
-// faceKey identifies one cached face: a slot at a device-pixel size.
-//
-// The size is all the key carries beyond the slot. The alternative - keying on
-// (CSS size, scale) as well - splits the cache for no gain: 16px at DPR 1 and
-// 16px at DPR 2 are the same bitmap, and paint.GlyphRun already documents its
-// Size as "already scaled by the device ratio" for exactly this reason. Keeping
-// the key narrow is what lets a page that changes zoom reuse every glyph it has
-// already drawn.
 type faceKey struct {
 	slot frame.FontSlot
 	size int32
 }
 
-// Fonts owns the parsed faces and the per-size faces derived from them.
-//
-// A slot with no host font is served by the embedded Go face instead of failing,
-// so the set of families is a quality difference rather than a correctness one:
-// the same binary on a fontless Ubuntu CI runner and on a Mac draws different
-// typefaces but never missing text. GOOSIE_SYSTEM_FONTS=off pins every slot to
-// the embedded face, which is what a run that compares rendered bytes needs on a
-// host that has the fonts.
-//
-// An opentype.Face reuses internal scratch buffers between calls and is not safe
-// for concurrent use, so faces are guarded here rather than shared. The
-// rendering of a glyph happens once and its mask is copied into a private
-// image.Alpha, so the lock covers a cache miss and never a warm tile raster -
-// which is the difference between parallel rasterization and a mutex in the
-// hot path.
-//
-// The lock is a RWMutex so warm lookups run concurrently: a hit in a face's
-// glyph or advance memo only takes the read lock, while driving a face (a miss)
-// takes the write lock. The per-face memos are only ever touched under this
-// lock, so no per-face lock is needed.
 type fallbackKey struct {
 	idx  int
 	size int32
@@ -103,8 +62,6 @@ func (rc runeCoverage) contains(r rune) bool {
 	return false
 }
 
-// parseCmapRanges extracts unicode rune ranges from font bytes (cmap format 4 and format 12).
-// It returns a compact sorted slice of non-overlapping rune ranges.
 func parseCmapRanges(data []byte) runeCoverage {
 	if len(data) < 12 {
 		return nil
@@ -150,9 +107,6 @@ func parseCmapRanges(data []byte) runeCoverage {
 	return runeCoverage(merged)
 }
 
-// parseSFNTCmapRangesAt parses a face directory at offset. Table offsets in a
-// TrueType collection remain relative to the collection start, so data itself
-// is not sliced before following the cmap table pointer.
 func parseSFNTCmapRangesAt(data []byte, offset int) []runeRange {
 	if offset < 0 || offset+12 > len(data) {
 		return nil
@@ -237,12 +191,9 @@ func parseSFNTCmapRangesAt(data []byte, offset int) []runeRange {
 }
 
 type Fonts struct {
-	mu      sync.RWMutex
-	sources map[frame.FontSlot]*opentype.Font
-	entries map[faceKey]*faceEntry
-	// fbCache memoizes fallbackLocked's chain per requested (slot, size). It is
-	// only read and written under the write lock, and it is dropped whenever a
-	// new face entry appears, so a cached chain always equals a fresh one.
+	mu                    sync.RWMutex
+	sources               map[frame.FontSlot]*opentype.Font
+	entries               map[faceKey]*faceEntry
 	fbCache               map[faceKey][]*faceEntry
 	custom                []*opentype.Font
 	fallbacks             []*opentype.Font
@@ -261,38 +212,20 @@ type faceEntry struct {
 	face    font.Face
 	glyphs  map[rune]Glyph
 	missing map[rune]struct{}
-	// adv memoizes GlyphAdvanceFixed's 26.6 result per rune, including the
-	// fallback-resolved value; advMiss memoizes the "no face has it" answer.
-	// Both are populated only by the GlyphAdvanceFixed path from the exact
-	// values it used to compute, so a cached hit is bit-identical to a fresh
-	// call. The Glyph path keeps its own glyphs/missing memo untouched.
 	adv     map[rune]int32
 	advMiss map[rune]struct{}
 }
 
-// MaxFallbackFontBytes is the upper bound on the file size of a candidate host fallback font
-// admitted for parsing (4 MiB). Candidate files exceeding this size (such as Arial Unicode.ttf
-// at ~22-39 MiB) are rejected at admission via os.Stat before any ReadFile. This protects against
-// runaway memory retention and high synchronous disk I/O under the raster lock, following the engine's
-// untrusted input admission contract (internal/image/decode.go:14-18, internal/engine/limits.go:23-59).
 const MaxFallbackFontBytes = 4 * 1024 * 1024
 
-// MaxParsedFallbackFonts is the upper bound on the number of wide-coverage system
-// fallback fonts that may be lazily loaded and retained in memory.
 const MaxParsedFallbackFonts = 2
 
 const systemFontDir = "/System/Library/Fonts/Supplemental"
 
-// systemFontFiles maps a CSS-resolved slot onto the host file that draws it.
-// A missing or unreadable file is normal - it is what a Linux host looks like -
-// and leaves the slot on the embedded face.
 var systemFontFiles = []struct {
 	slot frame.FontSlot
 	file string
 }{
-	// Chromium's default serif on macOS is Times New Roman, and the score says
-	// so: Apple's Times from Times.ttc renders the same pages ~5pp worse against
-	// Playwright references.
 	{frame.FontSlot{Family: frame.FontTimes}, "Times New Roman.ttf"},
 	{frame.FontSlot{Family: frame.FontTimes, Bold: true}, "Times New Roman Bold.ttf"},
 	{frame.FontSlot{Family: frame.FontTimes, Italic: true}, "Times New Roman Italic.ttf"},
@@ -315,15 +248,6 @@ var systemFontFiles = []struct {
 	{frame.FontSlot{Family: frame.FontVerdana, Bold: true, Italic: true}, "Verdana Bold Italic.ttf"},
 }
 
-// systemFontCollections loads faces that only exist inside a macOS font
-// collection (.ttc), which opentype.Parse cannot read as a single font. Each
-// entry names a face by its index in the collection. The indices are stable for
-// a given macOS build; a host without the file simply leaves the slot on the
-// embedded face, exactly as a missing .ttf does.
-//
-// Helvetica Neue is the family Chromium falls back to for a "Helvetica Neue",
-// Helvetica CSS stack on macOS, so goosie has to reach for the same face to line
-// its glyph advances up with the reference renders.
 var systemFontCollections = []struct {
 	slot frame.FontSlot
 	path string
@@ -334,18 +258,10 @@ var systemFontCollections = []struct {
 	{frame.FontSlot{Family: frame.FontHelvetica, Light: true}, "/System/Library/Fonts/HelveticaNeue.ttc", 12},
 }
 
-// systemFallbackFiles lists candidate system font files used as wide-coverage
-// fallbacks when no document family or standard system font carries a glyph.
-// They are prioritized by measured coverage: wide-coverage symbol faces (Apple Symbols)
-// are checked before narrow dingbat faces (ZapfDingbats), and large multi-megabyte fonts
-// (Arial Unicode) are queried last only when smaller fonts do not provide the glyph.
 var systemFallbackFiles = []string{
-	// CJKSymbolsFallback is a small macOS collection containing kana and CJK symbols.
 	"/System/Library/Fonts/CJKSymbolsFallback.ttc",
-	// Other macOS and Linux fallback faces are ordered by measured non-Latin coverage.
 	"/System/Library/Fonts/Apple Symbols.ttf",
 	"/System/Library/Fonts/ZapfDingbats.ttf",
-	// Linux - small system fonts (< 2 MB)
 	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 	"/usr/share/fonts/dejavu/DejaVuSans.ttf",
 	"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
@@ -354,16 +270,10 @@ var systemFallbackFiles = []string{
 	"/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
 	"/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf",
 	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-	// Large fallback fonts - last resort (~22-39 MB)
 	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
 	"/Library/Fonts/Arial Unicode.ttf",
 }
 
-// NewFonts parses the embedded font and every host font it can read. It is
-// called once at startup; the parse cost is a few hundred microseconds per face
-// and it is the only place the font bytes are read. Fallback host fonts are
-// NOT parsed here; they are loaded lazily on demand when a rune misses across
-// all primary faces.
 func NewFonts() (*Fonts, error) {
 	f, err := NewEmbeddedFonts()
 	if err != nil {
@@ -401,9 +311,6 @@ func NewFonts() (*Fonts, error) {
 	return f, nil
 }
 
-// NewEmbeddedFonts returns a Fonts that serves every slot from the embedded Go
-// faces. A host with no system fonts is in this state anyway, which is why it is
-// a supported configuration rather than a test-only fixture.
 func NewEmbeddedFonts() (*Fonts, error) {
 	regular, err := opentype.Parse(goregular.TTF)
 	if err != nil {
@@ -427,8 +334,6 @@ func NewEmbeddedFonts() (*Fonts, error) {
 	}, nil
 }
 
-// AddFallback appends an opentype.Font to the wide-coverage fallback chain.
-// It is thread-safe and invalidates any cached fallback chains.
 func (f *Fonts) AddFallback(font *opentype.Font) {
 	if font == nil {
 		return
@@ -439,8 +344,6 @@ func (f *Fonts) AddFallback(font *opentype.Font) {
 	f.fbCache = map[faceKey][]*faceEntry{}
 }
 
-// fallbackFaceLocked returns the cached faceEntry for a fallback font at the given size.
-// Callers hold f.mu (read or write).
 func (f *Fonts) fallbackFaceLocked(idx int, size int32, src *opentype.Font) *faceEntry {
 	if size <= 0 || src == nil {
 		return nil
@@ -471,9 +374,6 @@ func (f *Fonts) fallbackFaceLocked(idx int, size int32, src *opentype.Font) *fac
 	return e
 }
 
-// admitAndRetainFallbackLocked parses font bytes, creates the requested face, and retains
-// the font in f.fallbacks if within MaxParsedFallbackFonts and HasGlyph(face, r) is true.
-// Callers hold f.mu for writing.
 func (f *Fonts) admitAndRetainFallbackLocked(path string, data []byte, size int32, r rune) *faceEntry {
 	if len(f.fallbacks) >= MaxParsedFallbackFonts {
 		return nil
@@ -537,21 +437,6 @@ func (f *Fonts) admitAndRetainFallbackLocked(path string, data []byte, size int3
 	return e
 }
 
-// lazyFallbackForRuneLocked probes candidate host fallback files in priority order
-// for a rune missing from all currently loaded faces.
-//
-// Candidate files exceeding MaxFallbackFontBytes (such as Arial Unicode.ttf at 22-39 MiB)
-// or missing from disk are rejected at admission via os.Stat before any ReadFile, and
-// memoized in rejectedFallbackPaths so they are never probed again.
-//
-// When an admitted font is read, its rune coverage (cmap ranges) is extracted into candidateCoverage.
-// If the font does NOT cover the requested rune r, the face and parsed font are dropped
-// immediately (letting GC reclaim them), retaining only the compact runeCoverage memo
-// (~hundreds of bytes) so future misses avoid redundant disk I/O.
-//
-// Only candidate fonts that actually cover r are admitted and retained in f.fallbacks,
-// bounded by MaxParsedFallbackFonts (2) and gateFallbackFontBudgetMiB.
-// Callers hold f.mu for writing.
 func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 	if size <= 0 || systemFontsDisabled() {
 		return nil
@@ -626,7 +511,6 @@ func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 		f.candidateCoverage[path] = cov
 
 		if cov != nil && !cov.contains(r) {
-			// Does not cover r: face is NOT retained. GC reclaims data.
 			continue
 		}
 
@@ -637,28 +521,22 @@ func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 	return nil
 }
 
-// FallbackFilesRead returns the number of host font files read from disk for fallback.
 func (f *Fonts) FallbackFilesRead() int64 {
 	return f.fallbackFilesRead.Load()
 }
 
-// FallbackFontsCount returns the number of fallback fonts currently loaded and retained.
 func (f *Fonts) FallbackFontsCount() int {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return len(f.fallbacks)
 }
 
-// FallbackBytes returns the total bytes of fallback fonts retained by f.
 func (f *Fonts) FallbackBytes() int64 {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.fallbackBytes
 }
 
-// SetFallbackCandidates overrides candidate fallback font paths for this Fonts instance.
-// Passing a non-empty slice forces lazyFallbackForRuneLocked to query exactly these paths.
-// Passing nil or an empty slice restores default system fallback candidates.
 func (f *Fonts) SetFallbackCandidates(paths []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -669,18 +547,12 @@ func (f *Fonts) SetFallbackCandidates(paths []string) {
 	f.fallbackCandidates = append([]string(nil), paths...)
 }
 
-// SetFallbackHook registers an optional callback invoked whenever a host fallback
-// font file is read from disk.
 func (f *Fonts) SetFallbackHook(fn func(path string)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.fallbackHook = fn
 }
 
-// Register parses a font file's bytes and returns a 1-based index the style
-// resolver threads through FontSlot.CustomIdx. A @font-face rule that names
-// this family sets that index on every ComputedStyle that matches, which is
-// how a face the engine did not ship with ends up rasterizing glyphs.
 func (f *Fonts) Register(data []byte) (uint16, error) {
 	parsed, err := opentype.Parse(data)
 	if err != nil {
@@ -692,9 +564,6 @@ func (f *Fonts) Register(data []byte) (uint16, error) {
 	return uint16(len(f.custom)), nil
 }
 
-// systemFontsDisabled reports whether the environment asks for the embedded face
-// in every slot. A gate that compares rendered bytes across machines needs the
-// font set, like the rasterizer, to be a function of the binary alone.
 func systemFontsDisabled() bool {
 	switch strings.ToLower(os.Getenv("GOOSIE_SYSTEM_FONTS")) {
 	case "0", "off", "no", "false":
@@ -703,12 +572,6 @@ func systemFontsDisabled() bool {
 	return false
 }
 
-// Face returns the cached face for a slot at a device-pixel size.
-//
-// The returned face is shared and must not be driven concurrently: use Glyph
-// unless the caller already holds this Fonts lock. A size at or below zero
-// yields nil, which callers treat as "draw nothing" rather than a default size,
-// so a layout bug shows up as missing text instead of text at the wrong scale.
 func (f *Fonts) Face(size int32, slot frame.FontSlot) font.Face {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -731,12 +594,8 @@ func (f *Fonts) faceLocked(size int32, slot frame.FontSlot) *faceEntry {
 		return e
 	}
 	face, err := opentype.NewFace(src, &opentype.FaceOptions{
-		Size: float64(size),
-		DPI:  faceDPI,
-		// No hinting on purpose. Hinting adjusts stem positions to the pixel
-		// grid, and the grid differs between a Retina display and a 1x monitor,
-		// so a hinted rendering is not a function of size alone. Determinism
-		// across machines is worth more here than a slightly crisper stem.
+		Size:    float64(size),
+		DPI:     faceDPI,
 		Hinting: font.HintingNone,
 	})
 	if err != nil {
@@ -744,35 +603,20 @@ func (f *Fonts) faceLocked(size int32, slot frame.FontSlot) *faceEntry {
 	}
 	e := &faceEntry{face: face, glyphs: map[rune]Glyph{}, missing: map[rune]struct{}{}, adv: map[rune]int32{}, advMiss: map[rune]struct{}{}}
 	f.entries[k] = e
-	// A new face can join a previously computed fallback chain, so any chain
-	// cached before it existed is stale. Face creation happens a handful of
-	// times per document (one per slot/size), so dropping the whole memo is
-	// cheaper than versioning it.
 	f.fbCache = map[faceKey][]*faceEntry{}
 	return e
 }
 
-// resolveLocked maps a requested slot onto the slot and parsed font that serves
-// it, applying the same degradation faceLocked does. It only reads shared maps,
-// so it is safe under either the read or the write lock. Callers hold f.mu.
 func (f *Fonts) resolveLocked(slot frame.FontSlot) (frame.FontSlot, *opentype.Font) {
 	var src *opentype.Font
 	if slot.CustomIdx != 0 && int(slot.CustomIdx-1) < len(f.custom) {
 		src = f.custom[slot.CustomIdx-1]
 	} else {
 		src = f.sources[slot]
-		// A slot the host cannot serve still has to draw: first the same family
-		// without the slant it is missing, then the embedded face at the same
-		// weight. The cache is keyed by the face that ends up being used rather than
-		// by the request, which is what stops five unavailable families from each
-		// holding a private copy of every glyph.
 		if src == nil && slot.Italic {
 			slot.Italic = false
 			src = f.sources[slot]
 		}
-		// A light weight is served only by a family the host has a light face for;
-		// everywhere else it settles back onto that family's regular face rather than
-		// dropping the whole family to the embedded face.
 		if src == nil && slot.Light {
 			slot.Light = false
 			src = f.sources[slot]
@@ -785,9 +629,6 @@ func (f *Fonts) resolveLocked(slot frame.FontSlot) (frame.FontSlot, *opentype.Fo
 	return slot, src
 }
 
-// lookupLocked returns the cached face entry without creating one, for read-lock
-// fast paths. A nil result means the caller must take the write lock and go
-// through faceLocked. Callers hold f.mu (read or write).
 func (f *Fonts) lookupLocked(size int32, slot frame.FontSlot) *faceEntry {
 	if size <= 0 {
 		return nil
@@ -799,20 +640,6 @@ func (f *Fonts) lookupLocked(size int32, slot frame.FontSlot) *faceEntry {
 	return f.entries[faceKey{slot: slot, size: size}]
 }
 
-// fallbackLocked returns the faces to try for a rune the requested face does not
-// carry, in a fixed order: the embedded symbol face first, then every other
-// family the host served. The order is sorted rather than map-random because a
-// substitute glyph has to be the same glyph on every run of one document.
-//
-// Callers hold f.mu for writing: resolving the chain can create faces.
-// faceLocked degrades a slot it cannot serve, so the same
-// face can come back for several slots and is offered once.
-//
-// The chain for a requested (size, slot) never changes without a new face entry
-// appearing - the sources map is fixed after NewFonts - and faceLocked drops the
-// memo whenever that happens, so a cached chain is the chain a fresh computation
-// would return, including its order. The returned slice is shared and must only
-// be iterated, never mutated.
 func (f *Fonts) fallbackLocked(size int32, slot frame.FontSlot) []*faceEntry {
 	k := faceKey{slot: slot, size: size}
 	if fb, ok := f.fbCache[k]; ok {
@@ -878,15 +705,6 @@ func (f *Fonts) fallbackLocked(size int32, slot frame.FontSlot) []*faceEntry {
 	return out
 }
 
-// isDefaultIgnorable reports whether r is a format control that Unicode
-// defaults to ignorable: it costs no advance and carries no ink. Chromium 1.63
-// measured a Latin "a" and an "a" followed by one of these as the same
-// 8.906px (scripts/verify-br087-text-parity.js), so the answer is given before
-// any face is consulted - a host face that does map U+200D or U+200F would
-// otherwise draw a phantom box over the neighbours, and U+00AD would charge a
-// hyphen where the reference charges nothing. Combining marks are the opposite
-// case and stay out of this set: they advance zero but must keep their accent
-// ink.
 func isDefaultIgnorable(r rune) bool {
 	return (r >= 0xFE00 && r <= 0xFE0F) ||
 		(r >= 0xE0100 && r <= 0xE01EF) ||
@@ -894,10 +712,6 @@ func isDefaultIgnorable(r rune) bool {
 		r == 0x200E || r == 0x200F || r == 0xFEFF
 }
 
-// tofuAdvanceFixed returns the advance of a missing glyph in 26.6 fixed-point units.
-// The advance is stable and non-zero (1 em = size pixels), matching the standard
-// square geometry of emoji and .notdef glyphs so layout does not shift when
-// a real emoji face is provided.
 func tofuAdvanceFixed(size int32) int32 {
 	if size <= 0 {
 		return 0
@@ -905,8 +719,6 @@ func tofuAdvanceFixed(size int32) int32 {
 	return size << 6
 }
 
-// tofuGlyph generates a visible missing glyph (tofu): a bordered rectangle
-// with non-zero ink and a stable advance width.
 func tofuGlyph(size int32) Glyph {
 	if size <= 0 {
 		return Glyph{}
@@ -952,22 +764,13 @@ func tofuGlyph(size int32) Glyph {
 	}
 }
 
-// Glyph rasterizes r in a slot at a device-pixel size, returning a mask the
-// caller owns (and may keep in a cache). If no face in the fallback chain has
-// such a glyph, it returns a visible tofu glyph (a bordered box) with a stable
-// non-zero advance and sets Missing=true, rather than treating missing text as
-// whitespace.
 func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 	if size <= 0 {
 		return Glyph{}
 	}
 	if isDefaultIgnorable(r) {
-		// Asked and answered before any face is consulted: the control occupies
-		// nothing, so it must not be looked up, cached per face, or counted as
-		// missing coverage.
 		return Glyph{Ok: true}
 	}
-	// Fast path: a cached hit needs no face and no writer.
 	f.mu.RLock()
 	if e := f.lookupLocked(size, slot); e != nil {
 		if g, ok := e.glyphs[r]; ok {
@@ -993,11 +796,6 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 	}
 	g := renderGlyph(e.face, r)
 	if !g.Ok {
-		// A text family that does not cover a rune must not swallow it: the
-		// embedded face carries the arrows, math operators and symbols the
-		// document faces do not, and the host's other families cover what it
-		// does not. Layout measures through this same function, so the
-		// substitute glyph and the advance it was broken with agree.
 		for _, fb := range f.fallbackLocked(size, slot) {
 			if g = renderGlyph(fb.face, r); g.Ok {
 				break
@@ -1020,31 +818,17 @@ func (f *Fonts) Glyph(size int32, r rune, slot frame.FontSlot) Glyph {
 	return g
 }
 
-// GlyphAdvance reports the width r occupies in a slot at a device-pixel size,
-// in device pixels. It satisfies layout.Metrics, which is why this method exists
-// as a one-liner beside Glyph: layout measures words with the same numbers the
-// rasterizer draws them with, without layout importing raster.
 func (f *Fonts) GlyphAdvance(size int32, r rune, slot frame.FontSlot) int32 {
 	return f.Glyph(size, r, slot).Advance
 }
 
-// GlyphAdvanceFixed reports r's advance in 26.6 fixed-point units (1/64 px) as
-// an int32, the raw number the face carries before any rounding. It exists for
-// the layout/paint measurement contract: a browser sums fractional advances
-// across a run and rounds only the pen position at each glyph, so callers that
-// place or measure more than one glyph must accumulate these, not the rounded
-// GlyphAdvance values.
 func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32 {
 	if size <= 0 {
 		return 0
 	}
 	if isDefaultIgnorable(r) {
-		// The same front door Glyph answers with: the control occupies nothing,
-		// so it is never measured and never counted as missing coverage.
 		return 0
 	}
-	// Fast path: a memoized advance is the value a fresh call would
-	// compute, with no face involved, so readers share the lock.
 	f.mu.RLock()
 	if e := f.lookupLocked(size, slot); e != nil {
 		if adv, ok := e.adv[r]; ok {
@@ -1070,8 +854,6 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 	}
 	adv, ok := e.face.GlyphAdvance(r)
 	if !ok {
-		// The same substitution Glyph makes for a rune the document face does
-		// not cover, so the measured width and the drawn glyph agree.
 		for _, fb := range f.fallbackLocked(size, slot) {
 			if adv, ok = fb.face.GlyphAdvance(r); ok {
 				break
@@ -1095,17 +877,14 @@ func (f *Fonts) GlyphAdvanceFixed(size int32, r rune, slot frame.FontSlot) int32
 	return v
 }
 
-// MissingCount returns the total number of missing glyph lookups that fell back to tofu.
 func (f *Fonts) MissingCount() int64 {
 	return f.missingCount.Load()
 }
 
-// ResetMissingCount resets the missing glyph counter to zero.
 func (f *Fonts) ResetMissingCount() {
 	f.missingCount.Store(0)
 }
 
-// HasGlyph reports whether face contains a rendered glyph for rune r.
 func HasGlyph(face font.Face, r rune) bool {
 	if face == nil {
 		return false
@@ -1114,9 +893,6 @@ func HasGlyph(face font.Face, r rune) bool {
 	return ok
 }
 
-// FaceForRune returns the font face that covers r for the given size and slot,
-// following the fallback chain. If no face in the chain covers r, it returns
-// (nil, false), indicating that the rune is missing across all faces.
 func (f *Fonts) FaceForRune(size int32, r rune, slot frame.FontSlot) (font.Face, bool) {
 	if size <= 0 {
 		return nil, false
@@ -1143,14 +919,6 @@ func (f *Fonts) FaceForRune(size int32, r rune, slot frame.FontSlot) (font.Face,
 	return nil, false
 }
 
-// LineMetrics reports a face's ascent, descent and normal line height in device
-// pixels. Each value is rounded on its own, the way a browser rounds them: the
-// content area is the rounded ascent plus the rounded descent, while a normal
-// line box is the font's own leading-inclusive height, which is a pixel taller
-// for Times than the content area and the same height as it for Courier.
-//
-// A slot the host cannot serve answers 0,0,0 and the caller falls back to its
-// own estimate, which is what keeps a display-less host laying out at all.
 func (f *Fonts) LineMetrics(size int32, slot frame.FontSlot) (int32, int32, int32) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1163,14 +931,6 @@ func (f *Fonts) LineMetrics(size int32, slot frame.FontSlot) (int32, int32, int3
 	return round(m.Ascent), round(m.Descent), round(m.Height)
 }
 
-// XHeightFixed reports the face's x-height in 1/64 px. It is the one line-box
-// metric the face already carries in this currency and must keep: LineMetrics
-// rounds its three numbers to device pixels because a content area is drawn on
-// whole pixels, while `vertical-align: middle` only ever halves the x-height and
-// adds it to another half, so the fraction is the answer rather than noise.
-//
-// A slot the host cannot serve answers 0 and the caller falls back, as for
-// LineMetrics.
 func (f *Fonts) XHeightFixed(size int32, slot frame.FontSlot) int32 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1181,11 +941,6 @@ func (f *Fonts) XHeightFixed(size int32, slot frame.FontSlot) int32 {
 	return int32(e.face.Metrics().XHeight)
 }
 
-// renderGlyph copies one glyph's coverage out of a face.
-//
-// The copy is mandatory rather than defensive: a face's own mask buffer is
-// documented to change on the next Glyph call, and a tile cache holds masks for
-// as long as the tiles do.
 func renderGlyph(face font.Face, r rune) Glyph {
 	dr, mask, maskp, advance, ok := face.Glyph(fixed.Point26_6{}, r)
 	adv := int32((advance + 32) >> 6)
@@ -1203,11 +958,6 @@ func renderGlyph(face font.Face, r rune) Glyph {
 	}
 	m := image.NewAlpha(image.Rect(0, 0, w, h))
 	if am, isAlpha := mask.(*image.Alpha); isAlpha {
-		// DrawMask's convention, which Glyph's return values are built for: the
-		// mask pixel covering destination pixel (x, y) in dr is
-		// (x-dr.Min.X+maskp.X, y-dr.Min.Y+maskp.Y). Indexing the copy by its own
-		// pixel therefore needs maskp alone, not dr.Min as well - adding both
-		// shifts every mask off by its own height and renders blank glyphs.
 		mb := am.Bounds()
 		for y := 0; y < h; y++ {
 			my := y + maskp.Y

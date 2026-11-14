@@ -13,26 +13,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// The scheduler is the M1 frame path: the one object that both knows what a tile is
-// and is allowed to talk to the UI thread. These tests drive it the way
-// surface.Loop does - BeginFrame, Submit, ComposeInto - rather than reaching into
-// its internals, because the loop's contract is the reason the internals exist.
-
-// ---------------------------------------------------------------------------
-// scene
-// ---------------------------------------------------------------------------
-
-// schedColor stamps a coordinate and a content version into four bytes, so a test
-// can tell which tile produced a pixel and whether it was drawn for the version it
-// is being credited with.
 func schedColor(c frame.TileCoord, version uint64) frame.Color {
 	return frame.RGB(byte(version*37+11), byte(c.Col*17+5), byte(c.Row*23+3))
 }
 
-// schedRaster is the worker's side. It fills the buffer with the tile's identity
-// rather than running the real rasterizer: which pixels a display list produces is
-// Task 7's claim to make, and the scheduler's claims are about which tiles are
-// drawn when, at which version, and with how much memory.
 func schedRaster(j raster.Job) error {
 	if j.Out == nil {
 		return errors.New("test: job carried no buffer")
@@ -46,8 +30,6 @@ func schedRaster(j raster.Job) error {
 	return nil
 }
 
-// schedDoc returns a document cols tiles wide and rows tiles tall - one fill over
-// the whole extent at content version 1 - with a budget of budget tile buffers.
 func schedDoc(t *testing.T, cols, rows int32, budget int64) (*frame.Layer, *paint.LayerDL) {
 	t.Helper()
 	bounds := frame.Rect4(0, 0, cols*frame.TileSize, rows*frame.TileSize)
@@ -60,8 +42,6 @@ func schedDoc(t *testing.T, cols, rows int32, budget int64) (*frame.Layer, *pain
 	return l, dl
 }
 
-// testBackground is deliberately unlike any tile color, so "this pixel is still the
-// background" is an unambiguous assertion.
 var testBackground = frame.RGB(9, 9, 9)
 
 type schedHarness struct {
@@ -72,16 +52,11 @@ type schedHarness struct {
 	size frame.Size
 }
 
-// newSched returns a harness wired exactly like the loop: a real layer, a real worker
-// pool, and a real composer whose backing store is the size the scheduler reports.
 func newSched(t *testing.T, cols, rows int32, budget int64, vp frame.Size, prefs raster.Pref) *schedHarness {
 	t.Helper()
 	return newSchedVP(t, cols, rows, budget, frame.Viewport{Size: vp}, prefs)
 }
 
-// newSchedVP is the same for a scheduler that starts somewhere other than the top of
-// the document, which is how a test gets a cold viewport without burning the frames it
-// is about to measure.
 func newSchedVP(t *testing.T, cols, rows int32, budget int64, vp frame.Viewport, prefs raster.Pref) *schedHarness {
 	t.Helper()
 	return newSchedRaster(t, cols, rows, budget, vp, prefs, schedRaster)
@@ -99,13 +74,10 @@ func newSchedRaster(t *testing.T, cols, rows int32, budget int64, vp frame.Viewp
 	return &schedHarness{s: s, l: l, pool: p, c: c, size: vp.Size}
 }
 
-// vsync is a pacing tick carrying an optional scroll delta, which is how the loop
-// hands coalesced input to a scheduler.
 func vsync(dy int32) surface.Event {
 	return surface.Event{Kind: surface.EvVsync, Delta: frame.Point{Y: dy}, At: time.Now()}
 }
 
-// frame runs one vsync the way the loop does: plan, resize, submit, compose.
 func (h *schedHarness) frame(t *testing.T, ev surface.Event) surface.FrameWork {
 	t.Helper()
 	plan, needed := h.s.BeginFrame(ev)
@@ -123,19 +95,11 @@ func (h *schedHarness) scroll(t *testing.T, dy int32) surface.FrameWork {
 	return h.frame(t, vsync(dy))
 }
 
-// pump resolves a frame and submits it without compositing, for a loop that is only
-// waiting for asynchronous work to land.
 func (h *schedHarness) pump() surface.FrameWork {
 	_, needed := h.s.BeginFrame(vsync(0))
 	return h.s.Submit(needed)
 }
 
-// drain waits until all in-flight jobs have completed by polling the pool and the
-// grid's painting bytes. It sleeps between polls rather than yielding only to the
-// scheduler: under -race with the rest of the suite running, a worker may not have
-// picked a job up yet, and a pure Gosched spin can exhaust its budget before a
-// single raster finishes. The deadline turns a worker that never returns into a
-// named failure instead of a test that quietly never reaches the retry limit.
 func (h *schedHarness) drain(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -164,8 +128,6 @@ func (h *schedHarness) drain(t *testing.T) {
 	}
 }
 
-// untilQuiet draws until the frame path asks for nothing, which is the only way to be
-// sure an asynchronous pool has finished with what is on screen.
 func (h *schedHarness) untilQuiet(t *testing.T) {
 	t.Helper()
 	if !pollUntil(h.pumpUntilQuiet) {
@@ -173,16 +135,11 @@ func (h *schedHarness) untilQuiet(t *testing.T) {
 	}
 }
 
-// The predicate is "nothing left to ask for", not "no tile is stale or empty". A budget
-// that evicts leaves tiles empty on purpose, far off screen, and nobody will ever ask
-// for them again - waiting on those is a livelock rather than a settle.
 func (h *schedHarness) pumpUntilQuiet() bool {
 	w := h.pump()
 	return w.Needed == 0 && h.l.Grid.Stats().PaintingBytes == 0
 }
 
-// setOffset scrolls by whatever it takes to land exactly on y and draws the frame
-// that gets there.
 func (h *schedHarness) setOffset(t *testing.T, y int32) {
 	t.Helper()
 	h.frame(t, vsync(y-h.s.Viewport().Offset.Y))
@@ -191,9 +148,6 @@ func (h *schedHarness) setOffset(t *testing.T, y int32) {
 	}
 }
 
-// warm rasterizes the whole document by stepping the viewport down it one tile row
-// at a time. It is the setup half of every "warm cache" claim in this file, and the
-// only way to know the measured phase has no work left rather than no work noticed.
 func (h *schedHarness) warm(t *testing.T) {
 	t.Helper()
 	vp := h.c.Backing.Bounds()
@@ -206,21 +160,11 @@ func (h *schedHarness) warm(t *testing.T) {
 	h.untilQuiet(t)
 }
 
-// ---------------------------------------------------------------------------
-// the plan's five named scheduler tests
-// ---------------------------------------------------------------------------
-
-// Invariant 6 on the scroll path, twice over: the runtime says nothing was
-// allocated, and the scheduler says none of its own scratch buffers grew. A warm
-// scroll is the frame this whole design exists for, so this is the test that fails
-// first when someone adds a convenience allocation back into it.
 func TestScrollPathIsAllocationFree(t *testing.T) {
 	const (
 		cols, rows = 4, 20
 		vp         = 4 * frame.TileSize
 	)
-	// Every tile in the document fits the budget, so a warm scroll has no memory
-	// excuse for allocating: the budget is the document's own size.
 	h := newSched(t, cols, rows, int64(cols*rows), frame.Size{W: vp, H: vp}, raster.Pref{})
 	h.warm(t)
 	if got := h.l.Stats().Valid; got != cols*rows {
@@ -228,9 +172,6 @@ func TestScrollPathIsAllocationFree(t *testing.T) {
 	}
 	before := h.s.Stats()
 
-	// 600 ticks of 100px, reversing at each end of the clamped range. A one-way
-	// flick would press against the bottom of the document and stop moving, which
-	// would pass this test while proving nothing about a scrolling frame path.
 	maxOffset := rows*frame.TileSize - vp
 	leg := int(maxOffset/100) + 1
 	i := 0
@@ -251,8 +192,6 @@ func TestScrollPathIsAllocationFree(t *testing.T) {
 	if got := h.s.ScratchAllocs(); got != 0 {
 		t.Fatalf("ScratchAllocs() = %d, want 0: every scratch buffer is sized before the frame path runs", got)
 	}
-	// AllocsPerRun counts process-wide, which is another reason the cache has to be
-	// warm: with nothing in flight there is no other goroutine to blame for a hit.
 	if n := testing.AllocsPerRun(600, tick); n != 0 {
 		t.Fatalf("allocs/op = %v on a warm scroll frame, want 0", n)
 	}
@@ -261,10 +200,6 @@ func TestScrollPathIsAllocationFree(t *testing.T) {
 	}
 }
 
-// The ring is what protects p99 rather than the mean: the tile the user is about to
-// reveal is already warm. Scrolling down has to queue the band below the viewport
-// ahead of the one above it, or the prefetch spends budget on content the user has
-// already left behind.
 func TestPrefetchAheadOfScrollDirection(t *testing.T) {
 	const (
 		cols, rows = 2, 40
@@ -274,10 +209,6 @@ func TestPrefetchAheadOfScrollDirection(t *testing.T) {
 		Offset: frame.Point{Y: rows * frame.TileSize / 2},
 		Size:   frame.Size{W: vp, H: vp},
 	}, raster.Pref{PrefetchRows: 2})
-	// Parked mid-document and measured on the very first frame, so both ring bands are
-	// still cold. A scheduler that had already been scrolling would have drawn one of
-	// them by now, and "nothing is queued that the viewport does not need" is not the
-	// same claim as "the trailing band is missing".
 	plan, needed := h.s.BeginFrame(vsync(100))
 	if plan == nil {
 		t.Fatal("no plan")
@@ -312,8 +243,6 @@ func TestPrefetchAheadOfScrollDirection(t *testing.T) {
 		t.Fatal("Stats().Prefetched = 0 while off-viewport tiles were queued")
 	}
 
-	// With the ring switched off nothing outside the viewport is queued at all:
-	// prefetch has to be a preference, not an unremovable tax on the budget.
 	off := newSchedVP(t, cols, rows, 200, frame.Viewport{
 		Offset: frame.Point{Y: rows * frame.TileSize / 2},
 		Size:   frame.Size{W: vp, H: vp},
@@ -336,9 +265,6 @@ func TestPrefetchAheadOfScrollDirection(t *testing.T) {
 	}
 }
 
-// A wide viewport has many more horizontal tile columns than vertical rows.
-// The default vertical prefetch ring must use the viewport height, otherwise
-// both rings can exceed the bounded cache and continuously evict one another.
 func TestDefaultVerticalPrefetchSettlesWithinLandscapeCacheBudget(t *testing.T) {
 	const (
 		cols       = 12
@@ -358,19 +284,13 @@ func TestDefaultVerticalPrefetchSettlesWithinLandscapeCacheBudget(t *testing.T) 
 	}
 }
 
-// The memory half of M1 exit criterion 1: a long scroll into content nobody has
-// looked at yet holds tile memory at the ceiling rather than growing with the
-// document. The scheduler, not the grid, is what guarantees it, because the grid is
-// allowed to overshoot when a raster is already on order.
 func TestBudgetPlateaus(t *testing.T) {
 	const (
-		cols, rows = 4, 79 // 79 * 256 = 20,224px of document
+		cols, rows = 4, 79
 		vp         = 4 * frame.TileSize
 		budget     = 20
 	)
 	limit := int64(budget) * frame.TileSizeBytes()
-	// The layer starts with a budget that could hold the document; the scheduler's
-	// Pref.Budget is what clamps it, which is the knob a running browser turns.
 	h := newSched(t, cols, rows, int64(cols*rows), frame.Size{W: vp, H: vp}, raster.Pref{PrefetchRows: 1, Budget: limit})
 	if got := h.s.Stats().Budget; got != limit {
 		t.Fatalf("Budget = %d, want Pref.Budget's %d applied to the grid", got, limit)
@@ -399,26 +319,13 @@ func TestBudgetPlateaus(t *testing.T) {
 	}
 }
 
-// Eviction is only a win if the tile comes back. A user scrolling up must find
-// content re-requested rather than permanently blank, which is the difference
-// between a cache that shrinks and a cache that loses the page.
 // qc:BR-174
 func TestEvictedTileIsRequeued(t *testing.T) {
 	const (
 		cols, rows = 2, 16
 		vp         = 2 * frame.TileSize
-		// Exactly the visible set, which is what makes the assertion below provable
-		// rather than lucky: arriving at a fresh page has to evict every tile of the old
-		// one, and the grid's eviction order is oldest-first with the most recently drawn
-		// tile last. A budget even one tile larger leaves that tile behind and the test
-		// starts asserting about LRU tie-breaking.
-		budget = 4
-		// A whole number of tile rows on purpose. An offset that is not tile aligned
-		// puts one row more of tiles on screen than the budget can ever hold, and a cache
-		// that cannot hold the viewport is a permanent thrash rather than something that
-		// settles - so untilQuiet below would be waiting for a frame path that cannot
-		// exist instead of checking that the eviction came back.
-		dist = 12 * frame.TileSize
+		budget     = 4
+		dist       = 12 * frame.TileSize
 	)
 	h := newSched(t, cols, rows, budget, frame.Size{W: vp, H: vp}, raster.Pref{PrefetchRows: raster.PrefetchOff})
 	h.untilQuiet(t)
@@ -453,8 +360,6 @@ func TestEvictedTileIsRequeued(t *testing.T) {
 	}
 }
 
-// A tile that cannot be drawn is a blank rectangle with a counter - not a crash, and
-// not a job the scheduler re-asks for every vsync for the rest of the session.
 // qc:BR-172
 func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	const (
@@ -475,7 +380,6 @@ func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	}
 	h := newSchedRaster(t, cols, rows, 32, frame.Viewport{Size: frame.Size{W: vp, H: vp}}, raster.Pref{PrefetchRows: raster.PrefetchOff}, draw)
 
-	// More frames than MaxTileAttempts: the retries have to stop somewhere.
 	for i := 0; i < frame.MaxTileAttempts*8 && h.s.Stats().Failed == 0; i++ {
 		h.frame(t, vsync(0))
 		h.drain(t)
@@ -495,14 +399,11 @@ func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	if h.l.Grid.Blittable(bad) {
 		t.Fatal("a failed tile reported pixels worth compositing")
 	}
-	// Blank means the layer background, not black and not the old content. The tile is
-	// at Col 1/Row 1, which is still inside a two-tile-square viewport.
 	px := h.c.Backing.At(int(bad.Col*frame.TileSize)+7, int(bad.Row*frame.TileSize)+7)
 	if px != testBackground {
 		t.Fatalf("pixel over the failed tile = %v, want the background %v", px, testBackground)
 	}
 
-	// Giving up is permanent for that content version: later frames must not re-ask.
 	stopped := attemptsAfterFailure
 	for i := 0; i < 5; i++ {
 		_, needed := h.s.BeginFrame(vsync(0))
@@ -519,8 +420,6 @@ func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	}
 	mu.Unlock()
 
-	// Content changing under it is a fair retry, which is frame.Grid's rule; the
-	// scheduler has to take the tile back rather than keep a blank rectangle.
 	h.l.Bump(2, bad.Rect(frame.TileSize))
 	_, needed := h.s.BeginFrame(vsync(0))
 	if !containsCoord(needed, bad) {
@@ -528,9 +427,6 @@ func TestFailedTileRendersBlankWithCounter(t *testing.T) {
 	}
 }
 
-// FrameWork.Failed is the headless guard's input. A tile the scheduler has given
-// up on must be reported on the frame that still shows it, because the only other
-// outcome is a PNG with a silent hole in it.
 // qc:BR-172
 func TestVisibleFailedTileIsReportedInFrameWork(t *testing.T) {
 	const (
@@ -564,9 +460,6 @@ func TestVisibleFailedTileIsReportedInFrameWork(t *testing.T) {
 	}
 }
 
-// The counter is visible tiles only. A failure above the viewport is still a hole
-// in the document, but it is not a hole in this frame and must not abort a render
-// that can finish.
 func TestFailedTileOutsideViewportIsNotReportedInFrameWork(t *testing.T) {
 	const (
 		cols, rows = 2, 8
@@ -593,8 +486,6 @@ func TestFailedTileOutsideViewportIsNotReportedInFrameWork(t *testing.T) {
 	}
 	h.drain(t)
 
-	// Scroll the failure out of the viewport; the document still has the hole, so
-	// the scheduler's own counter stays non-zero.
 	h.setOffset(t, 6*frame.TileSize)
 	w := h.frame(t, vsync(0))
 	h.drain(t)
@@ -606,13 +497,6 @@ func TestFailedTileOutsideViewportIsNotReportedInFrameWork(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// damage, versions, and geometry ownership
-// ---------------------------------------------------------------------------
-
-// A scroll must cost the exposed band and nothing else. This is the claim behind
-// "damage keeps a frame near the budget instead of a full recompose", stated as a
-// pixel count so that it does not depend on a machine.
 // qc:BR-174
 func TestScrollDamagesOnlyTheExposedBand(t *testing.T) {
 	const (
@@ -621,9 +505,6 @@ func TestScrollDamagesOnlyTheExposedBand(t *testing.T) {
 		dy         = 100
 	)
 	h := newSched(t, cols, rows, int64(cols*rows), frame.Size{W: vp, H: vp}, raster.Pref{PrefetchRows: raster.PrefetchOff})
-	// The whole document, not just the first screen: a tile that is still cold at the
-	// offset being measured can install mid-Submit and turn into a second damaged tile,
-	// which is real behaviour but not what this test is about.
 	h.warm(t)
 	writes := h.s.Stats().Writes
 
@@ -642,8 +523,6 @@ func TestScrollDamagesOnlyTheExposedBand(t *testing.T) {
 	if got := h.s.Damage(); len(got) != 1 || got[0] != want {
 		t.Fatalf("Damage() = %v, want the band the frame composed", got)
 	}
-	// The shifted rows must carry the tile that belongs there now, which is the only
-	// way to tell a correct memmove from one that slid the wrong content up.
 	off := plan.Viewport.Offset.Y
 	owner := frame.CoordFor(frame.Point{X: 4, Y: off + 4}, frame.TileSize)
 	if got := h.c.Backing.At(4, 4); got != schedColor(owner, 1) {
@@ -657,10 +536,6 @@ func TestScrollDamagesOnlyTheExposedBand(t *testing.T) {
 }
 
 // qc:BR-079
-//
-// Scrolling a page several screens tall exposes one new tile row per step. That
-// row must be the only thing rasterized: every tile already on screen stays in
-// the cache because the content under it did not change.
 func TestLongPageScrollRasterizesOnlyTheExposedRowAndReusesTheRest(t *testing.T) {
 	const (
 		cols, rows = 4, 24
@@ -705,9 +580,6 @@ func TestLongPageScrollRasterizesOnlyTheExposedRowAndReusesTheRest(t *testing.T)
 	lastY := int32(rows-cols) * frame.TileSize
 	for y := int32(0); y < lastY; y += step {
 		scrollOneRow(step)
-		// A tile now two rows above the bottom of the viewport is still the one
-		// drawn when it first appeared, so its pixels are the marker the cache
-		// has to have kept.
 		c := frame.CoordFor(frame.Point{X: 4, Y: h.s.Viewport().Offset.Y + step + 4}, frame.TileSize)
 		if px := h.l.Grid.Pixels(c); px == nil || px.At(3, 3) != schedColor(c, 1) {
 			t.Fatalf("tile %v lost its cached pixels at offset %d", c, h.s.Viewport().Offset.Y)
@@ -715,10 +587,6 @@ func TestLongPageScrollRasterizesOnlyTheExposedRowAndReusesTheRest(t *testing.T)
 	}
 }
 
-// The scheduler owns the scroll offset, because the tile offsets it hands the pool
-// and the buffer the composer presents have to agree with each other. A plan
-// therefore carries layers, not geometry, and a scroll past the end of the document
-// clamps instead of showing the void.
 func TestSchedulerOwnsTheViewportAndClampsScroll(t *testing.T) {
 	const (
 		cols, rows = 2, 8
@@ -738,8 +606,6 @@ func TestSchedulerOwnsTheViewportAndClampsScroll(t *testing.T) {
 		t.Fatalf("offset after scrolling past the top = %d, want 0", got)
 	}
 
-	// An absolute viewport is how a driver that is not a window says "show this",
-	// and a resize event widens the surface.
 	h.s.SetViewport(frame.Viewport{Offset: frame.Point{Y: 600}, Size: h.size})
 	if got := h.s.Viewport().Offset.Y; got != 600 {
 		t.Fatalf("SetViewport ignored: offset = %d, want 600", got)
@@ -749,9 +615,6 @@ func TestSchedulerOwnsTheViewportAndClampsScroll(t *testing.T) {
 	if plan.Viewport.Size != bigger {
 		t.Fatalf("resize not adopted: size = %v, want %v", plan.Viewport.Size, bigger)
 	}
-	// A second BeginFrame with no new event must still know the buffer it is
-	// drawing into changed: the damage decision belongs to the last compose, not
-	// the last plan.
 	plan, needed = h.s.BeginFrame(vsync(0))
 	h.c.Resize(plan.Viewport.Size)
 	h.s.Submit(needed)
@@ -761,12 +624,7 @@ func TestSchedulerOwnsTheViewportAndClampsScroll(t *testing.T) {
 	}
 }
 
-// A result is only worth installing if it depicts the version the layer is on now.
-// Content can bump while a job runs, and crediting older pixels with the newer
-// version would hide a raster that is still owed - permanently.
 func TestHandleDoneIgnoresAResultForAnOldVersion(t *testing.T) {
-	// One tile on screen, so exactly one job can be in flight and the refusal below has
-	// one buffer to account for.
 	const (
 		cols, rows = 2, 4
 		size       = frame.TileSize
@@ -774,9 +632,6 @@ func TestHandleDoneIgnoresAResultForAnOldVersion(t *testing.T) {
 	c0 := frame.TileCoord{Col: 0, Row: 0}
 	l, dl := schedDoc(t, cols, rows, 32)
 
-	// Draw that one tile with an ordinary pool first. The version bump the test needs
-	// stales pixels that exist, and until something has been installed there are no
-	// pixels to stale - which is exactly the confusion this test exists to avoid.
 	p0 := raster.New(2, 8, schedRaster)
 	p0.Start(context.Background())
 	t.Cleanup(func() { p0.Close() })
@@ -806,8 +661,6 @@ func TestHandleDoneIgnoresAResultForAnOldVersion(t *testing.T) {
 	s := raster.NewScheduler(l, p, frame.Viewport{Size: frame.Size{W: size, H: size}}, 1, raster.Pref{PrefetchRows: raster.PrefetchOff})
 	s.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{l}, Background: testBackground})
 
-	// The bump is what makes the running job's answer obsolete: the layer moves to
-	// version 2 while the frozen list the job carries stays at version 1.
 	if got := l.Bump(2, l.Bounds); got == 0 {
 		t.Fatal("setup: the bump staled nothing; the warm tile never had pixels")
 	}
@@ -818,8 +671,6 @@ func TestHandleDoneIgnoresAResultForAnOldVersion(t *testing.T) {
 	if len(needed) != 1 || needed[0] != c0 {
 		t.Fatalf("needed = %v, want exactly the one stale tile", needed)
 	}
-	// Nothing can have been collected during Submit: the only worker is parked on the
-	// only job, so what it installed is provably nothing.
 	s.Submit(needed)
 	if got := s.Stats().Rasterized; got != 0 {
 		t.Fatalf("Rasterized = %d before the worker was even released", got)
@@ -844,16 +695,12 @@ func TestHandleDoneIgnoresAResultForAnOldVersion(t *testing.T) {
 	if got := s.Stats().StaleNews; got == 0 {
 		t.Fatal("a refused result was not counted; the gate needs to see stale news")
 	}
-	// Re-asking is what recovers, so the coord has to come back into the needed list.
 	_, needed = s.BeginFrame(vsync(0))
 	if !containsCoord(needed, d.Coord) {
 		t.Fatalf("the superseded tile %v was not requeued for the current version", d.Coord)
 	}
 }
 
-// SetPlan hands the scheduler a new description of the content without moving the
-// scroll position, and a plan superseded before it was drawn is counted rather than
-// silently presented out of order.
 func TestSetPlanSupersedesAndKeepsTheScrollPosition(t *testing.T) {
 	const (
 		cols, rows = 2, 8
@@ -861,7 +708,6 @@ func TestSetPlanSupersedesAndKeepsTheScrollPosition(t *testing.T) {
 	)
 	h := newSched(t, cols, rows, 32, frame.Size{W: vp, H: vp}, raster.Pref{PrefetchRows: raster.PrefetchOff})
 	h.scroll(t, 500)
-	// Two publishes with no frame between them: the first is superseded.
 	h.s.SetPlan(frame.FramePlan{Serial: 2, Background: testBackground})
 	h.s.SetPlan(frame.FramePlan{Serial: 3, Layers: []*frame.Layer{h.l}, Background: testBackground})
 	plan, _ := h.s.BeginFrame(vsync(0))
@@ -876,9 +722,6 @@ func TestSetPlanSupersedesAndKeepsTheScrollPosition(t *testing.T) {
 	}
 }
 
-// The plan slot is also the only thread-crossing surface the scheduler offers:
-// SetPlan is documented as safe from a producer goroutine, so a test that publishes
-// while frames are being drawn has to be race-clean.
 func TestPublishingFromAnotherGoroutineIsRaceClean(t *testing.T) {
 	const (
 		cols, rows = 2, 8
@@ -909,9 +752,6 @@ func TestPublishingFromAnotherGoroutineIsRaceClean(t *testing.T) {
 	}
 }
 
-// SubmitScroll is the handoff a driver that is not running the loop uses, and it has
-// to agree with the same fold BeginFrame applies to event deltas - or a caller that
-// used both would move the document twice.
 func TestSubmitScrollAndEventDeltasFoldIdentically(t *testing.T) {
 	const (
 		cols, rows = 2, 8
@@ -932,9 +772,6 @@ func TestSubmitScrollAndEventDeltasFoldIdentically(t *testing.T) {
 	if got, want := b.s.Stats().Frames, a.s.Stats().Frames; got != want {
 		t.Fatalf("frames = %d vs %d; only BeginFrame should draw", got, want)
 	}
-	// The direction of the last scroll is what the ring keys off, and a zero delta
-	// must not erase it - otherwise the prefetch stops the instant a flick coalesces
-	// to no net movement.
 	if err := a.s.SubmitScroll(frame.Point{}, time.Now()); err != nil {
 		t.Fatalf("SubmitScroll with no delta: %v", err)
 	}
@@ -944,17 +781,11 @@ func TestSubmitScrollAndEventDeltasFoldIdentically(t *testing.T) {
 	}
 }
 
-// SetViewport, Viewport and SubmitScroll are called from navigation drain
-// goroutines (applyNavResult, scrollToAnchor, repaintTab) and the event thread
-// (switchTab saves the scroll offset) while surface.Loop runs BeginFrame on
-// its own thread. That cross-thread viewport access has to be race-clean;
-// SetPlan alone being safe is not enough for Gate 2 single-ownership.
 func TestViewportConcurrentAccess(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 800, H: 600}}
 	s := raster.NewScheduler(nil, nil, vp, 1, raster.Pref{})
 	s.SetPlan(frame.FramePlan{Serial: 1})
 	var wg sync.WaitGroup
-	// Drain/event threads: tab switches, anchor jumps, deferred-image repaints.
 	for i := int32(0); i < 8; i++ {
 		wg.Add(1)
 		go func(i int32) {
@@ -966,7 +797,6 @@ func TestViewportConcurrentAccess(t *testing.T) {
 			}
 		}(i)
 	}
-	// Content producer: plans may arrive from any goroutine.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -974,13 +804,10 @@ func TestViewportConcurrentAccess(t *testing.T) {
 			s.SetPlan(frame.FramePlan{Serial: uint64(j + 2)})
 		}
 	}()
-	// The loop thread is the only BeginFrame caller; it runs while the other
-	// goroutines move the viewport underneath it.
 	for j := 0; j < 100; j++ {
 		s.BeginFrame(surface.Event{Delta: frame.Point{Y: 3}})
 	}
 	wg.Wait()
-	// Deterministic final state: a serialized write followed by a read.
 	s.SetViewport(frame.Viewport{Offset: frame.Point{X: 42, Y: 7}, Size: frame.Size{W: 800, H: 600}})
 	got := s.Viewport()
 	if got.Offset.X != 42 || got.Offset.Y != 7 {
@@ -1000,16 +827,11 @@ func containsCoord(list []frame.TileCoord, c frame.TileCoord) bool {
 	return false
 }
 
-// TestSameLayerContentUpdateReusesTiles pins the incremental present path a
-// selection repaint relies on: after a version bump with a small dirty rect,
-// the next frame re-rasterizes (about) the dirty tiles and reuses the rest,
-// instead of the whole visible set.
 // qc:BR-174
 func TestSameLayerContentUpdateReusesTiles(t *testing.T) {
 	h := newSched(t, 4, 4, 32, frame.Size{W: 512, H: 512}, raster.Pref{PrefetchRows: 0})
 	h.warm(t)
 	before := h.s.Stats()
-	// One 10x10 device-pixel dirty rect inside the top-left tile.
 	h.l.Bump(2, frame.Rect4(0, 0, 10, 10))
 	w := h.frame(t, vsync(0))
 	if w.Needed > 2 {

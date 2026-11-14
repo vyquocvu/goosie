@@ -65,7 +65,6 @@ func TestInsetShorthand(t *testing.T) {
 	}
 
 	s3 := styles[b3.ID]
-	// In RTL, start is Right and end is Left
 	if s3.Right != 15 || s3.Left != 25 {
 		t.Errorf("b3 RTL InsetInline: want Right=15 Left=25, got Right=%v Left=%v", s3.Right, s3.Left)
 	}

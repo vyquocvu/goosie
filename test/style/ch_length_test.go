@@ -4,9 +4,6 @@ import (
 	"testing"
 )
 
-// `ch` is the width of a "0" glyph, so it tracks the element's font size the way
-// `em` does. Falling through the unit table untreated made `max-width: 60ch` a
-// 60-pixel column, and CSS-Tricks' prose wrapped one word per line.
 func TestChAndEmTrackFontSizeInDimensions(t *testing.T) {
 	s := styleFor(t, `<html><body><main class="p"></main></body></html>`,
 		`.p{font-size:20px;max-width:30ch;width:10em;min-height:2ch;max-height:4em}`, "main")
@@ -28,8 +25,6 @@ func TestChAndEmTrackFontSizeInDimensions(t *testing.T) {
 		}
 	}
 
-	// With no font-size of its own the element inherits 16px, and `ch` lands on
-	// half of it: the width of a zero in the default sans face.
 	def := styleFor(t, `<html><body><main class="p"></main></body></html>`, `.p{max-width:60ch}`, "main")
 	if def == nil {
 		t.Fatal("default-font main style not found")
@@ -39,10 +34,6 @@ func TestChAndEmTrackFontSizeInDimensions(t *testing.T) {
 	}
 }
 
-// Wikipedia's infobox declares `width: 22em` and `font-size: 88%` in the same
-// rule. The em has to resolve against the element's own computed font size, so
-// the order the two declarations happen to sit in cannot decide whether the box
-// comes out 352px or 310px wide.
 func TestFontRelativeLengthIgnoresDeclarationOrder(t *testing.T) {
 	first := styleFor(t, `<html><body><main class="p"></main></body></html>`,
 		`.p{width:22em;font-size:88%}`, "main")

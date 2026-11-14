@@ -59,15 +59,6 @@ func sendZoomKey(t *testing.T, b *browserE2E, key rune, want string) {
 	b.waitFor(t, "zoom becomes "+want, func() bool { return b.f.toolbar.ZoomPercent() == want })
 }
 
-// awaitZoomNode returns the published zoom badge once the accessibility tree
-// carries it with the whole-percent label the toolbar paints. The tree is frozen
-// per presented frame, so it can lag the toolbar state by one frame; polling the
-// published value (instead of a frame counter) is what keeps this race-free.
-//
-// It has no escape hatch: it returns only a matching node, and on deadline it
-// fails by naming what the tree actually held - no node at all, or a node with a
-// different value - alongside the label the badge paints. A missing node is
-// therefore a failure, never a skipped assertion.
 func awaitZoomNode(t *testing.T, b *browserE2E, want string) ax.Node {
 	t.Helper()
 	timer := time.NewTimer(e2eWaitLimit)
@@ -127,8 +118,6 @@ func screenshotInk(t *testing.T, b *browserE2E) int {
 func waitTilesIdle(t *testing.T, b *browserE2E, description string) {
 	t.Helper()
 	b.waitFor(t, description, func() bool {
-		// loop.Stats is the thread-safe view. sched.Stats belongs to the frame
-		// thread and reading it here would race BeginFrame on the loop.
 		st := b.f.loop.Stats()
 		return st.Last.Needed == 0 && st.Last.PaintingBytes == 0 && st.Rasterize > 0
 	})
@@ -222,8 +211,6 @@ func TestJourneyStopLoadingAndCompletedStopNoOp(t *testing.T) {
 		t.Fatal("Stop removed the previously displayed document")
 	}
 
-	// Exercise the callback target after completion, as the native toolbar would
-	// have no Stop action to dispatch once Loading is false.
 	if b.f.toolbar.OnStop == nil {
 		t.Fatal("toolbar Stop callback is not wired")
 	}
@@ -310,9 +297,6 @@ func TestJourneyZoomInGrowsContentAndDisplaysPercentage(t *testing.T) {
 	if zoomedInk <= initialInk {
 		t.Fatalf("content ink pixels at 150%% = %d, want more than 100%% count %d", zoomedInk, initialInk)
 	}
-	// The badge the address bar paints at 150% must be readable in AX. The old
-	// guard skipped this whole check when the node was absent, proving nothing;
-	// awaitZoomNode fails outright on absence and on a stale value.
 	zoom := awaitZoomNode(t, b, "150%")
 	if zoom.Value != "150%" || zoom.Value != b.f.toolbar.ZoomPercent() {
 		t.Fatalf("zoom AX indicator value = %q, want the 150%% label the badge paints (%q)", zoom.Value, b.f.toolbar.ZoomPercent())
@@ -374,14 +358,6 @@ func TestJourneyCmdZeroResetsZoomAndKeepsAXGeometryValid(t *testing.T) {
 	if got := b.f.toolbar.ZoomPercent(); got != "100%" {
 		t.Fatalf("zoom after Cmd+0 = %q, want 100%%", got)
 	}
-	// What Cmd+0 promises, measured rather than assumed: the key goes through
-	// framePath.handleZoom(0) (cmd/goosie/interaction.go), which sets zoom to 1.0
-	// and then calls toolbar.SetZoom(1.0) - not ResetZoom() - so the badge's 2.5s
-	// grace is re-armed and "100%" is still painted. zoomBadgeRect is the single
-	// rule the badge paint and this node both read, so the node must exist here
-	// with 100%, and must be gone once that grace runs out (or after a badge click,
-	// which does call ResetZoom). Both hidden branches are pinned without a clock by
-	// test/toolbar/zoom_badge_ax_test.go; nothing here is conditional.
 	zoom := awaitZoomNode(t, b, "100%")
 	if zoom.Value != "100%" || zoom.Value != b.f.toolbar.ZoomPercent() {
 		t.Fatalf("zoom AX indicator value after Cmd+0 = %q, want the 100%% label the badge paints (%q)", zoom.Value, b.f.toolbar.ZoomPercent())

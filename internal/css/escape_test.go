@@ -33,9 +33,6 @@ func TestParseValueStringWithEscape(t *testing.T) {
 	}
 }
 
-// TestStripCDATAMarkers pins XHTML style handling: reference pages wrap
-// <style> in CDATA, and the markers must not fuse onto the first selector
-// (which silently unmatched every rule in the sheet).
 func TestStripCDATAMarkers(t *testing.T) {
 	sh := Parse("<![CDATA[\n  img\n  {\n  height: 50px;\n  width: 50px;\n  }\n  ]]>")
 	if len(sh.Rules) != 1 {

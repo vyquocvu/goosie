@@ -1,15 +1,3 @@
-// Package layout builds a flat arena of positioned boxes from a styled DOM tree.
-//
-// The arena is the single data structure that connects style resolution to paint:
-// every DOM element with a box gets one Object, indexed by ObjectID, mutated in
-// place as each layout pass runs. The paint builder walks the arena and emits
-// display commands; nothing in the frame path ever sees the DOM directly.
-//
-// Layout runs as Block, then Inline, then Positioning. The Block pass dispatches
-// each box to its formatting-context pass (block flow, flex, grid, table) by used
-// display; float placement happens inside block flow. See block.go for the
-// dispatch. Each pass reads the style and the box geometry produced by earlier
-// passes and writes positions and sizes.
 package layout
 
 import (
@@ -21,27 +9,14 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// ObjectID identifies one box in the arena. It is a uint32 index, not a pointer,
-// so the arena can be a flat slice and a pass can mutate any object without
-// aliasing concerns. The zero value is reserved; valid IDs start at 1.
 type ObjectID uint32
 
 const rootID ObjectID = 1
 
-// Object is one box in the layout arena.
-//
-// A box has four concentric rects: content, padding, border, margin. Layout
-// writes Content and Margin; paint reads all four to position borders,
-// backgrounds, and content. The rects are stored as origin plus four thicknesses
-// rather than as four rects so a style change to one side of a border does not
-// rewrite the other three.
 type Object struct {
 	Node  *dom.Node
 	Style *style.ComputedStyle
 
-	// Key is the box's document-lifetime identity; see BoxKey. It is zero on
-	// boxes the builder cannot name from stable inputs, such as word and
-	// anonymous boxes generated during layout.
 	Key BoxKey
 
 	Parent ObjectID
@@ -54,28 +29,12 @@ type Object struct {
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
 	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
 
-	// GlyphOrder is the bidi visual order of a word's glyphs: visual slot k
-	// draws logical rune GlyphOrder[k]. nil is identity, which every
-	// left-to-right word keeps so paint never pays for the resolver.
-	// bidiReorder writes it during inline placement; paint reads it and
-	// nothing else.
 	GlyphOrder []int
 
-	// BidiLevels stores the resolved bidi level for each visual slot in
-	// GlyphOrder. BidiLevels[k] is the level of the logical rune drawn at
-	// visual slot k. nil when GlyphOrder is nil (pure LTR). Paint uses odd
-	// levels to mirror bracket glyphs (GOOSIE-BIDIMIRROR-001).
 	BidiLevels []byte
 
-	// InlineFragments holds the per-line border-box rects (CSS px) of a
-	// display:inline element that wraps across lines, in line order. Paint draws
-	// one border per fragment with the inline-start edge only on the first and
-	// the inline-end edge only on the last (css-text-decor-3 §4.6). Empty for
-	// non-inline boxes and for inline boxes with no border.
 	InlineFragments []frame.RectF
 
-	// GridCols and GridRows record the resolved track sizes (in px) of a grid
-	// container so subgrids can inherit track slices from their parent.
 	GridCols    []float32
 	GridRows    []float32
 	GridCol     int
@@ -83,71 +42,27 @@ type Object struct {
 	GridColSpan int
 	GridRowSpan int
 
-	// Image carries the decoded pixels of a replaced element so paint can draw
-	// it. It is `any` rather than an image type because layout may not depend
-	// on image decoding; the engine sets it to a concrete decoded image after
-	// layout, and paint reads it back out with a type assertion.
 	Image any
 
-	// BgImage carries the decoded pixels of this box's CSS background-image, if
-	// any. Like Image it is `any` so layout stays free of the image packages;
-	// paint type-asserts it and uses the object's Style for repeat, size and
-	// position.
 	BgImage any
 
-	// MaskImage carries the decoded pixels of this box's CSS mask-image, if
-	// any. Same ownership as BgImage; paint multiplies fill coverage by the
-	// mask alpha (luminance where the image has no alpha).
 	MaskImage any
 
-	// BorderImage carries the decoded pixels of this box's border-image
-	// source, if any. Paint nine-slices it against the style's slice/width
-	// repeat; without a decoded image normal borders paint.
 	BorderImage any
 
-	// Media carries a video element's presentation state: the frame to draw
-	// plus the position and condition its controls show. Like Image it is `any`
-	// so layout stays free of the packages that produce it; the engine attaches
-	// it and paint reads it back with a type assertion. It is reattached on
-	// every reflow and refreshed in place between them, because a new frame is
-	// not a layout change.
 	Media any
 
-	// BgVector marks a vector background rasterized at tile size after layout
-	// instead of at decode time (no intrinsic dimensions, or a mapping that
-	// depends on the tile). Paint negotiates the same tile it decoded at.
 	BgVector bool
 
-	// BgNoRatio marks a background whose source carries no intrinsic ratio
-	// (neither usable dimensions nor viewBox): cover and contain fill the
-	// positioning area instead of scaling by ratio. preserveAspectRatio=none
-	// does not set this: the viewBox ratio still sizes the tile, and none
-	// only stretches the content the decoder already baked in.
 	BgNoRatio bool
 
-	// StaticX/StaticY record where an out-of-flow box would have started had it
-	// stayed in the flow. CSS uses that position when an absolutely positioned
-	// box specifies neither the relevant inset nor a static-friendly pair.
 	StaticX, StaticY float32
 
-	// floatBottomL/R record the deepest left/right float bottom laid out in
-	// this box's content, relative to its content edge. A parent merges them
-	// when this box does not establish its own formatting context, so clear on
-	// a later sibling sees floats that share that context.
 	floatBottomL, floatBottomR float32
-	// floatSeedL/R carry a parent's merged float bottoms into this box's
-	// content coordinates before layout. Without them, clearance inside a
-	// plain block could not see floats held by an earlier sibling's subtree,
-	// even though both boxes share one formatting context. The seed is consumed
-	// once, on entry, so a re-layout never inherits a stale value.
-	floatSeedL, floatSeedR float32
-	// floatTop is the highest margin-box top among the floats laid out here,
-	// and floatSeedTop/floatSeedHas hand it to a child in the same formatting
-	// context. CSS 2.1 §9.5.1 keeps a later float from rising above an earlier
-	// one, and that constraint crosses sibling subtrees just as clearance does.
-	floatTop     float32
-	floatSeedTop float32
-	floatSeedHas bool
+	floatSeedL, floatSeedR     float32
+	floatTop                   float32
+	floatSeedTop               float32
+	floatSeedHas               bool
 
 	Baseline float32
 	flags    uint8
@@ -155,22 +70,11 @@ type Object struct {
 
 const (
 	flagInlineLaidOut uint8 = 1 << iota
-	// flagOutOfFlow marks a box block layout deliberately left unpositioned -
-	// an absolutely positioned box, which the positioning pass places later. The
-	// inline pass honours the mark so it does not lay the box's text out at the
-	// zero position the box still holds when the main passes run.
 	flagOutOfFlow
-	// flagRowPlaced marks an inline-block that block layout already gave a slot
-	// in a row, so the inline pass must not also drop it onto a text line.
 	flagRowPlaced
-	// flagAnonymous marks a box layout invented to hold inline content that
-	// shares a container with block children. It has no DOM node, and its own
-	// children are the run it wraps, so the wrapping pass must not recurse into
-	// it.
 	flagAnonymous
 )
 
-// ContentRect returns the content box as four edges.
 func (o *Object) ContentRect() (x0, y0, x1, y1 float32) {
 	x0 = o.X + o.BorderLeft + o.PaddingLeft
 	y0 = o.Y + o.BorderTop + o.PaddingTop
@@ -179,7 +83,6 @@ func (o *Object) ContentRect() (x0, y0, x1, y1 float32) {
 	return
 }
 
-// BorderRect returns the border box as four edges.
 func (o *Object) BorderRect() (x0, y0, x1, y1 float32) {
 	x0 = o.X
 	y0 = o.Y
@@ -188,10 +91,6 @@ func (o *Object) BorderRect() (x0, y0, x1, y1 float32) {
 	return
 }
 
-// BgAreaRect resolves one background box to CSS-px edges: the border box,
-// the padding box (inside the border), or the content box (inside the
-// padding). Text falls back to the border box; glyph masking is not
-// implemented.
 func (o *Object) BgAreaRect(box style.BgBox) (x0, y0, x1, y1 float32) {
 	x0, y0, x1, y1 = o.BorderRect()
 	switch box {
@@ -210,153 +109,73 @@ func (o *Object) BgAreaRect(box style.BgBox) (x0, y0, x1, y1 float32) {
 	return x0, y0, x1, y1
 }
 
-// BorderW returns the width of the border box.
 func (o *Object) BorderW() float32 {
 	return o.W + o.PaddingLeft + o.PaddingRight + o.BorderLeft + o.BorderRight
 }
 
-// BorderH returns the height of the border box. W and H are both content-box
-// dimensions, which is what ContentRect, BorderRect and the explicit-height
-// branch of resolveBoxSizes all assume; this is the one place that spelling is
-// needed as an expression rather than as edges.
 func (o *Object) BorderH() float32 {
 	return o.H + o.PaddingTop + o.PaddingBottom + o.BorderTop + o.BorderBottom
 }
 
-// Metrics supplies per-glyph advance widths so layout measures text with the
-// same numbers paint draws with. The size is the pixel size the glyph is drawn
-// at: layout passes CSS pixels, paint passes device pixels. The slot is the
-// resolved face - family, weight, slant - because measuring Times and drawing
-// Arial is how text overflows its box. It lives as an interface rather than a
-// concrete font type because layout may not depend on the raster package; the
-// concrete Fonts type satisfies it structurally, and the binaries wire it in.
-//
-// A nil Metrics is valid: measurement falls back to a half-em-per-character
-// estimate. Text with a nil Metrics renders, but spacing drifts from the real
-// font, which is why every binary passes one.
 type Metrics interface {
 	GlyphAdvance(sizePx int32, r rune, slot frame.FontSlot) int32
-	// GlyphAdvanceFixed reports the same advance in 26.6 fixed-point units
-	// (1/64 px) as an int32. A browser keeps the pen position fractional across
-	// a run and rounds only where a glyph lands; summing per-glyph integer
-	// advances loses a fraction of a pixel per character, which over a text line
-	// is tens of pixels of drift and every word wrapping in the wrong place.
-	// Callers that measure a whole word or place a run use this; GlyphAdvance
-	// remains for one-off widths where the integer is the answer.
 	GlyphAdvanceFixed(sizePx int32, r rune, slot frame.FontSlot) int32
-	// LineMetrics reports the face's ascent, descent and the height a line box
-	// takes when line-height is normal, all in device pixels for sizePx. Layout
-	// needs the ascent to place the baseline and the descent to size the content
-	// area; the normal height is the font's own leading, which differs by family
-	// by more than a pixel.
 	LineMetrics(sizePx int32, slot frame.FontSlot) (ascent, descent, normalLineHeight int32)
-	// XHeightFixed reports the distance from the baseline to the top of a
-	// lowercase letter that neither ascends nor descends, in 26.6 fixed-point
-	// units (1/64 px). `vertical-align: middle` centres a box on half of it
-	// (CSS 2.1 10.8), and the halving is why the fraction has to survive: the
-	// reference puts a 4px box 7.8125px down an 18px line because its parent's
-	// x-height is 8.375px, where the same metric rounded to 8px answers 8.
 	XHeightFixed(sizePx int32, slot frame.FontSlot) int32
 }
 
-// Arena is the flat box tree.
-//
-// Objects is indexed by ObjectID; the zero slot is unused so the zero ObjectID
-// is a sentinel. Walk methods use the sibling/child links rather than a
-// depth-first scan, so a pass that only needs the kids of one box touches one
-// cache line per kid rather than the whole arena.
 type Arena struct {
 	Objects []Object
 	byNode  map[dom.NodeID]ObjectID
 
-	// byKey indexes the object that carries each document-lifetime BoxKey within
-	// this arena generation. wordSeq and anonSeq are per-generation monotonic
-	// ordinals that keep generated word and anonymous box keys unique.
 	byKey   map[BoxKey]ObjectID
 	wordSeq uint16
 	anonSeq uint16
 
-	// PassCounts records how many times each formatting-context pass, indexed by
-	// FCKind, was dispatched during this arena generation's layout.
 	PassCounts [5]uint64
 
-	// Metrics is optional; see the Metrics interface. Set it before the
-	// inline pass runs, which is where text is measured.
 	Metrics Metrics
 
-	// NaturalSizes reports the intrinsic size, in CSS px, of each decoded
-	// replaced element keyed by its DOM node. It is plain floats because
-	// layout may not depend on image decoding; the engine fills it in from the
-	// images it fetched and decoded. A missing entry means the image is not
-	// (yet) available, and sizing falls back to specified attributes.
 	NaturalSizes map[dom.NodeID]NaturalSize
 
-	// ViewportH is the height of the initial containing block, which is the box
-	// a percentage height on the root element resolves against. Block sets it.
-	// Zero means no viewport height is modelled, so every percentage height
-	// behaves as auto.
 	ViewportH float32
 
-	// ViewportW is the width half of the same pair, for vw units inside
-	// deferred calc() values. Zero falls back to the evaluator default.
 	ViewportW float32
 
-	// QuoteDepth tracks the current nested quotation mark depth in document order.
 	QuoteDepth int
 
-	// FirstLineStyles holds the computed ::first-line style for each element
-	// that has one. Inline layout reads it to override the first line's runs.
 	FirstLineStyles map[dom.NodeID]*style.ComputedStyle
 
-	// inlineFragLines accumulates per-line fragment rects during the inline pass,
-	// keyed by generating inline element then line index. Scratch space: Block
-	// resets it (inlineInto first runs inside the Block pass), the positioning
-	// loop unions word-fragment content rects into it, and inlineSelfRects folds
-	// it into each box's InlineFragments (storing the expanded border boxes back
-	// so a parent inline can union them).
 	inlineFragLines map[ObjectID]map[int]frame.RectF
 }
 
-// NaturalSize is the intrinsic width and height of a replaced element.
 type NaturalSize struct{ W, H float32 }
 
-// NewArena returns an arena with the root object pre-allocated at index 1.
 func NewArena() *Arena {
 	a := &Arena{
 		Objects: make([]Object, 1, 64),
 		byNode:  make(map[dom.NodeID]ObjectID),
 		byKey:   make(map[BoxKey]ObjectID),
 	}
-	// Pre-allocate the root slot so rootID (1) is the first valid ID.
 	a.Objects = append(a.Objects, Object{})
 	return a
 }
 
-// Alloc reserves a new ObjectID and returns a pointer to the object. The pointer
-// is valid ONLY until the next call that can allocate: growing the Objects slice
-// reallocates the backing array and invalidates earlier pointers. Hold the
-// ObjectID and re-fetch with Get at use; never keep a *Object across an Alloc.
 func (a *Arena) Alloc() (ObjectID, *Object) {
 	id := ObjectID(len(a.Objects))
 	a.Objects = append(a.Objects, Object{})
 	return id, &a.Objects[id]
 }
 
-// Get returns the object for an ID. The ID is assumed valid; a bad ID is a bug
-// in the layout pass that produced it, and a panic is more useful than a nil
-// check that hides the bug until paint.
 func (a *Arena) Get(id ObjectID) *Object {
 	return &a.Objects[id]
 }
 
-// ForNode returns the object already allocated for n, if any.
 func (a *Arena) ForNode(id dom.NodeID) (ObjectID, bool) {
 	oid, ok := a.byNode[id]
 	return oid, ok
 }
 
-// setKey assigns a box's document-lifetime key and indexes it. The key must be
-// unique within this arena generation; callers pass a non-zero key.
 func (a *Arena) setKey(id ObjectID, k BoxKey) {
 	a.Objects[id].Key = k
 	if a.byKey == nil {
@@ -365,15 +184,11 @@ func (a *Arena) setKey(id ObjectID, k BoxKey) {
 	a.byKey[k] = id
 }
 
-// ForKey returns the object indexed for k, if any.
 func (a *Arena) ForKey(k BoxKey) (ObjectID, bool) {
 	id, ok := a.byKey[k]
 	return id, ok
 }
 
-// anonNodeID returns the DOM node ID of the nearest keyed ancestor of id, or 0.
-// Anonymous boxes borrow it for their key's node field; uniqueness comes from
-// the per-generation anonSeq ordinal, not from this node ID.
 func (a *Arena) anonNodeID(id ObjectID) uint32 {
 	for cur := id; cur != 0; cur = a.Objects[cur].Parent {
 		if n := a.Objects[cur].Node; n != nil && n.ID != 0 {
@@ -383,13 +198,8 @@ func (a *Arena) anonNodeID(id ObjectID) uint32 {
 	return 0
 }
 
-// FCCount returns how many times the formatting-context pass k was dispatched
-// during this arena generation's layout.
 func (a *Arena) FCCount(k FCKind) uint64 { return a.PassCounts[k] }
 
-// RefreshComputedStyles replaces per-node style pointers without rebuilding
-// the arena. It is safe only when there are no anonymous boxes: those styles
-// are derived during layout and need the parent context to be rebuilt.
 func (a *Arena) RefreshComputedStyles(styles map[dom.NodeID]*style.ComputedStyle) bool {
 	if a == nil {
 		return false
@@ -414,10 +224,6 @@ func (a *Arena) RefreshComputedStyles(styles map[dom.NodeID]*style.ComputedStyle
 	return true
 }
 
-// RefreshComputedStylesForNodes updates styles in a set of existing DOM
-// subtrees without walking unrelated arena objects. It remains unsafe when
-// anonymous boxes exist, because layout-derived anonymous styles need their
-// parent's context rebuilt.
 func (a *Arena) RefreshComputedStylesForNodes(styles map[dom.NodeID]*style.ComputedStyle, nodes []dom.NodeID) bool {
 	if a == nil {
 		return false
@@ -446,9 +252,6 @@ func (a *Arena) RefreshComputedStylesForNodes(styles map[dom.NodeID]*style.Compu
 	return true
 }
 
-// Link adds kid as the last child of parent. The arena owns the link structure;
-// a pass that reorders children calls Unlink first and then Link in the new
-// order, rather than rewriting the links by hand.
 func (a *Arena) Link(parent, kid ObjectID) {
 	p := &a.Objects[parent]
 	k := &a.Objects[kid]
@@ -464,17 +267,8 @@ func (a *Arena) Link(parent, kid ObjectID) {
 	p.LastKid = kid
 }
 
-// Build constructs the layout tree from a styled document. Every element node
-// gets one object; text nodes are not objects but contribute runs to their
-// parent's inline content during the inline pass. Pseudo-elements (::before,
-// ::after) with non-normal content get synthetic objects injected as first/last
-// children of their originating element.
 func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle) *Arena {
 	a := NewArena()
-	// Pre-size the slab and the node index from a cheap pointer walk: without
-	// it every Alloc past the initial 64 pays doubling copies of all previous
-	// objects, and Object is a wide value. Element and text nodes each take at
-	// most one object; pseudo-elements add at most two per originating element.
 	if doc != nil {
 		if n := countLayoutNodes(&doc.Node); n > 0 {
 			need := n + 2*len(pseudoStyles) + 2
@@ -492,15 +286,12 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 			}
 		}
 	}
-	// Use the pre-allocated root at index 1 for the document node.
 	a.Objects[rootID].Node = &doc.Node
 	a.setKey(rootID, NewBoxKey(uint32(doc.Node.ID), BoxKindBlock, 0))
 	if s, ok := styles[doc.Node.ID]; ok {
 		a.Objects[rootID].Style = s
 	}
 	a.byNode[doc.Node.ID] = rootID
-	// Extract ::first-line styles from pseudoStyles so inline layout can apply
-	// them to the first formatted line of each block container.
 	for key, cs := range pseudoStyles {
 		if key.Pseudo == "first-line" {
 			if a.FirstLineStyles == nil {
@@ -509,8 +300,6 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 			a.FirstLineStyles[key.NodeID] = cs
 		}
 	}
-	// Build the subtree under the document. Counter scopes thread through
-	// the walk in document order from an empty root.
 	rootScope := &style.CounterScope{}
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
 		if c.Element() || c.Type == dom.NodeText {
@@ -523,9 +312,6 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 	return a
 }
 
-// countLayoutNodes counts the nodes buildSubtree turns into objects (elements
-// and text) with an iterative walk: no allocation, no recursion, safe on deep
-// trees. It sizes the arena slab, never a limit check.
 func countLayoutNodes(root *dom.Node) int {
 	n := 0
 	stack := []*dom.Node{root}
@@ -576,16 +362,12 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 		a.setKey(id, NewBoxKey(uint32(n.ID), boxKindForStyle(obj.Style), 0))
 	}
 
-	// CSS counters apply in document order: the element's own reset/set
-	// establishes its scope, its increment adjusts the innermost instance,
-	// and both are visible to ::before/::after (which count as children).
 	if n.Element() && obj.Style != nil {
 		scope = scope.ApplyReset(obj.Style.CounterReset)
 		scope = scope.ApplySet(obj.Style.CounterSet)
 		scope = scope.ApplyIncrement(obj.Style.CounterIncrement)
 	}
 
-	// Inject ::before pseudo-element as first child if it has content.
 	if n.Element() && pseudoStyles != nil {
 		if beforeStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "before"}]; ok {
 			beforeID := buildPseudoElement(a, doc, n.ID, BoxKindPseudoBefore, beforeStyle, scope)
@@ -621,7 +403,6 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 		}
 	}
 
-	// Inject ::first-letter pseudo-element if applicable.
 	var flTextNode *dom.Node
 	var flRemNode *dom.Node
 	if n.Element() && pseudoStyles != nil {
@@ -632,7 +413,6 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 						continue
 					}
 					if c.Element() {
-						// Block with element-only children: no first-letter box
 						break
 					}
 					if c.Type == dom.NodeText {
@@ -694,7 +474,6 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 					a.Link(id, kid)
 				}
 			} else {
-				// Slot fallback content
 				for sc := c.FirstChild; sc != nil; sc = sc.NextSibling {
 					if sc.Element() || sc.Type == dom.NodeText {
 						kid := buildSubtreeWithHost(a, sc, currentHost, doc, styles, pseudoStyles, scope)
@@ -722,7 +501,6 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 		a.Link(id, kid)
 	}
 
-	// Inject ::after pseudo-element as last child if it has content.
 	if n.Element() && pseudoStyles != nil {
 		if afterStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "after"}]; ok {
 			afterID := buildPseudoElement(a, doc, n.ID, BoxKindPseudoAfter, afterStyle, scope)
@@ -733,17 +511,12 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 	return id
 }
 
-// buildPseudoElement creates a layout object for a pseudo-element with synthetic
-// text content. The object is an anonymous text node. Structured counter()
-// content evaluates against the originating element's scope; plain strings
-// pass through exactly as before.
 func buildPseudoElement(a *Arena, doc *dom.Document, nodeID dom.NodeID, kind BoxKind, pseudoStyle *style.ComputedStyle, scope *style.CounterScope) ObjectID {
 	id, obj := a.Alloc()
 	obj.flags |= flagAnonymous
 	obj.Style = pseudoStyle
 	a.setKey(id, NewBoxKey(uint32(nodeID), kind, 0))
 
-	// Create a synthetic text node with the generated content.
 	text := pseudoStyle.Content
 	if len(pseudoStyle.ContentParts) > 0 {
 		text = style.EvaluateContentWithQuotes(pseudoStyle.ContentParts, scope, pseudoStyle.Quotes, &a.QuoteDepth)
@@ -768,13 +541,11 @@ func buildFirstLetterPseudoElement(a *Arena, doc *dom.Document, nodeID dom.NodeI
 	return id
 }
 
-// ViewTransitionRect represents the snapshot bounds of a view-transition-named box.
 type ViewTransitionRect struct {
 	Name           string
 	X0, Y0, X1, Y1 float32
 }
 
-// FindViewTransitions returns the bounds of all boxes that declare a non-none view-transition-name.
 func (a *Arena) FindViewTransitions() []ViewTransitionRect {
 	var result []ViewTransitionRect
 	for i := range a.Objects {

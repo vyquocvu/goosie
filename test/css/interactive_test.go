@@ -12,30 +12,25 @@ func TestHoverPseudoClass(t *testing.T) {
 	div := doc.NewElement("div")
 	doc.Node.AppendChild(div)
 
-	// Initially not hovered.
 	if css.IsHovered(div) {
 		t.Error("element should not be hovered initially")
 	}
 
-	// Set hover state.
 	css.SetHover(div, true)
 	if !css.IsHovered(div) {
 		t.Error("element should be hovered after SetHover(true)")
 	}
 
-	// Test selector matching.
 	sel := css.ParseSelector("div:hover")
 	if !sel.Matches(div) {
 		t.Error("div:hover should match hovered div")
 	}
 
-	// Remove hover state.
 	css.SetHover(div, false)
 	if css.IsHovered(div) {
 		t.Error("element should not be hovered after SetHover(false)")
 	}
 
-	// Selector should no longer match.
 	if sel.Matches(div) {
 		t.Error("div:hover should not match unhovered div")
 	}
@@ -46,30 +41,25 @@ func TestFocusPseudoClass(t *testing.T) {
 	input := doc.NewElement("input")
 	doc.Node.AppendChild(input)
 
-	// Initially not focused.
 	if css.IsFocused(input) {
 		t.Error("element should not be focused initially")
 	}
 
-	// Set focus state.
 	css.SetFocus(input, true)
 	if !css.IsFocused(input) {
 		t.Error("element should be focused after SetFocus(true)")
 	}
 
-	// Test selector matching.
 	sel := css.ParseSelector("input:focus")
 	if !sel.Matches(input) {
 		t.Error("input:focus should match focused input")
 	}
 
-	// Remove focus state.
 	css.SetFocus(input, false)
 	if css.IsFocused(input) {
 		t.Error("element should not be focused after SetFocus(false)")
 	}
 
-	// Selector should no longer match.
 	if sel.Matches(input) {
 		t.Error("input:focus should not match unfocused input")
 	}
@@ -80,27 +70,22 @@ func TestHoverAndFocusCombined(t *testing.T) {
 	btn := doc.NewElement("button")
 	doc.Node.AppendChild(btn)
 
-	// Test combined selector.
 	sel := css.ParseSelector("button:hover:focus")
 
-	// Neither hovered nor focused.
 	if sel.Matches(btn) {
 		t.Error("button:hover:focus should not match when neither state is set")
 	}
 
-	// Only hovered.
 	css.SetHover(btn, true)
 	if sel.Matches(btn) {
 		t.Error("button:hover:focus should not match when only hovered")
 	}
 
-	// Both hovered and focused.
 	css.SetFocus(btn, true)
 	if !sel.Matches(btn) {
 		t.Error("button:hover:focus should match when both states are set")
 	}
 
-	// Only focused.
 	css.SetHover(btn, false)
 	if sel.Matches(btn) {
 		t.Error("button:hover:focus should not match when only focused")
@@ -114,7 +99,6 @@ func TestClearInteractiveState(t *testing.T) {
 	doc.Node.AppendChild(div1)
 	doc.Node.AppendChild(div2)
 
-	// Set various states.
 	css.SetHover(div1, true)
 	css.SetFocus(div2, true)
 
@@ -122,7 +106,6 @@ func TestClearInteractiveState(t *testing.T) {
 		t.Fatal("states should be set")
 	}
 
-	// Clear all states.
 	css.ClearInteractiveState()
 
 	if css.IsHovered(div1) {
@@ -134,7 +117,6 @@ func TestClearInteractiveState(t *testing.T) {
 }
 
 func TestHoverOnNilNode(t *testing.T) {
-	// Should not panic.
 	css.SetHover(nil, true)
 	if css.IsHovered(nil) {
 		t.Error("nil node should not be hovered")
@@ -142,7 +124,6 @@ func TestHoverOnNilNode(t *testing.T) {
 }
 
 func TestFocusOnNilNode(t *testing.T) {
-	// Should not panic.
 	css.SetFocus(nil, true)
 	if css.IsFocused(nil) {
 		t.Error("nil node should not be focused")
@@ -214,10 +195,6 @@ func TestFormStatePseudoClasses(t *testing.T) {
 		t.Error("selected option state was not reflected by :checked")
 	}
 
-	// A tie between two authored "selected" attributes resolves to the last one
-	// in tree order, the answer SelectedOption and form submission already give,
-	// so a `option:checked` rule cannot style a different option from the one the
-	// control announces and submits.
 	tie := doc.NewElement("select")
 	earlier := doc.NewElement("option")
 	earlier.SetAttribute("selected", "")
@@ -280,7 +257,7 @@ func TestReadOnlyAndReadWritePseudoClassesFollowHTMLMutability(t *testing.T) {
 	doc.Node.AppendChild(readonly)
 	checkbox := doc.NewElement("input")
 	checkbox.SetAttribute("type", "checkbox")
-	checkbox.SetAttribute("readonly", "") // readonly does not apply to checkbox state.
+	checkbox.SetAttribute("readonly", "")
 	doc.Node.AppendChild(checkbox)
 	textarea := doc.NewElement("textarea")
 	doc.Node.AppendChild(textarea)

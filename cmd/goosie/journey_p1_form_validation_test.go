@@ -59,8 +59,6 @@ func TestJourneyFormValidationBlocksRequestUntilValid(t *testing.T) {
 		return ok && browser.activeURL() == pageURL && pageRequests == 1
 	})
 
-	// The first real pointer click must reach the engine's validation path, focus
-	// the empty required control, and leave the loaded page as the only request.
 	browser.clickElementByID(t, "submit")
 	browser.waitFor(t, "invalid click is handled by validation or a navigation occurs", func() bool {
 		tab := browser.f.tabMgr.Active()
@@ -84,7 +82,6 @@ func TestJourneyFormValidationBlocksRequestUntilValid(t *testing.T) {
 		t.Fatalf("invalid required value = %q, want preserved empty value", got)
 	}
 
-	// Type into the focused control, then activate the same submitter again.
 	for _, ch := range "ready" {
 		browser.pressKey(t, ch)
 	}

@@ -11,34 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// BR-087, second half: the visual order of an RTL line.
-//
-// Every expectation here is the geometry Chromium 1.63 gave the same fixture in
-// scripts/verify-br087-bidi.js (2026-11-04). Its content box is x=600..800, so
-// subtract 600 to compare against these boxes at x=0..200. The quoted numbers
-// are in docs/roadmap-v2.md.
-//
-//	AR "مرحبا" x=[793.688 785.859 777.391 773.484 769.813] descending=true
-//	LA "abc"   x=[708.438 717.328 726.234] ascending=true
-//	EN "123"   x=[738.672 747.578 756.469] ascending=true
-//	visual     ="abc 123 ابحرم"  right-anchored=true (rightmost edge 800.001)
-//
-// Goosie before this slice painted every word's runes left to right from a
-// left-anchored line - "glyphs-painted: م@4 ر@9 ح@17 ب@26 ا@38" for the same run -
-// and ordered the words as "مرحبا abc 123".
-//
-// What the oracles read is the painted glyph list, because that is what the
-// rasterizer places: each entry carries the rune it draws and the x it draws it
-// at. Sorting a run by x gives the string the line actually reads, which is how
-// the reference reports it above; the slice's own order is not asserted, since
-// nothing downstream depends on it.
-//
-// Not covered here, and recorded as defects: mirroring of bracket glyphs (only
-// their order is asserted), nested embeds and isolates below a single line, and
-// where a caret or selection highlight lands inside a reordered word.
-
-// bidiWords returns the laid-out word fragments of one box, left to right as
-// they sit on the line, skipping the collapsible spaces that carry no ink.
 func bidiWords(t *testing.T, sess *engine.Session) []string {
 	t.Helper()
 	var out []string
@@ -56,15 +28,11 @@ func bidiWords(t *testing.T, sess *engine.Session) []string {
 	return out
 }
 
-// wordX returns the left edge of the fragment carrying that word.
 func wordX(t *testing.T, sess *engine.Session, word string) float32 {
 	t.Helper()
 	return wordBox(t, sess, word).X
 }
 
-// wordBox returns the laid-out box carrying that word. A word that appears more
-// than once is resolved to its leftmost box, which is the one the caller can
-// name unambiguously in a single-line fixture.
 func wordBox(t *testing.T, sess *engine.Session, word string) *layout.Object {
 	t.Helper()
 	var best *layout.Object
@@ -83,8 +51,6 @@ func wordBox(t *testing.T, sess *engine.Session, word string) *layout.Object {
 	return best
 }
 
-// lineEdges returns the left edge of the leftmost word and the right edge of
-// the rightmost word, in CSS px inside the box's own coordinate space.
 func lineEdges(t *testing.T, sess *engine.Session) (left, right float32) {
 	t.Helper()
 	left, right = 1e9, -1e9
@@ -103,8 +69,6 @@ func lineEdges(t *testing.T, sess *engine.Session) (left, right float32) {
 	return left, right
 }
 
-// bidiGlyphRuns returns one slice per painted text run, in the order the
-// builder emitted them.
 func bidiGlyphRuns(t *testing.T, sess *engine.Session) [][]paint.GlyphRun {
 	t.Helper()
 	var out [][]paint.GlyphRun
@@ -116,9 +80,6 @@ func bidiGlyphRuns(t *testing.T, sess *engine.Session) [][]paint.GlyphRun {
 	return out
 }
 
-// runFor finds the painted run carrying the same runes as word. It matches on
-// the rune set rather than the order, because the order is exactly what these
-// tests are about.
 func runFor(t *testing.T, runs [][]paint.GlyphRun, word string) []paint.GlyphRun {
 	t.Helper()
 	want := []rune(word)
@@ -146,8 +107,6 @@ func sameRunes(glyphs []paint.GlyphRun, want []rune) bool {
 	return true
 }
 
-// visualRunes reads a run the way its ink reads: the runes sorted by the x each
-// one is placed at. Chromium's anchor reports the same string.
 func visualRunes(glyphs []paint.GlyphRun) string {
 	cp := append([]paint.GlyphRun(nil), glyphs...)
 	sort.SliceStable(cp, func(i, j int) bool { return cp[i].X < cp[j].X })
@@ -158,7 +117,6 @@ func visualRunes(glyphs []paint.GlyphRun) string {
 	return sb.String()
 }
 
-// xsOfVisual lists a run's glyph x values in reading order.
 func xsOfVisual(glyphs []paint.GlyphRun) []int {
 	cp := append([]paint.GlyphRun(nil), glyphs...)
 	sort.SliceStable(cp, func(i, j int) bool { return cp[i].X < cp[j].X })
@@ -186,11 +144,6 @@ func strictlyAscending(xs []int) bool {
 	return true
 }
 
-// assertDrawnAdvances checks that each visual slot sits where the runes drawn
-// before it, by their own advances, put it. A reordered word drawn with the
-// logical rune's advance instead drifts several pixels by its tail: Chromium
-// measures ا=769.813+3.672 then ب=773.484, and the runes of مرحبا run from 3.7
-// to 8.5px wide.
 func assertDrawnAdvances(t *testing.T, sess *engine.Session, word string, glyphs []paint.GlyphRun) {
 	t.Helper()
 	box := wordBox(t, sess, word)
@@ -206,9 +159,6 @@ func assertDrawnAdvances(t *testing.T, sess *engine.Session, word string, glyphs
 	}
 }
 
-// Chromium: dir=rtl, 200px box, "مرحبا" alone - the word is the whole line, its
-// first rune sits rightmost (م=793.688, ا=769.813) and the line ends at the
-// content-box right edge (rightmost edge x=800.001).
 // qc:BR-087
 func TestRtlArabicWordPaintsRightToLeftAndAnchorsAtTheRightEdge(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">مرحبا</div>`)
@@ -226,9 +176,6 @@ func TestRtlArabicWordPaintsRightToLeftAndAnchorsAtTheRightEdge(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl "مرحبا abc 123" gives visual ="abc 123 ابحرم": the Latin and
-// the digits are one ascending island to the LEFT of the reversed Arabic,
-// because the space between two left-to-right types joins them.
 // qc:BR-087
 func TestRtlMixedLineOrdersWordsByVisualIslands(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">مرحبا abc 123</div>`)
@@ -250,10 +197,6 @@ func TestRtlMixedLineOrdersWordsByVisualIslands(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl "مرحبا 123 ٤٥٦ abc" gives visual ="abc ٤٥٦ 123 ابحرم" with
-// every numeric and Latin island ascending (abc=678.719 ٤٥٦=708.969
-// 123=738.672). The three islands swap order while each keeps its own, because
-// a neutral between two different directions takes the base level.
 // qc:BR-087
 func TestRtlEnAndAnIslandsReverseAsIslands(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">مرحبا 123 ٤٥٦ abc</div>`)
@@ -273,9 +216,6 @@ func TestRtlEnAndAnIslandsReverseAsIslands(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl with only Latin ("abc def") keeps the logical order
-// (visual==logical=true, a=747.516 … f=795.547) and only moves the anchor to the
-// right edge. A reorder rule must not reverse what it does not understand.
 // qc:BR-087
 func TestRtlPureLatinKeepsLogicalOrderAndAnchorsRight(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">abc def</div>`)
@@ -297,8 +237,6 @@ func TestRtlPureLatinKeepsLogicalOrderAndAnchorsRight(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl "שלום مرحبا" reverses BOTH scripts and puts the logical
-// first word rightmost: Hebrew at 767.953..788.875, Arabic at 733.328..757.203.
 // qc:BR-087
 func TestRtlHebrewAndArabicBothReverse(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">שלום مرحبا</div>`)
@@ -317,9 +255,6 @@ func TestRtlHebrewAndArabicBothReverse(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl with unicode-bidi: bidi-override reverses the Latin too -
-// a=756.469 b=747.578 c=739.578, visual ="cba ابحرم". Override is what proves
-// the reversal is level-driven rather than script-driven.
 // qc:BR-087
 func TestRtlBidiOverrideReversesLatinToo(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t),
@@ -338,9 +273,6 @@ func TestRtlBidiOverrideReversesLatinToo(t *testing.T) {
 	}
 }
 
-// Chromium: the same string in an LTR box keeps the word order ("مرحبا abc 123",
-// leftmost=600) and reverses only the Arabic in place
-// (م=623.875 … ا=600, "abc"=634.625…).
 // qc:BR-087
 func TestLtrArabicWordReversesInPlace(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px">مرحبا abc 123</div>`)
@@ -361,10 +293,6 @@ func TestLtrArabicWordReversesInPlace(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl "(abc)" gives visual =(abc) after mirroring. The bidi
-// algorithm reverses the order to )abc( (=763.547 leftmost, (=794.672
-// rightmost), then bidi mirroring flips each bracket: logical ) draws as (
-// and logical ( draws as ). The Latin island keeps its LTR order.
 // qc:BR-087
 func TestRtlParenthesesWrapTheLatinIsland(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">(abc)</div>`)
@@ -375,15 +303,9 @@ func TestRtlParenthesesWrapTheLatinIsland(t *testing.T) {
 	assertDrawnAdvances(t, sess, "(abc)", glyphs)
 }
 
-// Chromium mirrors bracket glyphs in RTL context: each Bidi_Mirrored character
-// draws as its counterpart when the resolved bidi level is odd. This test
-// verifies the mirroring behavior with a multi-character Latin island that
-// forces the brackets to odd levels.
 // qc:BR-087
 func TestBidiMirrorBracketsInRtl(t *testing.T) {
 	fonts := cjkFonts(t)
-	// Use a longer Latin run so the brackets are resolved as neutrals between
-	// strong LTR characters in an RTL paragraph, giving them odd levels.
 	sess := cjkSession(t, fonts, `<div style="width:200px" dir="rtl">(abc)</div>`)
 	runs := bidiGlyphRuns(t, sess)
 	var glyphs []paint.GlyphRun
@@ -393,14 +315,11 @@ func TestBidiMirrorBracketsInRtl(t *testing.T) {
 			break
 		}
 	}
-	// After bidi reversal: )abc( → after mirroring: (abc)
 	if got := visualRunes(glyphs); got != "(abc)" {
 		t.Errorf("visual = %q, want %q (mirrored brackets in RTL)", got, "(abc)")
 	}
 }
 
-// LTR text must NOT mirror brackets: the bidi level is even (0), so the
-// mirror map is never consulted.
 // qc:BR-087
 func TestBidiNoMirrorInLtr(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -418,9 +337,6 @@ func TestBidiNoMirrorInLtr(t *testing.T) {
 	}
 }
 
-// Chromium: text-align moves the anchor, never the order. dir=rtl with
-// text-align:left gives leftmost x=600, center gives 669.781..730.204 (equal
-// 69.8px gaps), right gives the same geometry as the default.
 // qc:BR-087
 func TestRtlTextAlignMovesTheAnchorNotTheOrder(t *testing.T) {
 	for _, c := range []struct{ align, leftmost, rightmost string }{
@@ -454,9 +370,6 @@ func TestRtlTextAlignMovesTheAnchorNotTheOrder(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl with unicode-bidi: plaintext and Latin first resolves the
-// paragraph to LTR - leftmost x=600, "abc" ascending at 600..617.797, the
-// Arabic reversed at 630.25..654.125.
 // qc:BR-087
 func TestPlaintextResolvesToLtrAndAnchorsLeft(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t),
@@ -474,8 +387,6 @@ func TestPlaintextResolvesToLtrAndAnchorsLeft(t *testing.T) {
 	}
 }
 
-// Chromium: dir=rtl selection within an RTL word must map through the glyph
-// permutation. The full-word selection should return the complete logical text.
 // qc:BR-087
 func TestBidiSelectionRtlFullWordReturnsLogicalText(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px" dir="rtl">مرحبا</div>`)
@@ -483,7 +394,6 @@ func TestBidiSelectionRtlFullWordReturnsLogicalText(t *testing.T) {
 	x0, y0, x1, y1 := box.BorderRect()
 	midY := (y0 + y1) / 2
 
-	// Select from before the word to after the word (full selection).
 	sess.SelectAt(x0-10, midY)
 	sess.SelectTo(x1+10, midY)
 	if !sess.HasSelection() {
@@ -495,9 +405,6 @@ func TestBidiSelectionRtlFullWordReturnsLogicalText(t *testing.T) {
 	}
 }
 
-// Chromium anchors an RTL line on the content box, not the border box: with
-// 30px of inline padding the last glyph's right edge is 770.001 in a box whose
-// border box ends at 800 (scripts/verify-br087-bidi.js u_padding).
 // qc:BR-087
 func TestRtlStartAnchorSitsInsideThePadding(t *testing.T) {
 	sess := cjkSession(t, cjkFonts(t), `<div style="width:200px; padding:0 30px" dir="rtl">مرحبا abc</div>`)

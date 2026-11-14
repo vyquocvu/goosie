@@ -7,11 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// Microtask checkpoints: promise reactions queue and drain FIFO after each
-// task (script or timer callback), never inline. A reaction scheduled during
-// Run must not run before the synchronous code after it; a reaction scheduled
-// during a timer callback must not run before that callback finishes.
-
 func orderOf(t *testing.T, r *js.Runtime) string {
 	t.Helper()
 	v, ok := r.Global("orderStr")
@@ -21,8 +16,6 @@ func orderOf(t *testing.T, r *js.Runtime) string {
 	return v.Str
 }
 
-// TestMicrotaskRunsAfterSyncCode pins deferred (not inline) reactions: sync
-// code following then() runs first.
 func TestMicrotaskRunsAfterSyncCode(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`
@@ -33,7 +26,6 @@ func TestMicrotaskRunsAfterSyncCode(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// The checkpoint at the end of Run has drained by now; re-read live.
 	if err := r.Run(`var orderStr = order.join(',');`, "inline2"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -42,8 +34,6 @@ func TestMicrotaskRunsAfterSyncCode(t *testing.T) {
 	}
 }
 
-// TestMicrotaskFIFOChains pins queue order across promises: reactions run in
-// attach order, and chained continuations queue behind already-queued work.
 func TestMicrotaskFIFOChains(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`
@@ -62,8 +52,6 @@ func TestMicrotaskFIFOChains(t *testing.T) {
 	}
 }
 
-// TestMicrotaskRunsBeforeNextTimer pins checkpoint-before-task: a microtask
-// queued during Run drains before any timer callback Tick delivers.
 func TestMicrotaskRunsBeforeNextTimer(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`
@@ -84,8 +72,6 @@ func TestMicrotaskRunsBeforeNextTimer(t *testing.T) {
 	}
 }
 
-// TestMicrotaskQueuedInTimerDrainsAfterTask pins the per-task checkpoint: a
-// reaction queued inside a timer callback runs after that callback finishes.
 func TestMicrotaskQueuedInTimerDrainsAfterTask(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	if err := r.Run(`
@@ -108,9 +94,6 @@ func TestMicrotaskQueuedInTimerDrainsAfterTask(t *testing.T) {
 	}
 }
 
-// TestRunawayMicrotasksInterrupt pins the DoS bound: a self-perpetuating
-// microtask chain ends in ErrInterrupted from the Run timeout, not a hang
-// (and not a stack-exhausting inline recursion).
 func TestRunawayMicrotasksInterrupt(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/", Timeout: 300 * time.Millisecond})
 	err := r.Run(`function loop() { Promise.resolve().then(loop); } loop();`, "inline")
@@ -119,9 +102,6 @@ func TestRunawayMicrotasksInterrupt(t *testing.T) {
 	}
 }
 
-// TestHangingTimerCallbackDoesNotWedgeTick pins the pump bound: a timer
-// callback that never returns ends the Tick at the runtime timeout instead
-// of hanging the pump thread.
 func TestHangingTimerCallbackDoesNotWedgeTick(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/", Timeout: 200 * time.Millisecond})
 	if err := r.Run(`setTimeout(function() { while(true) {} }, 0);`, "inline"); err != nil {

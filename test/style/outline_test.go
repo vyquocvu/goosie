@@ -8,11 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// TestOutlineShorthandResolves guards the outline property the `:checked` and
-// `:focus` rules in testdata/render/selectors/02-pseudo-classes.html rely on.
-// The engine parsed no outline at all, so a control's only keyboard-feedback
-// ring was dropped on the floor: the box painted as if the declaration were
-// absent. The shorthand carries the same three parts as `border`, in any order.
 func TestOutlineShorthandResolves(t *testing.T) {
 	doc := dom.NewDocument()
 	html := doc.NewElement("html")
@@ -45,8 +40,6 @@ func TestOutlineShorthandResolves(t *testing.T) {
 		t.Errorf("OutlineColor = %v, want %v", s.OutlineColor, want)
 	}
 
-	// A box with no outline declaration keeps the initial state: no style, so
-	// nothing paints even though the width and colour fields are untouched.
 	plain := doc.NewElement("input")
 	plain.SetAttribute("type", "text")
 	body.AppendChild(plain)
@@ -56,8 +49,6 @@ func TestOutlineShorthandResolves(t *testing.T) {
 	}
 }
 
-// TestOutlineLonghandsAndOffset pins the longhands beside the shorthand, since
-// a page may set only the colour or only the offset.
 func TestOutlineLonghandsAndOffset(t *testing.T) {
 	doc := dom.NewDocument()
 	html := doc.NewElement("html")

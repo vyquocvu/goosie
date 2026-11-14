@@ -10,8 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// PaintChecked validates geometry and scale before any device-coordinate
-// conversion, then checks tile metadata bounds before handing off the list.
 func (s *Session) PaintChecked(scale float32) (*paint.List, error) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -31,19 +29,8 @@ func (s *Session) PaintChecked(scale float32) (*paint.List, error) {
 	return list, nil
 }
 
-// Paint builds a display list from a trusted session's layout arena. Binaries
-// processing untrusted input must use PaintChecked instead.
-//
-// The list is mutable; the caller freezes it with Publish when the frame is
-// ready. scale is the device-pixel ratio: a 2x Retina display passes 2.0, and
-// the builder multiplies every CSS-pixel coordinate by it to produce device
-// pixels.
 func (s *Session) Paint(scale float32) *paint.List {
 	s.workCounts.displayListBuilds.Add(1)
-	// Size the slab from the box count so a first paint does not grow it
-	// repeatedly: each growth copies every DisplayCmd published so far, and a
-	// DisplayCmd is a wide value. A box emits a small handful of commands, so
-	// 2x the box count covers the common case without over-reserving.
 	n := 0
 	if s.Arena != nil {
 		n = 2 * len(s.Arena.Objects)
@@ -63,9 +50,6 @@ func (s *Session) Paint(scale float32) *paint.List {
 			marked := s.marked
 			markedLen := len([]rune(s.marked))
 			if controlEditable(s.focus) || (dom.IsContentEditable(s.focus) && s.markedHasNode) {
-				// Text controls and live contenteditable ranges already include the
-				// active IME text in the value or Text node. Clear marked to prevent
-				// double-splicing, but keep markedLen for selection highlight.
 				marked = ""
 			}
 			b.SetFocus(obj, s.caret, marked, markedLen)
@@ -99,21 +83,10 @@ func (s *Session) Paint(scale float32) *paint.List {
 		}
 	}
 	b.Build(layout.ObjectID(1))
-	// z-index is resolved into DisplayCmd.Z by the builder; sorting once per
-	// content version keeps that out of the frame path, and the stable sort
-	// leaves the all-zero flow in document order.
 	list.SortStable()
 	return list
 }
 
-// BackgroundColor returns the effective canvas background color.
-// If html has a non-transparent background, that is used. Otherwise if body
-// has a non-transparent background, that is used. If both are transparent,
-// white RGB(255, 255, 255) is returned.
-//
-// A display:none root contributes nothing: with no box the background has
-// nothing to propagate from, so html (or body) with display:none reads as
-// absent here.
 func (s *Session) BackgroundColor() frame.Color {
 	if s.Doc != nil {
 		if s.Doc.HTML != nil {

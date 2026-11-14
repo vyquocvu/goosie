@@ -8,7 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// find returns the first element whose class attribute contains wantClass.
 func find(root *dom.Node, wantClass string) *dom.Node {
 	var el *dom.Node
 	var walk func(n *dom.Node)
@@ -86,11 +85,6 @@ func TestFormPointerAssociatesControlsFromInsideTableForm(t *testing.T) {
 	}
 }
 
-// TestNestedListItemStaysInSublist pins HTML5 list-item scope: an <li> may only
-// close an <li> in the same list, never one in an ancestor list. Bootstrap-style
-// navbars rely on this — the malformed <li><li> markup below must keep the
-// dropdown items inside the (display:none) .dropdown-menu <ul>, not leak them
-// into the outer .navbar-nav list where they would render.
 func TestNestedListItemStaysInSublist(t *testing.T) {
 	doc := domtest.Parse(`<!doctype html><html><body>
 <ul class="navbar-nav">
@@ -114,8 +108,6 @@ func TestNestedListItemStaysInSublist(t *testing.T) {
 		}
 	}
 
-	// The outer navbar-nav <li> must hold only the "Design" toggle directly;
-	// the dropdown items belong one level deeper.
 	navbar := find(&doc.Node, "navbar-nav")
 	if navbar == nil {
 		t.Fatal("no .navbar-nav element found")

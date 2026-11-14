@@ -12,12 +12,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/preferences"
 )
 
-// TestJourneyAddressBarEncodesWithoutDialingASurprisingHost covers the two
-// halves of an address-bar value that is not already a clean URL: surrounding
-// whitespace is trimmed, and characters that cannot appear literally in the
-// request path are encoded. The server's view of Host and RequestURI is the
-// oracle - a page loaded from the typed host with an encoded path is
-// normalization; a request that arrives somewhere else is the bug.
 // qc:BR-006
 func TestJourneyAddressBarEncodesWithoutDialingASurprisingHost(t *testing.T) {
 	var mu sync.Mutex
@@ -58,8 +52,6 @@ func TestJourneyAddressBarEncodesWithoutDialingASurprisingHost(t *testing.T) {
 		t.Fatalf("server saw %q, want %q", gotRequests[0], want)
 	}
 
-	// A percent sign that does not form an escape is a clear error, not a
-	// request to a host or path the user did not mean.
 	before := len(gotRequests)
 	browser.navigateViaAddressBar(t, "   "+server.URL+"/100%   ")
 	browser.waitFor(t, "invalid escape reports an error page", func() bool {
@@ -74,11 +66,6 @@ func TestJourneyAddressBarEncodesWithoutDialingASurprisingHost(t *testing.T) {
 	}
 }
 
-// TestJourneyNonAllowlistedLinkSchemesSearchInsteadOfHandingOff is the click
-// path for BR-168. Goosie has no native scheme handler to invoke; the danger is
-// a link whose scheme the renderer would otherwise treat as a destination.
-// Every one of them has to land in the browser's own HTTP search page, scoped
-// by the profile template, with no request anywhere but that page.
 // qc:BR-168
 func TestJourneyNonAllowlistedLinkSchemesSearchInsteadOfHandingOff(t *testing.T) {
 	var mu sync.Mutex

@@ -14,12 +14,6 @@ const viewportCascadeSheet = `
 	div { padding: 3vh 3px; }
 `
 
-// The cascade rewrites viewport units for every declaration it resolves, so the
-// rewrite is allowed to cost nothing only when it can prove there is nothing to
-// rewrite. That proof is the thing this pins: the values that carry a viewport unit
-// still resolve against the frame, and the ones that merely look like one - the "ma"
-// of a colour name, the "va" of a keyword - still come through untouched. A fast path
-// that skipped too much would show up here as a zero width or an unset colour.
 func TestViewportUnitsAndTheirLookalikesBothSurviveTheCascade(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 

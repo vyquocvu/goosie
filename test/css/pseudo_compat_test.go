@@ -27,9 +27,6 @@ func findRowNode(doc *dom.Document) *dom.Node {
 	return found
 }
 
-// The four original pseudo-elements keep working single-colon spellings
-// (CSS 2.1 §5.12.3): :after must match exactly what ::after matches, or
-// every legacy clearfix silently stops generating its box.
 func TestSingleColonPseudoElements(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div class="row"><p>x</p></div></body></html>`)
 	node := findRowNode(doc)
@@ -48,7 +45,6 @@ func TestSingleColonPseudoElements(t *testing.T) {
 			t.Errorf("%s does not match ::before", selStr)
 		}
 	}
-	// A real pseudo-class must not be mistaken for an element.
 	sel := css.ParseSelector(".row:hover")
 	if sel.MatchesPseudoElement(node, "hover") {
 		t.Error(".row:hover matched as pseudo-element")

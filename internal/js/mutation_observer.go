@@ -8,11 +8,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// MutationObserver API implementation.
-
-// MutationRecord represents a single DOM mutation.
 type MutationRecord struct {
-	Type               string // "attributes", "childList", or "characterData"
+	Type               string
 	Target             *dom.Node
 	AddedNodes         []*dom.Node
 	RemovedNodes       []*dom.Node
@@ -23,7 +20,6 @@ type MutationRecord struct {
 	OldValue           *string
 }
 
-// mutationObserver holds the internal state of one MutationObserver.
 type mutationObserver struct {
 	mu            sync.Mutex
 	callback      goja.Callable
@@ -73,7 +69,6 @@ func mutationStateOf(r *Runtime) *mutationState {
 	return s
 }
 
-// setupMutationObserver installs the MutationObserver constructor.
 func (r *Runtime) setupMutationObserver() {
 	state := &mutationState{recordProto: r.vm.NewObject()}
 	setMutationState(r, state)
@@ -115,7 +110,6 @@ func (r *Runtime) setupMutationObserver() {
 		obj := call.This
 		obs.obj = obj
 
-		// observe(target, options)
 		_ = obj.Set("observe", func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) < 1 {
 				panic(r.vm.NewTypeError("observe requires a target argument"))
@@ -231,7 +225,6 @@ func (r *Runtime) setupMutationObserver() {
 			return goja.Undefined()
 		})
 
-		// disconnect()
 		_ = obj.Set("disconnect", func(call goja.FunctionCall) goja.Value {
 			obs.mu.Lock()
 			obs.disconnected = true
@@ -251,7 +244,6 @@ func (r *Runtime) setupMutationObserver() {
 			return goja.Undefined()
 		})
 
-		// takeRecords()
 		_ = obj.Set("takeRecords", func(call goja.FunctionCall) goja.Value {
 			obs.mu.Lock()
 			records := obs.records
@@ -271,10 +263,6 @@ func (r *Runtime) setupMutationObserver() {
 
 	ctor := r.vm.ToValue(constructor)
 	if ctorObject, ok := ctor.(*goja.Object); ok {
-		// Goja's native constructor functions do not always carry an ECMAScript
-		// prototype object. MutationObserver is an interface constructor, so
-		// provide its Web IDL prototype explicitly; same-origin WindowProxy
-		// construction relies on this property when it creates a bridge.
 		_ = ctorObject.Set("prototype", r.vm.NewObject())
 	}
 	_ = r.vm.Set("MutationObserver", ctor)
@@ -337,7 +325,6 @@ func (r *Runtime) wrapMutationRecord(rec MutationRecord) *goja.Object {
 	return obj
 }
 
-// NotifyMutation records a mutation for all observing MutationObservers.
 func (r *Runtime) NotifyMutation(target *dom.Node, mutationType string, attrName string) {
 	r.queueMutationRecord(MutationRecord{Type: mutationType, Target: target, AttributeName: attrName})
 }
@@ -479,7 +466,6 @@ func queueMutationRecordForObserver(obs *mutationObserver, record MutationRecord
 	return true
 }
 
-// DrainMutationObservers fires pending mutation records to callbacks.
 func (r *Runtime) DrainMutationObservers() {
 	state := mutationStateOf(r)
 	if state == nil {

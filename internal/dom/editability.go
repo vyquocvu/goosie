@@ -1,7 +1,5 @@
 package dom
 
-// ContentEditableState returns the enumerated state exposed by the
-// HTMLElement.contentEditable IDL attribute.
 func ContentEditableState(n *Node) string {
 	if n == nil || !n.Element() || !n.HasAttribute("contenteditable") {
 		return "inherit"
@@ -18,9 +16,6 @@ func ContentEditableState(n *Node) string {
 	}
 }
 
-// IsContentEditable reports whether n is editable under the inherited
-// contenteditable enumerated state. An explicit false state stops inheritance;
-// missing and invalid values inherit from the nearest ancestor state.
 func IsContentEditable(n *Node) bool {
 	if n == nil || !n.Element() {
 		return false

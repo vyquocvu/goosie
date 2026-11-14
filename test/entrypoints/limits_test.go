@@ -1,6 +1,3 @@
-// Package entrypoints verifies that both real-document executables enforce
-// the guarded rendering contracts: viewport validation, bounded input, tile
-// cache budgeting, and checked painting.
 package entrypoints
 
 import (
@@ -13,7 +10,6 @@ import (
 	"testing"
 )
 
-// buildBinary compiles the named command and returns its path.
 func buildBinary(t *testing.T, name string) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -26,8 +22,6 @@ func buildBinary(t *testing.T, name string) string {
 	return bin
 }
 
-// TestGoosieHeadlessRejectsInvalidViewport verifies that goosie-headless
-// validates viewport dimensions before attempting to render.
 func TestGoosieHeadlessRejectsInvalidViewport(t *testing.T) {
 	bin := buildBinary(t, "goosie-headless")
 
@@ -55,7 +49,6 @@ func TestGoosieHeadlessRejectsInvalidViewport(t *testing.T) {
 			if err == nil {
 				t.Fatalf("%s succeeded, want error", tc.name)
 			}
-			// Just verify it failed - the error message varies.
 			if len(out) == 0 {
 				t.Errorf("expected error output")
 			}
@@ -63,8 +56,6 @@ func TestGoosieHeadlessRejectsInvalidViewport(t *testing.T) {
 	}
 }
 
-// TestGoosieHeadlessRejectsOversizedDocument verifies that goosie-headless
-// rejects documents whose rendered extent exceeds tile limits.
 func TestGoosieHeadlessRejectsOversizedDocument(t *testing.T) {
 	bin := buildBinary(t, "goosie-headless")
 
@@ -83,8 +74,6 @@ func TestGoosieHeadlessRejectsOversizedDocument(t *testing.T) {
 	}
 }
 
-// TestGoosieHeadlessValidDocument verifies that a valid small document renders
-// successfully through the guarded pipeline.
 func TestGoosieHeadlessValidDocument(t *testing.T) {
 	bin := buildBinary(t, "goosie-headless")
 
@@ -106,15 +95,12 @@ func TestGoosieHeadlessValidDocument(t *testing.T) {
 	}
 }
 
-// TestGoosieScreenshotRejectsInvalidViewport verifies that goosie -screenshot
-// validates viewport dimensions before attempting to render.
 func TestGoosieScreenshotRejectsInvalidViewport(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
 	tmp := t.TempDir()
 	png := filepath.Join(tmp, "out.png")
 
-	// Start a test server to serve a minimal HTML page.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<html><body>test</body></html>"))
@@ -145,8 +131,6 @@ func TestGoosieScreenshotRejectsInvalidViewport(t *testing.T) {
 	}
 }
 
-// TestGoosieScreenshotValidDocument verifies that goosie -screenshot renders
-// a valid document successfully.
 func TestGoosieScreenshotValidDocument(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
@@ -169,17 +153,12 @@ func TestGoosieScreenshotValidDocument(t *testing.T) {
 	}
 }
 
-// TestGoosieHeadlessRejectsOversizedInput verifies that goosie-headless
-// rejects documents that exceed the byte limit.
 // qc:BR-162
 func TestGoosieHeadlessRejectsOversizedInput(t *testing.T) {
 	bin := buildBinary(t, "goosie-headless")
 
 	tmp := t.TempDir()
 	html := filepath.Join(tmp, "huge.html")
-	// Whitespace just over the cap parses cheaply if the guard is ever skipped,
-	// so the test fails on the missing rejection rather than on a later text
-	// layout limit.
 	hugeContent := strings.Repeat(" ", 16<<20+1)
 	if err := os.WriteFile(html, []byte(hugeContent), 0644); err != nil {
 		t.Fatal(err)

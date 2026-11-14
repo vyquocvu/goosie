@@ -7,14 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// The synthetic scene is the M1 gate's page: a document with no DOM, no CSS, and no
-// layout pass behind it. Its only job is to contain enough tiles, enough commands per
-// tile, and enough distinct glyphs that a frame path cannot pass the gate by doing
-// nothing. These tests are the reason it can stand in for real content, so they
-// assert the properties the gate's claims rest on rather than how a pixel looks.
-
-// gateSpec is the document the M1 criteria are stated against: wide enough for a
-// 1440x900 viewport at DPR 2 and tall enough for 600 frames of a 100px scroll.
 func gateSpec() paint.SceneSpec {
 	return paint.SceneSpec{
 		Cols:         12,
@@ -26,10 +18,6 @@ func gateSpec() paint.SceneSpec {
 	}
 }
 
-// TestSceneDeterministic is what makes a golden meaningful: the same spec has to
-// produce the same commands, glyph for glyph, or a hash comparison is comparing
-// noise. A scene whose content came from the wall clock or from map iteration order
-// would pass every other test in this file and still be useless as a baseline.
 func TestSceneDeterministic(t *testing.T) {
 	spec := gateSpec()
 	a, layerA := paint.BuildLayer(spec)
@@ -45,16 +33,12 @@ func TestSceneDeterministic(t *testing.T) {
 		t.Fatalf("two builds of one spec produced bounds %v and %v", layerA.Bounds, layerB.Bounds)
 	}
 
-	// The seed is the only thing that may change the content, and a hash that ignored
-	// it would be a hash of the geometry rather than of the scene.
 	other := spec
 	other.Seed++
 	if paint.SceneHash(a) == paint.SceneHash(buildOf(t, other)) {
 		t.Fatal("changing Seed changed nothing: the scene's content is not seed-derived")
 	}
 
-	// Nor may two specs that differ only in size collide, since the gate compares
-	// hashes across runs whose documents differ deliberately.
 	taller := spec
 	taller.DocHeight += 4 * frame.TileSize
 	if paint.SceneHash(a) == paint.SceneHash(buildOf(t, taller)) {
@@ -80,12 +64,6 @@ func buildOf(t *testing.T, spec paint.SceneSpec) *paint.LayerDL {
 	return dl
 }
 
-// TestSceneBoundsCoverGrid is the plan's name for the one property a tile-based
-// rasterizer needs of its test document: nothing may be painted outside the extent
-// the tile grid was built over. A command that leaked past the bounds would be
-// silently unclipped by no one - the grid never makes a tile for it, so it would
-// simply never appear, and a gate that measured "did the tiles get drawn" would be
-// measuring a document with a hole in it.
 func TestSceneBoundsCoverGrid(t *testing.T) {
 	for _, name := range []string{"gate spec", "zero spec"} {
 		spec := gateSpec()
@@ -106,9 +84,6 @@ func TestSceneBoundsCoverGrid(t *testing.T) {
 			for i, c := range dl.All() {
 				b, ok := c.Bounds()
 				if !ok {
-					// A command with no bounds paints nothing, so it cannot stick out. It is
-					// still worth knowing that the generator emits one: an empty text run is
-					// how a layout bug would look here.
 					t.Errorf("command %d (%v) bounds to nothing", i, c.Kind)
 					continue
 				}
@@ -123,10 +98,6 @@ func TestSceneBoundsCoverGrid(t *testing.T) {
 	}
 }
 
-// TestSceneCarriesTheContentTheGateDependsOn states, as counts, what the synthetic
-// page is claimed to contain. Each of these is a different way the frame path could
-// cheat: no text means no glyph atlas, one text size means one atlas row, no image
-// means the scaler is never exercised, no borders means a tile costs one memset.
 func TestSceneCarriesTheContentTheGateDependsOn(t *testing.T) {
 	dl, l := paint.BuildLayer(gateSpec())
 	if !dl.Frozen() {
@@ -184,14 +155,11 @@ func TestSceneCarriesTheContentTheGateDependsOn(t *testing.T) {
 		t.Fatalf("Checkerboard on produced %d fill colors, want the cells to alternate", len(colors))
 	}
 
-	// The budget is the layer's, in the units the memory criterion is stated in.
 	if got, want := l.Grid.Stats().Budget, int64(256)*frame.TileSizeBytes(); got != want {
 		t.Fatalf("Budget = %d, want %d (256 tiles)", got, want)
 	}
 }
 
-// TestSceneFlatCellsAreFlat checks the other half of the Checkerboard flag: it
-// changes colour, not structure, so a gate can compare command counts across it.
 func TestSceneFlatCellsAreFlat(t *testing.T) {
 	checker := buildOf(t, gateSpec())
 	plain := buildOf(t, func() paint.SceneSpec {
@@ -208,15 +176,11 @@ func TestSceneFlatCellsAreFlat(t *testing.T) {
 			seen[c.Color] = true
 		}
 	}
-	if len(seen) > 2 { // the page background and one cell colour, at most
+	if len(seen) > 2 {
 		t.Fatalf("Checkerboard off still produced %d distinct fill colours", len(seen))
 	}
 }
 
-// TestSceneDefaultsReachTheGatesScrollDistance is why the defaults are the defaults:
-// a caller that writes SceneSpec{} and scrolls 600 times must never hit the clamp,
-// because a frame path that has stopped moving is a frame path that stopped being
-// measured.
 func TestSceneDefaultsReachTheGatesScrollDistance(t *testing.T) {
 	dl, l := paint.BuildLayer(paint.SceneSpec{})
 	if dl.Len() == 0 {
@@ -233,7 +197,6 @@ func TestSceneDefaultsReachTheGatesScrollDistance(t *testing.T) {
 	if got := l.Grid.Stats().Budget; got < int64(96)*frame.TileSizeBytes() {
 		t.Fatalf("default budget is %d tiles, want room for a 12x8 tile viewport", got/frame.TileSizeBytes())
 	}
-	// Rows follow DocHeight, so the two cannot disagree about how tall the document is.
 	tall := paint.SceneSpec{Rows: 4}
 	if _, l := paint.BuildLayer(tall); l.Bounds.H() != 4*frame.TileSize {
 		t.Fatalf("Rows:4 gave a %dpx document, want %d", l.Bounds.H(), 4*frame.TileSize)

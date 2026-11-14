@@ -38,35 +38,12 @@ func TestWPTSuiteIsOptIn(t *testing.T) {
 	}
 }
 
-// TestWPTSuite runs the configured WPT directories against goosie. With the
-// default config this is the curated set; a full conformance config can select
-// broader roots. It discovers tests, renders them, compares references, and
-// reports results.
-//
-// The test requires:
-//   - A built goosie binary (at ./goosie or configured via WPT_GOOSIE_BINARY)
-//   - A WPT checkout (at /tmp/goosie-wpt or configured via WPT_DIR)
-//   - Reference renders (at /tmp/wpt-references or configured via WPT_REF_DIR)
-//
-// Environment variables:
-//   - WPT_GOOSIE_BINARY: path to the goosie binary
-//   - WPT_DIR: path to a WPT checkout (skips download)
-//   - WPT_CONFIG: path to wpt-config.json
-//   - WPT_DIRS: comma-separated list of WPT directories to test (overrides config)
-//   - WPT_INCLUDE: comma-separated WPT-relative paths or file-name patterns
-//   - WPT_SKIP_DOWNLOAD: if "1", skip the WPT download (requires WPT_DIR)
-//   - WPT_RUN_SUITE: if "1", run the conformance suite. Without it the test
-//     skips: the suite needs a checkout (possibly a network download), a built
-//     binary, and far longer than a unit run, so `go test ./...` must not start
-//     it. Use `WPT_RUN_SUITE=1 go test -run TestWPTSuite ./test/wpt/` or
-//     `make wpt` for the conformance run.
 func TestWPTSuite(t *testing.T) {
 	if !wptSuiteEnabled(os.Getenv) {
 		t.Skip("WPT conformance suite is opt-in: set WPT_RUN_SUITE=1 (or run make wpt)")
 	}
 	cfg := loadTestConfig(t)
 
-	// Ensure we have a WPT checkout.
 	checkout := NewCheckout(cfg)
 	wptDir, err := checkout.Ensure()
 	if err != nil {
@@ -74,14 +51,12 @@ func TestWPTSuite(t *testing.T) {
 	}
 	cfg.WPTDir = wptDir
 
-	// Run the suite.
 	runner := NewRunner(cfg)
 	result, err := runner.Run()
 	if err != nil {
 		t.Fatalf("wpt run: %v", err)
 	}
 
-	// Write reports.
 	reporter := NewReporter(result)
 	reporter.PrintSummary(os.Stderr)
 
@@ -99,9 +74,6 @@ func TestWPTSuite(t *testing.T) {
 		t.Logf("wpt: HTML report: %s", htmlPath)
 	}
 
-	// The suite fails below its configured floor (ratchet: set to the measured
-	// rate, raised as rendering support grows, never lowered to green a red
-	// run). Individual failures below that are still listed per-test above.
 	if result.Total == 0 {
 		t.Skip("no WPT tests discovered")
 	}
@@ -118,7 +90,6 @@ func TestWPTSuite(t *testing.T) {
 		result.Skipped, result.Errored)
 }
 
-// TestWPTCurator verifies that the curator correctly classifies tests.
 func TestWPTCurator(t *testing.T) {
 	support := GoosieSupport()
 	dirs := CuratedDirs(support)
@@ -127,7 +98,6 @@ func TestWPTCurator(t *testing.T) {
 		t.Fatal("no curated directories")
 	}
 
-	// Verify each curated directory has a description.
 	parserTestsCurated := false
 	domParsingCurated := false
 	customElementsCurated := false
@@ -260,7 +230,6 @@ func TestWPTCurator(t *testing.T) {
 		t.Error("MessageChannel/MessagePort WPTs should be discoverable while implementation gaps remain")
 	}
 
-	// Verify the support flags are consistent.
 	if !support.HTMLBasic {
 		t.Error("HTMLBasic should be supported")
 	}
@@ -275,9 +244,7 @@ func TestWPTCurator(t *testing.T) {
 	}
 }
 
-// TestWPTServer verifies the HTTP server starts and serves files.
 func TestWPTServer(t *testing.T) {
-	// Create a temp directory with a test file.
 	tmpDir := t.TempDir()
 	testHTML := `<!DOCTYPE html><html><body><h1>Test</h1></body></html>`
 	if err := os.WriteFile(filepath.Join(tmpDir, "test.html"), []byte(testHTML), 0o644); err != nil {
@@ -328,14 +295,11 @@ func TestWPTServer(t *testing.T) {
 	}
 }
 
-// TestWPTImageCompare verifies the pixel comparison function.
 func TestWPTImageCompare(t *testing.T) {
-	// Create two identical small PNGs and verify 100% match.
 	tmpDir := t.TempDir()
 	imgA := filepath.Join(tmpDir, "a.png")
 	imgB := filepath.Join(tmpDir, "b.png")
 
-	// Create a simple 2x2 red PNG.
 	writeTestPNG(t, imgA, 2, 2, [4]byte{255, 0, 0, 255})
 	writeTestPNG(t, imgB, 2, 2, [4]byte{255, 0, 0, 255})
 
@@ -347,7 +311,6 @@ func TestWPTImageCompare(t *testing.T) {
 		t.Errorf("identical images: got %.1f%%, want 100%%", score)
 	}
 
-	// Create a different image and verify < 100%.
 	imgC := filepath.Join(tmpDir, "c.png")
 	writeTestPNG(t, imgC, 2, 2, [4]byte{0, 255, 0, 255})
 
@@ -360,7 +323,6 @@ func TestWPTImageCompare(t *testing.T) {
 	}
 }
 
-// TestWPTConfigDefaults verifies the default configuration.
 func TestWPTConfigDefaults(t *testing.T) {
 	cfg := DefaultConfig()
 	if cfg.PassThreshold != 95.0 {
@@ -377,7 +339,6 @@ func TestWPTConfigDefaults(t *testing.T) {
 	}
 }
 
-// TestWPTConfigLoad verifies loading a config from JSON.
 func TestWPTConfigLoad(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "config.json")
@@ -480,7 +441,6 @@ func TestWPTIncludeFilter(t *testing.T) {
 	}
 }
 
-// TestShouldSkip verifies the skip logic.
 func TestShouldSkip(t *testing.T) {
 	support := GoosieSupport()
 
@@ -610,7 +570,6 @@ func TestDiscoverTestsKeepsManualAndUnclassifiedPagesVisible(t *testing.T) {
 	}
 }
 
-// loadTestConfig builds a Config from environment variables and the config file.
 func loadTestConfig(t *testing.T) Config {
 	t.Helper()
 
@@ -627,7 +586,6 @@ func loadTestConfig(t *testing.T) Config {
 		cfg = DefaultConfig()
 	}
 
-	// Environment overrides.
 	if v := os.Getenv("WPT_GOOSIE_BINARY"); v != "" {
 		cfg.GoosieBinary = v
 	}
@@ -647,9 +605,7 @@ func loadTestConfig(t *testing.T) Config {
 		cfg.ReferenceDir = v
 	}
 
-	// Try to find the config file in testdata if not explicitly set.
 	if cfgPath == "" {
-		// Look for testdata/wpt-config.json relative to the project root.
 		candidates := []string{
 			"../../testdata/wpt-config.json",
 			"testdata/wpt-config.json",
@@ -658,7 +614,6 @@ func loadTestConfig(t *testing.T) Config {
 			if data, err := os.ReadFile(c); err == nil {
 				var fileCfg Config
 				if json.Unmarshal(data, &fileCfg) == nil {
-					// Merge: file config provides defaults, env vars override.
 					if len(fileCfg.Directories) > 0 && len(cfg.Directories) == 0 {
 						cfg.Directories = fileCfg.Directories
 					}
@@ -713,7 +668,6 @@ func trimSpace(s string) string {
 	return s[start:end]
 }
 
-// writeTestPNG creates a minimal PNG file for testing using the standard library.
 func writeTestPNG(t *testing.T, path string, w, h int, c [4]byte) {
 	t.Helper()
 
@@ -735,9 +689,6 @@ func writeTestPNG(t *testing.T, path string, w, h int, c [4]byte) {
 	}
 }
 
-// TestReadFuzzyMeta pins fuzzy-tolerance parsing: the most lenient
-// allowance wins, unparseable metas are ignored, and files without the
-// meta report ok=false so strict scoring still applies.
 func TestReadFuzzyMeta(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) string {
@@ -761,9 +712,6 @@ func TestReadFuzzyMeta(t *testing.T) {
 	}
 }
 
-// TestFuzzyPasses pins the tolerance recount: identical images pass any
-// allowance, fully different images fail a zero allowance but pass a
-// lenient one.
 func TestFuzzyPasses(t *testing.T) {
 	tmpDir := t.TempDir()
 	imgA := filepath.Join(tmpDir, "a.png")
@@ -783,9 +731,6 @@ func TestFuzzyPasses(t *testing.T) {
 	}
 }
 
-// TestWPTCheckoutReusable pins the stale-checkout contract: a matching
-// marker reuses only when content sits behind it. A marker alone (truncated
-// download, external cleanup) must re-download, never run an empty suite.
 func TestWPTCheckoutReusable(t *testing.T) {
 	const pin = "abc123"
 	if checkoutReusable(t.TempDir(), pin) {
@@ -820,10 +765,6 @@ func TestWPTCheckoutReusable(t *testing.T) {
 	}
 }
 
-// TestWPTMinPassRateFloor pins the suite-level ratchet: a floor of zero
-// disables (ad-hoc runs still report), an empty run never meets a positive
-// floor, and the boundary is inclusive so a floor set to today's measured
-// rate stays green until support regresses.
 func TestWPTMinPassRateFloor(t *testing.T) {
 	full := SuiteResult{Total: 100, Passed: 80, Failed: 20, PassRate: 80.0}
 	if !full.MeetsMinPassRate(0) {
@@ -845,9 +786,6 @@ func TestWPTMinPassRateFloor(t *testing.T) {
 	}
 }
 
-// TestWPTSuiteThresholdCheck pins the enforcement the suite itself calls: a
-// disabled floor never errors, a run at the floor passes, and anything below
-// errors with the counts attached.
 func TestWPTSuiteThresholdCheck(t *testing.T) {
 	full := SuiteResult{Total: 100, Passed: 80, Failed: 20, PassRate: 80.0}
 	if err := CheckSuiteThreshold(full, 0); err != nil {

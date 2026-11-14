@@ -7,23 +7,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// escSVG is the document every spelling below denotes: an SVG whose attribute
-// quotes are plain, because that is what a data URI has to look like for the
-// decoder to read it.
 const escSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="rgb(0,0,255)"/></svg>`
 
-// escDataURL writes an SVG as the non-base64 data URI form sites use, where the
-// markup itself is the payload.
 func escDataURL(svg string) string { return `data:image/svg+xml,` + svg }
 
-// TestEscapedQuoteDataURLBackgroundAttachesToTheArena is the session-level
-// oracle for GOOSIE-CSSURLESCAPE-001: the escaped-quote forms must reach the
-// arena as a decoded image, not as a background that silently never attached.
-// A payload that keeps its backslashes is not a valid data URI, so the failing
-// shape is BgImage == nil, which is exactly what Chromium renders as nothing
-// and Goosie rendered as nothing while the url() scanner failed the token
-// closed on the backslash. The percent-encoded control proves the attachment
-// path itself was never the problem.
 // qc:BR-269
 func TestEscapedQuoteDataURLBackgroundAttachesToTheArena(t *testing.T) {
 	singleQuoted := strings.ReplaceAll(escSVG, `"`, `'`)

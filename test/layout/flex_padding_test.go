@@ -2,11 +2,6 @@ package layout_test
 
 import "testing"
 
-// A padded flex item whose content is block-level keeps that padding once. Its
-// flex basis is a border-box width, so passing the derived content width back
-// as the containing block made block layout subtract the padding again:
-// Google's header item lost 9 px and wrapped the sign-in button below the apps
-// icon instead of beside it.
 func TestFlexItemBlockContentKeepsPaddingOnce(t *testing.T) {
 	arena := session(t, `<html><body style="margin:0">
 <div style="display:flex; width:400px">

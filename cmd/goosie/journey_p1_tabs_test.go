@@ -40,7 +40,6 @@ func TestJourneySwitchTabRestoresScroll(t *testing.T) {
 	url1 := server.URL + "/tab1"
 	url2 := server.URL + "/tab2"
 
-	// 1. Load tall document in Tab 1
 	browser.navigateViaAddressBar(t, url1)
 	browser.waitFor(t, "tab 1 initial document loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "tab1-head")
@@ -48,14 +47,12 @@ func TestJourneySwitchTabRestoresScroll(t *testing.T) {
 	})
 	tab1ID := browser.f.tabMgr.Active().ID()
 
-	// Blur address bar so document receives keyboard scroll navigation
 	browser.pressKey(t, 0x1b)
 	browser.waitFor(t, "address bar blurred", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 		return ok && !node.Focused
 	})
 
-	// Scroll down in Tab 1 using PageDown key
 	browser.pressKey(t, keyPageDown)
 	browser.waitFor(t, "tab 1 scrolled down", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -66,7 +63,6 @@ func TestJourneySwitchTabRestoresScroll(t *testing.T) {
 	})
 	tab1Scroll := browser.f.tabMgr.Active().ScrollY()
 
-	// 2. Open Tab 2 via Cmd+T
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
 	browser.waitFor(t, "tab 2 created and focused", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -74,7 +70,6 @@ func TestJourneySwitchTabRestoresScroll(t *testing.T) {
 	})
 	tab2ID := browser.f.tabMgr.Active().ID()
 
-	// Navigate Tab 2 to tall document
 	browser.navigateViaAddressBar(t, url2)
 	browser.waitFor(t, "tab 2 loaded at top", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -85,14 +80,12 @@ func TestJourneySwitchTabRestoresScroll(t *testing.T) {
 		return ok && browser.activeURL() == url2 && active.ScrollY() == 0
 	})
 
-	// Blur address bar so document receives keyboard scroll navigation
 	browser.pressKey(t, 0x1b)
 	browser.waitFor(t, "tab 2 address bar blurred", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 		return ok && !node.Focused
 	})
 
-	// Scroll down twice in Tab 2 with wait in between so event folding doesn't coalesce them
 	browser.pressKey(t, keyPageDown)
 	browser.waitFor(t, "tab 2 first page down registered", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -108,10 +101,8 @@ func TestJourneySwitchTabRestoresScroll(t *testing.T) {
 	tab1IDStr := strconv.FormatUint(tab1ID, 10)
 	tab2IDStr := strconv.FormatUint(tab2ID, 10)
 
-	// 3. Switch back to Tab 1 by clicking its tab node in AX tree
 	browser.clickNode(t, "goosie.tab."+tab1IDStr)
 
-	// Post-condition: Tab 1 is restored with its own document AND its exact scroll offset
 	browser.waitFor(t, "switch to tab 1 restores document and scroll offset", func() bool {
 		active := browser.f.tabMgr.Active()
 		if active == nil || active.ID() != tab1ID {
@@ -121,7 +112,6 @@ func TestJourneySwitchTabRestoresScroll(t *testing.T) {
 		return ok && browser.activeURL() == url1 && active.ScrollY() == tab1Scroll && browser.f.sched.Viewport().Offset.Y == tab1Scroll
 	})
 
-	// 4. Switch back to Tab 2 and verify its document and scroll offset are preserved
 	browser.clickNode(t, "goosie.tab."+tab2IDStr)
 	browser.waitFor(t, "switch to tab 2 restores document and scroll offset", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -160,7 +150,6 @@ func TestJourneyTabsIndependentHistory(t *testing.T) {
 	t2URL1 := server.URL + "/t2-alpha"
 	t2URL2 := server.URL + "/t2-beta"
 
-	// 1. Tab 1 navigates across two pages
 	browser.navigateViaAddressBar(t, t1URL1)
 	browser.waitFor(t, "tab 1 page 1 loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "t1-p1")
@@ -179,7 +168,6 @@ func TestJourneyTabsIndependentHistory(t *testing.T) {
 		return ok && browser.activeURL() == t1URL2 && len(entries) == 2 && idx == 1
 	})
 
-	// 2. Open Tab 2 via Cmd+T
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
 	browser.waitFor(t, "tab 2 created and active", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -187,7 +175,6 @@ func TestJourneyTabsIndependentHistory(t *testing.T) {
 	})
 	tab2ID := browser.f.tabMgr.Active().ID()
 
-	// Tab 2 navigates across its own two pages
 	browser.navigateViaAddressBar(t, t2URL1)
 	browser.waitFor(t, "tab 2 page 1 loaded", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -209,7 +196,6 @@ func TestJourneyTabsIndependentHistory(t *testing.T) {
 		return ok && browser.activeURL() == t2URL2 && len(entries) == 2 && idx == 1
 	})
 
-	// 3. Tab 2 navigates Back to t2URL1
 	browser.clickToolbarButton(t, toolbar.ButtonBack)
 	browser.waitFor(t, "tab 2 navigated back to page A", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -223,10 +209,8 @@ func TestJourneyTabsIndependentHistory(t *testing.T) {
 	tab1IDStr := strconv.FormatUint(tab1ID, 10)
 	tab2IDStr := strconv.FormatUint(tab2ID, 10)
 
-	// 4. Switch to Tab 1
 	browser.clickNode(t, "goosie.tab."+tab1IDStr)
 
-	// Post-condition: Tab 1 history is completely isolated from Tab 2
 	browser.waitFor(t, "tab 1 has preserved history unaffected by tab 2", func() bool {
 		active := browser.f.tabMgr.Active()
 		if active == nil || active.ID() != tab1ID {
@@ -240,7 +224,6 @@ func TestJourneyTabsIndependentHistory(t *testing.T) {
 			active.History().CanBack() && !active.History().CanForward()
 	})
 
-	// Tab 1 can navigate Back independently
 	browser.clickToolbarButton(t, toolbar.ButtonBack)
 	browser.waitFor(t, "tab 1 navigates back to its own page 1", func() bool {
 		active := browser.f.tabMgr.Active()
@@ -251,7 +234,6 @@ func TestJourneyTabsIndependentHistory(t *testing.T) {
 		return ok && browser.activeURL() == t1URL1 && !active.History().CanBack() && active.History().CanForward()
 	})
 
-	// 5. Switch back to Tab 2 and verify its state was not altered by Tab 1's Back navigation
 	browser.clickNode(t, "goosie.tab."+tab2IDStr)
 	browser.waitFor(t, "tab 2 still retains its own forward history", func() bool {
 		active := browser.f.tabMgr.Active()

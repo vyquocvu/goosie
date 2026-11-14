@@ -13,40 +13,34 @@ func buildTestForm() *dom.Node {
 	form.SetAttribute("action", "/submit")
 	form.SetAttribute("method", "post")
 
-	// Text input
 	text := doc.NewElement("input")
 	text.SetAttribute("type", "text")
 	text.SetAttribute("name", "username")
 	text.SetAttribute("value", "alice")
 	form.AppendChild(text)
 
-	// Hidden input
 	hidden := doc.NewElement("input")
 	hidden.SetAttribute("type", "hidden")
 	hidden.SetAttribute("name", "token")
 	hidden.SetAttribute("value", "abc123")
 	form.AppendChild(hidden)
 
-	// Checkbox (checked)
 	check := doc.NewElement("input")
 	check.SetAttribute("type", "checkbox")
 	check.SetAttribute("name", "agree")
 	check.SetAttribute("checked", "")
 	form.AppendChild(check)
 
-	// Checkbox (unchecked)
 	check2 := doc.NewElement("input")
 	check2.SetAttribute("type", "checkbox")
 	check2.SetAttribute("name", "newsletter")
 	form.AppendChild(check2)
 
-	// Textarea
 	ta := doc.NewElement("textarea")
 	ta.SetAttribute("name", "bio")
 	ta.AppendChild(doc.NewText("Hello world"))
 	form.AppendChild(ta)
 
-	// Select
 	sel := doc.NewElement("select")
 	sel.SetAttribute("name", "color")
 	opt1 := doc.NewElement("option")
@@ -60,7 +54,6 @@ func buildTestForm() *dom.Node {
 	sel.AppendChild(opt2)
 	form.AppendChild(sel)
 
-	// Disabled input (should be skipped)
 	dis := doc.NewElement("input")
 	dis.SetAttribute("type", "text")
 	dis.SetAttribute("name", "disabled_field")
@@ -113,7 +106,6 @@ func TestCollectFormDataCheckbox(t *testing.T) {
 	form := buildTestForm()
 	data := engine.CollectFormData(form, nil)
 
-	// Should find checked checkbox
 	foundChecked := false
 	for _, d := range data {
 		if d.Name == "agree" {
@@ -125,7 +117,6 @@ func TestCollectFormDataCheckbox(t *testing.T) {
 		t.Error("checked checkbox 'agree' not found")
 	}
 
-	// Should not find unchecked checkbox
 	for _, d := range data {
 		if d.Name == "newsletter" {
 			t.Error("unchecked checkbox 'newsletter' should not be collected")
@@ -207,13 +198,11 @@ func TestCollectFormDataSkipsUnnamed(t *testing.T) {
 	doc := dom.NewDocument()
 	form := doc.NewElement("form")
 
-	// Input without name
 	input := doc.NewElement("input")
 	input.SetAttribute("type", "text")
 	input.SetAttribute("value", "no_name")
 	form.AppendChild(input)
 
-	// Input with name
 	input2 := doc.NewElement("input")
 	input2.SetAttribute("type", "text")
 	input2.SetAttribute("name", "has_name")
@@ -234,7 +223,6 @@ func TestCollectFormDataMaxControls(t *testing.T) {
 	doc := dom.NewDocument()
 	form := doc.NewElement("form")
 
-	// Add more than MaxFormControls inputs
 	for i := 0; i < engine.MaxFormControls+10; i++ {
 		input := doc.NewElement("input")
 		input.SetAttribute("type", "text")
@@ -279,27 +267,23 @@ func TestEncodeFormURLEncodedSpecialChars(t *testing.T) {
 func TestFormMethod(t *testing.T) {
 	doc := dom.NewDocument()
 
-	// POST method
 	form1 := doc.NewElement("form")
 	form1.SetAttribute("method", "post")
 	if got := engine.FormMethod(form1); got != "POST" {
 		t.Errorf("FormMethod(post) = %q, want POST", got)
 	}
 
-	// GET method (explicit)
 	form2 := doc.NewElement("form")
 	form2.SetAttribute("method", "get")
 	if got := engine.FormMethod(form2); got != "GET" {
 		t.Errorf("FormMethod(get) = %q, want GET", got)
 	}
 
-	// Default (no method attribute)
 	form3 := doc.NewElement("form")
 	if got := engine.FormMethod(form3); got != "GET" {
 		t.Errorf("FormMethod(default) = %q, want GET", got)
 	}
 
-	// Dialog
 	form4 := doc.NewElement("form")
 	form4.SetAttribute("method", "dialog")
 	if got := engine.FormMethod(form4); got != "dialog" {
@@ -316,7 +300,6 @@ func TestFormAction(t *testing.T) {
 		t.Errorf("FormAction = %q, want %q", got, "/submit")
 	}
 
-	// No action
 	form2 := doc.NewElement("form")
 	if got := engine.FormAction(form2); got != "" {
 		t.Errorf("FormAction(empty) = %q, want empty", got)
@@ -326,20 +309,17 @@ func TestFormAction(t *testing.T) {
 func TestFormEnctype(t *testing.T) {
 	doc := dom.NewDocument()
 
-	// Default
 	form1 := doc.NewElement("form")
 	if got := engine.FormEnctype(form1); got != "application/x-www-form-urlencoded" {
 		t.Errorf("FormEnctype(default) = %q", got)
 	}
 
-	// multipart/form-data
 	form2 := doc.NewElement("form")
 	form2.SetAttribute("enctype", "multipart/form-data")
 	if got := engine.FormEnctype(form2); got != "multipart/form-data" {
 		t.Errorf("FormEnctype(multipart) = %q", got)
 	}
 
-	// text/plain
 	form3 := doc.NewElement("form")
 	form3.SetAttribute("enctype", "text/plain")
 	if got := engine.FormEnctype(form3); got != "text/plain" {

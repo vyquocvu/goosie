@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// ---------------------------------------------------------------------------
-// DataTransfer data store (Go level)
-// ---------------------------------------------------------------------------
-
 func TestDataTransferStore(t *testing.T) {
 	dt := dom.NewDataTransfer()
 
@@ -27,13 +23,11 @@ func TestDataTransferStore(t *testing.T) {
 		t.Errorf("format lookup is case-insensitive: got %q", got)
 	}
 
-	// Types keeps insertion order.
 	types := dt.Types()
 	if len(types) != 2 || types[0] != "text/plain" || types[1] != "text/html" {
 		t.Errorf("Types() = %v, want [text/plain text/html]", types)
 	}
 
-	// Re-setting a format replaces the entry without changing its position.
 	dt.SetData("text/plain", "replaced")
 	if got := dt.GetData("text/plain"); got != "replaced" {
 		t.Errorf("re-set data = %q, want %q", got, "replaced")
@@ -42,7 +36,6 @@ func TestDataTransferStore(t *testing.T) {
 		t.Errorf("re-set did not move the replaced format to the end: %v", types)
 	}
 
-	// The legacy "text" keyword aliases text/plain.
 	if got := dt.GetData("text"); got != "replaced" {
 		t.Errorf(`GetData("text") = %q, want the text/plain entry`, got)
 	}
@@ -115,7 +108,6 @@ func TestDataTransferEffectValues(t *testing.T) {
 		t.Errorf("invalid effectAllowed was stored")
 	}
 
-	// setDragImage is a no-op that must not panic.
 	dt.SetDragImage(nil, 10, 10)
 }
 
@@ -143,10 +135,6 @@ func TestDragOperationRequiresAllowedEffect(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// draggable reflection
-// ---------------------------------------------------------------------------
-
 func TestDraggableReflection(t *testing.T) {
 	doc, err := dom.ParseBounded(`<html><body>
 		<div id="plain">x</div>
@@ -168,9 +156,9 @@ func TestDraggableReflection(t *testing.T) {
 	}{
 		{"plain", false},
 		{"opt", true},
-		{"pic", true},     // img default
-		{"picOff", false}, // explicit attribute wins over the img default
-		{"link", true},    // a[href] default
+		{"pic", true},
+		{"picOff", false},
+		{"link", true},
 		{"nolink", false},
 	}
 	for _, c := range cases {
@@ -183,7 +171,6 @@ func TestDraggableReflection(t *testing.T) {
 		}
 	}
 
-	// The attribute setter path: set true, then back to false.
 	n := doc.ElementByID("plain")
 	n.SetAttribute("draggable", "true")
 	if !dom.IsDraggable(n) {
@@ -228,25 +215,17 @@ func TestDraggableJSProperty(t *testing.T) {
 		t.Errorf("draggable IDL placement = %s, want [true,false]", got)
 	}
 
-	// el.draggable = true sets the attribute.
 	if got := jsEval(`var d = document.getElementById('d'); d.draggable = true; d.getAttribute('draggable')`); got != "true" {
 		t.Errorf("el.draggable = true gave attribute %q, want %q", got, "true")
 	}
 	if got := jsEval(`document.getElementById('d').draggable`); got != "true" {
 		t.Errorf("el.draggable after set = %q, want true", got)
 	}
-	// el.draggable = false writes draggable="false" (removing the attribute
-	// would silently restore the img/link auto defaults).
 	if got := jsEval(`var d = document.getElementById('d'); d.draggable = false; d.getAttribute('draggable')`); got != "false" {
 		t.Errorf("el.draggable = false gave attribute %q, want %q", got, "false")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Drag event sequence (engine level)
-// ---------------------------------------------------------------------------
-
-// dragBoxCenter returns the center of the laid-out box for the element id.
 func dragBoxCenter(t *testing.T, s *engine.Session, id string) (float32, float32) {
 	t.Helper()
 	if s.Arena == nil {
@@ -262,7 +241,6 @@ func dragBoxCenter(t *testing.T, s *engine.Session, id string) (float32, float32
 	return 0, 0
 }
 
-// dragHTML lays out a draggable source box above a drop target box.
 const dragHTML = `<html><body style="margin:0">
 	<div id="src" draggable="true" style="width:100px;height:100px;">src</div>
 	<div id="dst" style="width:100px;height:100px;">dst</div>
@@ -287,7 +265,6 @@ func TestDragEventSequence(t *testing.T) {
 	for _, typ := range []string{"dragenter", "dragover", "drop"} {
 		dom.AddEventListener(dst, typ, record("dst", typ), false)
 	}
-	// A drop is allowed only when dragover is canceled.
 	dom.AddEventListener(dst, "dragover", func(e *dom.Event) { e.PreventDefault() }, false)
 
 	sx, sy := dragBoxCenter(t, sess, "src")
@@ -333,8 +310,6 @@ func TestDropRequiresCanceledDragover(t *testing.T) {
 	src := sess.Doc.ElementByID("src")
 	dom.AddEventListener(dst, "drop", func(*dom.Event) { dropped = true }, false)
 	dom.AddEventListener(src, "dragend", func(*dom.Event) { dragEnded = true }, false)
-	// No dragover listener: the target never cancels dragover, so it is not a
-	// valid drop target.
 
 	sx, sy := dragBoxCenter(t, sess, "src")
 	dx, dy := dragBoxCenter(t, sess, "dst")
@@ -354,8 +329,6 @@ func TestDropRequiresCanceledDragover(t *testing.T) {
 }
 
 func TestDraggableElementDoesNotImplicitlyAcceptDrop(t *testing.T) {
-	// Being draggable does not select a non-none drag operation; dragover still
-	// has to be canceled and choose an operation allowed by the source.
 	html := `<html><body style="margin:0">
 		<div id="src" draggable="true" style="width:100px;height:100px;">src</div>
 		<div id="dst" draggable="true" style="width:100px;height:100px;">dst</div>
@@ -401,8 +374,6 @@ func TestDragStartPreventedCancelsDrag(t *testing.T) {
 	if sess.Dragging() {
 		t.Error("drag state exists after a canceled dragstart")
 	}
-	// EndDrag must be a no-op and must not fire dragend for a drag that
-	// never started.
 	ended := false
 	dom.AddEventListener(src, "dragend", func(*dom.Event) { ended = true }, false)
 	sess.EndDrag(sx, sy)
@@ -428,7 +399,6 @@ func TestStartDragRequiresDraggable(t *testing.T) {
 	if sess.Dragging() {
 		t.Error("drag state exists after a rejected StartDrag")
 	}
-	// DragTo/EndDrag with no active drag are no-ops.
 	sess.DragTo(x+10, y+10)
 	sess.EndDrag(x+10, y+10)
 }
@@ -514,10 +484,6 @@ func TestDragEntersAndLeavesMultipleTargets(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Drag through the JS bridge
-// ---------------------------------------------------------------------------
-
 func TestDragDataTransferThroughJS(t *testing.T) {
 	html := `<html><body style="margin:0">
 		<div id="src" draggable="true" style="width:100px;height:100px;">src</div>
@@ -560,7 +526,6 @@ func TestDragDataTransferThroughJS(t *testing.T) {
 	if v, ok := rt.Global("effects"); !ok || v.Str != "copy/copy" {
 		t.Errorf("effectAllowed/dropEffect across the drag = %v (present %v), want %q", v, ok, "copy/copy")
 	}
-	// dragover fires at the target's center.
 	if v, ok := rt.Global("coords"); !ok || int(v.Num) != int(dx) {
 		t.Errorf("dragover clientX = %v (present %v), want %v", v, ok, dx)
 	}
@@ -730,7 +695,6 @@ func TestDataTransferJSAPI(t *testing.T) {
 		return v
 	}
 
-	// setData/getData/clearData round trip and types ordering.
 	if got := jsEval(`var dt = new DataTransfer();
 		dt.setData('text/html', '<b>x</b>');
 		dt.setData('text/plain', 'x');
@@ -753,7 +717,6 @@ func TestDataTransferJSAPI(t *testing.T) {
 		t.Errorf("types after clearData() = %q, want 0", got)
 	}
 
-	// dropEffect/effectAllowed round trip with validation.
 	if got := jsEval(`dt.dropEffect = 'copy'; dt.dropEffect`); got != "copy" {
 		t.Errorf("dropEffect round trip = %q, want %q", got, "copy")
 	}
@@ -764,7 +727,6 @@ func TestDataTransferJSAPI(t *testing.T) {
 		t.Errorf("effectAllowed round trip = %q, want %q", got, "copyMove")
 	}
 
-	// setDragImage is a no-op that must not throw; files is empty; items works.
 	if got := jsEval(`dt.setDragImage(null, 1, 2); 'ok'`); got != "ok" {
 		t.Errorf("setDragImage threw or returned %q", got)
 	}
@@ -802,7 +764,6 @@ func TestDataTransferJSAPI(t *testing.T) {
 		t.Errorf("dt.items.length after clear = %q, want 0", got)
 	}
 
-	// DragEvent cancelability follows the event type.
 	if got := jsEval(`new DragEvent('dragover').cancelable`); got != "true" {
 		t.Errorf("dragover cancelable = %q, want true", got)
 	}
@@ -814,9 +775,6 @@ func TestDataTransferJSAPI(t *testing.T) {
 	}
 }
 
-// TestDragSequenceThroughJSUsesSharedStore verifies each event receives a
-// DataTransfer view over the operation's shared store: data written at
-// dragstart is readable at drop, and event ordering holds for JS listeners.
 func TestDragSequenceThroughJS(t *testing.T) {
 	html := `<html><body style="margin:0">
 		<div id="src" draggable="true" style="width:100px;height:100px;">src</div>
@@ -854,7 +812,6 @@ func TestDragSequenceThroughJS(t *testing.T) {
 	if !ok {
 		t.Fatal("order global missing")
 	}
-	// drag fires on the source during the move; drop happens at release.
 	want := "start;enter;drag;drop:payload;end;"
 	if v.Str != want {
 		t.Errorf("JS event order = %q, want %q", v.Str, want)

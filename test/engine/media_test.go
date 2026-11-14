@@ -19,35 +19,24 @@ import (
 	"github.com/vyquocvu/goosie/internal/media"
 )
 
-// timeUpdateInterval mirrors the engine's throttle: a playing video moves its
-// control bar four times a second, not every tick.
 const timeUpdateInterval = 250 * time.Millisecond
 
-// mp4Header is the smallest body that passes the engine's container signature
-// check: one ftyp box. These tests are about ownership and state, not decoding,
-// so no real asset is involved until the native smoke test.
 var mp4Header = []byte{
-	0x00, 0x00, 0x00, 0x14, // box size: 20 bytes
+	0x00, 0x00, 0x00, 0x14,
 	'f', 't', 'y', 'p',
-	'i', 's', 'o', 'm', // major brand
-	0x00, 0x00, 0x02, 0x00, // minor version
-	'i', 's', 'o', 'm', // compatible brand
+	'i', 's', 'o', 'm',
+	0x00, 0x00, 0x02, 0x00,
+	'i', 's', 'o', 'm',
 }
 
-// fakeFetcher stands in for the browser's HTTP client. gate, when non-nil,
-// holds every fetch until it is closed, which is how "pause while the bytes are
-// still arriving" is made deterministic instead of a race against the scheduler.
 type fakeFetcher struct {
-	mu      sync.Mutex
-	urls    []string
-	started int
-	gate    chan struct{}
-	fail    error
-	body    []byte
-	// status overrides the response code; zero means 200.
-	status int
-	// finalURL overrides the URL the response reports, which is how a redirect
-	// landing somewhere else is simulated without a server.
+	mu       sync.Mutex
+	urls     []string
+	started  int
+	gate     chan struct{}
+	fail     error
+	body     []byte
+	status   int
 	finalURL string
 }
 
@@ -94,15 +83,11 @@ func (f *fakeFetcher) starts() int {
 	return f.started
 }
 
-// seekReq records one Seek a player was asked for.
 type seekReq struct {
 	op      uint64
 	seconds float64
 }
 
-// fakePlayer is a scriptable backend. The test drives it through set(); each
-// Poll returns the current snapshot and clears the one-shot fields, which is the
-// contract the real backend has to honour.
 type fakePlayer struct {
 	mu     sync.Mutex
 	snap   media.Snapshot
@@ -175,10 +160,6 @@ func (p *fakePlayer) closeCount() int {
 	return p.closes
 }
 
-// fakeBackend hands out fakePlayers. Players are found by the order Open was
-// called rather than by path, because the paths are the engine's own randomly
-// named temporary files. paths records every attempt, including the ones that
-// were refused, so a test can check the file behind a failed open.
 type fakeBackend struct {
 	mu      sync.Mutex
 	players []*fakePlayer
@@ -220,16 +201,12 @@ func (b *fakeBackend) path(i int) string {
 	return b.paths[i]
 }
 
-// openCount is how many players were successfully created, which is the number
-// a test means when it asks whether a download that should not have completed
-// reached a decoder.
 func (b *fakeBackend) openCount() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.players)
 }
 
-// solid is a tiny opaque frame; its colour identifies it in assertions.
 func solid(c color.RGBA) image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
 	for i := 0; i < 4*4; i++ {
@@ -290,8 +267,6 @@ func hasKind(ev []media.Event, k media.EventKind) bool {
 	return false
 }
 
-// pumpUntil runs the owner-thread media step until want holds, failing rather
-// than hanging when it never does. Events are left for the caller to drain.
 func pumpUntil(t *testing.T, sess *engine.Session, want func() bool) {
 	t.Helper()
 	for i := 0; i < 400; i++ {
@@ -304,8 +279,6 @@ func pumpUntil(t *testing.T, sess *engine.Session, want func() bool) {
 	t.Fatal("the controller never reached the expected state")
 }
 
-// TestMediaWithoutBackendIsInert pins the no-backend contract: a session built
-// without WithMedia leaves <video> alone instead of pretending to play it.
 func TestMediaWithoutBackendIsInert(t *testing.T) {
 	sess, err := engine.NewSession(videoHTML, nil, 800, engine.WithMetrics(&fixedMetrics{advance: 7}))
 	if err != nil {
@@ -321,9 +294,6 @@ func TestMediaWithoutBackendIsInert(t *testing.T) {
 	}
 }
 
-// TestMediaPlayRequiresActivation pins that play() without a trusted gesture is
-// refused before any byte is fetched: an inert page must not be able to pull
-// media or make noise.
 func TestMediaPlayRequiresActivation(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -382,9 +352,6 @@ func TestTrustedGestureRetainsDOMTransientActivationAfterDispatch(t *testing.T) 
 	}
 }
 
-// TestMediaPlayAfterDownload walks the happy path: load, metadata, activation,
-// play, and the play request settling only once the player reports it is
-// actually playing.
 func TestMediaPlayAfterDownload(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -462,9 +429,6 @@ func TestMediaPlayAfterDownload(t *testing.T) {
 	}
 }
 
-// TestMediaPauseDuringDownload pins the abort path: pausing while the bytes are
-// still arriving cancels the fetch, never opens a player, and rejects the
-// pending play as aborted rather than starting playback late.
 func TestMediaPauseDuringDownload(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	f.gate = make(chan struct{})
@@ -498,8 +462,6 @@ func TestMediaPauseDuringDownload(t *testing.T) {
 	}
 }
 
-// TestMediaLatestSourceWins pins generation handling: replacing the source
-// leaves exactly one live player and deletes the first source's file.
 func TestMediaLatestSourceWins(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -536,7 +498,6 @@ func TestMediaLatestSourceWins(t *testing.T) {
 	}
 }
 
-// TestMediaSeekSupersession pins that only the newest seek settles.
 func TestMediaSeekSupersession(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -563,7 +524,6 @@ func TestMediaSeekSupersession(t *testing.T) {
 		t.Fatalf("state after seeking = %v, want StateSeeking", got)
 	}
 
-	// The stale seek completes first; it must not settle anything.
 	p.set(func(s *media.Snapshot) { s.State = media.StatePaused; s.Position = 2; s.DoneOp = ops[0].op })
 	sess.PumpMedia()
 	if ev := c.Events(); hasKind(ev, media.EvSeeked) {
@@ -577,9 +537,6 @@ func TestMediaSeekSupersession(t *testing.T) {
 	}
 }
 
-// TestMediaLoadFailureIsReported pins the error path: a fetch failure reaches
-// StateFailed, emits EvError, and rejects a pending play instead of leaving the
-// promise unsettled forever.
 func TestMediaLoadFailureIsReported(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	f.fail = errors.New("net: fetch failed")
@@ -613,8 +570,6 @@ func TestMediaLoadFailureIsReported(t *testing.T) {
 	}
 }
 
-// TestMediaUnsupportedBackend pins that a backend which cannot play anything
-// here surfaces ErrUnsupported and deletes the file it was handed.
 func TestMediaUnsupportedBackend(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	b.fail = media.ErrUnsupported
@@ -635,8 +590,6 @@ func TestMediaUnsupportedBackend(t *testing.T) {
 	}
 }
 
-// TestMediaCloseIsIdempotent pins teardown: closing twice must not double-free
-// the player, and a closed controller refuses further commands.
 func TestMediaCloseIsIdempotent(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -665,9 +618,6 @@ func TestMediaCloseIsIdempotent(t *testing.T) {
 	sess.PumpMedia()
 }
 
-// TestMediaSessionCloseReleasesEverything pins that Session.Close reaches the
-// media: a tab that goes away must not leave a player running or a directory of
-// video behind it.
 func TestMediaSessionCloseReleasesEverything(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -690,9 +640,6 @@ func TestMediaSessionCloseReleasesEverything(t *testing.T) {
 	}
 }
 
-// TestMediaPumpWithoutJS pins the no-scripting path: a page with the controls
-// attribute and no runtime still loads and plays, because the media pump does
-// not depend on PumpJS.
 func TestMediaPumpWithoutJS(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -712,9 +659,6 @@ func TestMediaPumpWithoutJS(t *testing.T) {
 	pumpUntil(t, sess, func() bool { return c.Snapshot().State == media.StatePlaying })
 }
 
-// TestMediaPumpReportsDamageOnlyOnChange pins that the pump names the video's
-// rectangle when something moved and stays silent when nothing did, which is
-// what keeps a paused video from repainting the page every tick.
 func TestMediaPumpReportsDamageOnlyOnChange(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -751,8 +695,6 @@ func TestMediaPumpReportsDamageOnlyOnChange(t *testing.T) {
 		t.Fatalf("an idle video reported damage %v", got)
 	}
 
-	// Inside the timeupdate window a position change is not worth a repaint:
-	// the control bar only moves four times a second.
 	p.set(func(s *media.Snapshot) { s.Position = 0.1 })
 	if got := sess.PumpMedia(); len(got) != 0 {
 		t.Fatalf("a sub-interval position change reported damage %v", got)
@@ -764,9 +706,6 @@ func TestMediaPumpReportsDamageOnlyOnChange(t *testing.T) {
 	}
 }
 
-// TestMediaFrameAttachedForPaint pins the paint seam: after a frame arrives the
-// element carries an immutable presentation view, and attaching it does not
-// rebuild the layout arena.
 func TestMediaFrameAttachedForPaint(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -806,12 +745,6 @@ func TestMediaFrameAttachedForPaint(t *testing.T) {
 	}
 }
 
-// TestMediaPlayBeforeTheSourceIsLoaded pins the commonest real journey: the user
-// presses play on a video that has not been fetched yet. The gesture has to stay
-// attached to the request across the download and the decoder's preparation, and
-// playback has to actually begin once the asset is ready — recording the intent and
-// then never acting on it leaves a button that does nothing, which is what this
-// looked like before the ready transition honoured a pending request.
 func TestMediaPlayBeforeTheSourceIsLoaded(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -837,7 +770,6 @@ func TestMediaPlayBeforeTheSourceIsLoaded(t *testing.T) {
 		t.Fatalf("the player was told to play %v before the asset was ready", got)
 	}
 
-	// The asset becomes ready; nothing else asks for playback again.
 	p.set(func(s *media.Snapshot) {
 		s.State = media.StateReady
 		s.Duration = 6
@@ -848,8 +780,6 @@ func TestMediaPlayBeforeTheSourceIsLoaded(t *testing.T) {
 		return len(got) == 1 && got[0] == op
 	})
 
-	// Ready is not playing: the promise must still be open until the backend says
-	// playback actually began.
 	if hasKind(c.Events(), media.EvPlayResolved) {
 		t.Fatal("play settled when the asset became ready rather than when playback started")
 	}
@@ -859,9 +789,6 @@ func TestMediaPlayBeforeTheSourceIsLoaded(t *testing.T) {
 		t.Fatalf("playback started but the request never settled: %v", kinds(ev))
 	}
 
-	// A settled request is settled: dropping back to ready must not start another
-	// play, and a backend that takes several polls to report playback must not be
-	// asked to start again on each one.
 	p.set(func(s *media.Snapshot) { s.State = media.StateReady })
 	pumpUntil(t, sess, func() bool { return c.Snapshot().State == media.StateReady })
 	for i := 0; i < 5; i++ {
@@ -872,9 +799,6 @@ func TestMediaPlayBeforeTheSourceIsLoaded(t *testing.T) {
 	}
 }
 
-// TestMediaRemovedElementIsClosed pins that an element taken out of the
-// document gives up its decoder and its file: nothing can reach it again, so
-// leaving it running would be audio with no way to stop it.
 func TestMediaRemovedElementIsClosed(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)

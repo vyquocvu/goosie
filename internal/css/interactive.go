@@ -7,26 +7,16 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// Interactive state tracking for :hover, :focus, and :focus-visible pseudo-classes.
-// The engine updates these registries when the user interacts with elements,
-// and the selector matcher queries them during style resolution.
-
 var (
-	// hoverState tracks which nodes are currently hovered.
-	hoverState sync.Map // map[*dom.Node]bool
+	hoverState sync.Map
 
-	// focusState tracks which node currently has focus.
-	focusState sync.Map // map[*dom.Node]bool
+	focusState sync.Map
 
-	// focusVisibleState tracks which focused nodes should expose a keyboard
-	// focus indicator according to the browser's input-modality heuristic.
-	focusVisibleState sync.Map // map[*dom.Node]bool
+	focusVisibleState sync.Map
 
-	// activeState tracks the element currently being activated by pointer input.
-	activeState sync.Map // map[*dom.Node]bool
+	activeState sync.Map
 )
 
-// SetHover marks a node as hovered or unhovered.
 func SetHover(n *dom.Node, hovered bool) {
 	if n == nil {
 		return
@@ -38,7 +28,6 @@ func SetHover(n *dom.Node, hovered bool) {
 	}
 }
 
-// IsHovered reports whether a node is currently hovered.
 func IsHovered(n *dom.Node) bool {
 	if n == nil {
 		return false
@@ -47,7 +36,6 @@ func IsHovered(n *dom.Node) bool {
 	return ok && v.(bool)
 }
 
-// SetFocus marks a node as focused or unfocused.
 func SetFocus(n *dom.Node, focused bool) {
 	if n == nil {
 		return
@@ -60,7 +48,6 @@ func SetFocus(n *dom.Node, focused bool) {
 	}
 }
 
-// IsFocused reports whether a node currently has focus.
 func IsFocused(n *dom.Node) bool {
 	if n == nil {
 		return false
@@ -69,8 +56,6 @@ func IsFocused(n *dom.Node) bool {
 	return ok && v.(bool)
 }
 
-// SetFocusVisible marks whether the focused node should match :focus-visible.
-// Callers choose the value from the input modality and control type.
 func SetFocusVisible(n *dom.Node, visible bool) {
 	if n == nil {
 		return
@@ -82,8 +67,6 @@ func SetFocusVisible(n *dom.Node, visible bool) {
 	}
 }
 
-// IsFocusVisible reports whether a node is both focused and should display a
-// keyboard-style focus indicator.
 func IsFocusVisible(n *dom.Node) bool {
 	if !IsFocused(n) {
 		return false
@@ -92,17 +75,12 @@ func IsFocusVisible(n *dom.Node) bool {
 	if ok && v.(bool) {
 		return true
 	}
-	// The focus-visible heuristic depends on the control's current state, not
-	// only the type it had when focus was first established. In particular,
-	// changing a focused input from a button-like state to a text-entry state
-	// makes its focus indicator visible even when focus began by pointer/script.
 	if n.Element() && n.Data == "input" {
 		return !strings.EqualFold(strings.TrimSpace(n.GetAttribute("type")), "hidden")
 	}
 	return false
 }
 
-// SetActive marks a node as currently being activated by pointer input.
 func SetActive(n *dom.Node, active bool) {
 	if n == nil {
 		return
@@ -114,7 +92,6 @@ func SetActive(n *dom.Node, active bool) {
 	}
 }
 
-// IsActive reports whether a node is currently being activated by pointer input.
 func IsActive(n *dom.Node) bool {
 	if n == nil {
 		return false
@@ -123,8 +100,6 @@ func IsActive(n *dom.Node) bool {
 	return ok && v.(bool)
 }
 
-// ClearInteractiveState removes all hover, focus, and focus-visible state.
-// Called when the document is unloaded or reset.
 func ClearInteractiveState() {
 	hoverState.Range(func(key, value interface{}) bool {
 		hoverState.Delete(key)

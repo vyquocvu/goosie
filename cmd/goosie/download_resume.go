@@ -12,14 +12,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 )
 
-// errDownloadCanceled is the context cause for a canceled transfer. Pausing
-// uses download.ErrPaused instead so the writer knows to keep the partial file.
 var errDownloadCanceled = errors.New("goosie: download canceled")
 
-// resumeDownloadPlan continues a paused transfer after the navigation that
-// started it has returned. It owns the pieces the navigation context carried:
-// the client (private for incognito), the partial file, and the destination
-// rule used by the first attempt.
 type resumeDownloadPlan struct {
 	mgr        *download.Manager
 	client     net.HTTP
@@ -32,7 +26,6 @@ type resumeDownloadPlan struct {
 	name       string
 }
 
-// register publishes the partial file and the resume operation to the manager.
 func (p *resumeDownloadPlan) register() {
 	if p == nil || p.mgr == nil {
 		return
@@ -43,8 +36,6 @@ func (p *resumeDownloadPlan) register() {
 
 func (p *resumeDownloadPlan) run() {
 	item := p.mgr.Get(p.itemID)
-	// Resume flips the item to active before invoking this callback, so both
-	// states are legitimate; canceled or finished items must not restart.
 	if item == nil || (item.Status != download.StatusPaused && item.Status != download.StatusActive) {
 		return
 	}
@@ -72,7 +63,6 @@ func (p *resumeDownloadPlan) run() {
 	switch res.StatusCode {
 	case http.StatusPartialContent:
 	case http.StatusRequestedRangeNotSatisfiable:
-		// The partial file already holds every byte the server has.
 		sum, hashErr := download.HashFile(p.tempPath)
 		if hashErr != nil {
 			p.mgr.Fail(p.itemID, hashErr)
@@ -81,9 +71,6 @@ func (p *resumeDownloadPlan) run() {
 		p.finish(p.received, sum)
 		return
 	case http.StatusOK:
-		// The server ignored the Range request and is sending the whole
-		// entity. Discard the prefix and write this response from zero
-		// rather than appending a second copy to it.
 		p.restart(ctx, cancel, res)
 		return
 	default:
@@ -113,9 +100,6 @@ func (p *resumeDownloadPlan) run() {
 	p.finish(total, sum)
 }
 
-// restart consumes a 200 response as a fresh transfer. It drops the abandoned
-// prefix, resets the item's counters, and keeps pause/cancel working for the
-// new stream just as they did for the original one.
 func (p *resumeDownloadPlan) restart(ctx context.Context, cancel context.CancelCauseFunc, res *net.StreamResponse) {
 	_ = os.Remove(p.tempPath)
 	p.tempPath = ""

@@ -16,7 +16,6 @@ type inlineDeclaration struct {
 	priority string
 }
 
-// defineStyleAccessor exposes the element's live inline style declaration.
 func (r *Runtime) defineStyleAccessor(obj *goja.Object, node *dom.Node) {
 	if node == nil || !node.Element() {
 		return
@@ -242,8 +241,6 @@ func (s *inlineStyleDeclaration) replaceProperty(name, value, priority string, r
 		}
 		parts = append(parts, part)
 	}
-	// Chromium serialises the style attribute with a trailing semicolon
-	// (`style.color = 'red'` leaves "color: red;", measured in probe5).
 	s.runtime.setInlineStyleText(s.node, strings.Join(parts, "; ")+";")
 }
 

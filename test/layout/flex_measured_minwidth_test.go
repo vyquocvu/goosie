@@ -4,11 +4,6 @@ import (
 	"testing"
 )
 
-// TestFlexMeasuredItemHonorsMinWidth guards the auto-basis measure path: an
-// item with no declared basis measures its max-content width, but min-width
-// still floors it. Before the floor, 34px of text in a min-width: 60px item
-// measured 34px of content and the whole row packed left of Chromium's row -
-// which is what dragged the flexbox-complete parity fixture to 85.88%.
 func TestFlexMeasuredItemHonorsMinWidth(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; width: 760px;">
@@ -25,14 +20,11 @@ func TestFlexMeasuredItemHonorsMinWidth(t *testing.T) {
 	if !almostEqual(first.W, 60) {
 		t.Errorf("first.W = %v, want 60 (min-width floors the text measure)", first.W)
 	}
-	// Second item starts after first's margin box plus its own margin-left.
 	if !almostEqual(second.X, 99) {
 		t.Errorf("second.X = %v, want 99 (3 + 60 content + 30 padding + 3 + 3 margins)", second.X)
 	}
 }
 
-// TestFlexMeasuredItemHonorsMaxWidth guards the other side: max-width caps an
-// auto-basis item whose text would measure wider.
 func TestFlexMeasuredItemHonorsMaxWidth(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; width: 760px;">
@@ -49,10 +41,6 @@ func TestFlexMeasuredItemHonorsMaxWidth(t *testing.T) {
 	}
 }
 
-// TestFlexColumnDeclaredBasisWinsOverMeasure guards column main-axis sizing:
-// a declared flex-basis (or height) is written to the item even when content
-// would measure taller or shorter. Before, the place pass advanced the cursor
-// by the basis but left the measured height on the box.
 func TestFlexColumnDeclaredBasisWinsOverMeasure(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; flex-direction: column; height: 200px;">
@@ -76,10 +64,6 @@ func TestFlexColumnDeclaredBasisWinsOverMeasure(t *testing.T) {
 	}
 }
 
-// TestFlexEmptyFixedAtomicMeasuresItsBox guards max-content measurement of an
-// empty fixed-size atomic: a 15px spacer with no words still occupies 15px.
-// Before, it measured zero and the probe-width fallback upstream committed a
-// 10000px item into the finished row.
 func TestFlexEmptyFixedAtomicMeasuresItsBox(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; width: 200px;">
@@ -92,7 +76,6 @@ func TestFlexEmptyFixedAtomicMeasuresItsBox(t *testing.T) {
 	if len(divs) < 3 {
 		t.Fatalf("found %d divs, want at least 3", len(divs))
 	}
-	// divs[0] is the container; divs[1] the growing item; divs[2] the spacer holder.
 	if divs[2].W > 200 {
 		t.Errorf("spacer holder W = %v, want the 15px spacer (probe width leaked)", divs[2].W)
 	}
@@ -101,10 +84,6 @@ func TestFlexEmptyFixedAtomicMeasuresItsBox(t *testing.T) {
 	}
 }
 
-// TestFlexAlignStartShrinkWrapsLikeFlexStart guards logical alignment in
-// fit-content measurement: `align-self: start` shrink-wraps exactly like
-// flex-start. Before, only the physical keywords measured, so a start-aligned
-// item kept the full line width.
 func TestFlexAlignStartShrinkWrapsLikeFlexStart(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; flex-direction: column;">
@@ -119,7 +98,6 @@ func TestFlexAlignStartShrinkWrapsLikeFlexStart(t *testing.T) {
 	if len(divs) < 2 {
 		t.Fatalf("found %d divs, want at least 2", len(divs))
 	}
-	// divs[0] is the container; divs[1] the item, shrink-wrapped to 100px.
 	if !almostEqual(divs[1].W, 100) {
 		t.Errorf("item.W = %v, want 100 (shrink-wrapped, not the 800 line)", divs[1].W)
 	}
@@ -128,10 +106,6 @@ func TestFlexAlignStartShrinkWrapsLikeFlexStart(t *testing.T) {
 	}
 }
 
-// TestFlexColumnWrapBreaksLines guards multi-line column flex: items wrap
-// past the container height into lines that pack across, each line laying
-// its items bottom-up for column-reverse. Before, every item piled into one
-// overflowing line.
 func TestFlexColumnWrapBreaksLines(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; flex-direction: column-reverse; flex-wrap: wrap; height: 300px; width: 300px;">
@@ -148,7 +122,6 @@ func TestFlexColumnWrapBreaksLines(t *testing.T) {
 	if len(divs) != 7 {
 		t.Fatalf("found %d divs, want 7 (container + 6 items)", len(divs))
 	}
-	// Three lines of 100px across: f alone left, d/e middle, a/b/c right.
 	if !almostEqual(divs[6].X, 0) || !almostEqual(divs[6].W, 100) {
 		t.Errorf("f = {X:%v W:%v}, want the 100px first line", divs[6].X, divs[6].W)
 	}
@@ -159,7 +132,6 @@ func TestFlexColumnWrapBreaksLines(t *testing.T) {
 	if len(xs) != 3 {
 		t.Errorf("items span %d distinct columns, want 3", len(xs))
 	}
-	// Column-reverse stacks bottom-up: a (first in DOM) sits lowest.
 	var aY, cY float32
 	for i, d := range divs[1:] {
 		if i == 0 {

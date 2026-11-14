@@ -18,8 +18,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// TestDownloadsManagerIntegration drives a real attachment response through
-// loadURLCtx: the zip must be saved, recorded as completed, and never rendered.
 // qc:BR-149
 func TestDownloadsManagerIntegration(t *testing.T) {
 	dlDir := t.TempDir()
@@ -71,14 +69,12 @@ func TestDownloadsPageRenderingAndActions(t *testing.T) {
 	f.config.downloadDir = dlDir
 	f.downloads = download.NewManager(dlDir)
 
-	// Add an active download and a completed download
 	active := f.downloads.CreateItem("https://example.com/huge.iso", "huge.iso", 1024*1024*100)
-	f.downloads.UpdateProgress(active.ID, 1024*1024*25) // 25%
+	f.downloads.UpdateProgress(active.ID, 1024*1024*25)
 
 	comp := f.downloads.CreateItem("https://example.com/app.dmg", "app.dmg", 5000)
 	f.downloads.Complete(comp.ID, filepath.Join(dlDir, "app.dmg"))
 
-	// 1. Initial page render
 	title, htmlContent := f.buildInternalPageHTML("goosie://downloads")
 	if title != "Downloads" {
 		t.Errorf("title = %q, want Downloads", title)
@@ -93,14 +89,12 @@ func TestDownloadsPageRenderingAndActions(t *testing.T) {
 		t.Errorf("expected disk file document.pdf in HTML: %s", htmlContent)
 	}
 
-	// 2. Action: Cancel active download
 	_, _ = f.buildInternalPageHTML("goosie://downloads?action=cancel&id=" + active.ID)
 	it := f.downloads.Get(active.ID)
 	if it.Status != download.StatusCanceled {
 		t.Errorf("status after cancel = %v, want StatusCanceled", it.Status)
 	}
 
-	// 3. Action: Clear finished downloads
 	_, _ = f.buildInternalPageHTML("goosie://downloads?action=clear")
 	if f.downloads.TotalCount() != 0 {
 		t.Errorf("total count after clear = %d, want 0", f.downloads.TotalCount())
@@ -114,7 +108,6 @@ func TestDownloadsPageShowsPauseAndResumeActions(t *testing.T) {
 
 	active := f.downloads.CreateItem("https://example.com/large.iso", "large.iso", 1000)
 	f.downloads.UpdateProgress(active.ID, 250)
-	// SetPause is the loader's contract; register one so the page offers Pause.
 	f.downloads.SetPause(active.ID, func() {})
 	if !f.downloads.Pausable(active.ID) {
 		t.Fatal("pause handler was not registered")
@@ -176,7 +169,6 @@ func TestToolbarDownloadsClickNavigates(t *testing.T) {
 		navigatedURL = "goosie://downloads"
 	}
 
-	// Find the download button rect
 	btnRect := toolbar.ButtonRect(toolbar.ButtonDownloads, 800)
 	midX := (btnRect.X0 + btnRect.X1) / 2
 	midY := (btnRect.Y0 + btnRect.Y1) / 2

@@ -16,8 +16,6 @@ type findBox struct {
 	x0, y0, x1, y1 float32
 }
 
-// findWordBoxes walks the arena in tree order and returns every text box with
-// geometry, the same population Session.Find searches.
 func findWordBoxes(sess *engine.Session) []findBox {
 	objs := sess.Arena.Objects
 	var out []findBox
@@ -101,9 +99,6 @@ func TestFindCaseInsensitive(t *testing.T) {
 	}
 }
 
-// TestFindUnicodeCaseInsensitive pins that finding folds Vietnamese text by
-// rune rather than byte: an uppercase accented query matches its lowercase
-// source, and the match span covers both words.
 // qc:BR-136
 func TestFindUnicodeCaseInsensitive(t *testing.T) {
 	sess, err := engine.NewSession(`<html><body style="margin: 0;"><p>Tiếng Việt đất nước</p></body></html>`, nil, 800)
@@ -183,8 +178,6 @@ func TestFindNoMatch(t *testing.T) {
 	}
 }
 
-// findHighlightFills returns the fill commands painted exactly over the
-// match's document rect at the given scale.
 func findHighlightFills(list *paint.List, m engine.Match, scale float32) []paint.DisplayCmd {
 	want := frame.RectF4(m.X0, m.Y0, m.X1, m.Y1).ToDevice(scale)
 	var out []paint.DisplayCmd

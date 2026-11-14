@@ -15,23 +15,13 @@ func (b *Builder) paintBorders(obj *layout.Object, rect frame.Rect, radius frame
 	if s == nil {
 		return
 	}
-	// A decoded border-image replaces normal border rendering entirely; the
-	// border widths still reserve layout space underneath it.
 	if b.paintBorderImage(obj, rect, opacity) {
 		return
 	}
-	// The widths come off the box, not the style: layout is what decides which
-	// edges a box actually draws, and a collapsed table border is exactly the
-	// case where the two disagree. A nonzero width always paints at least one
-	// device pixel: truncating 0.1px to zero would erase the hairlines the
-	// small-values tests require to be visible.
 	toDevice := func(cssPx float32) int32 {
 		if cssPx <= 0 {
 			return 0
 		}
-		// Floor, with a one-pixel floor for nonzero widths: 1.9px snaps
-		// to 1px (never rounds up to 2px), while 0.1px still paints its
-		// hairline instead of vanishing.
 		if w := int32(cssPx * b.scale); w > 0 {
 			return w
 		}
@@ -61,10 +51,6 @@ func (b *Builder) paintBorders(obj *layout.Object, rect frame.Rect, radius frame
 	}
 }
 
-// paintInlineBorderFragments draws one border per line fragment of a wrapping
-// display:inline element. The fragment rects are CSS px on the box; each is
-// scaled to device space here. border-image and border-radius on inline
-// fragments are deferred (normal solid path, zero radius).
 func (b *Builder) paintInlineBorderFragments(obj *layout.Object, opacity float32) {
 	s := obj.Style
 	if s == nil {
@@ -78,11 +64,6 @@ func (b *Builder) paintInlineBorderFragments(obj *layout.Object, opacity float32
 	}
 }
 
-// paintBorderFragment draws the border edges one inline fragment owns: top and
-// bottom on every fragment, the physical left edge on the inline-start of the
-// run and the physical right edge on the inline-end, mapped by direction
-// (LTR start=left/end=right, RTL start=right/end=left). Widths and colours come
-// off the box exactly as paintBorders does; a nonzero width paints >= 1 device px.
 func (b *Builder) paintBorderFragment(obj *layout.Object, rect frame.Rect, opacity float32, first, last, rtl bool) {
 	s := obj.Style
 	toDevice := func(cssPx float32) int32 {
@@ -119,11 +100,6 @@ func (b *Builder) paintBorderFragment(obj *layout.Object, rect frame.Rect, opaci
 	}
 }
 
-// paintOutline draws the outline ring around the border box as four strips
-// between the offset rect and the same rect grown by the outline width. The
-// ring takes no layout space, so a positive offset pushes it out over whatever
-// the box neighbours and a negative one pulls it inside; a style of none or a
-// zero width paints nothing, which is the initial state of every box.
 func (b *Builder) paintOutline(s *style.ComputedStyle, rect frame.Rect, opacity float32) {
 	if s == nil || s.OutlineWidth <= 0 {
 		return
@@ -141,8 +117,6 @@ func (b *Builder) paintOutline(s *style.ComputedStyle, rect frame.Rect, opacity 
 	if outer.Empty() || inner.Empty() {
 		return
 	}
-	// An unset colour falls back to currentColor, which is what the shorthand
-	// leaves behind when it carries no colour token.
 	c := s.OutlineColor
 	if c.A == 0 {
 		c = s.Color
@@ -161,17 +135,6 @@ func (b *Builder) paintOutline(s *style.ComputedStyle, rect frame.Rect, opacity 
 	strip(inner.X1, inner.Y0, outer.X1, inner.Y1)
 }
 
-// paintBorderImage nine-slices a decoded border-image source over the
-// border area. It reports whether it painted: without a source, a slice, or
-// decoded pixels the caller falls back to normal borders.
-//
-// Slice edges cut the source (percentages of its dimensions, numbers in
-// source px, scaled down together when they overflow); widths size the
-// destination ring (auto reads the slice intrinsics, numbers multiply the
-// border widths, lengths and percentages are absolute); outset grows the
-// ring past the border box. Corners scale to their cells; edges stretch
-// along their axis in this pass (repeat/round/space tile in the next).
-// The middle paints only with slice fill.
 func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity float32) bool {
 	s := obj.Style
 	if s == nil || s.BorderImage.Source == "" {
@@ -187,8 +150,6 @@ func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity 
 		return false
 	}
 	bi := s.BorderImage
-	// Source cuts: top/bottom against the height, left/right against the
-	// width (percentages) or in source px (numbers).
 	cut := [4]float32{}
 	for i := range cut {
 		v := bi.Slice[i]
@@ -204,7 +165,6 @@ func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity 
 		}
 		cut[i] = v
 	}
-	// Overflowing cuts scale down together, preserving their ratios.
 	if cut[0]+cut[2] > sh && sh > 0 {
 		k := sh / (cut[0] + cut[2])
 		cut[0], cut[2] = cut[0]*k, cut[2]*k
@@ -213,10 +173,6 @@ func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity 
 		k := sw / (cut[1] + cut[3])
 		cut[1], cut[3] = cut[1]*k, cut[3]*k
 	}
-	// Destination widths per side: top, right, bottom, left. Outset is
-	// area-independent (lengths, or numbers times the border widths), so the
-	// area resolves first and percentage widths read it after. Number widths
-	// multiply the *used* border widths (zero under none/hidden style).
 	bw := obj.Style.UsedBorderWidths()
 	ox := [4]float32{}
 	if bi.HasOutset {
@@ -228,9 +184,6 @@ func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity 
 			}
 		}
 	}
-	// Border-image area in CSS px: the border box grown by the outset.
-	// obj.W/H are content-box; padding and border complete the border box
-	// the percentage widths key off.
 	areaW := obj.W + obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight + ox[1] + ox[3]
 	areaH := obj.H + obj.PaddingTop + obj.PaddingBottom + obj.BorderTop + obj.BorderBottom + ox[0] + ox[2]
 	w := [4]float32{}
@@ -247,7 +200,6 @@ func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity 
 				w[i] = bi.Width[i] * areaW / 100
 			}
 		case bi.WidthU[i] == css.BiWidthAuto:
-			// Auto reads the slice intrinsics: the cut's own size.
 			w[i] = cut[i]
 		case bi.WidthU[i] == css.BiWidthNumber:
 			w[i] = bi.Width[i] * bw[i]
@@ -258,21 +210,17 @@ func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity 
 			w[i] = 0
 		}
 	}
-	// Device-space destination area and widths.
 	toDev := func(v float32) int32 { return int32(v*b.scale + 0.5) }
 	ax0, ay0 := rect.X0-toDev(ox[3]), rect.Y0-toDev(ox[0])
 	ax1, ay1 := rect.X1+toDev(ox[1]), rect.Y1+toDev(ox[2])
 	dw := [4]int32{toDev(w[0]), toDev(w[1]), toDev(w[2]), toDev(w[3])}
 	sc := func(f float32) int { return int(f + 0.5) }
 	cells := []biCell{
-		// Corners.
 		{sb.Min.X, sb.Min.Y, sb.Min.X + sc(cut[3]), sb.Min.Y + sc(cut[0]), ax0, ay0, ax0 + dw[3], ay0 + dw[0]},
 		{sb.Max.X - sc(cut[1]), sb.Min.Y, sb.Max.X, sb.Min.Y + sc(cut[0]), ax1 - dw[1], ay0, ax1, ay0 + dw[0]},
 		{sb.Min.X, sb.Max.Y - sc(cut[2]), sb.Min.X + sc(cut[3]), sb.Max.Y, ax0, ay1 - dw[2], ax0 + dw[3], ay1},
 		{sb.Max.X - sc(cut[1]), sb.Max.Y - sc(cut[2]), sb.Max.X, sb.Max.Y, ax1 - dw[1], ay1 - dw[2], ax1, ay1},
 	}
-	// Edges tile along their axis per the repeat modes; the cross axis
-	// always stretches to the destination width.
 	topSrc := [4]int{sb.Min.X + sc(cut[3]), sb.Min.Y, sb.Max.X - sc(cut[1]), sb.Min.Y + sc(cut[0])}
 	botSrc := [4]int{sb.Min.X + sc(cut[3]), sb.Max.Y - sc(cut[2]), sb.Max.X - sc(cut[1]), sb.Max.Y}
 	leftSrc := [4]int{sb.Min.X, sb.Min.Y + sc(cut[0]), sb.Min.X + sc(cut[3]), sb.Max.Y - sc(cut[2])}
@@ -306,15 +254,9 @@ func (b *Builder) paintBorderImage(obj *layout.Object, rect frame.Rect, opacity 
 			Opacity: opacity,
 		})
 	}
-	// A fully degenerate image (every cell empty) still replaces the border:
-	// per CSS an empty source region paints nothing, but the border style
-	// underneath must not show through either.
 	return true
 }
 
-// corners resolves a box's declared radii against the device rect they round.
-// The rule itself lives with the property (style.ComputedStyle.UsedBorderRadius)
-// because hit testing has to cut the same corner the painter fills.
 func corners(s *style.ComputedStyle, r frame.Rect, scale float32) frame.Corners {
 	return s.UsedBorderRadius(float32(r.W()), float32(r.H()), scale)
 }
@@ -324,32 +266,14 @@ func uniformCorners(r float32) frame.Corners {
 	return frame.Corners{TL: rad, TR: rad, BR: rad, BL: rad}
 }
 
-// biCell is one nine-slice piece: a source sub-rectangle scaled into a
-// destination rect, both as integers (source px, device px).
 type biCell struct {
 	sx0, sy0, sx1, sy1 int
 	dx0, dy0, dx1, dy1 int32
 }
 
-// biTileCells lays one border-image edge strip: src is the source strip,
-// mode the axis repeat, span the destination interval along the axis, and
-// cross the destination interval across it (for a horizontal edge, x-span
-// and y-cross). The tile keeps its intrinsic axis size; the cross axis
-// stretches to the destination width, which preserves the source aspect
-// the way round-trip scaling through the cross ratio does.
-//
-// Tiles phase from the span center, the way border-image counts from the
-// middle of each side: a tile far larger than its span shows its middle,
-// and small tiles repeat symmetrically outward, clipped to the span.
-// Stretch covers the span in one piece; repeat clips the overhanging
-// tiles; round rescales to a whole count; space distributes whole tiles
-// with the first flush to the start and the last flush to the end (a lone
-// tile centers unscathed).
 func biTileCells(src [4]int, mode css.BorderImageRepeat, span0, span1 float64, cross0, cross1 int32, horizontal bool) []biCell {
 	var out []biCell
 	emit := func(s0, s1 int, d0, d1 float64) {
-		// Clip to the span, keeping source and destination proportional:
-		// edge tiles never paint into the corners' cells.
 		if d1 > d0 {
 			if d0 < span0 {
 				s0 += int((span0 - d0) / (d1 - d0) * float64(s1-s0))
@@ -379,10 +303,6 @@ func biTileCells(src [4]int, mode css.BorderImageRepeat, span0, span1 float64, c
 	if srcLen <= 0 || span <= 0 {
 		return nil
 	}
-	// The tile keeps the source aspect: the strip scaled by the cross-axis
-	// ratio (destination width over source cross size). A 50px strip on a
-	// 100px border tiles at 100px; a square slice on equal widths tiles at
-	// its own size.
 	crossLen := float64(cross1 - cross0)
 	srcCross := src[3] - src[1]
 	if !horizontal {
@@ -398,8 +318,6 @@ func biTileCells(src [4]int, mode css.BorderImageRepeat, span0, span1 float64, c
 	mid := (span0 + span1) / 2
 	switch mode {
 	case css.BiRepeatRepeat:
-		// Tiles march outward from the centered tile, clipped to the span.
-		// Every tile shows the whole strip; only its visible slice maps.
 		i0 := int(math.Floor((span0 - (mid - tile/2)) / tile))
 		i1 := int(math.Ceil((span1 - (mid - tile/2)) / tile))
 		for i := i0; i < i1; i++ {
@@ -420,15 +338,12 @@ func biTileCells(src [4]int, mode css.BorderImageRepeat, span0, span1 float64, c
 		if n < 1 {
 			n = 1
 		}
-		// Space distributes evenly between AND around the tiles: n+1
-		// equal gaps, so a lone tile centers and two tiles sit at
-		// third-points rather than flush with the span ends.
 		gap := (span - float64(n)*tile) / float64(n+1)
 		for i := 0; i < n; i++ {
 			d := span0 + gap + float64(i)*(tile+gap)
 			emit(axis0, axis0+srcLen, d, d+tile)
 		}
-	default: // BiRepeatStretch
+	default:
 		emit(axis0, axis0+srcLen, span0, span1)
 	}
 	return out

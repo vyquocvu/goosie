@@ -7,15 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// These oracles pin the shape of the ink an outer box-shadow puts on the page:
-// the shadow is clipped to the OUTSIDE of the border box (CSS Backgrounds and
-// Borders §7.1.1), so what reaches the display list is the shadow rect minus the
-// box, emitted behind it. Chromium measures the same ring, and it is the reason
-// the shadow band is not part of the hit area (test/engine/effects_hit_test.go).
-
-// shadowFills returns the fills painted in the shadow's colour in display-list
-// order, the index of the box's own background fill, and the index of the first
-// shadow fill.
 func shadowFills(t *testing.T, html string) (fills []frame.Rect, boxFillAt, shadowAt int) {
 	t.Helper()
 	boxFillAt, shadowAt = -1, -1
@@ -46,18 +37,14 @@ const shadowFixtureHead = `<!doctype html><html><head><style>` +
 const shadowFixtureTail = ` rgb(128,0,128)}` +
 	`</style></head><body><div id="b"></div></body></html>`
 
-// A symmetric spread of 8px on the 120x60 box at (200,260) grows the shadow to
-// (192,252)-(328,328), so the ring is that rect minus the border box: two
-// full-width bands of 8px above and below, two 8x60 bands between them.
-//
 // qc:BR-073
 func TestOuterBoxShadowPaintsOnlyTheRingOutsideTheBorderBox(t *testing.T) {
 	fills, boxFillAt, shadowAt := shadowFills(t, shadowFixtureHead+`0 0 0 8px`+shadowFixtureTail)
 	want := []frame.Rect{
-		frame.Rect4(192, 252, 328, 260), // above
-		frame.Rect4(192, 320, 328, 328), // below
-		frame.Rect4(192, 260, 200, 320), // left
-		frame.Rect4(320, 260, 328, 320), // right
+		frame.Rect4(192, 252, 328, 260),
+		frame.Rect4(192, 320, 328, 328),
+		frame.Rect4(192, 260, 200, 320),
+		frame.Rect4(320, 260, 328, 320),
 	}
 	if len(fills) != len(want) {
 		t.Fatalf("shadow fills = %v, want the %d strips %v", fills, len(want), want)
@@ -79,10 +66,6 @@ func TestOuterBoxShadowPaintsOnlyTheRingOutsideTheBorderBox(t *testing.T) {
 	}
 }
 
-// The offset case is what catches a shadow emitted as a plain rect: `10px 10px 0
-// 8px` moves the shadow rect to (202,262)-(338,338), which no longer reaches
-// above or left of the box, so only the below and right bands take ink.
-//
 // qc:BR-073
 func TestOffsetBoxShadowInksOnlyTheSideItIsPushedTo(t *testing.T) {
 	fills, _, _ := shadowFills(t, shadowFixtureHead+`10px 10px 0 8px`+shadowFixtureTail)
@@ -100,12 +83,6 @@ func TestOffsetBoxShadowInksOnlyTheSideItIsPushedTo(t *testing.T) {
 	}
 }
 
-// Inset layers are not the ring an outer shadow is: their ink belongs inside the
-// border box, and box_shadow_inset_test.go pins its shape. What survives of the
-// no-ring era is the two halves this fixture was built to check - a box that
-// declares only an inset layer still paints its own background, and none of the
-// layer's ink escapes the box.
-//
 // qc:BR-073
 func TestInsetOnlyShadowKeepsItsInkInsideTheBorderBox(t *testing.T) {
 	fills, boxFillAt, _ := shadowFills(t, `<!doctype html><html><head><style>`+

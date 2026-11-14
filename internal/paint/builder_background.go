@@ -10,16 +10,6 @@ import (
 
 const maxBgTiles = 4096
 
-// BGTileSize resolves one background tile's drawn size for paint and for
-// the engine's post-layout vector rasterization, which must agree exactly.
-// noRatio marks a source with no intrinsic ratio (no usable dimensions and
-// no viewBox): cover and contain fill the positioning area instead of ratio
-// math. Otherwise negotiation is standard against the natural size.
-//
-// Auto always tiles at the natural size: the decoder bakes the aspect
-// handling (meet centering, none stretching) into the raster, so paint
-// places it 1:1. Only cover/contain scale, and only lengths resolve axes;
-// an auto axis follows the ratio, falling back to the natural dimension.
 func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, noRatio bool) (float32, float32) {
 	tileW, tileH := natW, natH
 	switch s.BackgroundSize {
@@ -60,17 +50,12 @@ func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, noRati
 		case wAuto && hAuto:
 			tileW, tileH = natW, natH
 		case wAuto:
-			// Width auto resolves from the height through the ratio;
-			// without one it keeps the natural width: only the height
-			// axis defaults to the positioning area (see hAuto).
 			if !noRatio && tileH > 0 && natW > 0 && natH > 0 {
 				tileW = tileH * natW / natH
 			} else {
 				tileW = natW
 			}
 		case hAuto:
-			// Height auto: preserve the image aspect ratio, or fill the
-			// positioning area height when there is no ratio at all.
 			if !noRatio && tileW > 0 && natW > 0 && natH > 0 {
 				tileH = tileW * natH / natW
 			} else if noRatio {
@@ -83,11 +68,6 @@ func BGTileSize(s *style.ComputedStyle, areaW, areaH, natW, natH float32, noRati
 	return tileW, tileH
 }
 
-// paintBackground draws a box's CSS background-image. The repeat modes tile the
-// image across the border box; no-repeat places it once. background-size selects
-// the tile's drawn size and background-position selects its origin. A tile that
-// overflows the box edge is clipped by shrinking both its destination rect and
-// the source sub-rect that maps into it, so paint never spills onto a neighbour.
 func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	src, ok := obj.BgImage.(image.Image)
 	if !ok || src == nil {
@@ -103,9 +83,6 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 		return
 	}
 	tiles := bgLayerTiles(s, obj, natW, natH, obj.BgNoRatio)
-	// A border-area clip shows only the ring between the border box and the
-	// padding box: each tile's visible slice is cut against the inner box
-	// before source mapping, so every piece keeps its own pixels.
 	var ring *[4]float32
 	if s.BackgroundClip == style.BgBoxBorderArea {
 		px0, py0, px1, py1 := obj.BgAreaRect(style.BgBoxPadding)
@@ -118,8 +95,6 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 		}
 		for _, pc := range pieces {
 			vx0, vy0, vx1, vy1 := pc[0], pc[1], pc[2], pc[3]
-			// Map the visible destination slice back to the image's source
-			// sub-rectangle, at the tile's scale.
 			sx0 := int32(float64(sb.Min.X) + (vx0-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
 			sx1 := int32(float64(sb.Min.X) + (vx1-float64(t.cx))/float64(t.tw)*float64(sb.Dx()))
 			sy0 := int32(float64(sb.Min.Y) + (vy0-float64(t.cy))/float64(t.th)*float64(sb.Dy()))
@@ -144,14 +119,6 @@ func (b *Builder) paintBackground(obj *layout.Object, opacity float32) {
 	}
 }
 
-// paintGradientTiles paints one gradient layer through the background
-// tile machinery: gradients carry no intrinsic size, so the positioning
-// area is both the size they resolve auto axes against and the natural
-// size negotiation starts from. Each tile maps the ramp to itself, which
-// is what makes repeat tile a gradient instead of stretching one.
-// Length-written stop positions resolve per tile against the line the
-// rasterizer will divide by - the command rect, i.e. the tile clipped to
-// the clip box - so the ramp lands where the author put it.
 func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, radius frame.Corners, sg *style.Gradient, srg *style.RadialGradient, opacity float32) {
 	s := obj.Style
 	if s == nil {
@@ -189,20 +156,12 @@ func (b *Builder) paintGradientTiles(obj *layout.Object, clipRect frame.Rect, ra
 	}
 }
 
-// bgTile is one painted tile: cx/cy is the tile origin and tw/th its size
-// (for mapping back to source pixels); vx0..vy1 is the visible slice after
-// clipping, in CSS px.
 type bgTile struct {
 	cx, cy, tw, th     float32
 	vx0, vy0, vx1, vy1 float64
 }
 
-// bgLayerTiles lays one background layer's tiles: size from BGTileSize
-// against the origin box, round rescaling, positions from background-
-// position, spans covering the clip box (space stays in the origin box).
-// Every returned tile is non-empty and clipped to the clip box.
 func bgLayerTiles(s *style.ComputedStyle, obj *layout.Object, natW, natH float32, noRatio bool) []bgTile {
-	// Tiles position within the origin box and paint inside the clip box.
 	px0, py0, px1, py1 := obj.BgAreaRect(s.BackgroundOrigin)
 	cx0, cy0, cx1, cy1 := obj.BgAreaRect(s.BackgroundClip)
 	if px1 < px0 {
@@ -229,7 +188,6 @@ func bgLayerTiles(s *style.ComputedStyle, obj *layout.Object, natW, natH float32
 	}
 
 	rx, ry := bgRepeatAxis(s.BackgroundRepeat, true), bgRepeatAxis(s.BackgroundRepeatY, false)
-	// Round rescales the tile so a whole number fits the positioning area.
 	if rx == style.BgRepeatRound {
 		tileW = bgRoundTile(areaW, tileW)
 	}
@@ -240,10 +198,6 @@ func bgLayerTiles(s *style.ComputedStyle, obj *layout.Object, natW, natH float32
 	ox := bgOrigin(s.BackgroundPosXMode, s.BackgroundPosX, s.BgPosXPct, ax0, areaW, tileW)
 	oy := bgOrigin(s.BackgroundPosYMode, s.BackgroundPosY, s.BgPosYPct, ay0, areaH, tileH)
 
-	// Repeating tiles cover the whole clip box, phased from the
-	// positioning origin: a padding-box origin on a bordered box still
-	// repeats under the transparent border. Space distributes within the
-	// positioning area itself.
 	sx0, sx1 := cx0, cx1
 	sy0, sy1 := cy0, cy1
 	if rx == style.BgRepeatSpace {
@@ -262,8 +216,6 @@ func bgLayerTiles(s *style.ComputedStyle, obj *layout.Object, natW, natH float32
 		for _, cy := range ys {
 			vx0, vy0 := float64(cx), float64(cy)
 			vx1, vy1 := float64(cx+tileW), float64(cy+tileH)
-			// Painting clips to the clip box, which may extend past the
-			// positioning area the tiles phase from.
 			if float32(vx0) < cx0 {
 				vx0 = float64(cx0)
 			}
@@ -285,12 +237,6 @@ func bgLayerTiles(s *style.ComputedStyle, obj *layout.Object, natW, natH float32
 	return out
 }
 
-// bgOrigin resolves one background-position axis into a CSS-px coordinate where
-// a tile of the given size begins within a span of `areaLen` starting at `base`.
-// A percentage aligns `length` of the image with `length` of the free space; a
-// length is a plain offset from the start edge. The three/four-value offsets
-// measure from their own keyword edge instead: `right 25px` sits 25px left of
-// the end, and a percentage offset resolves against the free space.
 func bgOrigin(mode style.BgPosMode, length float32, isPct bool, base, areaLen, tileSize float32) float32 {
 	free := areaLen - tileSize
 	switch mode {
@@ -313,14 +259,11 @@ func bgOrigin(mode style.BgPosMode, length float32, isPct bool, base, areaLen, t
 			return base + free - free*length
 		}
 		return base + free - length
-	default: // BgPosStart
+	default:
 		return base
 	}
 }
 
-// bgRepeatAxis normalizes one repeat mode for the axis being laid out: the
-// legacy repeat-x/repeat-y spellings repeat only on their own axis, while
-// every other mode applies wherever it is stored.
 func bgRepeatAxis(mode style.BgRepeat, isX bool) style.BgRepeat {
 	switch mode {
 	case style.BgRepeatRepeat:
@@ -340,9 +283,6 @@ func bgRepeatAxis(mode style.BgRepeat, isX bool) style.BgRepeat {
 	}
 }
 
-// bgRoundTile rescales a tile so a whole number fits the positioning area:
-// the count is the nearest whole number of tiles, at least one, and the
-// tile stretches or squeezes to exactly fill the area with that count.
 func bgRoundTile(areaLen, tileLen float32) float32 {
 	if tileLen <= 0 || areaLen <= 0 {
 		return tileLen
@@ -354,11 +294,6 @@ func bgRoundTile(areaLen, tileLen float32) float32 {
 	return areaLen / float32(n)
 }
 
-// bgAxisSpans lists the start coordinate of every tile along one axis. A
-// repeating (or round, which repeats its rescaled tile) axis phases from
-// the origin and fills the whole span; space lays whole unclipped tiles
-// flush with both edges and spreads the leftover evenly, centering a lone
-// tile; anything else contributes only the single placed tile.
 func bgAxisSpans(mode style.BgRepeat, origin, size, lo, hi, areaLen float32) []float32 {
 	switch mode {
 	case style.BgRepeatSpace:
@@ -367,7 +302,6 @@ func bgAxisSpans(mode style.BgRepeat, origin, size, lo, hi, areaLen float32) []f
 		}
 		n := int(areaLen / size)
 		if n <= 1 {
-			// One tile (or none fitting): center it in the area.
 			return []float32{lo + (areaLen-size)/2}
 		}
 		if n > maxBgTiles {
@@ -381,7 +315,6 @@ func bgAxisSpans(mode style.BgRepeat, origin, size, lo, hi, areaLen float32) []f
 		return out
 	case style.BgRepeatRepeat, style.BgRepeatRound:
 		start := origin
-		// Walk the phase back to the edge so tiling covers the whole area.
 		for i := 0; start > lo && i < maxBgTiles; i++ {
 			start -= size
 		}
@@ -395,14 +328,7 @@ func bgAxisSpans(mode style.BgRepeat, origin, size, lo, hi, areaLen float32) []f
 	}
 }
 
-// appendBgFill emits one background-color fill. A border-area clip paints
-// only the ring between the border box and the padding box (square corners;
-// rounded ones keep the full border box because the rasterizer has no
-// rounded hole-punch).
 func (b *Builder) appendBgFill(obj *layout.Object, clipRect frame.Rect, radius frame.Corners, color frame.Color, opacity float32) {
-	// A mask-image multiplies the background fill's coverage (icon pattern:
-	// solid colour showing through a glyph-shaped mask). The mask stretches
-	// over the fill rect; mask-size/position/repeat are deferred.
 	var mask image.Image
 	if m, ok := obj.MaskImage.(image.Image); ok && m != nil {
 		if b := m.Bounds(); b.Dx() > 0 && b.Dy() > 0 {
@@ -465,9 +391,6 @@ func splitSlice(v [4]float64, inner *[4]float32) [][4]float64 {
 	return out
 }
 
-// subtractRect cuts inner out of outer: the up-to-four axis-aligned strips
-// that cover outer minus inner. A non-overlapping inner returns outer whole;
-// an empty result returns nothing.
 func subtractRect(outer, inner frame.Rect) []frame.Rect {
 	ix0, iy0 := outer.X0, outer.Y0
 	if inner.X0 > ix0 {
@@ -490,7 +413,6 @@ func subtractRect(outer, inner frame.Rect) []frame.Rect {
 		return []frame.Rect{outer}
 	}
 	var out []frame.Rect
-	// Top and bottom span the full width; left and right fill between them.
 	for _, r := range []frame.Rect{
 		frame.Rect4(outer.X0, outer.Y0, outer.X1, iy0),
 		frame.Rect4(outer.X0, iy1, outer.X1, outer.Y1),

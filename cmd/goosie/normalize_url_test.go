@@ -120,8 +120,6 @@ func TestNormalizeAddressUsesProfileSearchEngine(t *testing.T) {
 	}
 }
 
-// TestNormalizeURLSearchQueryToDomainEdgeCases tests edge cases that could be
-// interpreted as either domains or search queries.
 func TestNormalizeURLSearchQueryToDomainEdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -165,7 +163,6 @@ func TestNormalizeURLSearchQueryToDomainEdgeCases(t *testing.T) {
 	}
 }
 
-// TestNormalizeURLSpecialCharacters tests URLs with special characters.
 func TestNormalizeURLSpecialCharacters(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -199,7 +196,6 @@ func TestNormalizeURLSpecialCharacters(t *testing.T) {
 	}
 }
 
-// TestNormalizeURLContainsDot checks if input contains a dot for domain detection.
 func TestNormalizeURLContainsDot(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -238,9 +234,7 @@ func TestNormalizeURLContainsDot(t *testing.T) {
 	}
 }
 
-// TestNormalizeURLEdgeCases tests additional edge cases.
 func TestNormalizeURLEdgeCases(t *testing.T) {
-	// Test inputs that contain both dots AND spaces (should be search queries)
 	edgeCaseTests := []struct {
 		name     string
 		input    string
@@ -268,10 +262,6 @@ func TestNormalizeURLEdgeCases(t *testing.T) {
 	}
 }
 
-// TestNormalizeAddressAmbiguousInputs pins the host-vs-search decisions for
-// scheme-less address-bar values: only unambiguously host-shaped input
-// (dotted names, IPs, localhost, bracketed IPv6, optional valid ports)
-// navigates; everything else searches through the profile engine.
 // qc:BR-003
 func TestNormalizeAddressAmbiguousInputs(t *testing.T) {
 	tests := []struct {
@@ -289,8 +279,6 @@ func TestNormalizeAddressAmbiguousInputs(t *testing.T) {
 		{"localhost is case insensitive", "LocalHost:3000", "https://LocalHost:3000"},
 		{"bracketed ipv6 with port navigates", "[::1]:8080", "https://[::1]:8080"},
 		{"bare ipv6 without brackets searches", "::1", "https://www.google.com/search?q=%3A%3A1"},
-		// Decision: any whitespace makes the value a search phrase, even when
-		// the head looks like a host:port (matches mainstream browsers).
 		{"host with space in path searches", "example.com:8080/a b", "https://www.google.com/search?q=example.com%3A8080%2Fa+b"},
 		{"host with percent-encoded space in path navigates", "example.com:8080/a%20b", "https://example.com:8080/a%20b"},
 		{"non numeric port searches", "example.com:notaport/x", "https://www.google.com/search?q=example.com%3Anotaport%2Fx"},
@@ -318,24 +306,19 @@ func TestNormalizeAddressAmbiguousInputs(t *testing.T) {
 	}
 }
 
-// TestNormalizeAddressSingleWordUsesProfileTemplate checks that a single-word
-// query is searched through the profile's engine, not just the default one.
 func TestNormalizeAddressSingleWordUsesProfileTemplate(t *testing.T) {
 	template := "https://search.example/find?term={query}"
 	if got := normalizeAddress("golang", template); got != "https://search.example/find?term=golang" {
 		t.Errorf("profile template not used for single word: %q", got)
 	}
-	// A malformed template must still produce a safe default-engine search.
 	if got := normalizeAddress("cats", "not a template"); got != "https://www.google.com/search?q=cats" {
 		t.Errorf("invalid template fallback = %q, want default-engine search", got)
 	}
-	// Host-shaped input must never be routed to the search engine.
 	if got := normalizeAddress("example.com:8080/x", template); got != "https://example.com:8080/x" {
 		t.Errorf("host-shaped input sent to search engine: %q", got)
 	}
 }
 
-// BenchmarkNormalizeURL benchmarks the normalizeURL function with various inputs.
 func BenchmarkNormalizeURL(b *testing.B) {
 	testCases := []string{
 		"google.com",
@@ -355,7 +338,6 @@ func BenchmarkNormalizeURL(b *testing.B) {
 	}
 }
 
-// TestNormalizeURLPerformance checks performance on long search queries.
 func TestNormalizeURLPerformance(t *testing.T) {
 	longQuery := strings.Repeat("test ", 100) + "final"
 	result := normalizeURL(longQuery)

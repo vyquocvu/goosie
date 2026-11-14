@@ -7,13 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestBackgroundDataURLParenAttaches is the §2.3 row-1 end-to-end oracle: the
-// payload that reaches Style.BackgroundImage must survive the rest of the
-// pipeline (decodeDataImageURL → SVG decode → arena attach). Before the fix the
-// two rgb() forms were cut at the first ')' by extractBackgroundURL, so the
-// truncated payload failed to decode and the box attached no background at all.
-// The parenthesis-free forms are in the same table because a regression there is
-// a blocker, not a footnote.
 // qc:BR-212
 func TestBackgroundDataURLParenAttaches(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='rgb(0,0,255)'/%3E%3C/svg%3E`
@@ -28,7 +21,6 @@ func TestBackgroundDataURLParenAttaches(t *testing.T) {
 		{"unquoted, payload has ')'", `url(` + svgRGB + `)`, true},
 		{"quoted, parenthesis-free", `url("` + svgHash + `")`, true},
 		{"unquoted, parenthesis-free", `url(` + svgHash + `)`, true},
-		// A malformed token must attach nothing rather than half a URI.
 		{"unterminated quote attaches nothing", `url("` + svgRGB, false},
 	}
 	for _, tc := range cases {
@@ -58,7 +50,6 @@ func TestBackgroundDataURLParenAttaches(t *testing.T) {
 	}
 }
 
-// first80 shortens a declaration for error text without hiding its shape.
 func first80(s string) string {
 	if len(s) > 80 {
 		return s[:80] + "…"
@@ -66,10 +57,6 @@ func first80(s string) string {
 	return s
 }
 
-// TestStyleSheetImportDataURLParenAttaches drives §2.3 row 3 through a real
-// <link> stylesheet body: the fetched sheet's quoted data URI keeps its payload
-// through absolutizeCSSURLs and the background still attaches. The sheet is fed
-// as an author stylesheet so the test needs no network fetcher.
 // qc:BR-212
 func TestStyleSheetImportDataURLParenAttaches(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='rgb(0,0,255)'/%3E%3C/svg%3E`

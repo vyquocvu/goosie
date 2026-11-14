@@ -6,11 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestEvalFuncWithBaseResolvesPercentages guards the layout-time calc path: a
-// `%` term resolves against the base the caller supplies (the containing
-// length for box sizes, the parent font for font-relative shares), while the
-// base-less EvalFunc keeps reporting such expressions unsupported so the
-// cascade never answers with a sum that silently dropped the share.
 func TestEvalFuncWithBaseResolvesPercentages(t *testing.T) {
 	for _, c := range []struct {
 		fn, expr string
@@ -40,9 +35,6 @@ func TestEvalFuncWithBaseResolvesPercentages(t *testing.T) {
 	}
 }
 
-// TestEvalFuncStillRejectsPercentagesWithoutABase guards the cascade-time
-// contract EvalFuncWithBase was split off from: with no containing length in
-// scope a percentage keeps reporting unsupported.
 func TestEvalFuncStillRejectsPercentagesWithoutABase(t *testing.T) {
 	for _, expr := range []string{"100% - 100px", "min(400px, 80%)", "max(200px, 50%)"} {
 		if _, ok := css.EvalFunc("calc", expr, 16, 1440, 900); ok {
@@ -51,8 +43,6 @@ func TestEvalFuncStillRejectsPercentagesWithoutABase(t *testing.T) {
 	}
 }
 
-// TestValueFuncHasPercent guards the deferral predicate the cascade uses to
-// decide whether a math function stays as text for layout.
 func TestValueFuncHasPercent(t *testing.T) {
 	if !css.ParseValue("calc(100% - 10px)").FuncHasPercent() {
 		t.Error("calc(100% - 10px) should report a percentage term")

@@ -52,9 +52,6 @@ func fillsOf(cmds []paint.DisplayCmd, color frame.Color) (count int, minX, minY,
 	return count, minX, minY, maxX, maxY
 }
 
-// A cubic-curve outline used to paint as nothing: the flattening only knew
-// M/L/H/V, so every control point was skipped and the subpath kept a single
-// point. Google's header icons are exactly this shape of path.
 func TestSVGCubicPathFills(t *testing.T) {
 	red := frame.RGB(255, 0, 0)
 	cmds := svgCommands(t,
@@ -72,7 +69,6 @@ func TestSVGCubicPathFills(t *testing.T) {
 	}
 }
 
-// Arcs had the same gap: without A/a support an arc-only outline fills nothing.
 func TestSVGArcPathFills(t *testing.T) {
 	blue := frame.RGB(0, 0, 255)
 	cmds := svgCommands(t,
@@ -87,8 +83,6 @@ func TestSVGArcPathFills(t *testing.T) {
 	}
 }
 
-// Subpaths are separate regions. Joining them into one polygon drew a bridge
-// between neighbouring shapes, which turned a 3x3 icon grid into a blob.
 func TestSVGPathSubpathsStaySeparate(t *testing.T) {
 	green := frame.RGB(0, 128, 0)
 	cmds := svgCommands(t,
@@ -108,8 +102,6 @@ func TestSVGPathSubpathsStaySeparate(t *testing.T) {
 	}
 }
 
-// The viewBox maps user units onto the viewport: a 100-unit square in a
-// 200x200 box is 200 px on screen, not 100.
 func TestSVGViewBoxScalesCoordinates(t *testing.T) {
 	blue := frame.RGB(0, 0, 255)
 	cmds := svgCommands(t,
@@ -119,8 +111,6 @@ func TestSVGViewBoxScalesCoordinates(t *testing.T) {
 	if count == 0 {
 		t.Fatal("viewBox path painted nothing")
 	}
-	// Scanline fills emit an inclusive right/bottom edge, so a 20 px extent
-	// ends at 21.
 	if maxX < 19.5 || maxX > 21.5 {
 		t.Errorf("fill right edge = %v, want ~20 (10 user units at 2x)", maxX)
 	}

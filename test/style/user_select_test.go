@@ -64,7 +64,6 @@ func TestUserSelectCascade(t *testing.T) {
 }
 
 func TestUserSelectSelectionExclusion(t *testing.T) {
-	// Text in an unselectable container should not be detected as selectable text
 	html := `<html><body style="margin: 0;">
 <p style="user-select: none;">Unselectable paragraph text</p>
 <p style="user-select: text;">Selectable paragraph text</p>

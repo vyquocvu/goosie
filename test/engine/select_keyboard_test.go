@@ -7,11 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// Keyboard selection for <select> (BR-101). Before this the control was
-// focusable but immovable: nothing in the engine changed the "selected"
-// attribute, so a user could never pick an option that the document did not
-// already ship as selected.
-
 const selectKeyboardHTML = `<html><body style="margin: 0;">` +
 	`<form action="/s" method="GET">` +
 	`<select id="sel" name="opt">` +
@@ -60,9 +55,6 @@ func selectedID(s *engine.Session) string {
 	return ""
 }
 
-// selectedCount catches the failure mode where a move sets the new option but
-// leaves the old one selected: two selected options make controlValue and
-// SelectedOption disagree about which one is chosen, silently.
 func selectedCount(s *engine.Session) int {
 	n := 0
 	for _, id := range []string{"o1", "o2", "o3"} {
@@ -156,7 +148,7 @@ func TestSelectSkipsDisabledOptions(t *testing.T) {
 	s, _ := newSelectSession(t, html)
 	if !s.MoveSelect(engine.EditDown) {
 		t.Fatal("MoveSelect(EditDown) returned false")
-	} // o1 -> must skip disabled o2
+	}
 	if got := selectedID(s); got != "o3" {
 		t.Fatalf("EditDown with o2 disabled landed on %q, want o3: disabled options must be skipped", got)
 	}
@@ -174,7 +166,7 @@ func TestSelectSkipsDisabledOptions(t *testing.T) {
 // qc:BR-101
 func TestSelectHomeEndGoToTheEdges(t *testing.T) {
 	s, _ := newSelectSession(t, selectKeyboardHTML)
-	s.MoveSelect(engine.EditDown) // o1 -> o2
+	s.MoveSelect(engine.EditDown)
 	if !s.MoveSelect(engine.EditEnd) {
 		t.Fatal("MoveSelect(EditEnd) returned false")
 	}
@@ -202,7 +194,7 @@ func TestSelectMoveChangesSubmittedValue(t *testing.T) {
 	if got := s.FocusedSelectValue(); got != "1" {
 		t.Fatalf("FocusedSelectValue before any key is %q, want 1: the shell reads the label through this accessor", got)
 	}
-	s.MoveSelect(engine.EditDown) // o1 -> o2
+	s.MoveSelect(engine.EditDown)
 	data := engine.CollectFormData(form, nil)
 	got := ""
 	for _, p := range data {
@@ -235,13 +227,6 @@ func TestSelectMoveCollapsesMultipleAuthoredSelections(t *testing.T) {
 	if got := selectedCount(s); got != 1 {
 		t.Fatalf("%d options still carry selected after a move, want the document collapsed to 1", got)
 	}
-	// TASK-037: the last authored selection is the selection, so a move steps
-	// forward from o2 to o3. Chromium measures the same pair of facts -
-	// two selected options give selectedIndex 1, and the next ArrowDown gives
-	// selectedIndex 2 (scripts/verify-task037-option-value.js,
-	// "LISTBOX two-selected initial"/"after ArrowDown"). Stepping from o1 would
-	// land on o2, the option that was already winning, and the key would look
-	// dead to the user.
 	if got := selectedID(s); got != "o3" {
 		t.Fatalf("move from a two-selected document landed on %q, want o3: the last authored selection is what a move steps from", got)
 	}
@@ -313,7 +298,7 @@ func TestClickFocusesSelectButNotDisabledControls(t *testing.T) {
 	}
 
 	for _, id := range []string{"dis", "txt"} {
-		s.FocusControl(795, 595) // start each case from no focus
+		s.FocusControl(795, 595)
 		x, y := clickPoint(t, s, id)
 		if s.FocusControl(x, y) {
 			t.Fatalf("clicking the disabled %q changed focus; disabled controls must not take focus", id)

@@ -13,7 +13,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// XHR readyState constants per the spec.
 const (
 	xhrUnsent = iota
 	xhrOpened
@@ -22,14 +21,8 @@ const (
 	xhrDone
 )
 
-// MaxConcurrentXHR bounds in-flight XMLHttpRequests per document, mirroring
-// MaxConcurrentFetches: a page that sprays beacons cannot pile goroutines
-// without bound.
 const MaxConcurrentXHR = 6
 
-// xhrStateKey is the hidden VM property holding the per-Runtime XHR bookkeeping.
-// internal/js can only import internal/dom (archtest), so per-subsystem state
-// rides on the VM exactly like fetchState does.
 const xhrStateKey = "__xhrState__"
 
 type xhrBookkeeping struct {
@@ -55,9 +48,6 @@ func xhrOf(r *Runtime) *xhrBookkeeping {
 	return st
 }
 
-// xhrObject is one request's plain-Go state. The mutex guards everything the
-// network goroutine and the VM thread share; goja values are only touched on
-// the VM thread (inside queueMicrotask jobs or synchronous methods).
 type xhrObject struct {
 	r   *Runtime
 	obj *goja.Object
@@ -68,7 +58,7 @@ type xhrObject struct {
 	reqHeaders     map[string]string
 	opened         bool
 	sent           bool
-	settled        bool // completion/abort/timeout claimed; late arrivals no-op
+	settled        bool
 	aborted        bool
 	timedOut       bool
 	state          int
@@ -86,10 +76,6 @@ type xhrObject struct {
 	cancel         context.CancelFunc
 }
 
-// setupXHR installs the XMLHttpRequest constructor. The transport reuses the
-// fetch HTTPFetcher; without one, send() still exists and fails each request
-// through the error event, so feature-detecting pages never see a missing
-// constructor.
 func (r *Runtime) setupXHR(client HTTPFetcher) {
 	setXHRState(r, &xhrBookkeeping{client: client, ctx: context.Background()})
 
@@ -208,7 +194,6 @@ func (r *Runtime) constructXHR(call goja.ConstructorCall) *goja.Object {
 	_ = obj.Set("removeEventListener", func(call goja.FunctionCall) goja.Value { return r.xhrRemoveListener(x, call) })
 	_ = obj.Set("dispatchEvent", func(call goja.FunctionCall) goja.Value { return r.xhrDispatchEvent(x, call) })
 
-	// responseType validates the enum on write; anything else is ignored.
 	_ = obj.DefineAccessorProperty("responseType",
 		r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 			x.mu.Lock()
@@ -227,8 +212,6 @@ func (r *Runtime) constructXHR(call goja.ConstructorCall) *goja.Object {
 			return goja.Undefined()
 		}), goja.FLAG_FALSE, goja.FLAG_TRUE)
 
-	// upload has the listener surface but never fires progress: the whole
-	// body hands to the transport at once, so there is nothing to report.
 	upload := r.vm.NewObject()
 	_ = upload.Set("addEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 	_ = upload.Set("removeEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
@@ -272,7 +255,6 @@ func (r *Runtime) xhrDispatchEvent(x *xhrObject, call goja.FunctionCall) goja.Va
 	return r.vm.ToValue(!event.Get("defaultPrevented").ToBoolean())
 }
 
-// xhrResponse implements text, JSON, and document response extraction.
 func (r *Runtime) xhrResponse(x *xhrObject) goja.Value {
 	x.mu.Lock()
 	rt, body := x.responseType, append([]byte(nil), x.body...)
@@ -347,9 +329,6 @@ func (r *Runtime) xhrOpen(x *xhrObject, call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) >= 3 {
 		async = call.Arguments[2].ToBoolean()
 	}
-	// Synchronous open would block the VM thread on the network with no
-	// interruptible bound; no shipped page may do that. Async is the only
-	// mode; refusing loudly beats hanging silently.
 	if !async {
 		panic(namedError(r, "InvalidAccessError", "XMLHttpRequest synchronous open is not supported"))
 	}
@@ -433,9 +412,6 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 
 	st := xhrOf(r)
 	if st == nil || st.client == nil {
-		// No transport: fail through the error event, never by throwing.
-		// Pages that feature-detect with try/catch around send still work;
-		// pages that listen for error get the event they expect.
 		r.fireXHR(x, "readystatechange", 0, 0)
 		r.queueMicrotask(func() error {
 			r.completeXHRError(x)
@@ -457,8 +433,6 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 	st.active++
 	st.mu.Unlock()
 
-	// Create a cancellable context for this request. The cancel function is
-	// stored on the XHR object so abort() can tear down the socket.
 	ctx, cancel := context.WithCancel(st.ctx)
 	x.mu.Lock()
 	x.ctx = ctx
@@ -489,8 +463,6 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 		x.mu.Unlock()
 	}
 
-	// Capture the shared subresource budget on the VM thread so the request
-	// goroutine never locks r.mu off-thread. nil leaves the request ungated.
 	budget := r.subresourceBudget()
 
 	go func() {
@@ -499,9 +471,6 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 			headers["Origin"] = getOrigin(r.opts.URL)
 		}
 		resp, err := st.client.Fetch(ctx, reqURL, method, headers, body)
-		// Charge the response body to the document's shared subresource
-		// budget, mirroring fetch: a body that does not fit fails the request
-		// cleanly (XHR error) rather than succeeding past the cap.
 		if err == nil && budget != nil && !budget.Take(len(resp.Body)) {
 			err = fmt.Errorf("XHR response exceeds the document subresource budget")
 			resp = nil
@@ -515,7 +484,6 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 			x.timer = nil
 		}
 		if x.settled {
-			// Aborted or timed out while the bytes were coming back.
 			x.mu.Unlock()
 			return
 		}
@@ -537,8 +505,6 @@ func (r *Runtime) xhrSend(x *xhrObject, call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// xhrAbort implements abort(): in-flight requests settle here synchronously
-// (abort + loadend fire on this thread); anything else just resets.
 func (r *Runtime) xhrAbort(x *xhrObject) goja.Value {
 	x.mu.Lock()
 	if !x.sent || x.settled {
@@ -551,8 +517,6 @@ func (r *Runtime) xhrAbort(x *xhrObject) goja.Value {
 		x.timer.Stop()
 		x.timer = nil
 	}
-	// Cancel the context to tear down the in-flight HTTP request at the socket
-	// level, not just mark the XHR as aborted.
 	if x.cancel != nil {
 		x.cancel()
 	}
@@ -620,9 +584,6 @@ func (r *Runtime) completeXHRTimeout(x *xhrObject) {
 	r.fireXHR(x, "loadend", 0, 0)
 }
 
-// fireXHR dispatches one event to the on<type> property and every listener
-// registered for type. All calls happen on the VM thread; listener errors
-// are contained per listener under the runtime bound, as with timers.
 func (r *Runtime) fireXHR(x *xhrObject, typ string, loaded, total int64) {
 	ev := r.vm.NewObject()
 	_ = ev.Set("type", typ)

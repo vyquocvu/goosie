@@ -164,7 +164,6 @@ p::first-letter { font-size: 48px; float: left; margin-right: 15px; }
 		t.Fatalf("first-letter float box has empty dimensions: W=%v H=%v", floatObj.W, floatObj.H)
 	}
 
-	// Find the first word object in the arena following the drop cap
 	firstWord := findWordObject(arena, "This")
 	if firstWord == nil {
 		firstWord = findWordObject(arena, "his")
@@ -246,7 +245,6 @@ p::first-letter { font-size: 48px; }
 	}
 }
 
-// Untagged on purpose: it proves a rebuild happened, never what the rebuilt ::first-letter was - GOOSIE-PSEUDO-002.
 func TestFirstLetterIncremental(t *testing.T) {
 	css.ClearInteractiveState()
 	t.Cleanup(css.ClearInteractiveState)
@@ -271,7 +269,6 @@ func TestFirstLetterIncremental(t *testing.T) {
 		t.Fatal("elements not found")
 	}
 
-	// 1. Paint-only change on unrelated element: arena reused, no layout rebuild (BR-185 invariant)
 	before := sess.WorkCounts()
 	for current := unrelated; current != nil && current.Element(); current = current.Parent {
 		css.SetHover(current, true)
@@ -284,7 +281,6 @@ func TestFirstLetterIncremental(t *testing.T) {
 		t.Fatalf("paint-only hover rebuilt layout: %d -> %d", before.LayoutBuilds, after.LayoutBuilds)
 	}
 
-	// 2. Hover on target modifying ::first-letter: layout rebuild must occur via style_diff
 	css.ClearInteractiveState()
 	if err := sess.RestyleAndReflow(800); err != nil {
 		t.Fatal(err)

@@ -8,7 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// mockWorkerRunner is a mock worker runner for testing.
 type mockWorkerRunner struct {
 	messages []any
 	term     bool
@@ -28,7 +27,6 @@ func (m *mockWorkerRunner) Terminate() error {
 	return nil
 }
 
-// mockWorkerDialer is a mock worker dialer for testing.
 type mockWorkerDialer struct {
 	runner *mockWorkerRunner
 }
@@ -402,8 +400,6 @@ postMessage(true);`), nil
 		t.Fatal("BroadcastChannel message from closed worker was delivered")
 	}
 }
-
-// Service Worker tests
 
 func TestServiceWorkerRegister(t *testing.T) {
 	r, err := js.New(js.Options{

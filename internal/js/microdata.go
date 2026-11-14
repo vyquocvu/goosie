@@ -9,20 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// HTML Microdata (HTML Living Standard §5.2) is the structured-data
-// vocabulary built into HTML itself: itemscope marks an item, itemtype and
-// itemid name it, and itemprop marks its properties. The DOM side is the five
-// attribute reflections, the read-only properties collection, and
-// document.getItems.
-//
-// This runtime has no shared HTMLElement prototype — every element wrapper
-// carries its own accessors — so the reflections are installed per wrapper by
-// defineMicrodataAccessors, called from wrapNode like defineStyleAccessor and
-// the rest. document.getItems is installed once on the document object here.
-
-// setupMicrodata installs document.getItems on the document object. It runs
-// in New's registration chain; the method body re-reads r.domDoc per call, so
-// a runtime whose DOM arrives later via SetDOM is served the same way.
 func (r *Runtime) setupMicrodata() {
 	docVal := r.vm.Get("document")
 	doc, ok := docVal.(*goja.Object)
@@ -34,11 +20,6 @@ func (r *Runtime) setupMicrodata() {
 	})
 }
 
-// jsGetItems implements document.getItems(type). It returns the document's
-// top-level microdata items: elements with itemscope that are not themselves
-// a property (itemprop) of another item. With a space-separated type list,
-// an item qualifies only when its itemtype tokens include every requested
-// type; without an argument every top-level item qualifies.
 func (r *Runtime) jsGetItems(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil {
 		return r.newHTMLCollection(nil)
@@ -59,9 +40,6 @@ func (r *Runtime) jsGetItems(call goja.FunctionCall) goja.Value {
 	return r.newHTMLCollection(items)
 }
 
-// itemtypeContains reports whether the space-separated tokens of itemtype
-// include every type in want. An empty want matches any item, including one
-// with no itemtype at all.
 func itemtypeContains(itemtype string, want []string) bool {
 	if len(want) == 0 {
 		return true
@@ -93,10 +71,6 @@ func microdataTokens(value string) []string {
 	})
 }
 
-// microdataProperties returns the properties found by the HTML microdata
-// algorithm. itemref adds referenced elements in the item's tree scope to the
-// traversal queue; nested items are included as properties but their children
-// are left to their own properties collection.
 func (r *Runtime) microdataProperties(item *dom.Node) []*dom.Node {
 	if item == nil || !item.Element() {
 		return nil
@@ -167,10 +141,6 @@ func (r *Runtime) microdataTreeScopeRoot(item *dom.Node) *dom.Node {
 	return root
 }
 
-// newHTMLCollection wraps nodes as an HTMLCollection-like object: length,
-// item(index) and 0-based indexed access in document order. It is built fresh
-// on every read of the property that returns it, so callers that re-read see
-// the tree as it stands; a held reference is the snapshot it was built from.
 func (r *Runtime) newHTMLCollection(nodes []*dom.Node) *goja.Object {
 	obj := r.vm.NewObject()
 	_ = obj.Set("length", len(nodes))
@@ -190,9 +160,6 @@ func (r *Runtime) newHTMLCollection(nodes []*dom.Node) *goja.Object {
 	return obj
 }
 
-// newPropertiesCollection builds the HTMLPropertiesCollection for item: the
-// length/item surface of a collection plus names, the distinct itemprop
-// tokens across the item's properties in first-encounter order.
 func (r *Runtime) newPropertiesCollection(item *dom.Node) *goja.Object {
 	props := r.microdataProperties(item)
 	obj := r.newHTMLCollection(props)
@@ -211,16 +178,6 @@ func (r *Runtime) newPropertiesCollection(item *dom.Node) *goja.Object {
 	return obj
 }
 
-// defineMicrodataAccessors installs the microdata IDL attributes on one
-// element wrapper: the itemscope boolean reflection, the itemtype/itemid/
-// itemprop/itemref string reflections, and the read-only properties
-// collection. itemprop/itemref stay plain strings (the DOMTokenList form can
-// come later); properties is a getter-only accessor, so a sloppy-mode write
-// to it is ignored the way browsers ignore it.
-//
-// Each IDL name is reachable in two spellings — the content-attribute form
-// (itemscope, itemprop) and the spec's camelCase IDL form (itemScope,
-// itemProp) — with one accessor pair shared between them.
 func (r *Runtime) defineMicrodataAccessors(obj *goja.Object, node *dom.Node) {
 	if node == nil || !node.Element() {
 		return

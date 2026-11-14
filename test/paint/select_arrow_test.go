@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// The select control's indicator is a downward triangle: its widest row is the
-// top one. The rows used to widen downward, drawing an upward caret.
 func TestSelectArrowPointsDown(t *testing.T) {
 	html := `<!doctype html><html><body style="margin:0"><select style="width:100px;height:20px"><option>X</option></select></body></html>`
 	sess, err := engine.NewSession(html, nil, 800)

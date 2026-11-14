@@ -8,14 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// Parity renders for interaction-heavy pages.
-//
-// These tests verify that complex interaction sequences produce correct engine
-// state. They exercise forms, checkbox groups, text editing, focus management,
-// and event propagation through the full engine → DOM → JS pipeline.
-// ---------------------------------------------------------------------------
-
 func newParitySession(t *testing.T, html string) (*engine.Session, *js.Runtime) {
 	t.Helper()
 	rt, err := js.New(js.Options{
@@ -38,8 +30,6 @@ func newParitySession(t *testing.T, html string) (*engine.Session, *js.Runtime) 
 	return sess, rt
 }
 
-// TestParity_FormWithAllInputTypes verifies a form with text, checkbox, radio,
-// textarea, and submit button all interact correctly.
 func TestParity_FormWithAllInputTypes(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -65,22 +55,17 @@ document.getElementById('form').addEventListener('submit', function(e) {
 </script>
 </body></html>`)
 
-	// Type into the text input.
 	sess.FocusControl(10, 10)
 	for _, ch := range "Alice" {
 		sess.Edit(engine.EditRune, ch)
 	}
 
-	// Toggle the checkbox.
 	clickCenter(t, sess, "agree")
 
-	// Select the "blue" radio button.
 	clickCenter(t, sess, "blue")
 
-	// Edit the textarea: clear it and type new content.
-	sess.FocusControl(10, 10) // Focus textarea (approximate coordinates)
+	sess.FocusControl(10, 10)
 
-	// Submit the form.
 	clickCenter(t, sess, "submit")
 
 	v, ok := rt.Global("__submitted")
@@ -89,8 +74,6 @@ document.getElementById('form').addEventListener('submit', function(e) {
 	}
 }
 
-// TestParity_CheckboxGroup verifies that multiple checkboxes can be toggled
-// independently and JS observes each change.
 func TestParity_CheckboxGroup(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -105,7 +88,6 @@ document.getElementById('c').addEventListener('change', function() { __changes++
 </script>
 </body></html>`)
 
-	// Toggle each checkbox once.
 	clickCenter(t, sess, "a")
 	clickCenter(t, sess, "b")
 	clickCenter(t, sess, "c")
@@ -118,7 +100,6 @@ document.getElementById('c').addEventListener('change', function() { __changes++
 		t.Errorf("__changes = %v, want 3", v.Num)
 	}
 
-	// Toggle them again (uncheck).
 	clickCenter(t, sess, "a")
 	clickCenter(t, sess, "b")
 	clickCenter(t, sess, "c")
@@ -129,8 +110,6 @@ document.getElementById('c').addEventListener('change', function() { __changes++
 	}
 }
 
-// TestParity_RadioGroupMutualExclusion verifies that selecting one radio
-// button in a group deselects the others.
 func TestParity_RadioGroupMutualExclusion(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -144,7 +123,6 @@ document.getElementById('lg').addEventListener('change', function() { __lastChec
 </script>
 </body></html>`)
 
-	// Click "large" - should deselect "medium" and select "large".
 	clickCenter(t, sess, "lg")
 
 	v, ok := rt.Global("__lastChecked")
@@ -153,8 +131,6 @@ document.getElementById('lg').addEventListener('change', function() { __lastChec
 	}
 }
 
-// TestParity_TextInputBackspaceAndOvertype verifies text editing with
-// backspace, cursor movement, and overtyping.
 func TestParity_TextInputBackspaceAndOvertype(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -167,17 +143,13 @@ document.getElementById('input').addEventListener('input', function() {
 </script>
 </body></html>`)
 
-	// Focus the input for text editing.
 	focusCenter(t, sess, "input")
 
-	// Move caret to end.
 	sess.Edit(engine.EditEnd, 0)
 
-	// Delete "lo" with two backspaces.
 	sess.Edit(engine.EditBackspace, 0)
 	sess.Edit(engine.EditBackspace, 0)
 
-	// Type "p!".
 	sess.Edit(engine.EditRune, 'p')
 	sess.Edit(engine.EditRune, '!')
 
@@ -185,14 +157,11 @@ document.getElementById('input').addEventListener('input', function() {
 	if !ok {
 		t.Fatal("__inputCount not set")
 	}
-	// Each successful edit fires an input event: 2 backspaces + 2 runes = 4.
 	if v.Num != 4 {
 		t.Errorf("__inputCount = %v, want 4 (2 backspaces + 2 runes)", v.Num)
 	}
 }
 
-// TestParity_FocusTabOrder verifies that FocusNext moves focus through
-// focusable controls in document order.
 func TestParity_FocusTabOrder(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -207,7 +176,6 @@ document.getElementById('third').addEventListener('focus', function() { __focusL
 </script>
 </body></html>`)
 
-	// Tab through the inputs.
 	sess.FocusNext()
 	sess.FocusNext()
 	sess.FocusNext()
@@ -221,8 +189,6 @@ document.getElementById('third').addEventListener('focus', function() { __focusL
 	}
 }
 
-// TestParity_ClickPreventDefaultBlocksFormSubmit verifies that
-// event.preventDefault() on a submit handler blocks the default action.
 func TestParity_ClickPreventDefaultBlocksFormSubmit(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -246,8 +212,6 @@ document.getElementById('form').addEventListener('submit', function(e) {
 	}
 }
 
-// TestParity_MultipleEventListenersOnSameElement verifies that multiple
-// listeners on the same element all fire in registration order.
 func TestParity_MultipleEventListenersOnSameElement(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -272,9 +236,6 @@ btn.addEventListener('click', function() { __order += 'C'; });
 	}
 }
 
-// TestParity_ScrollEventFiresOnDocument verifies that scroll events dispatched
-// by the engine reach document-level listeners. Chromium coalesces the moves of
-// one turn into a single queued event, so five signals deliver one.
 func TestParity_ScrollEventFiresOnDocument(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -299,8 +260,6 @@ document.addEventListener('scroll', function() { __scrolls++; });
 	}
 }
 
-// TestParity_DOMMutationFromClickListener verifies that a click handler can
-// mutate the DOM and the changes are visible to subsequent queries.
 func TestParity_DOMMutationFromClickListener(t *testing.T) {
 	sess, rt := newParitySession(t, `<!DOCTYPE html>
 <html><body>
@@ -317,13 +276,9 @@ document.getElementById('btn').addEventListener('click', function() {
 
 	clickCenter(t, sess, "btn")
 
-	// Verify via JS that the DOM was mutated.
 	v, ok := rt.Global("__check")
 	_ = v
 	_ = ok
-	// The mutation happened in the click handler; verify via a follow-up query.
-	// Since we can't easily read back textContent from Go, verify the attribute.
-	// Use a second script to check.
 	sess2, rt2 := newParitySession(t, `<!DOCTYPE html>
 <html><body>
 <div id="target">original</div>

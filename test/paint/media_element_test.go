@@ -10,11 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// stubBackend makes the session a playable one. Without a backend the video
-// paints its unsupported message and no control bar at all, and the bar is what
-// this test is about. Nothing is ever opened: Open declines, which leaves the
-// element failed rather than unsupported, and a failed element still owns its
-// controls.
 type stubBackend struct{}
 
 func (stubBackend) Name() string { return "stub" }
@@ -73,7 +68,6 @@ func TestVideoAndAudioPainting(t *testing.T) {
 			}
 		}
 		if cmd.Kind == paint.CmdFill {
-			// Video or audio progress tracks/fills
 			if cmd.Rect.H() == 4 || cmd.Rect.H() == 32 {
 				hasTimelineTrack = true
 			}

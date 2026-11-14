@@ -55,17 +55,14 @@ func TestExtractArticle(t *testing.T) {
 		t.Fatalf("expected non-nil Article")
 	}
 
-	// Verify Title
 	if art.Title != "Understanding Modern Go Systems" {
 		t.Errorf("expected title 'Understanding Modern Go Systems', got %q", art.Title)
 	}
 
-	// Verify Byline
 	if !strings.Contains(art.Byline, "Jane Doe") || !strings.Contains(art.Byline, "Tech Journal") {
 		t.Errorf("expected byline to contain author and site name, got %q", art.Byline)
 	}
 
-	// Verify Boilerplate is stripped
 	if strings.Contains(art.ContentHTML, "Buy our shiny new product") {
 		t.Errorf("expected ad-banner to be stripped from content")
 	}
@@ -79,7 +76,6 @@ func TestExtractArticle(t *testing.T) {
 		t.Errorf("expected comments section to be stripped from content")
 	}
 
-	// Verify Article content retained
 	if !strings.Contains(art.ContentHTML, "concurrency primitives") {
 		t.Errorf("expected article content to be retained")
 	}
@@ -90,7 +86,6 @@ func TestExtractArticle(t *testing.T) {
 		t.Errorf("expected code block to be formatted")
 	}
 
-	// Verify Word count and reading time
 	if art.WordCount <= 0 {
 		t.Errorf("expected positive word count, got %d", art.WordCount)
 	}
@@ -98,7 +93,6 @@ func TestExtractArticle(t *testing.T) {
 		t.Errorf("expected at least 1 min reading time, got %d", art.ReadingTime)
 	}
 
-	// Verify Rendered HTML with Sepia theme
 	fullHTML := RenderReaderPageHTML(art)
 	if !strings.Contains(fullHTML, "#fbf0d9") {
 		t.Errorf("expected sepia background color in rendered HTML")
@@ -117,14 +111,12 @@ func TestReaderThemeVariants(t *testing.T) {
 		WordCount:   350,
 	}
 
-	// Light theme
 	art.Theme = "light"
 	lightHTML := RenderReaderPageHTML(art)
 	if !strings.Contains(lightHTML, "#fdfdfd") {
 		t.Errorf("expected light theme background")
 	}
 
-	// Dark theme
 	art.Theme = "dark"
 	darkHTML := RenderReaderPageHTML(art)
 	if !strings.Contains(darkHTML, "#1e1e24") {

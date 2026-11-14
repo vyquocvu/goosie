@@ -10,40 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// What Chromium answers in the `properties` list of a select, its option nodes
-// and its optgroup groups - and which of those keys disappear when the control or
-// the option is disabled. Every expectation here is copied out of
-// scripts/verify-optionax-props.js (Chromium 153.0.8010.12, 46 fixtures, 324
-// checks, run 2026-11-06), which reads the tree over CDP and compares the FULL
-// property set shape by shape, so a key the reference does not answer reddens the
-// anchor rather than passing a subset test. These tests hold the same sets against
-// Goosie's tree.
-//
-//	AX closed-enabled        -> {expanded:false, focusable:true, hasPopup:"menu", invalid:"false"}
-//	AX open-single           -> {focusable:true, invalid:"false", multiselectable:false,
-//	                             orientation:"vertical", required:false}
-//	AX closed-disabled       -> {disabled:true, expanded:false, hasPopup:"menu", invalid:"false"}
-//	AX open-disabled         -> {disabled:true, invalid:"false", multiselectable:false,
-//	                             orientation:"vertical", required:false} + activedescendant KEPT
-//	AX every disabled case   -> options answer {disabled:true, focusable:true} with NO selected
-//	AX open-option-disabled  -> {disabled:true} alone, not even on the selected option
-//	AX closed-required-empty -> invalid:"true" and NO required key at all
-//	AX focused-closed-*      -> focused:true, and the activedescendant names the selection
-//
-// Two halves of the reference's answer stay outside these tests and are disclosed
-// rather than guessed: the activedescendant of a CLOSED combobox hangs on a
-// MenuListPopup container node that Goosie does not emit (so the property is
-// asserted on the control, which is the only node there is), and the AppKit
-// attribute each property would become needs a display host with VoiceOver. Both
-// are GOOSIE-OPTIONAX-005 in docs/qa-open-defects.json.
-
-// propSet renders a node's property list the way the anchor prints it: sorted
-// "name=value" pairs, so a full-set comparison pins a key the reference does not
-// answer as firmly as one it answers wrongly.
-//
-// The activedescendant is left out, exactly as the anchor's shape() lifts it out of
-// the property list into its own check: it names a node rather than answering a
-// state, and activeDescendant below asserts it separately.
 func propSet(n *ax.Node) []string {
 	out := make([]string, 0, len(n.Props))
 	for _, p := range n.Props {
@@ -56,10 +22,6 @@ func propSet(n *ax.Node) []string {
 	return out
 }
 
-// optionProps renders every option under a control as "name: prop prop", in
-// document order. The walk is recursive so the same helper reads a listbox, whose
-// options are direct children, and a closed combobox, whose options the reference
-// hangs one container layer lower.
 func optionProps(control *ax.Node) []string {
 	var out []string
 	var walk func([]ax.Node)
@@ -75,10 +37,6 @@ func optionProps(control *ax.Node) []string {
 	return out
 }
 
-// activeDescendant returns the name the activedescendant of the control or of any
-// node under it points at, and "" when nothing in that subtree answers one. The
-// target is resolved through an index of the whole subtree because the option it
-// names can sit one layer lower, inside an optgroup's group node.
 func activeDescendant(control *ax.Node) string {
 	names := make(map[uint64]string)
 	var index func([]ax.Node)
@@ -105,10 +63,6 @@ func activeDescendant(control *ax.Node) string {
 	return found
 }
 
-// selectIn returns the control node of a session's tree, failing when the tree
-// carries more or fewer than one. axSelect (option_ax_surfaces_test.go) is the
-// same search over a fresh session; this one takes a session so a caller can focus
-// the control or run script against it first.
 func selectIn(t *testing.T, s *engine.Session) *ax.Node {
 	t.Helper()
 	nodes := axFlatten(s.AccessibilityTree())
@@ -124,9 +78,6 @@ func selectIn(t *testing.T, s *engine.Session) *ax.Node {
 	return found[0]
 }
 
-// focusedSelect returns the control node of a one-select document whose select has
-// focus, the state the reference answers with a `focused` property and - on a
-// closed box - an activedescendant.
 func focusedSelect(t *testing.T, html string) *ax.Node {
 	t.Helper()
 	s := newFocusSession(t, html)
@@ -150,8 +101,6 @@ func optionsOf(t *testing.T, html string) []string {
 	return optionProps(axSelect(t, `<html><body style="margin:0">`+html+`</body></html>`))
 }
 
-// checkProps compares a full property set, so a missing key and an extra one fail
-// the same way: the reference prunes keys rather than answering them false.
 func checkProps(t *testing.T, label string, got, want []string) {
 	t.Helper()
 	sorted := append([]string(nil), want...)
@@ -162,11 +111,6 @@ func checkProps(t *testing.T, label string, got, want []string) {
 }
 
 // qc:BR-139
-//
-// The two shapes answer two disjoint property sets, and the closed box's set is
-// the same whether or not `multiple` is present - the used display size decides,
-// exactly as it decides the role. Measured closed-enabled /
-// closed-multiple-size1 / open-single / open-multiple-two.
 func TestAccessibilitySelectPropertiesFollowTheUsedDisplaySize(t *testing.T) {
 	closed := []string{"expanded=false", "focusable=true", "hasPopup=menu", "invalid=false"}
 	open := []string{"focusable=true", "invalid=false", "multiselectable=false",
@@ -178,8 +122,6 @@ func TestAccessibilitySelectPropertiesFollowTheUsedDisplaySize(t *testing.T) {
 		{`<select id="w"><option value="a">Aye</option><option value="b" selected>Bee</option></select>`, closed},
 		{`<select id="w" multiple size="1"><option value="a" selected>Aye</option><option value="b">Bee</option></select>`, closed},
 		{`<select id="w" size="0"><option value="a" selected>Aye</option></select>`, closed},
-		// An empty select is still the closed widget: the set does not depend on
-		// having anything to show.
 		{`<select id="w"></select>`, closed},
 		{`<select id="w" size="2"><option value="a" selected>Aye</option><option value="b">Bee</option></select>`, open},
 		{`<select id="w" multiple><option value="a" selected>Aye</option><option value="b" selected>Bee</option></select>`,
@@ -195,10 +137,6 @@ func TestAccessibilitySelectPropertiesFollowTheUsedDisplaySize(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// aria-haspopup replaces the native "menu" only when it names a kind of popup:
-// measured dialog, listbox, tree and grid verbatim, while "true", "false" and an
-// unusable token all leave the answer at "menu".
 func TestAccessibilityHasPopupFollowsOnlyAPopupKindToken(t *testing.T) {
 	cases := []struct {
 		token string
@@ -221,11 +159,6 @@ func TestAccessibilityHasPopupFollowsOnlyAPopupKindToken(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// A closed box has no orientation of its own - measured closed-enabled answers no
-// orientation key at all - so only an authored token can add one, and an unusable
-// token adds nothing. An open list defaults to "vertical" and an unusable token
-// leaves it there.
 func TestAccessibilityOrientationIsAuthoredOnAClosedBoxAndDefaultedOnAnOpenOne(t *testing.T) {
 	closed := []string{"expanded=false", "focusable=true", "hasPopup=menu", "invalid=false"}
 	cases := []struct {
@@ -257,9 +190,6 @@ func TestAccessibilityOrientationIsAuthoredOnAClosedBoxAndDefaultedOnAnOpenOne(t
 }
 
 // qc:BR-139
-//
-// An author-set aria-expanded cannot open the native popup, so the closed box
-// answers expanded:false either way - measured closed-aria-expanded-true.
 func TestAccessibilityClosedBoxStaysCollapsedWhateverAriaExpandedSays(t *testing.T) {
 	for _, expanded := range []string{"true", "false"} {
 		checkProps(t, "aria-expanded="+expanded,
@@ -269,12 +199,6 @@ func TestAccessibilityClosedBoxStaysCollapsedWhateverAriaExpandedSays(t *testing
 }
 
 // qc:BR-139
-//
-// `required` reaches the open list only: measured closed-required-empty and
-// closed-aria-required answer no required key at all, while open-required answers
-// required:true. aria-required can turn the key ON but "false" cannot turn the
-// content attribute OFF (open-aria-required-false-over-attr answers required:true),
-// so the rule is a disjunction of the two attributes.
 func TestAccessibilityRequiredReachesOnlyTheOpenList(t *testing.T) {
 	closed := []string{"expanded=false", "focusable=true", "hasPopup=menu"}
 	openList := []string{"focusable=true", "multiselectable=false", "orientation=vertical"}
@@ -282,8 +206,6 @@ func TestAccessibilityRequiredReachesOnlyTheOpenList(t *testing.T) {
 		html string
 		want []string
 	}{
-		// The placeholder option is selected, so the constraint fails and the
-		// closed box answers invalid:"true" with no required key.
 		{`<select id="w" required><option value="">Pick</option><option value="a">Aye</option></select>`,
 			append(append([]string(nil), closed...), "invalid=true")},
 		{`<select id="w" aria-required="true"><option value="a" selected>Aye</option></select>`,
@@ -308,19 +230,13 @@ func TestAccessibilityRequiredReachesOnlyTheOpenList(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// `invalid` is a STRING, not a boolean, and aria-invalid overrides the constraint
-// except for the two tokens that mean neither true nor false, which drop the key
-// entirely. An EMPTY aria-invalid reads as absent rather than as "false": the same
-// fixture answers "true" when the constraint fails and "false" when it holds
-// (closed-aria-invalid-empty versus closed-aria-invalid-empty-valid).
 func TestAccessibilityInvalidIsTheConstraintUnlessAriaSaysOtherwise(t *testing.T) {
 	one := `<option value="a" selected>Aye</option>`
 	missing := `<option value="">Pick</option><option value="a">Aye</option>`
 	cases := []struct {
 		label string
 		html  string
-		want  string // "" means the reference answers no invalid key at all
+		want  string
 	}{
 		{"a valid closed box", `<select id="w">` + one + `</select>`, "false"},
 		{"a required box left on its placeholder", `<select id="w" required>` + missing + `</select>`, "true"},
@@ -348,10 +264,6 @@ func TestAccessibilityInvalidIsTheConstraintUnlessAriaSaysOtherwise(t *testing.T
 }
 
 // qc:BR-139
-//
-// A custom error is a constraint failure like any other: measured
-// closed-custom-validity answers invalid:"true" for a select that would otherwise
-// be valid. This case needs a JS runtime because setCustomValidity is script.
 func TestAccessibilityCustomValidityMakesASelectInvalid(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0">`+
 		`<select id="w"><option value="a" selected>Aye</option></select></body></html>`)
@@ -371,12 +283,6 @@ func TestAccessibilityCustomValidityMakesASelectInvalid(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// A disabled control answers `disabled` and loses `focusable`, keeping every other
-// key of its shape - and a disabled OPEN list keeps its activedescendant even
-// though nothing in it can be focused any more. Measured closed-disabled,
-// fieldset-disabled (a disabled fieldset is byte-identical to the attribute) and
-// open-disabled.
 func TestAccessibilityDisabledControlPrunesFocusableAndKeepsTheRest(t *testing.T) {
 	rows := `<option value="a" selected>Aye</option><option value="b">Bee</option>`
 	cases := []struct {
@@ -410,12 +316,6 @@ func TestAccessibilityDisabledControlPrunesFocusableAndKeepsTheRest(t *testing.T
 }
 
 // qc:BR-139
-//
-// An enabled option inside a disabled control answers BOTH disabled and focusable
-// and loses only `selected` - measured for the selected and the unselected row of
-// closed-disabled, fieldset-disabled and open-disabled. Pruning `selected` is an
-// accessibility answer only: the DOM's selectedness is untouched, which the same
-// test asserts through engine.SelectedOption.
 func TestAccessibilityOptionsOfADisabledControlKeepFocusableAndLoseSelected(t *testing.T) {
 	rows := `<option value="a" selected>Aye</option><option value="b">Bee</option>`
 	want := []string{"Aye: disabled=true focusable=true", "Bee: disabled=true focusable=true"}
@@ -428,8 +328,6 @@ func TestAccessibilityOptionsOfADisabledControlKeepFocusableAndLoseSelected(t *t
 		if strings.Join(got, "|") != strings.Join(want, "|") {
 			t.Errorf("%s options = [%s], want [%s]", html, strings.Join(got, " "), strings.Join(want, " "))
 		}
-		// The property list answers what assistive technology hears, not what the
-		// DOM holds: pruning `selected` must not unselect anything.
 		s := newFocusSession(t, `<html><body style="margin:0">`+html+`</body></html>`)
 		control := s.Doc.ElementByID("w")
 		if !dom.IsFormControlDisabled(control) {
@@ -443,11 +341,6 @@ func TestAccessibilityOptionsOfADisabledControlKeepFocusableAndLoseSelected(t *t
 }
 
 // qc:BR-139
-//
-// A disabled option keeps nothing but `disabled` - no focusable, and no `selected`
-// even when it is the selected one - while the control's activedescendant still
-// names it. The same pruning reaches an option through a disabled optgroup.
-// Measured open-option-disabled and open-optgroup-disabled.
 func TestAccessibilityDisabledOptionKeepsOnlyDisabled(t *testing.T) {
 	control := axSelect(t, `<html><body style="margin:0">`+
 		`<select id="w" size="2"><option value="a" selected disabled>Aye</option>`+
@@ -468,8 +361,6 @@ func TestAccessibilityDisabledOptionKeepsOnlyDisabled(t *testing.T) {
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("option in a disabled optgroup = [%s], want [%s]", strings.Join(got, " "), strings.Join(want, " "))
 	}
-	// A group node answers no properties in either shape: measured props {} for
-	// closed-optgroup and open-optgroup-disabled alike.
 	group := axFind(grouped.Children, ax.RoleGroup, "G")
 	if group == nil {
 		t.Fatalf("no group node named %q under the optgroup select: %+v", "G", grouped.Children)
@@ -478,10 +369,6 @@ func TestAccessibilityDisabledOptionKeepsOnlyDisabled(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// An enabled option in an enabled control answers focusable plus `selected` with
-// BOTH values - measured {focusable:true, selected:false} on the unselected rows,
-// so the key is not pruned when it is false, unlike `disabled`.
 func TestAccessibilityEnabledOptionsAnswerSelectedFalseRatherThanNothing(t *testing.T) {
 	got := optionsOf(t, `<select id="w" size="2"><option value="a" selected>Aye</option>`+
 		`<option value="b">Bee</option><option value="c" disabled>Cee</option></select>`)
@@ -496,18 +383,6 @@ func TestAccessibilityEnabledOptionsAnswerSelectedFalseRatherThanNothing(t *test
 }
 
 // qc:BR-139
-//
-// The activedescendant names a selection, and which node carries it and when it
-// appears differs by shape: an open list answers it whenever something is
-// selected, naming the FIRST selected option, while a closed box answers it only
-// while focused. With nothing selected - no authored selection on an open list, or
-// no enabled option for a closed box's default to land on - no node answers one.
-// Measured open-single, open-multiple-two, open-nothing-selected,
-// focused-closed-selected, focused-closed-default and focused-closed-all-disabled.
-//
-// The reference hangs a closed box's activedescendant on the MenuListPopup node
-// between the control and its options; Goosie emits no such layer yet, so the
-// property is read off the control (GOOSIE-OPTIONAX-005).
 func TestAccessibilityActiveDescendantNamesTheFirstSelectionOfTheShapeThatHasOne(t *testing.T) {
 	cases := []struct {
 		label string
@@ -535,8 +410,6 @@ func TestAccessibilityActiveDescendantNamesTheFirstSelectionOfTheShapeThatHasOne
 		if got := activeDescendant(control); got != c.want {
 			t.Errorf("%s: activedescendant names %q, want %q", c.label, got, c.want)
 		}
-		// `focused` is answered only while the control has focus, and only on the
-		// control: no option or group node reports it.
 		focused := false
 		for _, p := range propSet(control) {
 			if p == "focused=true" {
@@ -553,9 +426,6 @@ func TestAccessibilityActiveDescendantNamesTheFirstSelectionOfTheShapeThatHasOne
 }
 
 // qc:BR-139
-//
-// A focused open list adds `focused` to the property set it already answers, and
-// keeps its activedescendant on the control - measured focused-open.
 func TestAccessibilityFocusedOpenListKeepsItsActivedescendantOnTheControl(t *testing.T) {
 	control := focusedSelect(t, `<html><body style="margin:0">`+
 		`<select id="w" size="2"><option value="a" selected>Aye</option><option value="b">Bee</option></select></body></html>`)

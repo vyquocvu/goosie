@@ -5,14 +5,12 @@ import (
 	"strings"
 )
 
-// FilterFunc represents one CSS filter function.
 type FilterFunc struct {
-	Name string  // e.g., "blur", "brightness"
-	Arg  float32 // argument value (interpretation depends on function)
-	Raw  string  // raw argument string
+	Name string
+	Arg  float32
+	Raw  string
 }
 
-// FormatFilter formats a slice of FilterFunc back into a CSS filter string.
 func FormatFilter(funcs []FilterFunc) string {
 	if len(funcs) == 0 {
 		return "none"
@@ -34,9 +32,6 @@ func FormatFilter(funcs []FilterFunc) string {
 	return b.String()
 }
 
-// ParseFilter parses a CSS filter property value.
-// Supported functions: blur(), brightness(), contrast(), grayscale(), invert(),
-// opacity(), saturate(), sepia().
 func ParseFilter(s string) []FilterFunc {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "none" {
@@ -47,7 +42,6 @@ func ParseFilter(s string) []FilterFunc {
 	i := 0
 
 	for i < len(s) {
-		// Skip whitespace.
 		for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
 			i++
 		}
@@ -55,7 +49,6 @@ func ParseFilter(s string) []FilterFunc {
 			break
 		}
 
-		// Parse function name.
 		start := i
 		for i < len(s) && s[i] != '(' {
 			i++
@@ -64,9 +57,8 @@ func ParseFilter(s string) []FilterFunc {
 			break
 		}
 		name := strings.TrimSpace(s[start:i])
-		i++ // skip '('
+		i++
 
-		// Parse argument.
 		argStart := i
 		depth := 1
 		for i < len(s) && depth > 0 {
@@ -81,10 +73,9 @@ func ParseFilter(s string) []FilterFunc {
 		}
 		argStr := strings.TrimSpace(s[argStart:i])
 		if i < len(s) {
-			i++ // skip ')'
+			i++
 		}
 
-		// Parse the argument value.
 		arg := parseFilterArg(name, argStr)
 		funcs = append(funcs, FilterFunc{Name: name, Arg: arg, Raw: argStr})
 	}
@@ -92,23 +83,17 @@ func ParseFilter(s string) []FilterFunc {
 	return funcs
 }
 
-// parseFilterArg parses the argument for a filter function.
 func parseFilterArg(name, s string) float32 {
-	// Most filter functions take a number with optional unit.
-	// blur() takes a length (px).
-	// Others take a number or percentage.
 
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0
 	}
 
-	// Strip units.
 	if strings.HasSuffix(s, "px") {
 		s = s[:len(s)-2]
 	} else if strings.HasSuffix(s, "%") {
 		s = s[:len(s)-1]
-		// Convert percentage to multiplier (100% = 1.0).
 		v := parseFilterFloat(s)
 		return v / 100
 	}
@@ -116,7 +101,6 @@ func parseFilterArg(name, s string) float32 {
 	return parseFilterFloat(s)
 }
 
-// parseFilterFloat parses a float from a string.
 func parseFilterFloat(s string) float32 {
 	s = strings.TrimSpace(s)
 	if s == "" {

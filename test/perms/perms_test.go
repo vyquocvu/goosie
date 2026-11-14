@@ -30,7 +30,6 @@ func TestPermsManager_DefaultsAndModifications(t *testing.T) {
 	mgr := perms.NewManager("")
 	origin := "https://example.com"
 
-	// Defaults: all allowed
 	if !mgr.IsAllowed(origin, perms.PermissionJavaScript) {
 		t.Errorf("expected JS allowed by default")
 	}
@@ -41,7 +40,6 @@ func TestPermsManager_DefaultsAndModifications(t *testing.T) {
 		t.Errorf("expected StateDefault")
 	}
 
-	// Block JS
 	mgr.Set(origin, perms.PermissionJavaScript, perms.StateBlock)
 	if mgr.IsAllowed(origin, perms.PermissionJavaScript) {
 		t.Errorf("expected JS blocked after Set StateBlock")
@@ -50,12 +48,10 @@ func TestPermsManager_DefaultsAndModifications(t *testing.T) {
 		t.Errorf("expected StateBlock")
 	}
 
-	// Images remain allowed
 	if !mgr.IsAllowed(origin, perms.PermissionImages) {
 		t.Errorf("expected Images still allowed")
 	}
 
-	// Set back to default
 	mgr.Set(origin, perms.PermissionJavaScript, perms.StateDefault)
 	if !mgr.IsAllowed(origin, perms.PermissionJavaScript) {
 		t.Errorf("expected JS allowed after resetting to StateDefault")

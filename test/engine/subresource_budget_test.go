@@ -9,9 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestCSSImportBreadthCapped pins the breadth cap on @import expansion: a
-// sheet naming a hundred imports must not fetch them all. The document still
-// builds, with the imports past the budget silently absent.
 func TestCSSImportBreadthCapped(t *testing.T) {
 	var fetched int64
 	linker := func(base, href string) (string, error) {

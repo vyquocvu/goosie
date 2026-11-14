@@ -10,11 +10,7 @@ import (
 	"github.com/dop251/goja"
 )
 
-// TextEncoder and TextDecoder API implementation.
-
-// setupTextEncoding installs TextEncoder and TextDecoder constructors.
 func (r *Runtime) setupTextEncoding() {
-	// TextEncoder constructor.
 	encoderCtor := func(call goja.ConstructorCall) *goja.Object {
 		obj := call.This
 		_ = obj.Set("encoding", "utf-8")
@@ -67,7 +63,6 @@ func (r *Runtime) setupTextEncoding() {
 		}
 	}
 
-	// TextDecoder constructor.
 	decoderCtor := func(call goja.ConstructorCall) *goja.Object {
 		obj := call.This
 		encoding := "utf-8"
@@ -86,7 +81,6 @@ func (r *Runtime) setupTextEncoding() {
 			arg := call.Arguments[0]
 			var bytes []byte
 
-			// Handle Uint8Array or Array
 			if arrObj, ok := arg.(*goja.Object); ok {
 				lengthVal := arrObj.Get("length")
 				if lengthVal == nil || goja.IsUndefined(lengthVal) {
@@ -105,7 +99,6 @@ func (r *Runtime) setupTextEncoding() {
 			switch encoding {
 			case "utf-16le":
 				if len(bytes) >= 2 {
-					// Decode UTF-16LE
 					u16s := make([]uint16, len(bytes)/2)
 					for i := range u16s {
 						u16s[i] = binary.LittleEndian.Uint16(bytes[i*2 : i*2+2])
@@ -125,11 +118,9 @@ func (r *Runtime) setupTextEncoding() {
 				}
 				return r.vm.ToValue("")
 			default:
-				// UTF-8 (default)
 				if utf8.Valid(bytes) {
 					return r.vm.ToValue(string(bytes))
 				}
-				// Replace invalid UTF-8 with replacement character
 				var sb strings.Builder
 				for len(bytes) > 0 {
 					r, size := utf8.DecodeRune(bytes)

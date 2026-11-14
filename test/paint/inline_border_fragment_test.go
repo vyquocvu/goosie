@@ -6,7 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// ibBorders returns every CmdBorder in list order.
 func ibBorders(cmds []paint.DisplayCmd) []paint.DisplayCmd {
 	var out []paint.DisplayCmd
 	for _, c := range cmds {
@@ -17,17 +16,11 @@ func ibBorders(cmds []paint.DisplayCmd) []paint.DisplayCmd {
 	return out
 }
 
-// GOOSIE-INLINEBORDER-001 display-list oracle: a wrapping bordered span emits
-// one CmdBorder per line fragment. The first fragment draws top+bottom+left
-// (no right); the last draws top+bottom+right (no left). A single-line span
-// draws all four edges on its one fragment.
 func TestInlineBorderFragments(t *testing.T) {
-	// Narrow viewport forces the span onto multiple lines.
 	css := `div{width:80px;background:rgba(200,0,0,.5)}span{border:3px solid rgba(0,0,200,.5)}`
 	body := `<div><span>aa bb cc dd ee ff</span></div>`
 	cmds := ibDisplayList(t, css, body, 100)
 	borders := ibBorders(cmds)
-	// The block itself has no border, so every CmdBorder is a span fragment.
 	if len(borders) < 2 {
 		t.Fatalf("wrapping span: got %d border commands, want >= 2 (one per line)", len(borders))
 	}
@@ -52,7 +45,6 @@ func TestInlineBorderFragments(t *testing.T) {
 	}
 }
 
-// A single-line bordered span draws all four edges on exactly one fragment.
 func TestInlineBorderSingleLine(t *testing.T) {
 	css := `div{width:400px}span{border:3px solid rgba(0,0,200,.5)}`
 	body := `<div><span>word</span></div>`
@@ -67,7 +59,6 @@ func TestInlineBorderSingleLine(t *testing.T) {
 	}
 }
 
-// A borderless inline span emits no border command (corpus stays byte-identical).
 func TestInlineBorderNone(t *testing.T) {
 	css := `div{width:80px}span{color:blue}`
 	body := `<div><span>aa bb cc dd</span></div>`

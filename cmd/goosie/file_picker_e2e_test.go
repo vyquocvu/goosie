@@ -108,8 +108,6 @@ input.addEventListener('change', function() {
 	}
 }
 
-// axNodeText concatenates a node's own label/value with its descendants'. Text
-// in a paragraph is a static-text child of the group that carries the id.
 func axNodeText(node ax.Node) string {
 	text := node.Label + node.Value
 	for _, child := range node.Children {

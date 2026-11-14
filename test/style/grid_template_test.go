@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// Wikipedia's Vector 2022 page shell declares its grid with the `grid-template`
-// shorthand and spaces it with a bare `column-gap`. Expanding only the longhand
-// names left the column template empty and the gap on both axes, so the page
-// divided itself evenly instead of giving the sidebar its 12.25rem.
 func TestGridTemplateShorthandAndAxisGaps(t *testing.T) {
 	s := styleFor(t, `<html><body style="margin:0"><section class="g"></section></body></html>`,
 		`.g{display:grid;column-gap:24px;grid-template:min-content 1fr / 12.25rem minmax(0,1fr)}`, "section")
@@ -30,7 +26,6 @@ func TestGridTemplateShorthandAndAxisGaps(t *testing.T) {
 	}
 }
 
-// `gap` is the shorthand for both axes, so it has to set them both.
 func TestGapShorthandSetsBothAxes(t *testing.T) {
 	s := styleFor(t, `<html><body style="margin:0"><section class="g"></section></body></html>`,
 		`.g{display:flex;gap:1rem}`, "section")
@@ -42,9 +37,6 @@ func TestGapShorthandSetsBothAxes(t *testing.T) {
 	}
 }
 
-// `float` blockifies the box it lands on, so an inline element carrying it takes
-// a box of its own and reaches the side it was thrown to instead of joining its
-// siblings' run of text.
 func TestFloatBlockifiesItsBox(t *testing.T) {
 	s := styleFor(t, `<html><body style="margin:0"><span class="f"></span></body></html>`,
 		`.f{float:left}`, "span")

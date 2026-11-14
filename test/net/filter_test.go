@@ -46,14 +46,10 @@ func TestFilterEngineDefaultRules(t *testing.T) {
 func TestFilterEngineEasyListSyntaxAndExceptions(t *testing.T) {
 	fe := transport.NewEmptyFilterEngine()
 
-	// Add domain anchor rule
 	fe.AddRule("||bad-domain.com^")
-	// Add pattern rule
 	fe.AddRule("*/banner-ads/*")
-	// Add exception rule
 	fe.AddRule("@@||safe.bad-domain.com^")
 
-	// Base domain and subdomains should be blocked
 	if blocked, _ := fe.ShouldBlock("https://bad-domain.com/tracker"); !blocked {
 		t.Errorf("bad-domain.com should be blocked")
 	}
@@ -61,12 +57,10 @@ func TestFilterEngineEasyListSyntaxAndExceptions(t *testing.T) {
 		t.Errorf("sub.bad-domain.com should be blocked")
 	}
 
-	// Exception subdomain must be permitted
 	if blocked, _ := fe.ShouldBlock("https://safe.bad-domain.com/content"); blocked {
 		t.Errorf("safe.bad-domain.com should be allowed by exception rule")
 	}
 
-	// Pattern match
 	if blocked, _ := fe.ShouldBlock("https://other.com/assets/banner-ads/top.png"); !blocked {
 		t.Errorf("URL with pattern /banner-ads/ should be blocked")
 	}
@@ -98,7 +92,6 @@ func TestHTTPClientFilterIntegration(t *testing.T) {
 	client := transport.DefaultClient()
 	ctx := context.Background()
 
-	// Attempt to get a blocked URL
 	resp, err := client.Get(ctx, "https://www.google-analytics.com/analytics.js")
 	if resp != nil {
 		t.Errorf("expected nil response for blocked URL")
@@ -107,7 +100,6 @@ func TestHTTPClientFilterIntegration(t *testing.T) {
 		t.Fatalf("expected ErrBlockedByFilter, got: %v", err)
 	}
 
-	// Check blocked count
 	if fClient, ok := client.(interface {
 		Filter() *transport.FilterEngine
 	}); ok {

@@ -16,12 +16,10 @@ func TestSessionInsertText(t *testing.T) {
 	sess, rt := newJSSession(t, html)
 	_ = rt
 
-	// Focus the input control
 	if !focusCenter(t, sess, "inp") {
 		t.Fatalf("failed to focus inp")
 	}
 
-	// Insert text at caret (which defaults to end)
 	ok := sess.InsertText("world!")
 	if !ok {
 		t.Fatalf("InsertText returned false")
@@ -32,7 +30,6 @@ func TestSessionInsertText(t *testing.T) {
 		t.Errorf("expected 'hello world!', got %q", val)
 	}
 
-	// Test maxlength enforcement: length is 12, max is 20 -> 8 chars fit
 	sess.InsertText("1234567890EXTRA")
 	valWithMax := sess.FocusedText()
 	if len(valWithMax) > 20 {

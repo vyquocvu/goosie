@@ -10,18 +10,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// svgNamespace is the NSSVG constant value (defined in internal/dom).
-// We duplicate it here to avoid importing dom from paint, which would
-// violate the import boundary rules.
 const svgNamespace = 1
 
-// svgMapping maps user-space coordinates from a root's viewBox into its CSS
-// viewport under the default preserveAspectRatio="xMidYMid meet". Without a
-// usable viewBox it is the identity at the viewport origin.
 type svgMapping struct {
-	ox, oy float32 // viewport origin, CSS px
-	ux, uy float32 // viewBox min-x, min-y
-	s      float32 // user units to CSS px
+	ox, oy float32
+	ux, uy float32
+	s      float32
 }
 
 func newSVGMapping(viewBox string, x0, y0, w, h float32) svgMapping {
@@ -54,14 +48,10 @@ func (m svgMapping) point(x, y float32) (float32, float32) {
 
 func (m svgMapping) length(v float32) float32 { return v * m.s }
 
-// paintSVGShape draws an SVG shape element (rect, circle, ellipse, line,
-// polygon, polyline, path) using the element's geometry attributes and
-// presentation style. Shapes are rasterized into fill/stroke commands.
 func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
-	if obj.Node == nil || obj.Node.Namespace != svgNamespace { // NSSVG
+	if obj.Node == nil || obj.Node.Namespace != svgNamespace {
 		return
 	}
-	// Locate enclosing <svg> element to obtain viewport origin and bounds.
 	svgObj := obj
 	for svgObj != nil && (svgObj.Node == nil || svgObj.Node.Data != "svg") {
 		if svgObj.Parent == 0 {
@@ -81,7 +71,6 @@ func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
 	tag := obj.Node.Data
 	m := newSVGMapping(svgObj.Node.GetAttribute("viewBox"), x0, y0, x1-x0, y1-y0)
 
-	// Parse fill color from style or attribute.
 	fillColor := b.parseSVGPaint(obj, "fill", "black")
 	strokeColor := b.parseSVGPaint(obj, "stroke", "")
 	strokeWidth := b.parseSVGLength(obj, "stroke-width", 1) * m.length(1) * scale
@@ -102,8 +91,6 @@ func (b *Builder) paintSVGShape(obj *layout.Object, opacity float32) {
 	}
 }
 
-// parseSVGPaint returns the fill/stroke color for an SVG element. It checks
-// presentation attributes, inline style declarations, and currentColor.
 func (b *Builder) parseSVGPaint(obj *layout.Object, attr, fallback string) frame.Color {
 	if obj.Node == nil {
 		return 0
@@ -135,14 +122,11 @@ func (b *Builder) parseSVGPaint(obj *layout.Object, attr, fallback string) frame
 	return parseSVGColor(v)
 }
 
-// parseSVGLength parses an SVG length attribute, returning the value in
-// user units (pixels).
 func (b *Builder) parseSVGLength(obj *layout.Object, attr string, fallback float32) float32 {
 	v := obj.Node.GetAttribute(attr)
 	if v == "" {
 		return fallback
 	}
-	// Strip units if present (px, em, etc.) - we treat everything as px.
 	v = strings.TrimSuffix(v, "px")
 	v = strings.TrimSuffix(v, "em")
 	f, err := strconv.ParseFloat(v, 32)
@@ -152,7 +136,6 @@ func (b *Builder) parseSVGLength(obj *layout.Object, attr string, fallback float
 	return float32(f)
 }
 
-// parseSVGColor parses a CSS color string using css.ParseColor.
 func parseSVGColor(s string) frame.Color {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "none" {
@@ -256,7 +239,6 @@ func (b *Builder) paintSVGPolygon(obj *layout.Object, m svgMapping, fill, stroke
 		return
 	}
 	scale := b.scale
-	// Map user units through the viewBox, then to device pixels.
 	for i := range points {
 		x, y := m.point(points[i][0], points[i][1])
 		points[i][0] = x * scale
@@ -281,7 +263,6 @@ func (b *Builder) paintSVGPath(obj *layout.Object, m svgMapping, fill, stroke fr
 		return
 	}
 	scale := b.scale
-	// Map user units through the viewBox, then to device pixels.
 	for i := range segments {
 		for j := 0; j+1 < len(segments[i]); j += 2 {
 			x, y := m.point(segments[i][j], segments[i][j+1])
@@ -330,13 +311,9 @@ func (b *Builder) paintSVGStrokeRect(rect frame.Rect, color frame.Color, width, 
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: color, Opacity: opacity})
 		return
 	}
-	// Top
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+sw), Color: color, Opacity: opacity})
-	// Bottom
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y1-sw, rect.X1, rect.Y1), Color: color, Opacity: opacity})
-	// Left
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0+sw, rect.X0+sw, rect.Y1-sw), Color: color, Opacity: opacity})
-	// Right
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-sw, rect.Y0+sw, rect.X1, rect.Y1-sw), Color: color, Opacity: opacity})
 	_ = rx
 	_ = ry
@@ -417,7 +394,6 @@ func (b *Builder) paintSVGStrokedEllipse(cx, cy, rx, ry float32, color frame.Col
 }
 
 func (b *Builder) paintSVGLineSegment(x1, y1, x2, y2 float32, color frame.Color, width float32, opacity float32) {
-	// Bresenham-like line drawing with thickness.
 	dx := x2 - x1
 	dy := y2 - y1
 	steps := int32(math.Sqrt(float64(dx*dx + dy*dy)))
@@ -429,7 +405,6 @@ func (b *Builder) paintSVGLineSegment(x1, y1, x2, y2 float32, color frame.Color,
 		t := float32(i) / float32(steps)
 		px := x1 + dx*t
 		py := y1 + dy*t
-		// Draw a small square at each step for thickness.
 		size := int32(width)
 		if size < 1 {
 			size = 1
@@ -448,7 +423,6 @@ func (b *Builder) paintSVGFilledPolygon(points [][2]float32, color frame.Color, 
 	if len(points) < 3 {
 		return
 	}
-	// Find bounding box.
 	minX, minY := points[0][0], points[0][1]
 	maxX, maxY := minX, minY
 	for _, p := range points[1:] {
@@ -465,7 +439,6 @@ func (b *Builder) paintSVGFilledPolygon(points [][2]float32, color frame.Color, 
 			maxY = p[1]
 		}
 	}
-	// Scanline fill.
 	for y := int32(minY); y <= int32(maxY); y++ {
 		var intersections []float32
 		n := len(points)
@@ -478,7 +451,6 @@ func (b *Builder) paintSVGFilledPolygon(points [][2]float32, color frame.Color, 
 				intersections = append(intersections, xi+t*(xj-xi))
 			}
 		}
-		// Sort intersections.
 		for i := 0; i < len(intersections); i++ {
 			for j := i + 1; j < len(intersections); j++ {
 				if intersections[j] < intersections[i] {
@@ -486,7 +458,6 @@ func (b *Builder) paintSVGFilledPolygon(points [][2]float32, color frame.Color, 
 				}
 			}
 		}
-		// Fill between pairs.
 		for i := 0; i+1 < len(intersections); i += 2 {
 			x0 := int32(intersections[i])
 			x1 := int32(intersections[i+1])
@@ -513,8 +484,6 @@ func (b *Builder) paintSVGStrokedPolygon(points [][2]float32, color frame.Color,
 }
 
 func (b *Builder) paintSVGFilledPath(segments [][]float32, color frame.Color, opacity float32) {
-	// Each subpath is an independent region: joining them into one polygon
-	// would draw connecting edges between shapes that don't touch.
 	for _, seg := range segments {
 		points := make([][2]float32, 0, len(seg)/2)
 		for i := 0; i+1 < len(seg); i += 2 {
@@ -534,7 +503,6 @@ func (b *Builder) paintSVGStrokedPath(segments [][]float32, color frame.Color, w
 	}
 }
 
-// parseSVGPoints parses an SVG points attribute value into coordinate pairs.
 func parseSVGPoints(s string) [][2]float32 {
 	var points [][2]float32
 	s = strings.TrimSpace(s)
@@ -550,11 +518,6 @@ func parseSVGPoints(s string) [][2]float32 {
 	return points
 }
 
-// parseSVGPath flattens path data into moveto-delimited subpaths of user-space
-// points. Supported commands: M/m L/l H/h V/v Z/z, cubics C/c S/s, quadratics
-// Q/q T/t and elliptical arcs A/a, with implicit command repetition. Curves are
-// subdivided into line segments. The flattening lives here rather than reusing
-// internal/image's path decoder because paint may not import it (see archtest).
 func parseSVGPath(d string) [][]float32 {
 	p := &svgPathScanner{d: d}
 	var out [][]float32
@@ -790,8 +753,6 @@ func isSVGPathCmd(c byte) bool {
 	return false
 }
 
-// svgPathScanner reads path data: whitespace and commas separate values, and a
-// sign or decimal point can start the next number without a separator.
 type svgPathScanner struct {
 	d string
 	i int
@@ -825,7 +786,6 @@ func (p *svgPathScanner) number() (float32, bool) {
 		digits = true
 	}
 	if p.i < len(p.d) && p.d[p.i] == '.' {
-		// A second dot starts the next number ("1.5.25" is 1.5 then .25).
 		p.i++
 		for p.i < len(p.d) && p.d[p.i] >= '0' && p.d[p.i] <= '9' {
 			p.i++
@@ -855,8 +815,6 @@ func (p *svgPathScanner) number() (float32, bool) {
 	return float32(v), true
 }
 
-// flattenSVGCubic subdivides a cubic Bézier into line segments, excluding the
-// start point and ending exactly on p3.
 func flattenSVGCubic(p0, p1, p2, p3 [2]float32) [][2]float32 {
 	const n = 12
 	out := make([][2]float32, 0, n)
@@ -871,7 +829,6 @@ func flattenSVGCubic(p0, p1, p2, p3 [2]float32) [][2]float32 {
 	return out
 }
 
-// flattenSVGQuad subdivides a quadratic Bézier into line segments.
 func flattenSVGQuad(p0, p1, p2 [2]float32) [][2]float32 {
 	const n = 10
 	out := make([][2]float32, 0, n)
@@ -886,8 +843,6 @@ func flattenSVGQuad(p0, p1, p2 [2]float32) [][2]float32 {
 	return out
 }
 
-// flattenSVGArc converts an endpoint-parameterized elliptical arc to line
-// segments via center parametrization (SVG 1.1 §8.5, F.6.5 correction).
 func flattenSVGArc(p0 [2]float32, rx, ry, rot float32, large, sweep bool, p1 [2]float32) [][2]float32 {
 	x0, y0 := float64(p0[0]), float64(p0[1])
 	x1, y1 := float64(p1[0]), float64(p1[1])

@@ -14,8 +14,6 @@ const innerTextAtomicBoundary = '\uFDD1'
 const innerTextTableTab = '\uFDD2'
 const innerTextEscapeMarker = '\uFDD3'
 
-// innerText collects rendered text with inherited text-transform and
-// white-space processing, plus hard breaks for block-level children.
 func (r *Runtime) innerText(root *dom.Node) string {
 	if root == nil {
 		return ""
@@ -64,8 +62,6 @@ func (r *Runtime) innerText(root *dom.Node) string {
 						before := len(rows)
 						collectOptions(child, false)
 						if len(rows) == before && emptyGroupIsBoundary && child.FirstChild == nil {
-							// An empty optgroup still occupies a rendered option-list
-							// boundary when innerText is collected from its container.
 							rows = append(rows, "")
 						}
 					}
@@ -90,14 +86,9 @@ func (r *Runtime) innerText(root *dom.Node) string {
 			text = strings.ReplaceAll(text, "\r", "\n")
 			switch whiteSpace {
 			case "normal", "nowrap", "":
-				// Under normal white-space processing, source segment breaks
-				// collapse with spaces and tabs. Generated <br>/block breaks
-				// are appended separately by the tree walker and stay hard breaks.
 				text = strings.ReplaceAll(text, "\n", " ")
 				text = escapeInnerTextMarker(text)
 			case "pre-line":
-				// Segment breaks remain hard breaks; horizontal whitespace is
-				// collapsed by collapseInnerTextWhitespace after inline runs join.
 				text = escapeInnerTextMarker(text)
 			default:
 				text = preserveInnerTextSpaces(text)
@@ -186,14 +177,9 @@ func (r *Runtime) innerText(root *dom.Node) string {
 			}
 			if childBlock {
 				if childDisplay == "table" && childText == "" {
-					// An empty table creates no rendered text boundary. This matters
-					// for non-whitespace table text that the HTML parser foster-parents
-					// immediately before the table.
 					continue
 				}
 				if childParagraph && !hasInnerTextVisibleContent(childText) {
-					// Empty paragraphs do not add their own blank lines. Leave the
-					// surrounding paragraph boundary pending for the next content.
 					continue
 				}
 				if result.Len() > 0 {
@@ -260,10 +246,6 @@ func (r *Runtime) innerText(root *dom.Node) string {
 	return r.applyInnerTextPseudoTransforms(root, collapseInnerTextWhitespace(walked))
 }
 
-// applyInnerTextPseudoTransforms applies the resolved text-transform from the
-// queried block's first formatted line and first-letter pseudo-elements. The
-// first-line span is bounded by the first hard line break; wrapped visual line
-// fragments are not available at this API boundary yet.
 func (r *Runtime) applyInnerTextPseudoTransforms(root *dom.Node, text string) string {
 	if root == nil || !root.Element() {
 		return text
@@ -279,8 +261,6 @@ func (r *Runtime) applyInnerTextPseudoTransforms(root *dom.Node, text string) st
 			if end < 0 {
 				end = len(text)
 			}
-			// A zero-width block still exposes its first unbreakable word as the
-			// first formatted line in the current layout implementation.
 			if width := strings.TrimSpace(r.computedValues(root)["width"]); width == "0" || width == "0px" {
 				if space := strings.IndexAny(text[:end], " \t"); space >= 0 {
 					end = space
@@ -479,9 +459,6 @@ func innerTextTableWhitespace(node *dom.Node) bool {
 	return node.DataContent != ""
 }
 
-// These SVG elements can contain text in the DOM but do not create rendered
-// text. Keep this namespace-scoped: HTML elements with the same local names
-// have their ordinary rendering behavior.
 func isNonRenderedSVGInnerTextElement(node *dom.Node) bool {
 	if node == nil || node.Namespace != dom.NSSVG {
 		return false
@@ -517,16 +494,12 @@ func appendInnerTextBoundaryBreaks(result *strings.Builder, current, whiteSpace 
 
 func innerTextBoundaryBreakCount(current, whiteSpace string, afterEmptyBlock bool) int {
 	if preservesInnerTextNewlines(whiteSpace) && !afterEmptyBlock && strings.HasSuffix(current, "\n") {
-		// A preserved segment break stays hard beside the first block boundary.
 		return 2
 	}
 	return 1
 }
 
 func appendInnerTextParagraphBreaks(result *strings.Builder, current, whiteSpace string, alreadySeparated bool) {
-	// Paragraph boundaries add two LF after the current rendered text. Preserve
-	// hard line breaks that came from preformatted descendants while trimming
-	// only collapsible horizontal whitespace at the edge.
 	current = strings.TrimRight(current, " \t\f")
 	trailing := 0
 	for i := len(current) - 1; i >= 0 && current[i] == '\n'; i-- {
@@ -552,10 +525,6 @@ func isVisibleInnerTextParagraph(node *dom.Node, runtime *Runtime) bool {
 	return style["display"] != "none" && normalizeInnerTextVisibility(style["visibility"]) == "visible"
 }
 
-// paragraphEdge reports whether the first or last visible block content in a
-// subtree is a paragraph. This lets a paragraph nested inside a block container
-// preserve its blank-line boundary when that container is flattened by its
-// parent.
 func paragraphEdge(node *dom.Node, first bool, runtime *Runtime) bool {
 	if node == nil || !node.Element() || node.Namespace != dom.NSHTML {
 		return false
@@ -661,9 +630,6 @@ func escapeInnerTextMarker(text string) string {
 	return strings.ReplaceAll(text, tab, escape+tab)
 }
 
-// preserveInnerTextSpaces marks horizontal white-space that preformatted
-// modes retain. The marker is escaped as a doubled marker if it occurs in the
-// source text itself.
 func preserveInnerTextSpaces(text string) string {
 	var result strings.Builder
 	for _, r := range text {
@@ -695,10 +661,6 @@ func preserveInnerTextSpaces(text string) string {
 	return result.String()
 }
 
-// collapseInnerTextWhitespace collapses unprotected CSS white-space runs
-// across adjacent text nodes while preserving generated and preformatted
-// newlines. Leading/trailing collapsible runs disappear at each hard line
-// boundary, as rendered text does.
 func collapseInnerTextWhitespace(text string) string {
 	var result strings.Builder
 	pendingSpace := false
@@ -834,8 +796,6 @@ func trimInnerTextBoundaryWhitespace(text, whiteSpace string, left bool) string 
 	return strings.TrimRight(text, trimChars)
 }
 
-// trimInnerTextAtomicBoundaryWhitespace trims collapsible horizontal edge
-// whitespace around an atomic inline box while leaving hard line breaks intact.
 func trimInnerTextAtomicBoundaryWhitespace(text, whiteSpace string, left bool) string {
 	switch whiteSpace {
 	case "normal", "nowrap", "pre-line", "":
@@ -849,8 +809,6 @@ func trimInnerTextAtomicBoundaryWhitespace(text, whiteSpace string, left bool) s
 }
 
 func isBlockInnerTextNode(node *dom.Node, display string) bool {
-	// Paragraph elements form their own rendered-text paragraph boundaries,
-	// including when their CSS display value is changed to an inline-level box.
 	if isInnerTextParagraph(node) {
 		return true
 	}
@@ -897,8 +855,6 @@ func isBlockInnerTextDisplay(display string) bool {
 	}
 }
 
-// The descendants of these HTML elements provide control, frame, or media
-// fallback content rather than rendered text in the containing document.
 func isInnerTextReplacedContentElement(node *dom.Node) bool {
 	if node == nil || node.Namespace != dom.NSHTML {
 		return false

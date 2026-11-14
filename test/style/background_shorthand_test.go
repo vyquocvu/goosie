@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// The background shorthand lets position and size ride along with the image and
-// colour in one declaration. A layer that only sets them through `background`
-// must still reach those fields, or the image lands at its default top-left
-// origin instead of where the author asked.
 func TestBackgroundShorthandPositionAndSize(t *testing.T) {
 	s := styleFor(t, `<html><body><div class="x">x</div></body></html>`,
 		`body { font: 20px/1.5 sans-serif } .x { background: rgba(0,136,238,.3) url("invU.png") bottom repeat-x }`, "div")
@@ -22,7 +18,7 @@ func TestBackgroundShorthandPositionAndSize(t *testing.T) {
 	if s.BackgroundPosYMode != style.BgPosEnd {
 		t.Errorf("BackgroundPosYMode = %v, want end (bottom)", s.BackgroundPosYMode)
 	}
-	if s.BackgroundColor.A != 77 { // round(0.3 * 255)
+	if s.BackgroundColor.A != 77 {
 		t.Errorf("background colour alpha = %d, want 77", s.BackgroundColor.A)
 	}
 }

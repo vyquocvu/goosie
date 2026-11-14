@@ -37,7 +37,6 @@ func multipartParts(t *testing.T, contentType, body string) []multipartPart {
 		if err != nil {
 			t.Fatalf("read part: %v", err)
 		}
-		// NextPart drains the previous body, so read it before advancing.
 		data, err := io.ReadAll(part)
 		if err != nil {
 			t.Fatalf("read part %q: %v", part.FormName(), err)

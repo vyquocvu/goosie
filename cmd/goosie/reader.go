@@ -10,19 +10,17 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// Article holds distilled distraction-free content extracted from a webpage.
 type Article struct {
 	Title       string
 	Byline      string
 	ContentHTML string
 	TextLength  int
 	WordCount   int
-	ReadingTime int // in minutes (assumes 200 WPM)
+	ReadingTime int
 	URL         string
-	Theme       string // "light", "sepia", "dark"
+	Theme       string
 }
 
-// ExtractArticle analyzes a DOM tree and extracts clean readability content.
 func ExtractArticle(doc *dom.Document, pageURL, theme string) *Article {
 	if theme == "" {
 		theme = "light"
@@ -41,7 +39,6 @@ func ExtractArticle(doc *dom.Document, pageURL, theme string) *Article {
 
 	root := &doc.Node
 
-	// Extract Title
 	art.Title = extractTitle(root)
 	if art.Title == "" && pageURL != "" {
 		if u, err := url.Parse(pageURL); err == nil {
@@ -52,10 +49,8 @@ func ExtractArticle(doc *dom.Document, pageURL, theme string) *Article {
 		art.Title = "Untitled Article"
 	}
 
-	// Extract Byline
 	art.Byline = extractByline(root, pageURL)
 
-	// Find best container
 	candidate := findBestArticleNode(root)
 	if candidate == nil {
 		candidate = findBodyNode(root)
@@ -73,7 +68,6 @@ func ExtractArticle(doc *dom.Document, pageURL, theme string) *Article {
 	}
 	art.ContentHTML = content
 
-	// Count words and reading time
 	text := pureTextBuilder.String()
 	art.TextLength = len(text)
 	words := countWords(text)
@@ -86,7 +80,6 @@ func ExtractArticle(doc *dom.Document, pageURL, theme string) *Article {
 	return art
 }
 
-// extractTitle finds the title from <title>, <meta og:title>, or the first <h1>.
 func extractTitle(root *dom.Node) string {
 	var title string
 	var walk func(n *dom.Node)
@@ -137,7 +130,6 @@ func extractTitle(root *dom.Node) string {
 	return title
 }
 
-// extractByline looks for author meta tags, site names, or URL host.
 func extractByline(root *dom.Node, pageURL string) string {
 	var byline string
 	var siteName string
@@ -181,7 +173,6 @@ func extractByline(root *dom.Node, pageURL string) string {
 	return ""
 }
 
-// findBodyNode locates the <body> element in the tree.
 func findBodyNode(root *dom.Node) *dom.Node {
 	var body *dom.Node
 	var walk func(n *dom.Node)
@@ -204,7 +195,6 @@ func findBodyNode(root *dom.Node) *dom.Node {
 	return root
 }
 
-// findBestArticleNode finds the container with the highest readability score.
 func findBestArticleNode(root *dom.Node) *dom.Node {
 	var bestNode *dom.Node
 	bestScore := 0
@@ -245,7 +235,6 @@ func findBestArticleNode(root *dom.Node) *dom.Node {
 	return nil
 }
 
-// calculateReadabilityScore estimates the article density of a container node.
 func calculateReadabilityScore(node *dom.Node) int {
 	score := 0
 	pCount := 0
@@ -292,7 +281,6 @@ func calculateReadabilityScore(node *dom.Node) int {
 	}
 	scan(node, false)
 
-	// High link density penalty (navigation lists / blog rolls)
 	if textLen > 0 {
 		linkDensity := float64(linkTextLen) / float64(textLen)
 		if linkDensity > 0.5 {
@@ -304,7 +292,6 @@ func calculateReadabilityScore(node *dom.Node) int {
 	return score
 }
 
-// renderReadableNode formats content into clean, semantic reader HTML.
 func renderReadableNode(sb, pure *strings.Builder, n *dom.Node, depth int) {
 	if n == nil {
 		return
@@ -420,14 +407,12 @@ func renderReadableNode(sb, pure *strings.Builder, n *dom.Node, depth int) {
 		}
 		sb.WriteString(fmt.Sprintf("</%s>", tag))
 	default:
-		// For other elements (e.g. div, span, section), render children
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			renderReadableNode(sb, pure, c, depth+1)
 		}
 	}
 }
 
-// isBoilerplateOrNoise checks if an element represents noise or layout junk.
 func isBoilerplateOrNoise(n *dom.Node) bool {
 	if n == nil || n.Type != dom.NodeElement {
 		return false
@@ -504,7 +489,6 @@ func countWords(s string) int {
 	return words
 }
 
-// RenderReaderPageHTML generates the full distraction-free reading experience.
 func RenderReaderPageHTML(art *Article) string {
 	bg := "#fdfdfd"
 	fg := "#222222"

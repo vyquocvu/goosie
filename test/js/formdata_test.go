@@ -84,7 +84,6 @@ func TestFormDataConstructionGuardPreventsRecursiveFormSubmission(t *testing.T) 
 	}
 }
 
-// TestFormDataAppend verifies that appended entries are retrievable by name.
 // qc:BR-124
 func TestFormDataAppend(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
@@ -114,7 +113,6 @@ func TestFormDataAppend(t *testing.T) {
 	}
 }
 
-// TestFormDataSet verifies that set replaces every existing entry for a name.
 // qc:BR-124
 func TestFormDataSet(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
@@ -201,7 +199,6 @@ func TestFormDataDelete(t *testing.T) {
 	}
 }
 
-// TestFormDataGetAll verifies that repeated names keep insertion order.
 // qc:BR-124
 func TestFormDataGetAll(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
@@ -276,9 +273,6 @@ func TestFormDataOnWindow(t *testing.T) {
 	}
 }
 
-// TestFormDataSpecialCharactersPreserved verifies that separators, spaces, and
-// non-ASCII text in a FormData name or value are stored and returned verbatim
-// instead of being reinterpreted as form syntax.
 // qc:BR-124
 func TestFormDataSpecialCharactersPreserved(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})

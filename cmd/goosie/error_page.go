@@ -9,7 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// categorizeError classifies a network/navigation failure into a user-friendly code and summary.
 func categorizeError(err error) (code, heading, summary string) {
 	if err == nil {
 		return "ERR_UNKNOWN", "Unknown Error", "An unexpected error occurred."
@@ -34,7 +33,6 @@ func categorizeError(err error) (code, heading, summary string) {
 	}
 }
 
-// formatErrorPageHTML generates clean, responsive in-viewport HTML for navigation failures.
 func formatErrorPageHTML(rawURL string, err error) string {
 	code, heading, summary := categorizeError(err)
 	escapedURL := html.EscapeString(rawURL)
@@ -132,7 +130,6 @@ ul {
 </html>`, heading, escapedURL, summary, code, escapedErr, escapedURL)
 }
 
-// buildErrorPage renders the error HTML page into a frame Layer for in-viewport display.
 func (f *framePath) buildErrorPage(rawURL string, err error) (*frame.Layer, *engine.Session, frame.Color) {
 	if f.fonts == nil || f.contentWidth() <= 0 {
 		return nil, nil, frame.RGB(255, 255, 255)

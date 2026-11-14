@@ -42,8 +42,6 @@ html,body{margin:0}
 	red := frame.RGB(255, 0, 0)
 	blue := frame.RGB(0, 0, 255)
 
-	// The red box is declared first but carries the higher layer, so it must
-	// paint last: document order alone would leave blue on top.
 	list := paintList(t, newPaintSession(t, fmt.Sprintf(doc, "z-index:2", "z-index:1")))
 	redAt, blueAt := -1, -1
 	for i, cmd := range list.All() {
@@ -64,8 +62,6 @@ html,body{margin:0}
 		t.Errorf("red (z-index:2) painted at %d before blue (z-index:1) at %d; the higher layer must be on top", redAt, blueAt)
 	}
 
-	// Without a z-index the flow is document order, which is the contract the
-	// sort must not disturb: blue is declared last and must still be on top.
 	list = paintList(t, newPaintSession(t, fmt.Sprintf(doc, "", "")))
 	redAt, blueAt = -1, -1
 	for i, cmd := range list.All() {

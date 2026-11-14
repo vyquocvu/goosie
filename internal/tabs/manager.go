@@ -7,10 +7,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// maxClosedTabs is the maximum number of closed tab snapshots preserved for reopening.
 const maxClosedTabs = 25
 
-// ClosedTab holds snapshot state of a closed tab to support ReopenTab (Cmd+Shift+T).
 type ClosedTab struct {
 	URL     string
 	Title   string
@@ -18,7 +16,6 @@ type ClosedTab struct {
 	ScrollY int32
 }
 
-// TabManager owns all tabs and tracks which is active.
 type TabManager struct {
 	mu          sync.Mutex
 	tabs        []*Tab
@@ -27,21 +24,13 @@ type TabManager struct {
 	closedTabs  []ClosedTab
 	onCloseLast func()
 	OnChange    func()
-	// tabScroll is the strip's horizontal offset in logical pixels. The wheel
-	// handler, the draw path and hit testing share this one value under mu so
-	// a press always lands on the tab the pixels show.
-	tabScroll int32
-	// drag tracks a pointer tab-reorder: the dragged tab and its current
-	// strip X. Draw and hit-testing share it under mu with everything else.
-	dragID uint64
-	dragX  int32
-	dragOn bool
-	// theme is the appearance palette the strip paints with; empty is light.
-	theme string
+	tabScroll   int32
+	dragID      uint64
+	dragX       int32
+	dragOn      bool
+	theme       string
 }
 
-// SetTheme selects the tab strip's appearance palette. Unknown names fall back
-// to light, matching the toolbar and content theme resolvers.
 func (m *TabManager) SetTheme(theme string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -53,7 +42,6 @@ func (m *TabManager) SetTheme(theme string) {
 	}
 }
 
-// Theme reports the active appearance palette name.
 func (m *TabManager) Theme() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -82,7 +70,6 @@ func (m *TabManager) NewTab() *Tab {
 	return tab
 }
 
-// NewIncognitoTab creates a new private incognito tab.
 func (m *TabManager) NewIncognitoTab() *Tab {
 	m.mu.Lock()
 	m.nextID++
@@ -169,8 +156,6 @@ func (m *TabManager) CloseTab(id uint64) {
 	m.fireChange()
 }
 
-// DuplicateTab clones the tab identified by id, inserts it immediately after
-// the source tab, activates it, and returns the new tab.
 func (m *TabManager) DuplicateTab(id uint64) (*Tab, bool) {
 	m.mu.Lock()
 	idx := -1
@@ -205,8 +190,6 @@ func (m *TabManager) DuplicateTab(id uint64) (*Tab, bool) {
 	return dup, true
 }
 
-// CloseOtherTabs closes all tabs except the tab with keepID and any pinned tabs.
-// Closed tabs are archived in closedTabs for reopening.
 func (m *TabManager) CloseOtherTabs(keepID uint64) {
 	m.mu.Lock()
 	var remaining []*Tab
@@ -244,7 +227,6 @@ func (m *TabManager) CloseOtherTabs(keepID uint64) {
 	m.fireChange()
 }
 
-// CloseTabsToRight closes all unpinned tabs positioned to the right of fromID.
 func (m *TabManager) CloseTabsToRight(fromID uint64) {
 	m.mu.Lock()
 	fromIdx := -1
@@ -305,7 +287,6 @@ func (m *TabManager) CloseTabsToRight(fromID uint64) {
 	m.fireChange()
 }
 
-// PinTab pins the tab identified by id and moves it after existing pinned tabs.
 func (m *TabManager) PinTab(id uint64) bool {
 	m.mu.Lock()
 	idx := -1
@@ -321,7 +302,6 @@ func (m *TabManager) PinTab(id uint64) bool {
 	}
 	tab := m.tabs[idx]
 	tab.SetPinned(true)
-	// Reorder tab to right after the last existing pinned tab before this index
 	lastPinnedIdx := -1
 	for i, t := range m.tabs {
 		if t.Pinned() && t.ID() != id {
@@ -346,7 +326,6 @@ func (m *TabManager) PinTab(id uint64) bool {
 	return true
 }
 
-// UnpinTab unpins the tab identified by id.
 func (m *TabManager) UnpinTab(id uint64) bool {
 	m.mu.Lock()
 	for _, t := range m.tabs {
@@ -361,7 +340,6 @@ func (m *TabManager) UnpinTab(id uint64) bool {
 	return false
 }
 
-// TogglePin toggles the pinned state of the tab identified by id.
 func (m *TabManager) TogglePin(id uint64) bool {
 	m.mu.Lock()
 	for _, t := range m.tabs {
@@ -378,9 +356,6 @@ func (m *TabManager) TogglePin(id uint64) bool {
 	return false
 }
 
-// ReopenTab creates a new tab restoring the state of the most recently closed tab,
-// appends it, activates it, and returns the tab and true. If no closed tab is
-// available, it returns nil, false.
 func (m *TabManager) ReopenTab() (*Tab, bool) {
 	m.mu.Lock()
 	if len(m.closedTabs) == 0 {
@@ -410,21 +385,18 @@ func (m *TabManager) ReopenTab() (*Tab, bool) {
 	return tab, true
 }
 
-// CanReopenTab reports whether there are closed tabs available to reopen.
 func (m *TabManager) CanReopenTab() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.closedTabs) > 0
 }
 
-// ClosedTabCount reports the number of closed tabs in the reopen stack.
 func (m *TabManager) ClosedTabCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.closedTabs)
 }
 
-// PopClosedTab pops and returns the most recently closed tab record without creating a tab.
 func (m *TabManager) PopClosedTab() (ClosedTab, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -491,15 +463,12 @@ func (m *TabManager) TabByID(id uint64) *Tab {
 	return nil
 }
 
-// TabScroll reports the strip's horizontal offset in logical pixels.
 func (m *TabManager) TabScroll() int32 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.tabScroll
 }
 
-// SetTabScroll moves the strip, clamped to [0, StripMaxOffset] for the given
-// geometry so an over-scroll or a resize can never park it past its content.
 func (m *TabManager) SetTabScroll(off, tabCount, contentWidth int32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -513,10 +482,6 @@ func (m *TabManager) SetTabScroll(off, tabCount, contentWidth int32) {
 	m.tabScroll = off
 }
 
-// MoveTab reorders tabID to final index toIndex (clamped), keeping the
-// active tab stable by identity rather than position. It reports whether
-// anything moved. Change notification fires after unlock, like every other
-// mutator: callbacks reenter the manager.
 func (m *TabManager) MoveTab(id uint64, toIndex int) bool {
 	m.mu.Lock()
 	from := -1
@@ -561,14 +526,12 @@ func (m *TabManager) MoveTab(id uint64, toIndex int) bool {
 	return true
 }
 
-// StartDrag begins a pointer reorder of the given tab at strip X.
 func (m *TabManager) StartDrag(id uint64, x int32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.dragID, m.dragX, m.dragOn = id, x, true
 }
 
-// MoveDrag moves the in-progress reorder to strip X.
 func (m *TabManager) MoveDrag(x int32) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -577,14 +540,12 @@ func (m *TabManager) MoveDrag(x int32) {
 	}
 }
 
-// Dragging reports the in-progress reorder, if any.
 func (m *TabManager) Dragging() (id uint64, x int32, ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.dragID, m.dragX, m.dragOn
 }
 
-// EndDrag clears any in-progress reorder.
 func (m *TabManager) EndDrag() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// TestNthChildOfSelectorList pins the Selectors 4 `of` form: only siblings
-// matching the selector count, and the element itself must match one. Before,
-// the whole argument (including `of .foo`) went to the An+B parser, failed,
-// and no `of` form ever matched.
 func TestNthChildOfSelectorList(t *testing.T) {
 	doc := dom.NewDocument()
 	ul := doc.NewElement("ul")
@@ -37,20 +33,15 @@ func TestNthChildOfSelectorList(t *testing.T) {
 		t.Error("second .foo must match (2 of .foo)")
 	}
 
-	// Plain forms keep working through the same path: foo1 is the 2nd child
-	// overall, so a bare (2) matches it.
 	plain := css.ParseSelector("li:nth-child(2)")
 	if !plain.Matches(foo1) {
 		t.Error("plain li:nth-child(2) must still match the 2nd child")
 	}
 }
 
-// TestNthOfSpecificity pins the cascade half: the `of` selector contributes
-// its most specific argument on top of the pseudo-class itself.
 func TestNthOfSpecificity(t *testing.T) {
 	sel := css.ParseSelector("li:nth-child(2 of #x.y)")
 	a, b, c := sel.Specificity()
-	// (0,0,1) for li + (0,1,0) for the pseudo-class + (1,1,0) for #x.y.
 	if a != 1 || b != 2 || c != 1 {
 		t.Errorf("li:nth-child(2 of #x.y) specificity = (%d,%d,%d), want (1,2,1)", a, b, c)
 	}
@@ -61,9 +52,6 @@ func TestNthOfSpecificity(t *testing.T) {
 	}
 }
 
-// TestLangPseudoClass pins :lang() matching: the nearest ancestor-or-self
-// language wins, lang beats xml:lang on the same element, and BCP47 prefixes
-// match (en covers en-US but not english).
 func TestLangPseudoClass(t *testing.T) {
 	doc := dom.NewDocument()
 	root := doc.NewElement("div")
@@ -92,7 +80,7 @@ func TestLangPseudoClass(t *testing.T) {
 	}{
 		{"p:lang(en)", enPara, true},
 		{"p:lang(nl)", enPara, false},
-		{"p:lang(nl)", nlPara, true}, // inherited from root
+		{"p:lang(nl)", nlPara, true},
 		{"p:lang(de)", dePara, true},
 		{"p:lang(de-CH)", dePara, true},
 		{"p:lang(ch)", dePara, false},
@@ -105,10 +93,6 @@ func TestLangPseudoClass(t *testing.T) {
 	}
 }
 
-// TestLangPlainXmlLangInvisible pins what the reference engine does with
-// parser-produced attributes: a literal xml:lang never created by
-// setAttributeNS carries no namespace and :lang() ignores it, so lang alone
-// decides.
 func TestLangPlainXmlLangInvisible(t *testing.T) {
 	doc := dom.NewDocument()
 	root := doc.NewElement("div")
@@ -131,8 +115,6 @@ func TestLangPlainXmlLangInvisible(t *testing.T) {
 	}
 }
 
-// TestLangNamespacedXmlLangWins pins the setAttributeNS half: an
-// XML-namespaced xml:lang decides its level ahead of a plain lang.
 func TestLangNamespacedXmlLangWins(t *testing.T) {
 	doc := dom.NewDocument()
 	root := doc.NewElement("div")

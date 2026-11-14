@@ -9,12 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// The subresource budget is the other half of why the storm blanked the page:
-// every collection charged the bytes of every sheet again, so 927 requests for
-// 33 stylesheets were charged as if they were 927 distinct sheets. The memo
-// holds one copy of each text, so one copy is what the budget must lose. Only
-// an in-package test can read the charge, and the number is small enough to
-// name exactly.
 // qc:BR-282
 func TestLinkedSheetBytesChargedOncePerNavigation(t *testing.T) {
 	sheets := map[string]string{
@@ -69,10 +63,6 @@ func TestLinkedSheetBytesChargedOncePerNavigation(t *testing.T) {
 	}
 }
 
-// A nil memo is what the callers that collect outside any session get, and it
-// must keep the pre-memo behaviour of asking for every URL every pass. The
-// @import unit tests in this package run that way, so the shape is load-bearing
-// rather than theoretical.
 // qc:BR-282
 func TestNilSheetMemoAlwaysMisses(t *testing.T) {
 	var cache *cssTextCache

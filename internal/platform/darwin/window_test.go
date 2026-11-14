@@ -9,7 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// Type inference supplies the shim event because test files cannot import C.
 func zeroEvent[T any](func(T) (surface.Event, bool)) T {
 	var ev T
 	return ev
@@ -26,7 +25,7 @@ func TestTranslateScrollDirection(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ce := zeroEvent(translate)
-			ce.kind = 1 // GOOSIE_EV_SCROLL
+			ce.kind = 1
 			ce.dx, ce.dy = -12, -40
 			if tc.reverse {
 				ce.dx, ce.dy = -ce.dx, -ce.dy

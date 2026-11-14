@@ -14,21 +14,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/media"
 )
 
-// These are the only tests in the repository that prove anything was actually
-// decoded. Everything above this package runs against a scripted fake, which
-// pins the state machine and the ownership rules but would pass just as happily
-// against a backend that returned a black rectangle forever.
-//
-// They need no display and no window: AVPlayer owns the audio and the clock,
-// the video output hands pixels over instead of drawing them, and the player's
-// work happens on its own dispatch queue. A headless CI runner can therefore
-// run them, and a machine with no AVFoundation at all does not compile this
-// file.
-
-// fixturePath resolves a generated asset under testdata/media. The assets are
-// produced by the ffmpeg step documented in that directory rather than checked
-// in as opaque binaries, so a missing one is a skip with the command to run
-// rather than a failure that says nothing about the backend.
 func fixturePath(t *testing.T, name string) string {
 	t.Helper()
 	p := filepath.Join("..", "..", "..", "testdata", "media", name)
@@ -38,9 +23,6 @@ func fixturePath(t *testing.T, name string) string {
 	return p
 }
 
-// waitFor polls until want holds or the deadline passes, and fails rather than
-// hanging. A native decode is asynchronous, so every assertion here is a wait
-// rather than a read.
 func waitFor(t *testing.T, what string, p media.Player, want func(media.Snapshot) bool) media.Snapshot {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
@@ -59,10 +41,6 @@ func waitFor(t *testing.T, what string, p media.Player, want func(media.Snapshot
 	return last
 }
 
-// pixelDiff is the largest per-channel difference between two same-sized RGBA
-// frames. A moving test pattern is far above zero between two distinct frames
-// and exactly zero for a frame compared with itself, which is what makes
-// "the video advanced" an assertion rather than a hope.
 func pixelDiff(a, b image.Image) int {
 	ar, ok1 := a.(*image.RGBA)
 	br, ok2 := b.(*image.RGBA)
@@ -98,10 +76,6 @@ func TestMediaBackendRefusesAMissingPath(t *testing.T) {
 	}
 }
 
-// TestMediaBackendRefusesAMissingFile pins that an absent asset is reported
-// rather than played as silence. Creating an AVURLAsset does not touch the file,
-// so Open succeeding is correct: the refusal arrives when the metadata load
-// fails, which is the moment anything actually tried to read it.
 func TestMediaBackendRefusesAMissingFile(t *testing.T) {
 	p, err := mediaBackend{}.Open(filepath.Join(t.TempDir(), "absent.mp4"))
 	if err != nil {
@@ -119,10 +93,6 @@ func TestMediaBackendRefusesAMissingFile(t *testing.T) {
 	}
 }
 
-// TestMediaBackendRefusesGarbageThatLooksLikeMP4 pins the container check. An
-// ftyp box followed by nonsense is what a truncated download or a server error
-// page saved with the wrong extension looks like, and the honest answer is
-// "unsupported" rather than a player that never produces a frame.
 func TestMediaBackendRefusesGarbageThatLooksLikeMP4(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "garbage.mp4")
 	body := make([]byte, 512)
@@ -136,7 +106,6 @@ func TestMediaBackendRefusesGarbageThatLooksLikeMP4(t *testing.T) {
 	}
 	p, err := mediaBackend{}.Open(path)
 	if err != nil {
-		// Refusing at open is as good as refusing at prepare.
 		if !isUnsupported(err) {
 			t.Fatalf("Open(garbage) = %v, want ErrUnsupported", err)
 		}
@@ -148,10 +117,6 @@ func TestMediaBackendRefusesGarbageThatLooksLikeMP4(t *testing.T) {
 	})
 }
 
-// TestMediaBackendRefusesAnAssetOverTheLimits pins that the caps are enforced
-// where the pixels are measured rather than trusted from the file name. The
-// fixture is 1922x1080, which is one pixel over the width cap and over the area
-// cap as well.
 func TestMediaBackendRefusesAnAssetOverTheLimits(t *testing.T) {
 	p, err := mediaBackend{}.Open(fixturePath(t, "toobig.mp4"))
 	if err != nil {
@@ -169,9 +134,6 @@ func TestMediaBackendRefusesAnAssetOverTheLimits(t *testing.T) {
 	}
 }
 
-// TestMediaBackendDecodesRealFrames is the end-to-end proof: metadata, a frame
-// before playback, playback that advances, a seek that lands where it was asked,
-// mute, and a teardown that can be called twice.
 func TestMediaBackendDecodesRealFrames(t *testing.T) {
 	p, err := mediaBackend{}.Open(fixturePath(t, "clip.mp4"))
 	if err != nil {
@@ -179,9 +141,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 	}
 	defer p.Close()
 
-	// Metadata arrives asynchronously; nothing about the asset is known until it
-	// does, and a duration of NaN before that point is the contract the engine
-	// and the JS binding both rely on.
 	snap := waitFor(t, "metadata", p, func(s media.Snapshot) bool {
 		return !media.UnknownDuration(s.Duration) && s.Width > 0
 	})
@@ -192,8 +151,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 		t.Fatalf("duration = %v, want about 2s", snap.Duration)
 	}
 
-	// A frame must be available before play: a paused video with nothing drawn
-	// is a black box the user cannot tell from a broken one.
 	first := waitFor(t, "a frame before playback", p, func(s media.Snapshot) bool {
 		return s.Pixels != nil
 	})
@@ -208,13 +165,9 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 		t.Fatal("the decoded frame is transparent: the premultiplied RGBA conversion dropped the alpha")
 	}
 
-	// Frames are immutable and independently owned, because they go straight
-	// into a frozen display list.
 	held := make([]byte, len(img.Pix))
 	copy(held, img.Pix)
 
-	// Playback. The op is what ties the completion back to the request, so a
-	// stale play cannot settle a newer one.
 	const playOp uint64 = 7
 	p.Play(playOp)
 	playing := waitFor(t, "playback", p, func(s media.Snapshot) bool {
@@ -224,8 +177,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 		t.Fatalf("playback settled op %d, want %d", playing.DoneOp, playOp)
 	}
 
-	// The video has to actually move, and the frame already handed over must not
-	// change underneath the caller.
 	var moved bool
 	var lastPlaying image.Image
 	lastSeq := first.Seq
@@ -254,10 +205,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 		t.Fatalf("position = %v after playback, want it to have advanced", got)
 	}
 
-	// Pause. A paused output is not expected to keep serving frames — nothing is
-	// advancing, so there is no new frame to serve, and the one already delivered
-	// is what stays on screen. What a paused user does next is seek, and that has
-	// to produce the frame at the new position rather than the old one.
 	p.Pause()
 	waitFor(t, "the pause", p, func(s media.Snapshot) bool { return s.State == media.StatePaused })
 
@@ -276,7 +223,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 		t.Fatal("the seek produced the frame that was already showing: a paused seek did not decode its new position")
 	}
 
-	// A stale seek must not settle a newer one.
 	p.Seek(12, 0.2)
 	p.Seek(13, 1.0)
 	settled := map[uint64]bool{}
@@ -291,8 +237,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 		t.Fatal("a superseded seek reported completion")
 	}
 
-	// Mute is observable in the state, because the JS binding reads it from
-	// there rather than keeping its own idea.
 	p.SetMuted(true)
 	if got := waitFor(t, "mute", p, func(s media.Snapshot) bool { return s.Muted }).Muted; !got {
 		t.Fatal("SetMuted(true) did not reach the state")
@@ -300,8 +244,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 	p.SetMuted(false)
 	waitFor(t, "unmute", p, func(s media.Snapshot) bool { return !s.Muted })
 
-	// Replaying from the end is a seek to zero, which is what the DOM says
-	// happens and what the engine does.
 	p.Seek(14, 0)
 	waitFor(t, "the rewind", p, func(s media.Snapshot) bool { return s.DoneOp == 14 })
 	p.Play(15)
@@ -319,9 +261,6 @@ func TestMediaBackendDecodesRealFrames(t *testing.T) {
 	p.SetMuted(true)
 }
 
-// TestMediaBackendPlaysAVideoWithNoAudioTrack pins that the audio track is
-// optional: a video-only file is the common case for generated assets and for
-// muted autoplay, and refusing it would refuse most of the web's short clips.
 func TestMediaBackendPlaysAVideoWithNoAudioTrack(t *testing.T) {
 	p, err := mediaBackend{}.Open(fixturePath(t, "silent.mp4"))
 	if err != nil {
@@ -337,9 +276,6 @@ func TestMediaBackendPlaysAVideoWithNoAudioTrack(t *testing.T) {
 	waitFor(t, "a frame from the silent asset", p, func(s media.Snapshot) bool { return s.Pixels != nil })
 }
 
-// TestMediaBackendClosesWhilePlaying pins the teardown a user actually performs:
-// closing a tab mid-playback. Audio has to stop, and the close must not hang
-// waiting on a decoder that is mid-frame.
 func TestMediaBackendClosesWhilePlaying(t *testing.T) {
 	p, err := mediaBackend{}.Open(fixturePath(t, "clip.mp4"))
 	if err != nil {
@@ -361,11 +297,6 @@ func TestMediaBackendClosesWhilePlaying(t *testing.T) {
 	}
 }
 
-// opaqueEnough reports whether a decoded frame has visible content. The test
-// pattern is bright and busy, so a frame that came through the BGRA conversion
-// with its alpha zeroed would fail here — which is the mistake worth catching,
-// because a fully transparent frame composites to nothing and looks exactly like
-// a video that never started.
 func opaqueEnough(img *image.RGBA) bool {
 	opaque := 0
 	for i := 3; i < len(img.Pix); i += 4 {
@@ -378,15 +309,6 @@ func opaqueEnough(img *image.RGBA) bool {
 
 func isUnsupported(err error) bool { return errors.Is(err, media.ErrUnsupported) }
 
-// TestMain pins the main goroutine to the process main thread and services that
-// thread's run loop for as long as the tests run.
-//
-// This is not a convenience. AVPlayer prepares its item only on the main thread:
-// a worker thread with its own CFRunLoop turns the loop faithfully and the item's
-// status still never leaves Unknown, with no KVO notification and no error to
-// explain it. The browser gets the main run loop from GoosieAppRun, which services
-// AppKit with bounded waits; a test binary has nothing of the kind, so without
-// this every playback test below would be exercising a backend that cannot play.
 func TestMain(m *testing.M) {
 	runtime.LockOSThread()
 	code := 1

@@ -13,8 +13,6 @@ import (
 	"unsafe"
 )
 
-// ChooseSavePath presents the native save panel and returns the selected path.
-// The panel is always marshaled onto AppKit's main thread by the shim.
 func (w *Window) ChooseSavePath(directory, filename string) (string, bool, error) {
 	if w == nil || w.gw == nil {
 		return "", false, ErrClosed
@@ -38,15 +36,10 @@ func (w *Window) ChooseSavePath(directory, filename string) (string, bool, error
 	}
 }
 
-// ChooseFiles presents the native open panel and returns the selected paths.
-// The panel is always marshaled onto AppKit's main thread by the shim.
 func (w *Window) ChooseFiles(accept string, multiple bool) ([]string, bool, error) {
 	if w == nil || w.gw == nil {
 		return nil, false, ErrClosed
 	}
-	// The panel understands extensions directly and MIME types through UTType.
-	// An accept value it cannot represent leaves the selection unfiltered, as
-	// hiding files the page meant to allow is worse than showing all of them.
 	extensions, mimeTypes := parseFileAccept(accept).nativeFilter()
 	cExtensions := C.CString(extensions)
 	defer C.free(unsafe.Pointer(cExtensions))

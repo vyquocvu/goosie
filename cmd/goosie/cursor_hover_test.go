@@ -9,7 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// recWin is a window fake that records the cursor shapes it is asked for.
 type recWin struct {
 	cursors []surface.Cursor
 }
@@ -72,7 +71,6 @@ func TestInterceptHoverContentUsesResolver(t *testing.T) {
 		t.Fatalf("hover over content recorded %v, want one CursorPointer", rec.cursors)
 	}
 
-	// The same shape twice must not spam the platform: only a change calls.
 	cw.intercept(hoverMotion(50, int32(totalChromeHeight)+5))
 	if len(rec.cursors) != 1 {
 		t.Fatalf("repeat hover recorded %v, want the unchanged shape dropped", rec.cursors)
@@ -80,8 +78,6 @@ func TestInterceptHoverContentUsesResolver(t *testing.T) {
 }
 
 func TestInterceptHoverWithoutWindowDoesNotPanic(t *testing.T) {
-	// Existing tests build chromeWindow with no Window embedded; a hover
-	// over chrome or content must still be routable without one.
 	cw := newHoverWindow(nil)
 	if !cw.intercept(hoverMotion(10, 10)) {
 		t.Fatal("tab-bar hover not consumed")

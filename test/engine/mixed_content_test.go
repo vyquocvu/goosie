@@ -56,9 +56,6 @@ func TestMixedContentAllowsSameScheme(t *testing.T) {
 	}
 }
 
-// FR-SEC-03: an HTTPS document must not run a plaintext script or apply a
-// plaintext stylesheet. Both are active content: one runs code, the other can
-// rewrite the page and exfiltrate what it reads.
 func TestMixedContentBlocksActiveSubresources(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://secure.example.com/page"})
 	if err != nil {
@@ -95,9 +92,6 @@ func TestMixedContentBlocksActiveSubresources(t *testing.T) {
 	}
 }
 
-// FR-SEC-03: a plaintext iframe is an active child browsing context. The
-// embedding layer owns transport, but the engine owns the decision, so the
-// loader must never see the request.
 func TestMixedContentBlocksIFrame(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://secure.example.com/page"})
 	if err != nil {
@@ -128,8 +122,6 @@ document.body.appendChild(f);
 	}
 }
 
-// FR-SEC-03 applies to secure documents only. A page that was itself served
-// over plaintext asks for nothing stronger from its subresources.
 func TestMixedContentAllowsInsecureResourcesOnInsecureDocument(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "http://insecure.example.com/page"})
 	if err != nil {
@@ -171,8 +163,6 @@ func TestMixedContentAllowsInsecureResourcesOnInsecureDocument(t *testing.T) {
 	}
 }
 
-// Relative and scheme-relative references inherit the document's secure
-// scheme, so they are not downgrades and must keep loading.
 func TestMixedContentAllowsSecureRelativeReferences(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://secure.example.com/page"})
 	if err != nil {
@@ -213,8 +203,6 @@ func TestMixedContentAllowsSecureRelativeReferences(t *testing.T) {
 	}
 }
 
-// A page cannot turn its own report buffer into an unbounded allocation: one
-// document may name thousands of downgraded URLs.
 func TestMixedContentReportsAreBounded(t *testing.T) {
 	var html string
 	for i := 0; i < 40; i++ {

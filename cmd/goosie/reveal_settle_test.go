@@ -11,21 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// GOOSIE-FADESETTLE-001: the screenshot run wrote the page as it was before
-// the page had shown itself. Measured before the fix on /tmp/fade/reveal.html
-// (a 400x300 display:none box revealed by `setTimeout(..., 200)`, 600x400 at
-// DPR 1): goosie -screenshot produced 1 distinct colour and 0 ink in 0.258s,
-// while Chromium 131.0.6778.33 at load+1s produces 2 colours and 120,000 ink.
-// Nothing the driver consulted could see the debt - every tile was drawn,
-// nothing was on order, and no callback had repainted because no callback had
-// run - so the run decided it was idle 10 vsyncs before the reveal.
-//
-// The fix asks the document when it next owes itself a timer it queued during
-// its own load, and will not call a frame settled while one is due inside
-// steadyRevealHorizon. The oracles below pin both halves: the reveal is
-// captured, and the wait stays bounded, because a screenshot sweep that waits
-// for every pending timer would wait for gov.vn's 24-hour one.
-
 func revealDriver(reveal func() (time.Duration, bool)) *steadyDriver {
 	f := &framePath{window: &stubWindow{events: make(chan surface.Event)}}
 	d := newSteadyDriver(f, 8)
@@ -42,9 +27,6 @@ func tickReady(d *steadyDriver, started time.Time) bool {
 	return d.ready(started)
 }
 
-// Startup work due inside the horizon holds the run, and the frames
-// it spends waiting are the frames the reveal is drawn in.
-//
 // qc:BR-283
 func TestSteadyWaitsForStartupTimer(t *testing.T) {
 	d := revealDriver(func() (time.Duration, bool) { return 200 * time.Millisecond, true })
@@ -54,8 +36,6 @@ func TestSteadyWaitsForStartupTimer(t *testing.T) {
 			t.Fatalf("the run settled at frame %d while a 200ms startup timer was pending", d.sent)
 		}
 	}
-	// The timer fires and the pump repaints; from there the ordinary two idle
-	// frames rule decides, so the first quiet frame is not enough.
 	d.watchReveal(func() (time.Duration, bool) { return 0, false })
 	if tickReady(d, started) {
 		t.Fatal("the run settled on the first idle frame after the reveal")
@@ -65,11 +45,6 @@ func TestSteadyWaitsForStartupTimer(t *testing.T) {
 	}
 }
 
-// The other half of the rule, and the reason a sweep does not slow
-// down for pages that boot polling timers. 600ms is past the horizon, so the
-// run settles on the floor and two idle frames, exactly as it did before this
-// existed.
-//
 // qc:BR-283
 func TestSteadyDoesNotWaitForLateStartupTimer(t *testing.T) {
 	d := revealDriver(func() (time.Duration, bool) { return 600 * time.Millisecond, true })
@@ -87,10 +62,6 @@ func TestSteadyDoesNotWaitForLateStartupTimer(t *testing.T) {
 	}
 }
 
-// The wait itself is capped at one horizon, so a page that keeps
-// queueing zero-delay startup tasks costs the sweep half a second rather than
-// running to the deadline.
-//
 // qc:BR-283
 func TestSteadyRevealWaitSpendsOnlyOneHorizon(t *testing.T) {
 	d := revealDriver(func() (time.Duration, bool) { return time.Millisecond, true })
@@ -111,11 +82,6 @@ func TestSteadyRevealWaitSpendsOnlyOneHorizon(t *testing.T) {
 	}
 }
 
-// A startup timer enters the horizon as the run approaches it, and
-// by then the run may already have counted an idle frame. Waiting has to
-// restart the settle count, because the frame the run would have written is
-// not the frame the reveal paints.
-//
 // qc:BR-283
 func TestSteadyRevealEnteringTheHorizonRestartsTheSettleCount(t *testing.T) {
 	due, pending := 900*time.Millisecond, true
@@ -136,7 +102,7 @@ func TestSteadyRevealEnteringTheHorizonRestartsTheSettleCount(t *testing.T) {
 	if d.settled != 0 {
 		t.Fatalf("settled = %d during the wait, want the count restarted", d.settled)
 	}
-	pending = false // the callback ran, so the document reports no startup debt
+	pending = false
 	if tickReady(d, started) {
 		t.Fatal("the run settled on the first idle frame after the reveal")
 	}
@@ -158,9 +124,6 @@ func writeRevealPage(t *testing.T, delayMS int) string {
 	return "file://" + path
 }
 
-// ink counts the non-white pixels of the PNG the screenshot run wrote, which
-// is the whole question this defect is about: was the page captured as it
-// looks once its own queued work has run?
 func ink(t *testing.T, path string) int {
 	t.Helper()
 	f, err := os.Open(path)
@@ -185,13 +148,6 @@ func ink(t *testing.T, path string) int {
 	return n
 }
 
-// The shipped flag path, on the measured fixture. A box the page
-// reveals 200ms after load has to be in the PNG, as it is in Chromium's at
-// load+1s. 200ms rather than 100ms because the delay sweep says so: the
-// pre-fix run ended 150 to 190ms after it started, so a 100ms reveal already
-// landed by luck (measured: HEAD r0/r10/r50/r100 ink 120,000,
-// r200/r400/r800 ink 0). Only past that window does the missing signal show.
-//
 // qc:BR-283
 func TestScreenshotCapturesStartupReveal(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "reveal.png")
@@ -204,10 +160,6 @@ func TestScreenshotCapturesStartupReveal(t *testing.T) {
 	}
 }
 
-// And the bound is real. A reveal 3s out is past the horizon, so
-// the run ends without it rather than holding the sweep, exactly as it did
-// before this rule existed.
-//
 // qc:BR-283
 func TestScreenshotDoesNotWaitForLateReveal(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "late.png")
@@ -220,8 +172,6 @@ func TestScreenshotDoesNotWaitForLateReveal(t *testing.T) {
 	}
 }
 
-// A page with no startup timers at all must not pay for the rule.
-//
 // qc:BR-283
 func TestScreenshotOfStaticPageIsUnaffected(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "static.png")

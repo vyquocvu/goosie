@@ -8,47 +8,12 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// document.implementation.createHTMLDocument, and the detached document it
-// returns.
-//
-// The evidence is a measured throw, not a spec checklist. With every Node API in
-// this task's cluster already in place, the real jquery-3.6.0.min.js (89,501
-// bytes) inlined into a page still died while the library was installing itself:
-//
-//	TypeError: Cannot read property 'createHTMLDocument' of undefined or null
-//
-// because jQuery's load-time support probe is an unconditional statement:
-//
-//	y.createHTMLDocument = ((_t = E.implementation.createHTMLDocument("")
-//	                          .body).innerHTML = "<form></form><form></form>",
-//	                       2 === _t.childNodes.length)
-//
-// and S.parseHTML reaches for the same member again for every multi-tag
-// fragment. Past that throw `jQuery` is never defined, so the page's own
-// `jQuery(function($){...})` dies as "jQuery is not defined" and the render
-// never gets further than the server HTML. TestJQueryCreateHTMLDocumentProbeIs
-// TheExactExpression pins that statement; the rest pin the semantics it needs.
-//
-// `implementation.createDocument` was absent when this test file was first
-// written and has since been implemented under TASK-055. `hasFeature` remains
-// absent. The createHTMLDocument result is still a detached scratch tree: it is
-// not the runtime's `document` and is not styled, laid out, or painted.
-//
-// Every assertion reads through String(...)/explicit comparisons, because Array
-// join turns null and undefined into empty slots and would hide exactly the
-// distinction these tests care about: a member that is missing vs a member that
-// answers null.
-
 func detachedRuntime(t *testing.T, html string) *js.Runtime {
 	t.Helper()
 	doc := domtest.Parse(html)
 	return newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})
 }
 
-// The standard's createHTMLDocument(title) builds a document whose content is a
-// doctype plus html > (head > title) and an empty body. The assertions are that
-// shape, the HTML casing browsers use for nodeName, and the fact that the live
-// document is untouched by it.
 // qc:BR-208
 func TestCreateHTMLDocumentBuildsTheStandardSkeleton(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body><p id="a">main text</p></body></html>`)
@@ -114,11 +79,6 @@ func TestDOMElementNameValidationUsesDOMRules(t *testing.T) {
 	}
 }
 
-// jQuery's own probe, quoted rather than paraphrased, because it is the
-// statement whose throw stopped the library from installing: the body of a
-// detached document must take innerHTML, the two forms must arrive as two child
-// nodes, and the comparison must be exactly true - that boolean is stored in
-// y.createHTMLDocument and branched on by every later innerHTML/parseHTML path.
 // qc:BR-208
 func TestJQueryCreateHTMLDocumentProbeIsTheExactExpression(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body><p>main</p></body></html>`)
@@ -130,17 +90,9 @@ func TestJQueryCreateHTMLDocumentProbeIsTheExactExpression(t *testing.T) {
 	if got != "true" {
 		t.Fatalf("jQuery's createHTMLDocument probe returned %q, not true; with that flag false jQuery takes a different buildFragment path and the measured pages' markup never reaches the DOM", got)
 	}
-	// The forms belong to the document they were written into. If innerHTML had
-	// resolved the host document instead of the node's own, the live body would
-	// have grown; and because each call returns a *new* document, a second one
-	// starts with an empty body - a scratch tree jQuery can reuse without
-	// inheriting the previous scratch's content.
 	if again := evalString(t, rt, `(function(){return [String(document.body.childNodes.length),String(document.getElementsByTagName("form").length),String(document.implementation.createHTMLDocument("").body.childNodes.length)].join(",")})()`); again != "1,0,0" {
 		t.Errorf("detached innerHTML scoping: got %q want %q", again, "1,0,0")
 	}
-	// The block that runs only when that flag is true, in jQuery's own shape: an
-	// input appended to a detached document and cloned must carry its checked
-	// state, and the clone must be a different node with the same owner.
 	checked := evalString(t, rt, `(function(){
 		var d = document.implementation.createHTMLDocument(""), input = d.createElement("input");
 		input.setAttribute("type", "checkbox");
@@ -154,22 +106,6 @@ func TestJQueryCreateHTMLDocumentProbeIsTheExactExpression(t *testing.T) {
 	}
 }
 
-// S.parseHTML's base-href branch, quoted from the same library:
-//
-//	((r = (t = E.implementation.createHTMLDocument("")).createElement("base")
-//	  ).href = E.location.href, t.head.appendChild(r))
-//
-// It needs createElement on the detached document, an href write that reads back,
-// a live location.href on the *page* document, and head as a real node whose
-// children include the base.
-//
-// One caveat is asserted rather than hidden: `r.href = ...` lands as the JS
-// property jQuery wrote, not as a `href` attribute, because this engine reflects
-// IDL attributes only for a few members (internal/js/js.go has no href
-// accessor). That is pre-existing, it is not on a measured blocker path - the
-// base only matters to a browser's URL resolution, and this engine never
-// resolves a relative URL through a detached scratch document - and it is listed
-// in docs/tasks/TASK-047-DOM-JQUERY-APIS.md with the other named omissions.
 // qc:BR-208
 func TestParseHTMLBaseHrefBranchRunsAgainstTheDetachedHead(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body></body></html>`)
@@ -189,17 +125,6 @@ func TestParseHTMLBaseHrefBranchRunsAgainstTheDetachedHead(t *testing.T) {
 	}
 }
 
-// The detached document is isolated but identity-stable: elements created in it
-// answer ownerDocument with that exact object (not a look-alike wrapper), its
-// id/tag/class indexes and querySelector search only its own subtree, and the
-// live document cannot see it. jQuery's data cache and Sizzle's context test
-// both key off those identities.
-//
-// The query path matters here in a way it did not before this file: a query
-// rooted in a detached document used to be answered from the live document's
-// indexes filtered by "is this node under that root", which is always none and
-// is reported as a handled miss - a silent "not present" for content that is
-// present. See indexDocFor in internal/js/js.go.
 // qc:BR-208
 func TestDetachedDocumentIsIsolatedButIdentityStable(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body><div id="live">x</div></body></html>`)
@@ -226,30 +151,26 @@ func TestDetachedDocumentIsIsolatedButIdentityStable(t *testing.T) {
 		]
 	})()`)
 	want := strings.Join([]string{
-		"true", // a different document object
-		"true", // its own getElementById finds the created node
-		"true", // and never the live document's node
-		"true", // the live document cannot see the detached id
-		"true", // the live id still resolves in the live document
-		"true", // ownerDocument is that object by identity
-		"true", // parenting works inside it
-		"1",    // its own div only; the live one is in another tree
-		"1",    // class index scoped to it
-		"1",    // the live document still sees only its own div
-		"true", // querySelector answers from the detached tree
-		"true", // by id and by class alike
-		"1",    // querySelectorAll too
-		"1",    // and the live document's query is unaffected
+		"true",
+		"true",
+		"true",
+		"true",
+		"true",
+		"true",
+		"true",
+		"1",
+		"1",
+		"1",
+		"true",
+		"true",
+		"1",
+		"1",
 	}, ",")
 	if got != want {
 		t.Errorf("detached document isolation: got %q want %q", got, want)
 	}
 }
 
-// The rest of the constructor set the detached document has to answer, because
-// S.parseHTML and jQuery's clean/clone helpers call them on whatever document is
-// in hand rather than on the live one. Node types are the standard's 3/8/11, and
-// a fragment still means "its children move, it stays empty".
 // qc:BR-208
 func TestDetachedDocumentConstructors(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head></head><body></body></html>`)
@@ -271,8 +192,8 @@ func TestDetachedDocumentConstructors(t *testing.T) {
 	want := strings.Join([]string{
 		"3", "hi", "true",
 		"8", "c",
-		"11", "0", // the fragment emptied itself
-		"2", // body holds b and i
+		"11", "0",
+		"2",
 		"<b></b><i></i>",
 		"I",
 	}, ",")
@@ -281,9 +202,6 @@ func TestDetachedDocumentConstructors(t *testing.T) {
 	}
 }
 
-// title is the head's title element, read and written, and a title argument
-// containing markup stays text: the skeleton is built by parsing, so an
-// unescaped "<" in the argument would otherwise arrive as an element.
 // qc:BR-208
 func TestDetachedDocumentTitleIsTextAndIsWritable(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head></head><body></body></html>`)
@@ -301,12 +219,6 @@ func TestDetachedDocumentTitleIsTextAndIsWritable(t *testing.T) {
 	}
 }
 
-// hasFeature remains absent because the engine does not implement feature
-// reporting. createDocument is present and constructs the XML documents used by
-// DOM consumers such as the Range WPT fixtures.
-//
-// The live document title reflects its title element when one exists; the host
-// seed remains the fallback for an empty or not-yet-bound document.
 // qc:BR-208
 func TestDocumentImplementationOmitsUnimplementedMembers(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head><title>Main</title></head><body></body></html>`)
@@ -323,9 +235,6 @@ func TestDocumentImplementationOmitsUnimplementedMembers(t *testing.T) {
 	}
 }
 
-// createElement on the live document still allocates into the live tree, which
-// is what the live id/tag indexes search, and a node made in a scratch document
-// is not reachable from it. The two documents coexist without merging.
 // qc:BR-208
 func TestCreateElementOnTheLiveDocumentStillUsesTheLiveTree(t *testing.T) {
 	rt := detachedRuntime(t, `<!DOCTYPE html><html><head></head><body></body></html>`)

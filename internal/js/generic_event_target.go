@@ -7,8 +7,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// genericEventListener is the listener record used by ordinary EventTarget
-// instances. DOM nodes keep their richer propagation records in internal/dom.
 type genericEventListener struct {
 	typ     string
 	value   goja.Value
@@ -348,9 +346,6 @@ func (r *Runtime) dispatchGenericEvent(call goja.FunctionCall) goja.Value {
 	_ = event.Set("__composedPath", r.vm.NewArray(target))
 	listeners := append([]*genericEventListener(nil), r.genericEventTargets[target]...)
 	for _, listener := range listeners {
-		// DOM's inner invoke skips callbacks when the event target's global is
-		// no longer fully active. Recheck before every listener because an
-		// earlier callback can remove the iframe containing this target.
 		if !r.isFullyActiveBrowsingContext() {
 			break
 		}

@@ -7,14 +7,6 @@ import (
 	"testing"
 )
 
-// TestProgramErrorLineCarriesOneLabel is the oracle for the doubled program
-// label on stderr. TASK-040 measured a refused document printing
-//
-//	goosie: goosie: build session: CSS numeric value outside safe geometry range
-//
-// because the wrappers in this command already begin with "goosie: " and main
-// added it again. Each row is the error string a call chain can hand back; the
-// wanted line is what one reader should see.
 // qc:BR-190
 func TestProgramErrorLineCarriesOneLabel(t *testing.T) {
 	cases := []struct {
@@ -70,10 +62,6 @@ func TestProgramErrorLineCarriesOneLabel(t *testing.T) {
 	}
 }
 
-// TestRunFailureLineFromTheRealChain runs the code path that produced the
-// doubling: a loader-stage wrapper around a guard error, printed the way main
-// prints it. The chain is built here rather than through a live render because
-// what is being proved is the shape of the line, not the document.
 // qc:BR-190
 func TestRunFailureLineFromTheRealChain(t *testing.T) {
 	guard := fmt.Errorf("%w", errors.New("CSS numeric value outside safe geometry range: "+

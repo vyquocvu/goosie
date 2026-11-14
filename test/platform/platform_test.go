@@ -12,11 +12,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// This package is the only place that decides which window a v2 binary gets, and the
-// decision has two hard requirements: a build on a machine with no display server has
-// to yield a working window, and a run that names a GUI backend on a machine that
-// cannot open one has to say so rather than crash or quietly draw nothing.
-
 var _ surface.Window = (*headless.Window)(nil)
 
 func testOptions() platform.Options {
@@ -51,8 +46,6 @@ func TestAvailableNamesABackend(t *testing.T) {
 	}
 }
 
-// TestSelectDefaultsToAUsableWindow is the CI guarantee: with no backend named, on
-// any platform, a caller gets a window it can present through.
 func TestSelectDefaultsToAUsableWindow(t *testing.T) {
 	name, interactive := platform.Available()
 	w, err := platform.Select(testOptions())
@@ -72,8 +65,6 @@ func TestSelectDefaultsToAUsableWindow(t *testing.T) {
 	}
 }
 
-// TestSelectHeadlessIsAlwaysAvailable is what lets a macOS runner do a headless gate
-// run: naming the backend has to be enough, without a display server or an env var.
 func TestSelectHeadlessIsAlwaysAvailable(t *testing.T) {
 	w, err := platform.Select(appendHeadless(testOptions()))
 	if err != nil {
@@ -94,8 +85,6 @@ func TestSelectReportsAnUnknownOrUnavailableBackend(t *testing.T) {
 	if _, err := platform.Select(platform.Options{Backend: "wayland"}); !errors.Is(err, platform.ErrUnknownBackend) {
 		t.Fatalf("Select(wayland) = %v, want ErrUnknownBackend", err)
 	}
-	// A backend that exists in the table but cannot open a window here is the case
-	// the GUI binary reports through Available() rather than failing the run.
 	w, err := platform.Select(platform.Options{Backend: platform.Native, Size: testOptions().Size})
 	switch {
 	case err == nil:
@@ -109,12 +98,6 @@ func TestSelectReportsAnUnknownOrUnavailableBackend(t *testing.T) {
 	}
 }
 
-// TestWindowNameReportsTheWindowNotTheMachine guards the run line a pacing gate reads.
-// Available() answers a question about the machine and is answered before anything is
-// opened, so a run that names headless on a Mac with a display would report "darwin"
-// while drawing no pixels anywhere - and a nightly step that greps that line to prove a
-// frame path was paced by a real display would pass on the very fallback it exists to
-// catch. The window has to be the one that answers.
 func TestWindowNameReportsTheWindowNotTheMachine(t *testing.T) {
 	w, err := platform.Select(appendHeadless(testOptions()))
 	if err != nil {
@@ -126,8 +109,6 @@ func TestWindowNameReportsTheWindowNotTheMachine(t *testing.T) {
 		t.Fatalf("WindowName(headless window) = %q, want %q", got, platform.Headless)
 	}
 	if machine, _ := platform.Available(); machine == platform.Headless {
-		// On a machine with no native backend the two answers coincide, so the
-		// distinction below is only provable where a shim exists.
 		t.Log("no native backend here; the two questions cannot disagree on this machine")
 	} else if platform.WindowName(w) == machine {
 		t.Fatalf("a headless window reported %q, the machine's backend: the report is "+
@@ -135,8 +116,6 @@ func TestWindowNameReportsTheWindowNotTheMachine(t *testing.T) {
 	}
 }
 
-// unnamedWindow is a window that does not name itself, which is what a test fake in
-// another package looks like to WindowName.
 type unnamedWindow struct{ events chan surface.Event }
 
 func (w *unnamedWindow) Events() <-chan surface.Event              { return w.events }
@@ -154,9 +133,6 @@ func TestWindowNameDefaultsToHeadless(t *testing.T) {
 	}
 }
 
-// TestSelectCarriesTheWindowConfigThrough checks that the options are honoured rather
-// than merely accepted, since a window that ignores its size or period silently
-// changes what every pacing measurement downstream means.
 func TestSelectCarriesTheWindowConfigThrough(t *testing.T) {
 	o := appendHeadless(testOptions())
 	o.VsyncPeriod = 8 * time.Millisecond

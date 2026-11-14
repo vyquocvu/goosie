@@ -7,7 +7,6 @@ import (
 )
 
 func TestWordBreakBreakAllLayout(t *testing.T) {
-	// A narrow container with break-all should break long continuous text into multiple lines
 	html := `<!DOCTYPE html>
 <html><body style="margin: 0;">
 <div style="width: 50px; font-size: 16px; word-break: break-all;">
@@ -28,7 +27,6 @@ abcdefghijklmnopqrstuvwxyz
 		}
 	}
 
-	// Under break-all, 26 runes become 26 character tokens instead of 1 long word
 	if textWords < 10 {
 		t.Errorf("expected many split text word tokens under break-all, got %d", textWords)
 	}
@@ -49,7 +47,6 @@ func TestTextTransformFullWidth(t *testing.T) {
 	for i := range sess.Arena.Objects {
 		obj := &sess.Arena.Objects[i]
 		if obj.Node != nil && obj.Node.Text() {
-			// Check for full-width 'ａ' (U+FF41) or '！' (U+FF01)
 			for _, r := range obj.Node.DataContent {
 				if r == 0xFF41 || r == 0xFF01 {
 					foundFullWidth = true

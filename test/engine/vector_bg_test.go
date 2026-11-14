@@ -6,9 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestVectorBackgroundRasterizesAtTile pins lazy vector backgrounds: an SVG
-// without intrinsic dimensions rasterizes at its laid-out tile (not at a
-// guessed viewport) and attaches flagged, so paint negotiates the same tile.
 func TestVectorBackgroundRasterizesAtTile(t *testing.T) {
 	svg := `%3Csvg xmlns='http://www.w3.org/2000/svg' height='50%25'%3E%3Crect y='0' width='100%25' height='50%25' fill='lime'/%3E%3C/svg%3E`
 	html := `<html><head><style>div{background-image: url('data:image/svg+xml,` + svg + `'); background-repeat: no-repeat; background-size: auto; height: 768px; width: 256px;}</style></head><body style="margin:0;"><div>x</div></body></html>`

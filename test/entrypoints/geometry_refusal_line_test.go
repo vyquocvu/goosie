@@ -10,14 +10,6 @@ import (
 	"testing"
 )
 
-// TestGoosieGeometryRefusalLineIsWellFormed drives the real binary over a
-// document whose only CSS length is 8e8e8px - the form TASK-040 had to keep
-// refusing after it stopped refusing cafef.vn - and reads the line an operator
-// actually gets. It pins three things at once: the run still fails closed (no
-// PNG, nonzero exit), the refusal names the property, the value, the threshold
-// and the branch that fired, and the program label appears exactly once so the
-// message does not start with the twice-wrapped `goosie: goosie:` that made the
-// useful half of the line stop being its start.
 // qc:BR-190
 func TestGoosieGeometryRefusalLineIsWellFormed(t *testing.T) {
 	bin := buildBinary(t, "goosie")
@@ -58,9 +50,9 @@ func TestGoosieGeometryRefusalLineIsWellFormed(t *testing.T) {
 		t.Fatalf("no geometry refusal on stderr:\n%s", stderr.String())
 	}
 	for _, want := range []string{
-		`property "width"`, // which declaration
-		`value "8e8"`,      // which token
-		`unit "e8px"`,      // and what unit it carried
+		`property "width"`,
+		`value "8e8"`,
+		`unit "e8px"`,
 		"limit 2097152 CSS pixels",
 		"branch magnitude",
 	} {
@@ -79,11 +71,6 @@ func TestGoosieGeometryRefusalLineIsWellFormed(t *testing.T) {
 	}
 }
 
-// TestGoosieDigitLeadingCustomPropertyIsAdmitted is the other half of
-// GOOSIE-LIVE-002, measured on cafef.vn: a legal custom property whose name
-// begins with digits (--8e8e8e, a colour name) is an ident, not the dimension
-// -8e8, so the document must open. Before the tokenizer fix this run exited 1
-// and wrote no PNG at all.
 // qc:BR-192
 func TestGoosieDigitLeadingCustomPropertyIsAdmitted(t *testing.T) {
 	bin := buildBinary(t, "goosie")

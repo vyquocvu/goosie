@@ -18,12 +18,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// TestJourneyIMECompositionThenSubmit follows the input method through a real
-// form: candidate updates reach the control and the accessibility tree, Enter
-// while a candidate is marked must not navigate, and the committed text is what
-// the server receives. A browser that submits a half-composed word is unusable
-// for Vietnamese and Japanese typing regardless of how correct the rest is.
-//
 // qc:BR-111
 func TestJourneyIMECompositionThenSubmit(t *testing.T) {
 	var reqMu sync.Mutex
@@ -64,8 +58,6 @@ func TestJourneyIMECompositionThenSubmit(t *testing.T) {
 		return isNodeFocused(browser.window.AccessibilityTree(), "q")
 	})
 
-	// Marked text is the live candidate. It must be visible to paint and AX
-	// before it is committed, exactly as a user sees it while choosing.
 	browser.inject(t, surface.Event{Kind: surface.EvIME, IME: surface.IMEMarked, Text: "tiế"})
 	browser.waitFor(t, "first candidate is visible in the accessibility value", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "q")
@@ -77,8 +69,6 @@ func TestJourneyIMECompositionThenSubmit(t *testing.T) {
 		return ok && node.Value == "tiếng"
 	})
 
-	// Enter while composing belongs to the input method. It must not submit,
-	// and the candidate must survive so the next edit still applies to it.
 	browser.pressKey(t, '\r')
 	browser.waitFor(t, "Enter during composition left the candidate intact", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "q")
@@ -98,7 +88,6 @@ func TestJourneyIMECompositionThenSubmit(t *testing.T) {
 		return ok && node.Value == "tiếng" && sess.Marked() == ""
 	})
 
-	// With the composition finished Enter is an ordinary implicit submission.
 	browser.pressKey(t, '\r')
 	browser.waitFor(t, "committed text reaches the server exactly once", func() bool {
 		reqMu.Lock()
@@ -162,7 +151,6 @@ func TestJourneyOnlyActivatedSubmitterIsSent(t *testing.T) {
 		})
 	}
 
-	// Clicking Save sends Save's own pair and not Publish's.
 	openForm()
 	browser.clickNode(t, "btn_save")
 	browser.waitFor(t, "the save submission arrives", func() bool {
@@ -171,8 +159,6 @@ func TestJourneyOnlyActivatedSubmitterIsSent(t *testing.T) {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
 		return ok && len(submissions) == 1
 	})
-	// Clicking Publish on a fresh page sends Publish's pair, proving the pair
-	// follows the activation rather than being pinned to tree order.
 	openForm()
 	browser.clickNode(t, "btn_publish")
 	browser.waitFor(t, "the publish submission arrives", func() bool {
@@ -208,11 +194,6 @@ func TestJourneyOnlyActivatedSubmitterIsSent(t *testing.T) {
 	})
 }
 
-// TestJourneyInvalidStyleFollowsTyping covers the visible half of form
-// validation. Author CSS commonly paints "input:invalid"; that state changes
-// with the control's value, not with its box, so a repaint that reuses the old
-// computed style leaves the error colour behind by exactly one keystroke - or
-// forever, when the field never changes size.
 func TestJourneyInvalidStyleFollowsTyping(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -266,7 +247,6 @@ input:invalid { background-color: rgb(255, 0, 0); }
 	}
 	red := func(c color.RGBA) bool { return c.R >= 200 && c.G < 80 && c.B < 80 }
 
-	// An empty, non-required email field is valid: no error colour yet.
 	browser.waitFor(t, "empty email field is not painted as invalid", func() bool {
 		c, ok := sample()
 		return ok && !red(c)
@@ -323,11 +303,6 @@ input:invalid { background-color: rgb(255, 0, 0); }
 }
 
 // qc:BR-106
-// TestJourneyPostFormCarriesBody covers the other half of BR-106: a POST
-// submission must reach the server as a request body, not as a query string,
-// and the response's cookie must outlive the submission. A browser that
-// navigates to the action URL without the payload loses every login and
-// checkout on the web.
 func TestJourneyPostFormCarriesBody(t *testing.T) {
 	var reqMu sync.Mutex
 	var posted bool
@@ -414,7 +389,6 @@ func TestJourneyPostFormCarriesBody(t *testing.T) {
 		}
 	}
 
-	// The response cookie is a normal cookie: the next navigation must send it.
 	browser.navigateViaAddressBar(t, server.URL+"/echo")
 	browser.waitFor(t, "the cookie set by the POST response reaches the next request", func() bool {
 		_, seen := findAXNode(browser.window.AccessibilityTree(), "echo")
@@ -423,9 +397,6 @@ func TestJourneyPostFormCarriesBody(t *testing.T) {
 }
 
 // qc:BR-106
-// TestJourneyPostRedirectBecomesGet records the redirect rule that makes POST
-// safe to follow: 301/302/303 turn the redirected request into a GET, while the
-// POST itself still reaches the server with its body.
 func TestJourneyPostRedirectBecomesGet(t *testing.T) {
 	var reqMu sync.Mutex
 	var methods, bodies []string
@@ -497,9 +468,6 @@ func TestJourneyPostRedirectBecomesGet(t *testing.T) {
 }
 
 // qc:BR-106
-// TestJourneySubmitterOverridesDestination follows a form whose two submit
-// buttons lead to different places with different methods. The activated
-// button decides, exactly as sites rely on for "Save draft" versus "Publish".
 func TestJourneySubmitterOverridesDestination(t *testing.T) {
 	var reqMu sync.Mutex
 	var savedMethod, savedBody string
@@ -584,10 +552,6 @@ func TestJourneySubmitterOverridesDestination(t *testing.T) {
 }
 
 // qc:BR-105
-// TestJourneySubmitterNoValidateSkipsValidation covers the escape hatch sites
-// use for "Skip" or "Save draft": an empty required field must not block the
-// button that opts out with formnovalidate, while the normal submit stays on
-// the page and focuses the missing value.
 func TestJourneySubmitterNoValidateSkipsValidation(t *testing.T) {
 	var reqMu sync.Mutex
 	var draftQuery url.Values
@@ -628,7 +592,6 @@ func TestJourneySubmitterNoValidateSkipsValidation(t *testing.T) {
 		return ok && browser.activeURL() == pageURL
 	})
 
-	// The ordinary submit button is still blocked by the empty required field.
 	browser.clickNode(t, "send")
 	browser.waitFor(t, "the invalid submit focuses the missing control", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "q")
@@ -640,7 +603,6 @@ func TestJourneySubmitterNoValidateSkipsValidation(t *testing.T) {
 		t.Fatalf("invalid submit reached %q after %d requests; want to stay on the form", browser.activeURL(), gotSubmitted)
 	}
 
-	// The activating button's formnovalidate lets the same data through.
 	browser.clickNode(t, "skip")
 	browser.waitFor(t, "the opt-out button reaches its own destination", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "draft")
@@ -663,9 +625,6 @@ func TestJourneySubmitterNoValidateSkipsValidation(t *testing.T) {
 }
 
 // qc:BR-106
-// TestJourneyTextPlainEncoderReachesServer submits a text/plain form through the
-// real browser path: the server must receive text/plain and the literal
-// name=value lines, with no percent-encoding and CRLF line endings.
 func TestJourneyTextPlainEncoderReachesServer(t *testing.T) {
 	var reqMu sync.Mutex
 	var posted bool
@@ -736,11 +695,6 @@ line2</textarea>
 }
 
 // qc:BR-105
-// TestJourneyUserInvalidFollowsBlockedSubmit covers the user-facing validation
-// state: :invalid paints immediately, a blocked submission promotes the field
-// to :user-invalid, and correcting it flips the same field to :user-valid. The
-// pixels prove the host re-resolved styles at each transition rather than
-// reusing the previous computed style.
 func TestJourneyUserInvalidFollowsBlockedSubmit(t *testing.T) {
 	var reqMu sync.Mutex
 	var submitted int
@@ -834,7 +788,6 @@ input:user-valid { background-color: rgb(0, 128, 0); }
 		return ok && green(c)
 	})
 
-	// The form is now submittable, so the same button must navigate.
 	browser.clickNode(t, "send")
 	browser.waitFor(t, "the corrected form submits", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "done")
@@ -843,10 +796,6 @@ input:user-valid { background-color: rgb(0, 128, 0); }
 }
 
 // qc:BR-105
-// TestJourneyUserInvalidOnTabAway proves the host re-resolves validity styles
-// when focus leaves a control, not only after a blocked submission: the field
-// is :invalid from load, and a single Tab promotes it to :user-invalid on
-// screen. Keyboard users must see the error without attempting a submission.
 func TestJourneyUserInvalidOnTabAway(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -918,10 +867,6 @@ input:user-invalid { background-color: rgb(255, 165, 0); }
 }
 
 // qc:BR-106
-// TestJourneyMultipartFormCarriesSelectedFile drives a real multipart upload:
-// page script selects a File, the host submit path assembles the body from the
-// live FileList, and the server parses the same filename, content type, bytes
-// and text fields. A URL-encoded fallback would be silently wrong here.
 func TestJourneyMultipartFormCarriesSelectedFile(t *testing.T) {
 	type upload struct {
 		contentType string
@@ -1020,11 +965,6 @@ func TestJourneyMultipartFormCarriesSelectedFile(t *testing.T) {
 	}
 }
 
-// TestJourneyFormTargetBlankOpensNewTab submits a GET form with target="_blank":
-// the result must land in a fresh tab and leave the originating document where
-// it was. Treating _blank as _self silently replaces the page the user is
-// reading with the response they asked to open beside it.
-//
 // qc:BR-025 BR-106
 func TestJourneyFormTargetBlankOpensNewTab(t *testing.T) {
 	var reqMu sync.Mutex

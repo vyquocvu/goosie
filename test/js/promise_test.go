@@ -14,7 +14,6 @@ func TestPromiseConstructor(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Test that Promise constructor exists and is callable.
 	err = r.Run(`
 		var p = new Promise(function(resolve, reject) {
 			resolve(42);
@@ -126,7 +125,6 @@ func TestPromiseResolve(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Check that the promise resolved with the correct value.
 	val, ok := r.Global("result")
 	if !ok {
 		t.Fatal("result not found")

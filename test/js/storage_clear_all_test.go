@@ -35,8 +35,6 @@ func TestClearAllLocalStorageClearsMemoryAndDisk(t *testing.T) {
 	reg.SetLocalStorageItem(a, "token", "one")
 	reg.SetLocalStorageItem(b, "theme", "dark")
 
-	// A file left by an origin this session never loaded is still profile data;
-	// clearing the profile has to remove it even though no store exists for it.
 	if err := os.WriteFile(filepath.Join(storageDir, "legacy.json"), []byte(`{"k":"v"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +61,6 @@ func TestClearAllLocalStorageClearsMemoryAndDisk(t *testing.T) {
 		t.Errorf("a restarted profile still sees %+v", got)
 	}
 
-	// The store keeps its persistence hook: a write after the clear is durable.
 	reg.SetLocalStorageItem(a, "after", "clear")
 	fresh := js.NewOriginStorageRegistry(storageDir, false).DumpLocalStorage(a)
 	if len(fresh) != 1 || fresh[0].Key != "after" || fresh[0].Value != "clear" {

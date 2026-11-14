@@ -9,11 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// IME composition contract: input and textarea values track each active
-// composition update, and a commit replaces the active passage with its final
-// text. Cancel and blur remove the marked passage; maxlength applies to the
-// committed value, not to intermediate candidate text.
-
 // qc:BR-111
 func TestSetMarkedWithoutFocus(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
@@ -28,7 +23,7 @@ func TestSetMarkedWithoutFocus(t *testing.T) {
 // qc:BR-111
 func TestSetMarkedAndCommit(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
-	x, y := clickPoint(t, s, "a") // value "ab", caret ends at 2
+	x, y := clickPoint(t, s, "a")
 	s.FocusControl(x, y)
 	if !s.SetMarked("ni") {
 		t.Fatal("SetMarked should report change")
@@ -168,14 +163,14 @@ func TestMarkedClearsOnBlurAndSwitch(t *testing.T) {
 	x, y := clickPoint(t, s, "a")
 	s.FocusControl(x, y)
 	s.SetMarked("かな")
-	s.FocusControl(790, 590) // blur
+	s.FocusControl(790, 590)
 	if s.Marked() != "" {
 		t.Fatalf("Marked after blur = %q, want empty", s.Marked())
 	}
 	s.FocusControl(x, y)
 	s.SetMarked("かな")
 	bx, by := clickPoint(t, s, "b")
-	s.FocusControl(bx, by) // switch
+	s.FocusControl(bx, by)
 	if s.Marked() != "" {
 		t.Fatalf("Marked after switch = %q, want empty", s.Marked())
 	}
@@ -200,7 +195,7 @@ func TestPaintMarkedPreviewAtCaret(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin: 0;">`+
 		`<input id="a" value="ab"></body></html>`)
 	x, y := clickPoint(t, s, "a")
-	s.FocusControl(x, y) // caret at end
+	s.FocusControl(x, y)
 	s.Edit(engine.EditHome, 0)
 	s.SetMarked("か")
 	dl := s.Paint(1).Build(1)
@@ -267,8 +262,6 @@ func TestContentEditableIMEPreviewAtSelectionAndCommit(t *testing.T) {
 	if got, err := s.EvaluateJS(`imeEvents.join(",")`); err != nil || got != wantEvents {
 		t.Fatalf("composition event order/payload = %q, err %v", got, err)
 	}
-	// Every composition event is cancelable, not just the start - measured on
-	// Chromium 153 in scripts/verify-br111-ime-composition.js (2026-11-05).
 	wantCancelable := "compositionstart:true,compositionupdate:true,compositionupdate:true,compositionend:true"
 	if got, err := s.EvaluateJS(`imeCancelable.join(",")`); err != nil || got != wantCancelable {
 		t.Fatalf("composition cancelability = %q, err %v", got, err)
@@ -596,10 +589,6 @@ func TestPaintMarkedTextareaPreview(t *testing.T) {
 	}
 }
 
-// Enter during an active composition belongs to the input method: it commits
-// or cancels the candidate, it does not submit the form under the control.
-// Chromium suppresses the implicit submission while isComposing is set, and the
-// same rule keeps a half-typed Vietnamese or Japanese word from navigation.
 // qc:BR-111
 
 func TestEnterDuringCompositionDoesNotSubmit(t *testing.T) {
@@ -623,8 +612,6 @@ func TestEnterDuringCompositionDoesNotSubmit(t *testing.T) {
 		t.Fatalf("value after suppressed Enter = %q, want the live composition %q", got, "に")
 	}
 
-	// Once the input method commits, Enter is an ordinary implicit submission
-	// again and carries the committed text.
 	if !s.CommitText("日") {
 		t.Fatal("CommitText should report change")
 	}

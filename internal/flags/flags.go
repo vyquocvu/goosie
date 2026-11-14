@@ -1,4 +1,3 @@
-// Package flags provides an experimental browser feature flags registry and persistence engine.
 package flags
 
 import (
@@ -9,7 +8,6 @@ import (
 	"sync"
 )
 
-// Flag describes a configurable browser capability or experimental engine feature.
 type Flag struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -18,7 +16,6 @@ type Flag struct {
 	Enabled     bool   `json:"enabled"`
 }
 
-// DefaultFlags returns the built-in system flags and their canonical default states.
 func DefaultFlags() []Flag {
 	return []Flag{
 		{
@@ -80,14 +77,12 @@ func DefaultFlags() []Flag {
 	}
 }
 
-// Manager coordinates feature flags and synchronizes state to disk.
 type Manager struct {
 	mu       sync.RWMutex
 	filePath string
 	flags    map[string]Flag
 }
 
-// NewManager creates a Manager seeded with system defaults.
 func NewManager(filePath string) *Manager {
 	m := &Manager{
 		filePath: filePath,
@@ -99,7 +94,6 @@ func NewManager(filePath string) *Manager {
 	return m
 }
 
-// IsEnabled reports whether flag ID is currently enabled. If unknown, returns false.
 func (m *Manager) IsEnabled(id string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -110,7 +104,6 @@ func (m *Manager) IsEnabled(id string) bool {
 	return f.Enabled
 }
 
-// SetEnabled updates the state of flag ID.
 func (m *Manager) SetEnabled(id string, enabled bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -120,7 +113,6 @@ func (m *Manager) SetEnabled(id string, enabled bool) {
 	}
 }
 
-// ResetAll resets all feature flags back to their default values.
 func (m *Manager) ResetAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -129,7 +121,6 @@ func (m *Manager) ResetAll() {
 	}
 }
 
-// Flags returns all flags sorted alphabetically by Name.
 func (m *Manager) Flags() []Flag {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -143,7 +134,6 @@ func (m *Manager) Flags() []Flag {
 	return out
 }
 
-// HasNonDefaultReports whether any flag has been modified from its default setting.
 func (m *Manager) HasNonDefault() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -155,7 +145,6 @@ func (m *Manager) HasNonDefault() bool {
 	return false
 }
 
-// Load loads persisted flags from disk.
 func (m *Manager) Load() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -182,7 +171,6 @@ func (m *Manager) Load() error {
 	return nil
 }
 
-// Save writes active flag states to disk atomically.
 func (m *Manager) Save() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

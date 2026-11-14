@@ -7,11 +7,6 @@ import (
 	"golang.org/x/net/html/charset"
 )
 
-// ---------------------------------------------------------------------------
-// Helper predicates for the HTML5 tree-construction algorithm (§13.2.6).
-// ---------------------------------------------------------------------------
-
-// isSpecialElement reports whether tag is an HTML5 "special" element (§13.2.4.2).
 func isSpecialElement(tag string) bool {
 	switch tag {
 	case "address", "applet", "area", "article", "aside", "base", "basefont",
@@ -30,7 +25,6 @@ func isSpecialElement(tag string) bool {
 	return false
 }
 
-// isFormattingElement reports whether tag is an HTML5 formatting element.
 func isFormattingElement(tag string) bool {
 	switch tag {
 	case "a", "b", "big", "code", "em", "font", "i", "nobr", "s", "small",
@@ -40,9 +34,6 @@ func isFormattingElement(tag string) bool {
 	return false
 }
 
-// setDocumentEncodingFromMeta records the encoding label declared by a meta
-// element. The parser currently tokenizes input as UTF-8, but exposing the
-// recognized declaration is still required by Document.characterSet.
 func (tb *treeBuilder) setDocumentEncodingFromMeta(n *Node) {
 	if n == nil || tb.doc == nil {
 		return
@@ -66,8 +57,6 @@ func (tb *treeBuilder) setDocumentEncodingFromMeta(n *Node) {
 	}
 }
 
-// isScopeElementTag reports whether tag is a scope boundary for the regular
-// "has element in scope" check.
 func isScopeElementTag(tag string) bool {
 	switch tag {
 	case "applet", "caption", "html", "table", "td", "th",
@@ -92,10 +81,6 @@ func isTableScopeElement(tag string) bool {
 func isListItemScopeElement(tag string) bool {
 	return isScopeElementTag(tag) || tag == "ol" || tag == "ul"
 }
-
-// ---------------------------------------------------------------------------
-// Scope-checking helpers.
-// ---------------------------------------------------------------------------
 
 func (tb *treeBuilder) hasInButtonScope(tag string) bool {
 	for i := len(tb.openStack) - 1; i >= 0; i-- {
@@ -144,7 +129,6 @@ func (tb *treeBuilder) hasInSelectScope(tag string) bool {
 		}
 		switch n.Data {
 		case "optgroup", "option":
-			// not scope boundaries
 		default:
 			return false
 		}
@@ -152,13 +136,7 @@ func (tb *treeBuilder) hasInSelectScope(tag string) bool {
 	return false
 }
 
-// ---------------------------------------------------------------------------
-// Active formatting elements list management (§13.2.4.2).
-// ---------------------------------------------------------------------------
-
 func (tb *treeBuilder) pushToActiveFormatting(n *Node, tag string) {
-	// Noah's Ark clause: if there are already 3 entries with the same tag,
-	// same attributes, remove the earliest.
 	count := 0
 	lastIdx := -1
 	for i := len(tb.activeFormattingElems) - 1; i >= 0; i-- {
@@ -234,8 +212,6 @@ func (tb *treeBuilder) clearActiveFormattingToMarker() {
 	}
 }
 
-// reconstructActiveFormattingElements re-opens any formatting elements that
-// should be active before inserting content (§13.2.4.2).
 func (tb *treeBuilder) reconstructActiveFormattingElements() {
 	if len(tb.activeFormattingElems) == 0 {
 		return
@@ -244,13 +220,11 @@ func (tb *treeBuilder) reconstructActiveFormattingElements() {
 	if last.marker {
 		return
 	}
-	// Check if the last entry is already on the stack.
 	for _, o := range tb.openStack {
 		if o == last.node {
 			return
 		}
 	}
-	// Walk backwards to find the first entry that is on the stack or a marker.
 	i := len(tb.activeFormattingElems) - 1
 	for i > 0 {
 		i--
@@ -271,17 +245,12 @@ func (tb *treeBuilder) reconstructActiveFormattingElements() {
 			break
 		}
 	}
-	// Now re-create elements from i to the end.
 	for j := i; j < len(tb.activeFormattingElems); j++ {
 		entry := &tb.activeFormattingElems[j]
 		n := tb.insertElement(entry.tag, entry.node.Attr, false)
 		entry.node = n
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Implied end tags (§13.2.4.1).
-// ---------------------------------------------------------------------------
 
 func (tb *treeBuilder) generateImpliedEndTags() {
 	for len(tb.openStack) > 0 {
@@ -309,10 +278,6 @@ func (tb *treeBuilder) generateImpliedEndTagsExcept(except string) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Table context clearing helpers.
-// ---------------------------------------------------------------------------
 
 func (tb *treeBuilder) clearStackToTableContext() {
 	for len(tb.openStack) > 0 {
@@ -346,10 +311,6 @@ func (tb *treeBuilder) clearStackToTableRowContext() {
 		tb.pop()
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Miscellaneous helpers.
-// ---------------------------------------------------------------------------
 
 func (tb *treeBuilder) insertTemplateElement(attrs []Attribute, selfClose bool) *Node {
 	elem := tb.insertElement("template", attrs, selfClose)
@@ -427,8 +388,6 @@ func (tb *treeBuilder) hasTableSectionInScope() bool {
 	return false
 }
 
-// resetInsertionMode determines the appropriate insertion mode based on the
-// open-element stack (§13.2.6.1 "the appropriate end tag token" / reset).
 func (tb *treeBuilder) resetInsertionMode() {
 	for i := len(tb.openStack) - 1; i >= 0; i-- {
 		node := tb.openStack[i]
@@ -436,8 +395,6 @@ func (tb *treeBuilder) resetInsertionMode() {
 		if last && tb.fragmentContext != nil {
 			node = tb.fragmentContext
 		}
-		// In the real spec, if the element was created by the parser for
-		// html, the context is the fragment case. We always have a full doc.
 		switch node.Data {
 		case "select":
 			tb.mode = modeInSelect
@@ -495,38 +452,24 @@ func (tb *treeBuilder) resetInsertionMode() {
 	}
 }
 
-// popUntilInBody pops elements until we reach a state consistent with "in body"
-// processing after a </body> or </html>.
 func (tb *treeBuilder) popUntilInBody() {
-	// Generate implied end tags, then check stack.
 	tb.generateImpliedEndTags()
 }
 
-// ---------------------------------------------------------------------------
-// Adoption agency algorithm (§13.2.4.3).
-// ---------------------------------------------------------------------------
-
 func (tb *treeBuilder) adoptionAgency(tag string) {
-	// Step 1: If the current node is an HTML element with the same tag name,
-	// and it's in the active formatting list, pop it and remove from the list.
 	current := tb.current()
 	if current.Data == tag && tb.activeFormattingIndex(current) < 0 {
 		tb.pop()
 		return
 	}
 
-	// Run the algorithm for up to 8 iterations.
 	for outer := 0; outer < 8; outer++ {
-		// Step 3: Find the formatting element.
 		fmtNode, fmtIdx := tb.inActiveFormatting(tag)
 		if fmtNode == nil {
-			// No formatting element; process as "any other end tag".
 			tb.handleInBodyEndTagAnyOther(tag)
 			return
 		}
 
-		// Step 4: If the formatting element is not on the stack, remove it
-		// from the active formatting list and return.
 		fmtStackIdx := -1
 		for i, o := range tb.openStack {
 			if o == fmtNode {
@@ -539,14 +482,10 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 			return
 		}
 
-		// Step 5: If the formatting element is on the stack but not in scope, ignore.
 		if !tb.hasInScope(tag) {
 			return
 		}
 
-		// Step 6: If the formatting element is not the current node, parse error (we continue).
-
-		// Step 7-8: Find furthest block.
 		furthestIdx := -1
 		for i := fmtStackIdx + 1; i < len(tb.openStack); i++ {
 			if isSpecialElement(tb.openStack[i].Data) {
@@ -555,7 +494,6 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 			}
 		}
 		if furthestIdx < 0 {
-			// No furthest block: pop until we pop the formatting element.
 			for len(tb.openStack) > 0 {
 				popped := tb.pop()
 				if popped == fmtNode {
@@ -568,19 +506,14 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 
 		furthestBlock := tb.openStack[furthestIdx]
 
-		// Step 9-10: Common parent is the element above the formatting element on the stack.
 		commonParent := tb.openStack[fmtStackIdx-1]
 
-		// Step 11: Build a bookmark for the formatting element position.
 		bookmark := fmtIdx
 
-		// Step 12: Initialize node and inner loop counter.
 		nodeIdx := furthestIdx
 		lastNode := furthestBlock
 
-		// Inner loop: up to 3 iterations.
 		for inner := 0; inner < 3; inner++ {
-			// Find the element above node on the stack.
 			nodeIdx--
 			if nodeIdx < fmtStackIdx {
 				break
@@ -590,23 +523,18 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 				break
 			}
 
-			// Check if nodeAbove is in active formatting elements.
 			afIdx := tb.activeFormattingIndex(nodeAbove)
 			if afIdx < 0 {
-				// Not in active formatting: remove from stack, continue.
 				tb.openStack = append(tb.openStack[:nodeIdx], tb.openStack[nodeIdx+1:]...)
 				continue
 			}
 
-			// Create a new element with the same tag and attributes.
 			newElem := tb.doc.NewElement(nodeAbove.Data)
 			newElem.Attr = make([]Attribute, len(nodeAbove.Attr))
 			copy(newElem.Attr, nodeAbove.Attr)
 
-			// Update the active formatting elements list.
 			tb.activeFormattingElems[afIdx] = formatEntry{node: newElem, tag: nodeAbove.Data}
 
-			// Update the open element stack.
 			tb.openStack[nodeIdx] = newElem
 
 			if lastNode == furthestBlock {
@@ -616,11 +544,6 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 			lastNode = newElem
 		}
 
-		// Step 13: Insert lastNode into the common parent, using the foster
-		// parenting location for table ancestors. Remove it from its live parent
-		// first because script may have moved it while the parser was paused. The node is
-		// dropped if this insertion would create a host-including cycle, as the
-		// DOM pre-insertion algorithm requires (including shadow/template roots).
 		if lastNode.Parent != nil {
 			lastNode.Parent.RemoveChild(lastNode)
 		}
@@ -634,15 +557,12 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 			insertAtFosterLocation(insertParent, insertBefore, lastNode)
 		}
 
-		// Step 14: Create a new formatting element.
 		newFmt := tb.doc.NewElement(tag)
-		// Copy attributes from the original formatting element.
 		if fmtNode != nil {
 			newFmt.Attr = make([]Attribute, len(fmtNode.Attr))
 			copy(newFmt.Attr, fmtNode.Attr)
 		}
 
-		// Step 15: Move furthest block's children into the new formatting element.
 		for child := furthestBlock.FirstChild; child != nil; {
 			next := child.NextSibling
 			furthestBlock.RemoveChild(child)
@@ -650,11 +570,8 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 			child = next
 		}
 
-		// Step 16: Append the new formatting element to the furthest block.
 		furthestBlock.AppendChild(newFmt)
 
-		// Step 17: Replace the old formatting element at the bookmark. The
-		// inner loop may have moved the bookmark past cloned formatting entries.
 		if oldIdx := tb.activeFormattingIndex(fmtNode); oldIdx >= 0 {
 			tb.activeFormattingElems = append(tb.activeFormattingElems[:oldIdx], tb.activeFormattingElems[oldIdx+1:]...)
 			if oldIdx < bookmark {
@@ -671,8 +588,6 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 		copy(tb.activeFormattingElems[bookmark+1:], tb.activeFormattingElems[bookmark:])
 		tb.activeFormattingElems[bookmark] = formatEntry{node: newFmt, tag: tag}
 
-		// Step 18: Remove the old formatting element from the stack and insert
-		// the replacement immediately below the furthest block.
 		for i, open := range tb.openStack {
 			if open == fmtNode {
 				tb.openStack = append(tb.openStack[:i], tb.openStack[i+1:]...)
@@ -693,10 +608,6 @@ func (tb *treeBuilder) adoptionAgency(tag string) {
 	}
 }
 
-// hostIncludingInclusiveAncestor reports whether ancestor is node itself or
-// reachable through the parent chain, crossing a template content fragment to
-// its host. Shadow-root children already carry their host as Parent in this DOM
-// representation. Cycles terminate conservatively.
 func hostIncludingInclusiveAncestor(ancestor, node *Node) bool {
 	seen := make(map[*Node]struct{})
 	for current := node; current != nil; {
@@ -718,10 +629,6 @@ func hostIncludingInclusiveAncestor(ancestor, node *Node) bool {
 	return false
 }
 
-// ---------------------------------------------------------------------------
-// Block-level start tag set (used by "in body" mode).
-// ---------------------------------------------------------------------------
-
 var blockLevelTags = map[string]bool{
 	"address": true, "article": true, "aside": true, "blockquote": true,
 	"center": true, "details": true, "dialog": true, "dir": true,
@@ -735,44 +642,31 @@ var headingTags = map[string]bool{
 	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
 }
 
-// formattingStartTags are the formatting elements that get pushed to the
-// active formatting elements list.
 var formattingStartTags = map[string]bool{
 	"a": true, "b": true, "big": true, "code": true, "em": true,
 	"font": true, "i": true, "nobr": true, "s": true, "small": true,
 	"strike": true, "strong": true, "tt": true, "u": true,
 }
 
-// ---------------------------------------------------------------------------
-// Insertion mode handlers.
-// Each returns true if the token must be reprocessed in the (possibly changed)
-// insertion mode, or false if the token was fully handled.
-// ---------------------------------------------------------------------------
-
-// handleInitial (§13.2.6.1).
 func (tb *treeBuilder) handleInitial(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
 		if !hasNonSpace(data) {
-			return false // ignore whitespace
+			return false
 		}
 		tb.quirksMode = true
 		tb.doc.QuirksMode = true
 	case tokenComment:
-		// Insert comment as child of document.
 		n := tb.doc.NewComment(data)
 		tb.doc.Node.AppendChild(n)
 		return false
 	case tokenDoctype:
-		// Process doctype.
 		if !tb.allowNode(&tb.doc.Node) {
 			return false
 		}
 		dt := tb.doc.NewDoctype(data)
 		ids := parseDoctypeIdentifiers(data)
 		dt.DoctypeName, dt.PublicID, dt.SystemID = ids.name, ids.publicID, ids.systemID
-		// The tree builder pre-creates the html element so insertion modes can
-		// always target it. A doctype token still belongs before that element.
 		if tb.htmlElem != nil && tb.htmlElem.Parent == &tb.doc.Node {
 			tb.doc.Node.InsertBefore(dt, tb.htmlElem)
 		} else {
@@ -787,31 +681,29 @@ func (tb *treeBuilder) handleInitial(tokenType int, tag string, attrs []Attribut
 		tb.quirksMode = true
 		tb.doc.QuirksMode = true
 		tb.mode = modeBeforeHTML
-		return true // reprocess
+		return true
 	case tokenEndTag:
 		tb.quirksMode = true
 		tb.doc.QuirksMode = true
 		tb.mode = modeBeforeHTML
-		return true // reprocess
+		return true
 	}
 	tb.mode = modeBeforeHTML
 	return true
 }
 
-// handleBeforeHTML (§13.2.6.2).
 func (tb *treeBuilder) handleBeforeHTML(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenDoctype:
-		return false // ignore
+		return false
 	case tokenComment:
 		n := tb.doc.NewComment(data)
 		tb.doc.Node.AppendChild(n)
 		return false
 	case tokenChars:
 		if !hasNonSpace(data) {
-			return false // ignore whitespace
+			return false
 		}
-		// Non-whitespace: fall through to "anything else".
 	case tokenStartTag:
 		if tag == "html" {
 			if tb.htmlElem == nil {
@@ -825,17 +717,15 @@ func (tb *treeBuilder) handleBeforeHTML(tokenType int, tag string, attrs []Attri
 	case tokenEndTag:
 		switch tag {
 		case "head", "body", "html", "br", "p":
-			// Act as if <html> was seen, then reprocess.
 			if tb.htmlElem == nil {
 				tb.insertElement("html", nil, false)
 			}
 			tb.mode = modeBeforeHead
 			return true
 		default:
-			return false // ignore
+			return false
 		}
 	}
-	// "Anything else": act as if <html> start tag, then reprocess.
 	if tb.htmlElem == nil {
 		tb.insertElement("html", nil, false)
 	}
@@ -843,7 +733,6 @@ func (tb *treeBuilder) handleBeforeHTML(tokenType int, tag string, attrs []Attri
 	return true
 }
 
-// handleBeforeHead (§13.2.6.3).
 func (tb *treeBuilder) handleBeforeHead(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -867,18 +756,15 @@ func (tb *treeBuilder) handleBeforeHead(tokenType int, tag string, attrs []Attri
 	case tokenEndTag:
 		switch tag {
 		case "head", "body", "html", "br", "p":
-			// Fall through to "anything else".
 		default:
-			return false // ignore
+			return false
 		}
 	}
-	// "Anything else": create head, switch to inHead, reprocess.
 	tb.insertElement("head", nil, false)
 	tb.mode = modeInHead
 	return true
 }
 
-// handleInHead (§13.2.6.4).
 func (tb *treeBuilder) handleInHead(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -886,7 +772,6 @@ func (tb *treeBuilder) handleInHead(tokenType int, tag string, attrs []Attribute
 			tb.insertText(data)
 			return false
 		}
-		// Non-whitespace: fall through to "anything else".
 	case tokenComment:
 		tb.insertComment(data)
 		return false
@@ -926,9 +811,6 @@ func (tb *treeBuilder) handleInHead(tokenType int, tag string, attrs []Attribute
 		case "noscript":
 			tb.insertElement("noscript", attrs, false)
 			if tb.scriptingEnabled {
-				// With scripting enabled, <noscript> in head uses the RAWTEXT
-				// tokenizer state. With scripting disabled it uses the dedicated
-				// in-head-noscript tree-construction mode instead.
 				tb.prevMode = tb.mode
 				tb.mode = modeText
 			} else {
@@ -942,7 +824,7 @@ func (tb *treeBuilder) handleInHead(tokenType int, tag string, attrs []Attribute
 			tb.mode = modeInTemplate
 			return false
 		case "head":
-			return false // ignore
+			return false
 		}
 	case tokenEndTag:
 		if tag == "head" {
@@ -952,10 +834,8 @@ func (tb *treeBuilder) handleInHead(tokenType int, tag string, attrs []Attribute
 		}
 		switch tag {
 		case "body", "html", "br":
-			// Fall through to "anything else".
 		case "template":
 			if tb.hasOpenTag("template") {
-				// Find the template element.
 				var templateElem *Node
 				for i := len(tb.openStack) - 1; i >= 0; i-- {
 					if tb.openStack[i].Data == "template" {
@@ -969,7 +849,6 @@ func (tb *treeBuilder) handleInHead(tokenType int, tag string, attrs []Attribute
 				if len(tb.templateStack) > 0 {
 					tb.templateStack = tb.templateStack[:len(tb.templateStack)-1]
 				}
-				// If this was a shadow DOM template, move children to shadow root.
 				if templateElem != nil {
 					host := templateElem.Parent
 					isShadowTemplate := false
@@ -999,16 +878,14 @@ func (tb *treeBuilder) handleInHead(tokenType int, tag string, attrs []Attribute
 			}
 			return false
 		default:
-			return false // ignore
+			return false
 		}
 	}
-	// "Anything else": pop head, switch to afterHead, reprocess.
 	tb.pop()
 	tb.mode = modeAfterHead
 	return true
 }
 
-// handleInHeadNoscript (§13.2.6.5).
 func (tb *treeBuilder) handleInHeadNoscript(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenDoctype:
@@ -1018,10 +895,10 @@ func (tb *treeBuilder) handleInHeadNoscript(tokenType int, tag string, attrs []A
 			return tb.handleInBody(tokenType, tag, attrs, selfClose, data)
 		}
 		if tag == "noscript" {
-			return false // ignore
+			return false
 		}
 		if tag == "head" {
-			return false // ignore in this insertion mode
+			return false
 		}
 		if tag == "basefont" || tag == "bgsound" || tag == "link" || tag == "meta" || tag == "noframes" || tag == "style" {
 			return tb.handleInHead(tokenType, tag, attrs, selfClose, data)
@@ -1033,22 +910,19 @@ func (tb *treeBuilder) handleInHeadNoscript(tokenType int, tag string, attrs []A
 			return false
 		}
 		if tag == "br" {
-			// Fall through to "anything else".
 		} else {
-			return false // ignore
+			return false
 		}
 	case tokenChars:
 		if !hasNonSpace(data) {
 			return tb.handleInHead(tokenType, tag, attrs, selfClose, data)
 		}
 	}
-	// "Anything else": pop noscript, switch to inHead, reprocess.
 	tb.pop()
 	tb.mode = modeInHead
 	return true
 }
 
-// handleAfterHead (§13.2.6.6).
 func (tb *treeBuilder) handleAfterHead(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -1074,24 +948,20 @@ func (tb *treeBuilder) handleAfterHead(tokenType int, tag string, attrs []Attrib
 			tb.mode = modeInFrameset
 			return false
 		case "head":
-			return false // ignore
+			return false
 		}
-		// Other tags: create body, reprocess.
 	case tokenEndTag:
 		switch tag {
 		case "body", "html", "br", "p":
-			// Fall through to "anything else".
 		default:
-			return false // ignore
+			return false
 		}
 	}
-	// "Anything else": create body, switch to inBody, reprocess.
 	tb.insertElement("body", nil, false)
 	tb.mode = modeInBody
 	return true
 }
 
-// handleInBody (§13.2.6.7) - the main content processing mode.
 func (tb *treeBuilder) handleInBody(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -1104,7 +974,7 @@ func (tb *treeBuilder) handleInBody(tokenType int, tag string, attrs []Attribute
 		return false
 
 	case tokenDoctype:
-		return false // ignore
+		return false
 
 	case tokenStartTag:
 		return tb.handleInBodyStartTag(tag, attrs, selfClose)
@@ -1125,9 +995,6 @@ func (tb *treeBuilder) handleInBodyStartTag(tag string, attrs []Attribute, selfC
 		return false
 
 	case "head", "frame", "frameset":
-		// Both tokens are ignored in the in-body insertion mode. This matters
-		// inside template contents too: the in-template mode delegates ordinary
-		// tokens here, where head/body/frameset wrappers must not become nodes.
 		return false
 
 	case "base", "link", "meta":
@@ -1143,8 +1010,6 @@ func (tb *treeBuilder) handleInBodyStartTag(tag string, attrs []Attribute, selfC
 		return tb.handleInHead(tokenStartTag, tag, attrs, selfClose, "")
 
 	case "body":
-		// Fragment parsing has no document body pointer. The in-body rule only
-		// merges attributes into the existing body element when one exists.
 		if tb.bodyElem != nil {
 			tb.mergeAttrs(tb.bodyElem, attrs)
 		}
@@ -1160,7 +1025,6 @@ func (tb *treeBuilder) handleInBodyStartTag(tag string, attrs []Attribute, selfC
 
 	case "h1", "h2", "h3", "h4", "h5", "h6":
 		tb.closeParagraph()
-		// If current node is a heading, pop it.
 		top := tb.current()
 		if headingTags[top.Data] {
 			tb.pop()
@@ -1190,7 +1054,6 @@ func (tb *treeBuilder) handleInBodyStartTag(tag string, attrs []Attribute, selfC
 		return false
 
 	case "li":
-		// Close previous li if in scope.
 		for i := len(tb.openStack) - 1; i >= 0; i-- {
 			n := tb.openStack[i]
 			if n.Data == "li" {
@@ -1324,11 +1187,10 @@ func (tb *treeBuilder) handleInBodyStartTag(tag string, attrs []Attribute, selfC
 		return false
 
 	case "col":
-		// No colgroup open: create one.
 		tb.closeParagraph()
 		tb.insertElement("colgroup", nil, false)
 		tb.mode = modeInColumnGroup
-		return true // reprocess
+		return true
 
 	case "tbody", "thead", "tfoot":
 		tb.closeParagraph()
@@ -1340,13 +1202,13 @@ func (tb *treeBuilder) handleInBodyStartTag(tag string, attrs []Attribute, selfC
 		tb.closeParagraph()
 		tb.insertElement("tbody", nil, false)
 		tb.mode = modeInTableBody
-		return true // reprocess
+		return true
 
 	case "td", "th":
 		tb.closeParagraph()
 		tb.insertElement("tbody", nil, false)
 		tb.mode = modeInTableBody
-		return true // reprocess
+		return true
 
 	case "fieldset":
 		tb.closeParagraph()
@@ -1399,21 +1261,17 @@ func (tb *treeBuilder) handleInBodyStartTag(tag string, attrs []Attribute, selfC
 		return false
 
 	case "image":
-		// Treat as <img>.
 		tag = "img"
 		tb.reconstructActiveFormattingElements()
 		tb.insertElement("img", attrs, true)
 		return false
 
 	case "svg", "math":
-		// Foreign roots enter their own namespace, after reconstructing any
-		// active HTML formatting elements as required by the in-body mode.
 		tb.reconstructActiveFormattingElements()
 		tb.processStartTag(tag, attrs, selfClose)
 		return false
 	}
 
-	// Default: any other start tag.
 	tb.reconstructActiveFormattingElements()
 	tb.insertElement(tag, attrs, selfClose)
 	return false
@@ -1439,7 +1297,7 @@ func (tb *treeBuilder) handleInBodyEndTag(tag string) bool {
 	case "html":
 		if tb.hasInScope("body") {
 			tb.mode = modeAfterBody
-			return true // reprocess in afterBody
+			return true
 		}
 		return false
 
@@ -1506,8 +1364,6 @@ func (tb *treeBuilder) handleInBodyEndTag(tag string) bool {
 		return false
 
 	case "h1", "h2", "h3", "h4", "h5", "h6":
-		// If any heading is in scope, generate implied end tags and pop until
-		// we pop a heading element.
 		for i := len(tb.openStack) - 1; i >= 0; i-- {
 			n := tb.openStack[i]
 			if headingTags[n.Data] {
@@ -1516,7 +1372,7 @@ func (tb *treeBuilder) handleInBodyEndTag(tag string) bool {
 				return false
 			}
 			if isSpecialElement(n.Data) && !headingTags[n.Data] {
-				return false // not in scope
+				return false
 			}
 		}
 		return false
@@ -1535,20 +1391,16 @@ func (tb *treeBuilder) handleInBodyEndTag(tag string) bool {
 		return false
 
 	case "br":
-		// Act as <br> start tag.
 		return tb.handleInBodyStartTag("br", nil, false)
 
 	case "template":
 		return tb.handleInHead(tokenEndTag, tag, nil, false, "")
 	}
 
-	// Any other end tag.
 	tb.handleInBodyEndTagAnyOther(tag)
 	return false
 }
 
-// customizableSelectFor returns the nearest select whose first element child
-// is a button. In that content model, option descendants may contain markup.
 func (tb *treeBuilder) customizableSelectFor(node *Node) *Node {
 	for current := node; current != nil; current = current.Parent {
 		if current.Data != "select" {
@@ -1573,26 +1425,23 @@ func (tb *treeBuilder) handleInBodyEndTagAnyOther(tag string) {
 		node := tb.openStack[i]
 		if node.Data == tag {
 			tb.generateImpliedEndTagsExcept(tag)
-			// Pop everything up to and including this element.
 			for len(tb.openStack) > i {
 				tb.pop()
 			}
 			return
 		}
 		if isSpecialElement(node.Data) {
-			return // parse error, ignore
+			return
 		}
 	}
 }
 
-// handleTextMode (§13.2.6.4.7) - handles raw text element content.
 func (tb *treeBuilder) handleTextMode(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
 		tb.insertText(data)
 		return false
 	case tokenEndTag:
-		// Pop until we match the end tag, then restore mode.
 		tb.pop()
 		tb.mode = tb.prevMode
 		return false
@@ -1600,11 +1449,9 @@ func (tb *treeBuilder) handleTextMode(tokenType int, tag string, attrs []Attribu
 	return false
 }
 
-// handleInTable (§13.2.6.8).
 func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
-		// Switch to "in table text" and reprocess.
 		tb.prevMode = tb.mode
 		tb.mode = modeInTableText
 		return true
@@ -1619,9 +1466,6 @@ func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribut
 	case tokenStartTag:
 		switch tag {
 		case "template", "style", "script":
-			// The in-table insertion mode delegates these tokens to the in-head
-			// rules without enabling foster parenting. A template is a child of
-			// the table here, while ordinary stray content is foster parented.
 			return tb.handleInHead(tokenType, tag, attrs, selfClose, data)
 		case "caption":
 			tb.clearStackToTableContext()
@@ -1638,7 +1482,7 @@ func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribut
 			tb.clearStackToTableContext()
 			tb.insertElement("colgroup", nil, false)
 			tb.mode = modeInColumnGroup
-			return true // reprocess
+			return true
 		case "tbody", "thead", "tfoot":
 			tb.clearStackToTableContext()
 			tb.insertElement(tag, attrs, false)
@@ -1648,21 +1492,20 @@ func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribut
 			tb.clearStackToTableContext()
 			tb.insertElement("tbody", nil, false)
 			tb.mode = modeInTableBody
-			return true // reprocess
+			return true
 		case "td", "th":
 			tb.clearStackToTableContext()
 			tb.insertElement("tbody", nil, false)
 			tb.mode = modeInTableBody
-			return true // reprocess
+			return true
 		case "table":
 			if tb.hasInTableScope("table") {
 				tb.popUntil("table")
 				tb.resetInsertionMode()
-				return true // reprocess
+				return true
 			}
-			return false // ignore
+			return false
 		case "input":
-			// Only if type is "hidden".
 			for _, a := range attrs {
 				if strings.EqualFold(a.Name, "type") && strings.EqualFold(a.Value, "hidden") {
 					tb.reconstructActiveFormattingElements()
@@ -1670,7 +1513,6 @@ func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribut
 					return false
 				}
 			}
-			// Fall through to foster parenting.
 		case "form":
 			if tb.formElem != nil && len(tb.templateStack) == 0 {
 				return false
@@ -1683,7 +1525,6 @@ func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribut
 			tb.removeOpenElement(form)
 			return false
 		}
-		// "Anything else": foster parent.
 		tb.fosterParent = true
 		tb.handleInBody(tokenType, tag, attrs, selfClose, data)
 		tb.fosterParent = false
@@ -1699,9 +1540,8 @@ func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribut
 			return false
 		case "body", "caption", "col", "colgroup", "html", "tbody", "td",
 			"tfoot", "th", "thead", "tr":
-			return false // ignore
+			return false
 		}
-		// "Anything else": foster parent.
 		tb.fosterParent = true
 		tb.handleInBody(tokenType, tag, attrs, selfClose, data)
 		tb.fosterParent = false
@@ -1710,26 +1550,22 @@ func (tb *treeBuilder) handleInTable(tokenType int, tag string, attrs []Attribut
 	return false
 }
 
-// handleInTableText (§13.2.6.9).
 func (tb *treeBuilder) handleInTableText(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
 		if !hasNonSpace(data) {
 			tb.insertText(data)
 		} else {
-			// Foster-parent the text.
 			tb.fosterParent = true
 			tb.insertText(data)
 			tb.fosterParent = false
 		}
 		return false
 	}
-	// Any other token: switch back to previous mode and reprocess.
 	tb.mode = tb.prevMode
 	return true
 }
 
-// handleInCaption (§13.2.6.10).
 func (tb *treeBuilder) handleInCaption(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenEndTag:
@@ -1742,7 +1578,6 @@ func (tb *treeBuilder) handleInCaption(tokenType int, tag string, attrs []Attrib
 			}
 			return false
 		}
-		// Table-related end tags: close caption, reprocess.
 		switch tag {
 		case "table", "col", "colgroup", "tbody", "td", "tfoot", "th",
 			"thead", "tr":
@@ -1751,12 +1586,11 @@ func (tb *treeBuilder) handleInCaption(tokenType int, tag string, attrs []Attrib
 				tb.popUntil("caption")
 				tb.clearActiveFormattingToMarker()
 				tb.mode = modeInTable
-				return true // reprocess
+				return true
 			}
 			return false
 		}
 	case tokenStartTag:
-		// Table-related start tags: close caption, reprocess.
 		switch tag {
 		case "caption", "col", "colgroup", "tbody", "td", "tfoot", "th",
 			"thead", "tr":
@@ -1765,16 +1599,14 @@ func (tb *treeBuilder) handleInCaption(tokenType int, tag string, attrs []Attrib
 				tb.popUntil("caption")
 				tb.clearActiveFormattingToMarker()
 				tb.mode = modeInTable
-				return true // reprocess
+				return true
 			}
 			return false
 		}
 	}
-	// "Anything else": process as in body.
 	return tb.handleInBody(tokenType, tag, attrs, selfClose, data)
 }
 
-// handleInColumnGroup (§13.2.6.11).
 func (tb *treeBuilder) handleInColumnGroup(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -1782,7 +1614,6 @@ func (tb *treeBuilder) handleInColumnGroup(tokenType int, tag string, attrs []At
 			tb.insertText(data)
 			return false
 		}
-		// Fall through to "anything else".
 	case tokenComment:
 		tb.insertComment(data)
 		return false
@@ -1805,10 +1636,9 @@ func (tb *treeBuilder) handleInColumnGroup(tokenType int, tag string, attrs []At
 			return false
 		}
 		if tag == "col" {
-			return false // ignore
+			return false
 		}
 	}
-	// "Anything else": if not html, pop colgroup, switch to inTable, reprocess.
 	if tb.current().Data != "html" {
 		tb.pop()
 		tb.mode = modeInTable
@@ -1817,7 +1647,6 @@ func (tb *treeBuilder) handleInColumnGroup(tokenType int, tag string, attrs []At
 	return false
 }
 
-// handleInTableBody (§13.2.6.12).
 func (tb *treeBuilder) handleInTableBody(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenStartTag:
@@ -1831,13 +1660,13 @@ func (tb *treeBuilder) handleInTableBody(tokenType int, tag string, attrs []Attr
 			tb.clearStackToTableBodyContext()
 			tb.insertElement("tr", nil, false)
 			tb.mode = modeInRow
-			return true // reprocess
+			return true
 		case "caption", "col", "colgroup", "tbody", "tfoot", "thead":
 			if tb.hasTableSectionInScope() {
 				tb.clearStackToTableBodyContext()
-				tb.pop() // pop tbody/thead/tfoot
+				tb.pop()
 				tb.mode = modeInTable
-				return true // reprocess
+				return true
 			}
 			return false
 		}
@@ -1855,18 +1684,16 @@ func (tb *treeBuilder) handleInTableBody(tokenType int, tag string, attrs []Attr
 				tb.clearStackToTableBodyContext()
 				tb.pop()
 				tb.mode = modeInTable
-				return true // reprocess
+				return true
 			}
 			return false
 		case "body", "caption", "col", "colgroup", "html", "td", "th", "tr":
-			return false // ignore
+			return false
 		}
 	}
-	// "Anything else": process as in table.
 	return tb.handleInTable(tokenType, tag, attrs, selfClose, data)
 }
 
-// handleInRow (§13.2.6.13).
 func (tb *treeBuilder) handleInRow(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenStartTag:
@@ -1880,9 +1707,9 @@ func (tb *treeBuilder) handleInRow(tokenType int, tag string, attrs []Attribute,
 		case "caption", "col", "colgroup", "tbody", "tfoot", "thead", "tr":
 			if tb.hasInTableScope("tr") {
 				tb.clearStackToTableRowContext()
-				tb.pop() // pop tr
+				tb.pop()
 				tb.mode = modeInTableBody
-				return true // reprocess
+				return true
 			}
 			return false
 		}
@@ -1900,7 +1727,7 @@ func (tb *treeBuilder) handleInRow(tokenType int, tag string, attrs []Attribute,
 				tb.clearStackToTableRowContext()
 				tb.pop()
 				tb.mode = modeInTableBody
-				return true // reprocess
+				return true
 			}
 			return false
 		case "tbody", "thead", "tfoot":
@@ -1909,19 +1736,17 @@ func (tb *treeBuilder) handleInRow(tokenType int, tag string, attrs []Attribute,
 					tb.clearStackToTableRowContext()
 					tb.pop()
 					tb.mode = modeInTableBody
-					return true // reprocess
+					return true
 				}
 			}
 			return false
 		case "body", "caption", "col", "colgroup", "html", "td", "th":
-			return false // ignore
+			return false
 		}
 	}
-	// "Anything else": process as in table.
 	return tb.handleInTable(tokenType, tag, attrs, selfClose, data)
 }
 
-// handleInCell (§13.2.6.14).
 func (tb *treeBuilder) handleInCell(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenEndTag:
@@ -1935,12 +1760,12 @@ func (tb *treeBuilder) handleInCell(tokenType int, tag string, attrs []Attribute
 			}
 			return false
 		case "body", "caption", "col", "colgroup", "html":
-			return false // ignore
+			return false
 		case "table", "tbody", "tfoot", "thead", "tr":
 			if tb.hasInTableScope(tag) {
 				tb.closeCell()
 				tb.mode = modeInRow
-				return true // reprocess
+				return true
 			}
 			return false
 		}
@@ -1951,16 +1776,14 @@ func (tb *treeBuilder) handleInCell(tokenType int, tag string, attrs []Attribute
 			if tb.hasInTableScope("td") || tb.hasInTableScope("th") {
 				tb.closeCell()
 				tb.mode = modeInRow
-				return true // reprocess
+				return true
 			}
 			return false
 		}
 	}
-	// "Anything else": process as in body.
 	return tb.handleInBody(tokenType, tag, attrs, selfClose, data)
 }
 
-// handleInSelect (§13.2.6.15).
 func (tb *treeBuilder) handleInSelect(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -1994,14 +1817,10 @@ func (tb *treeBuilder) handleInSelect(tokenType int, tag string, attrs []Attribu
 			tb.insertElement("optgroup", attrs, false)
 			return false
 		case "select":
-			// Close select and reprocess.
 			tb.popUntil("select")
 			tb.resetInsertionMode()
 			return false
 		case "button":
-			// Customizable selects may begin with a select button containing a
-			// selectedcontent element. Parse its descendants with the ordinary
-			// in-body rules, then the closing button tag resets back to in-select.
 			if tb.current().Data == "select" {
 				tb.insertElement("button", attrs, false)
 				tb.mode = modeInBody
@@ -2014,7 +1833,7 @@ func (tb *treeBuilder) handleInSelect(tokenType int, tag string, attrs []Attribu
 		case "script", "template":
 			return tb.handleInHead(tokenType, tag, attrs, selfClose, data)
 		}
-		return false // ignore
+		return false
 	case tokenEndTag:
 		switch tag {
 		case "optgroup":
@@ -2039,12 +1858,11 @@ func (tb *treeBuilder) handleInSelect(tokenType int, tag string, attrs []Attribu
 		case "template":
 			return tb.handleInHead(tokenEndTag, tag, nil, false, "")
 		}
-		return false // ignore
+		return false
 	}
 	return false
 }
 
-// handleInSelectInTable (§13.2.6.16).
 func (tb *treeBuilder) handleInSelectInTable(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenStartTag:
@@ -2068,7 +1886,6 @@ func (tb *treeBuilder) handleInSelectInTable(tokenType int, tag string, attrs []
 	return tb.handleInSelect(tokenType, tag, attrs, selfClose, data)
 }
 
-// handleInTemplate (§13.2.6.17).
 func (tb *treeBuilder) handleInTemplate(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -2106,9 +1923,8 @@ func (tb *treeBuilder) handleInTemplate(tokenType int, tag string, attrs []Attri
 		if tag == "template" {
 			return tb.handleInHead(tokenEndTag, tag, nil, false, "")
 		}
-		return false // ignore
+		return false
 	}
-	// "Anything else": pop template, reset mode, reprocess.
 	if tb.hasOpenTag("template") {
 		tb.popUntil("template")
 		tb.clearActiveFormattingToMarker()
@@ -2121,9 +1937,6 @@ func (tb *treeBuilder) handleInTemplate(tokenType int, tag string, attrs []Attri
 	return false
 }
 
-// setTemplateInsertionMode updates the current template's insertion mode.
-// The stack gets one entry when each <template> starts; tokens processed while
-// that template is open replace its entry rather than growing the stack.
 func (tb *treeBuilder) setTemplateInsertionMode(mode insertionMode) {
 	if len(tb.templateStack) == 0 {
 		tb.templateStack = append(tb.templateStack, mode)
@@ -2132,18 +1945,15 @@ func (tb *treeBuilder) setTemplateInsertionMode(mode insertionMode) {
 	tb.templateStack[len(tb.templateStack)-1] = mode
 }
 
-// handleAfterBody (§13.2.6.18).
 func (tb *treeBuilder) handleAfterBody(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
 		if !hasNonSpace(data) {
 			return tb.handleInBody(tokenType, tag, attrs, selfClose, data)
 		}
-		// Non-whitespace: reprocess in inBody.
 		tb.mode = modeInBody
 		return true
 	case tokenComment:
-		// Insert comment as child of html element.
 		if tb.htmlElem != nil {
 			n := tb.doc.NewComment(data)
 			tb.htmlElem.AppendChild(n)
@@ -2168,7 +1978,6 @@ func (tb *treeBuilder) handleAfterBody(tokenType int, tag string, attrs []Attrib
 	return false
 }
 
-// handleInFrameset (§13.2.6.19).
 func (tb *treeBuilder) handleInFrameset(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -2208,7 +2017,6 @@ func (tb *treeBuilder) handleInFrameset(tokenType int, tag string, attrs []Attri
 	return false
 }
 
-// handleAfterFrameset (§13.2.6.20).
 func (tb *treeBuilder) handleAfterFrameset(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenChars:
@@ -2239,7 +2047,6 @@ func (tb *treeBuilder) handleAfterFrameset(tokenType int, tag string, attrs []At
 	return false
 }
 
-// handleAfterAfterBody (§13.2.6.21).
 func (tb *treeBuilder) handleAfterAfterBody(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenComment:
@@ -2262,7 +2069,7 @@ func (tb *treeBuilder) handleAfterAfterBody(tokenType int, tag string, attrs []A
 		return true
 	case tokenEndTag:
 		if tag == "html" {
-			return false // ignore
+			return false
 		}
 		tb.mode = modeInBody
 		return true
@@ -2270,7 +2077,6 @@ func (tb *treeBuilder) handleAfterAfterBody(tokenType int, tag string, attrs []A
 	return false
 }
 
-// handleAfterAfterFrameset (§13.2.6.22).
 func (tb *treeBuilder) handleAfterAfterFrameset(tokenType int, tag string, attrs []Attribute, selfClose bool, data string) bool {
 	switch tokenType {
 	case tokenComment:

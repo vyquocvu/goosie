@@ -39,19 +39,15 @@ func TestDynamicViewportUnits(t *testing.T) {
 	if target == nil {
 		t.Fatal("box style not found")
 	}
-	// 50dvw on 1000px viewport = 500px
 	if target.Width != 500 {
 		t.Errorf("Width = %v, want 500", target.Width)
 	}
-	// 25dvh on 800px viewport = 200px
 	if target.Height != 200 {
 		t.Errorf("Height = %v, want 200", target.Height)
 	}
-	// 10vi on 1000px = 100px
 	if target.MarginLeft != 100 {
 		t.Errorf("MarginLeft = %v, want 100", target.MarginLeft)
 	}
-	// 5vb on 800px = 40px
 	if target.MarginTop != 40 {
 		t.Errorf("MarginTop = %v, want 40", target.MarginTop)
 	}

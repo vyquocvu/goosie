@@ -10,9 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// paintPlaceholder draws the hint a control shows while it holds no value. The
-// text is not in the DOM, so it never went through layout: it starts at the
-// control's content origin and is bounded by that box.
 func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *frame.Rect) {
 	s := obj.Style
 	if s == nil || obj.Node == nil || !obj.Node.Element() {
@@ -22,7 +19,6 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 	if text == "" || controlText(obj) != "" {
 		return
 	}
-	// A composition preview takes the placeholder's place on an empty control.
 	if b.focus.object != nil && b.focus.object == obj && b.focus.marked != "" {
 		return
 	}
@@ -40,10 +36,6 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 	b.appendRun(text, rect, s, frame.RGB(117, 117, 117), opacity)
 }
 
-// composeControlText returns text with the composition preview spliced at the
-// caret when obj shows the focused control's text — the input itself or a
-// textarea's first text child. The caret bar stays before the marked text, so
-// the preview moves with the caret without moving the caret.
 func (b *Builder) composeControlText(obj *layout.Object, text string) string {
 	if b.focus.object == nil || b.focus.marked == "" || obj.Node == nil {
 		return text
@@ -69,9 +61,6 @@ func (b *Builder) composeControlText(obj *layout.Object, text string) string {
 	return string(out)
 }
 
-// paintControlSelectionHighlight paints the selection highlight for the IME
-// marked range in a focused text control. The marked range starts at the caret
-// and extends for markedLen runes.
 func (b *Builder) paintControlSelectionHighlight(obj *layout.Object, rect frame.Rect, s *style.ComputedStyle, opacity float32) {
 	if b.focus.object != obj || b.focus.markedLen == 0 {
 		return
@@ -82,11 +71,8 @@ func (b *Builder) paintControlSelectionHighlight(obj *layout.Object, rect frame.
 	}
 	start := caret
 	end := caret + b.focus.markedLen
-	// The text is what paintControlValue will draw: the control's value with
-	// the marked text already spliced in by the engine.
 	text := obj.Node.InputControlValue()
 	if b.focus.marked != "" {
-		// If marked is not empty, composeControlText will splice it in.
 		text = b.composeControlText(obj, text)
 	}
 	xa := runeX(text, rect, s, start, b.scale, b.metrics, nil)
@@ -106,9 +92,6 @@ func (b *Builder) paintControlSelectionHighlight(obj *layout.Object, rect frame.
 	})
 }
 
-// paintControlValue draws the text an input holds. The value is not in the DOM
-// text flow, so like the placeholder it starts at the content origin bounded
-// by the content box. Textareas paint through the normal text path instead.
 func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *frame.Rect) {
 	s := obj.Style
 	if s == nil || obj.Node == nil || !obj.Node.Element() {
@@ -119,8 +102,6 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 		return
 	}
 	typ := strings.ToLower(obj.Node.GetAttribute("type"))
-	// Checkbox, radio, submit, reset, and button inputs paint through their
-	// own specialised paths; skip them here.
 	switch typ {
 	case "checkbox", "radio", "submit", "reset", "button":
 		return
@@ -139,22 +120,15 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 			return
 		}
 	}
-	// Paint the IME marked range highlight before the text.
 	b.paintControlSelectionHighlight(obj, rect, s, opacity)
 	b.appendRun(text, rect, s, frame.RGB(0, 0, 0), opacity)
 }
 
-// paintCheckbox draws a checkbox widget: a small square box with a 1px border.
-// When checked, a checkmark is drawn inside.
 func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity float32) {
 	if rect.Empty() {
 		return
 	}
 	checked := obj.Node != nil && obj.Node.InputChecked()
-	// An unchecked box is white with a grey frame. A checked one takes the
-	// accent colour - the author's accent-color, or Chrome's default blue -
-	// and draws a white tick on it, which is what makes the state readable at
-	// a glance instead of only by the tick itself.
 	fillColor := frame.RGB(255, 255, 255)
 	borderColor := frame.RGB(117, 117, 117)
 	checkColor := frame.RGB(0, 0, 0)
@@ -172,56 +146,40 @@ func (b *Builder) paintCheckbox(obj *layout.Object, rect frame.Rect, opacity flo
 		Color:   fillColor,
 		Opacity: opacity,
 	})
-	// 1px border.
-	// Top
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X1, rect.Y0+1), Color: borderColor, Opacity: opacity})
-	// Bottom
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y1-1, rect.X1, rect.Y1), Color: borderColor, Opacity: opacity})
-	// Left
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X0, rect.Y0, rect.X0+1, rect.Y1), Color: borderColor, Opacity: opacity})
-	// Right
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(rect.X1-1, rect.Y0, rect.X1, rect.Y1), Color: borderColor, Opacity: opacity})
 
-	// If checked, draw a checkmark.
 	if checked {
-		// Simple checkmark: a small V shape drawn as filled pixels.
 		cx := (rect.X0 + rect.X1) / 2
 		cy := (rect.Y0 + rect.Y1) / 2
-		// Draw a simple checkmark using a few filled rects.
-		// Left stroke (going down-right):
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx-3, cy-1, cx-2, cy+1), Color: checkColor, Opacity: opacity})
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx-2, cy, cx-1, cy+2), Color: checkColor, Opacity: opacity})
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx-1, cy+1, cx, cy+3), Color: checkColor, Opacity: opacity})
-		// Right stroke (going up-right):
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx, cy, cx+1, cy+2), Color: checkColor, Opacity: opacity})
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx+1, cy-1, cx+2, cy+1), Color: checkColor, Opacity: opacity})
 		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(cx+2, cy-2, cx+3, cy), Color: checkColor, Opacity: opacity})
 	}
 }
 
-// paintRadio draws a radio button widget: a small circle with a 1px border.
-// When checked, a filled dot is drawn inside.
 func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float32) {
 	if rect.Empty() {
 		return
 	}
-	// White background fill.
 	b.list.Append(DisplayCmd{
 		Kind:    CmdFill,
 		Rect:    rect,
 		Color:   frame.RGB(255, 255, 255),
 		Opacity: opacity,
 	})
-	// Draw a circular border using small filled rects approximating a circle.
 	borderColor := frame.RGB(117, 117, 117)
 	cx := (rect.X0 + rect.X1) / 2
 	cy := (rect.Y0 + rect.Y1) / 2
 	rx := (rect.X1 - rect.X0) / 2
 	ry := (rect.Y1 - rect.Y0) / 2
-	// Draw the circle outline by filling pixels near the ellipse boundary.
 	for dy := -ry; dy <= ry; dy++ {
 		for dx := -rx; dx <= rx; dx++ {
-			// Check if this pixel is on the border (near the ellipse edge).
 			dist := float32(dx*dx)/float32(rx*rx) + float32(dy*dy)/float32(ry*ry)
 			if dist >= 0.7 && dist <= 1.1 {
 				b.list.Append(DisplayCmd{
@@ -234,10 +192,8 @@ func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float3
 		}
 	}
 
-	// If checked, draw a filled dot in the center.
 	if obj.Node != nil && obj.Node.InputChecked() {
 		dotColor := frame.RGB(0, 0, 0)
-		// Apply accent-color if set and has alpha > 0
 		if obj.Style != nil && obj.Style.AccentColor.A > 0 {
 			dotColor = frame.RGBA(obj.Style.AccentColor.R, obj.Style.AccentColor.G, obj.Style.AccentColor.B, 255)
 		}
@@ -260,9 +216,6 @@ func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float3
 	}
 }
 
-// paintRange draws the current value of a range input as a track, filled
-// segment, and thumb. The range input's value has already passed the HTML
-// value-sanitization algorithm before it reaches this paint stage.
 func (b *Builder) paintRange(obj *layout.Object, opacity float32, clip *frame.Rect) {
 	if obj == nil || obj.Node == nil || obj.Style == nil || b.scale <= 0 {
 		return
@@ -315,9 +268,6 @@ func (b *Builder) paintRange(obj *layout.Object, opacity float32, clip *frame.Re
 	track := frame.Rect4(left, centerY-trackHalf, right+1, centerY+trackHalf+1)
 	b.appendRangeFill(track, base, opacity, clip)
 	b.appendRangeFill(frame.Rect4(min(left, thumbX), centerY-trackHalf, max(left, thumbX)+1, centerY+trackHalf+1), active, opacity, clip)
-	// Datalist suggestions that fall inside the range are shown as tick marks.
-	// Draw them after the track fill and before the thumb so a tick under the
-	// thumb is naturally occluded.
 	tickColor := frame.RGB(16, 16, 16)
 	tickHeight := int32(math.Max(2, math.Round(float64(4*b.scale))))
 	radius := diameter / 2
@@ -341,8 +291,6 @@ func (b *Builder) paintRange(obj *layout.Object, opacity float32, clip *frame.Re
 		tickTop := centerY + radius + int32(math.Round(float64(5*b.scale)))
 		b.appendRangeFill(frame.Rect4(tickX, tickTop, tickX+1, tickTop+tickHeight), tickColor, opacity, clip)
 	}
-	// Build the circular thumb from horizontal spans so the rasterizer only
-	// receives solid rectangles, like the existing radio-control painter.
 	for dy := -radius; dy <= radius; dy++ {
 		half := int32(math.Sqrt(float64(radius*radius - dy*dy)))
 		b.appendRangeFill(frame.Rect4(thumbX-half, centerY+dy, thumbX+half+1, centerY+dy+1), active, opacity, clip)
@@ -364,8 +312,6 @@ func (b *Builder) appendRangeFill(rect frame.Rect, color frame.Color, opacity fl
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: color, Opacity: opacity})
 }
 
-// paintButtonLabel draws the value text of a button-like input (submit, reset,
-// button) centered in its box.
 func (b *Builder) paintButtonLabel(obj *layout.Object, opacity float32, clip *frame.Rect) {
 	s := obj.Style
 	if s == nil || obj.Node == nil {
@@ -397,7 +343,6 @@ func (b *Builder) paintButtonLabel(obj *layout.Object, opacity float32, clip *fr
 			return
 		}
 	}
-	// Center the text horizontally.
 	fontSize := int32(s.FontSize * b.scale)
 	if fontSize <= 0 {
 		return
@@ -419,8 +364,6 @@ func (b *Builder) paintButtonLabel(obj *layout.Object, opacity float32, clip *fr
 	b.appendRun(text, rect, s, frame.RGB(0, 0, 0), opacity)
 }
 
-// paintSelect draws the selected option text and a dropdown arrow indicator
-// for a <select> element.
 func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.Rect) {
 	s := obj.Style
 	if s == nil || obj.Node == nil {
@@ -437,33 +380,19 @@ func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.R
 			return
 		}
 	}
-	// Leave room for the dropdown arrow on the right.
 	arrowW := int32(12 * b.scale)
 	textRect := rect
 	if rect.X1-rect.X0 > arrowW {
 		textRect.X1 -= arrowW
 	}
-	// Paint the same option the accessibility tree announces and the form
-	// submits: SelectedOption resolves a multiple-selected tie last-authored-
-	// wins and applies the single-line first-option default. The closed
-	// control paints the display spelling OptionDisplayStyle - measured by
-	// scripts/verify-optionax-paint.js (Chromium 1.63, 2026-11-06): a label
-	// attribute's interior whitespace paints verbatim with the edge run
-	// trimmed (label="  My   Label  " answers the same ink span and gap as the
-	// authored "My   Label" baseline), while text content arrives normalised.
-	// Reading the raw text of the first selected child would let one control
-	// show, announce and submit three different answers, and falling back to
-	// another option's text would paint a label the control does not carry.
 	if option := obj.Node.SelectedOption(); option != nil {
 		if text := option.OptionDisplayStyle(); text != "" {
 			b.appendRun(text, textRect, s, frame.RGB(0, 0, 0), opacity)
 		}
 	}
-	// Draw a dropdown arrow (small triangle) on the right side.
 	arrowCX := rect.X1 - arrowW/2
 	arrowCY := (rect.Y0 + rect.Y1) / 2
 	arrowColor := frame.RGB(80, 80, 80)
-	// Simple downward triangle: 3 rows narrowing from top to bottom.
 	for i := int32(0); i < 3; i++ {
 		halfW := 3 - i
 		b.list.Append(DisplayCmd{
@@ -475,7 +404,6 @@ func (b *Builder) paintSelect(obj *layout.Object, opacity float32, clip *frame.R
 	}
 }
 
-// paintFocus draws the focused control's caret and focus ring.
 func (b *Builder) paintFocus(obj *layout.Object, clip *frame.Rect) {
 	if obj.Node == nil || obj.Style == nil ||
 		(obj.Node.Data != "input" && obj.Node.Data != "textarea") {
@@ -485,8 +413,6 @@ func (b *Builder) paintFocus(obj *layout.Object, clip *frame.Rect) {
 	b.paintFocusRing(obj)
 }
 
-// controlText returns the editable text of a form control: the value attribute
-// for input, the first text child for textarea.
 func controlText(obj *layout.Object) string {
 	if obj.Node == nil {
 		return ""
@@ -502,10 +428,6 @@ func controlText(obj *layout.Object) string {
 	return ""
 }
 
-// paintCaret draws the 1px bar where the next typed rune goes, one glyph
-// advance past the value's first caret runes. When the control carries a
-// GlyphOrder (direction:rtl), the logical caret index is mapped through the
-// visual permutation so the bar sits at the correct screen x.
 func (b *Builder) paintCaret(obj *layout.Object, clip *frame.Rect) {
 	s := obj.Style
 	if s == nil {
@@ -571,8 +493,6 @@ func (b *Builder) paintCaret(obj *layout.Object, clip *frame.Rect) {
 	})
 }
 
-// paintFocusRing draws a 2px Chromium-blue ring 2px outside the control's
-// border box, as four strips so it works at any size.
 func (b *Builder) paintFocusRing(obj *layout.Object) {
 	x0, y0, x1, y1 := obj.BorderRect()
 	if x1 <= x0 || y1 <= y0 {
@@ -601,9 +521,6 @@ func (b *Builder) paintFocusRing(obj *layout.Object) {
 	strip(inner.X1, inner.Y0, outer.X1, inner.Y1)
 }
 
-// listCounterStyle maps a marker type to the counter-style name FormatCounter
-// understands. Ordinals come from sibling order (custom ol start/reversed and
-// scoped counters do not feed markers yet); formatting is still per-type.
 func listCounterStyle(t style.ListStyleType) string {
 	switch t {
 	case style.ListStyleDecimalLeadingZero:
@@ -625,9 +542,6 @@ func listCounterStyle(t style.ListStyleType) string {
 	}
 }
 
-// paintMarker draws the outside marker of a list-item. The marker takes the
-// item's own font and color, is right-aligned to the item's content edge, and
-// sits on the baseline of the first text line inside it.
 func (b *Builder) paintMarker(obj *layout.Object, ordinal int) {
 	s := obj.Style
 	if s == nil || s.ListStyleType == style.ListStyleNone || s.Visibility != "visible" {
@@ -667,9 +581,6 @@ func (b *Builder) paintMarker(obj *layout.Object, ordinal int) {
 	if width <= 0 {
 		return
 	}
-	// The marker is followed by a space, so the glyph - not the trailing
-	// whitespace - is what ends at the item's content edge. Right-aligning the
-	// text alone butts `1.` against `Mission`, which reads as one word.
 	gap := int32(0)
 	if b.metrics != nil {
 		gap = b.metrics.GlyphAdvance(fontSize, ' ', slot)
@@ -685,8 +596,6 @@ func (b *Builder) paintMarker(obj *layout.Object, ordinal int) {
 	b.appendRun(text, rect, s, convertColor(s.Color), s.Opacity)
 }
 
-// firstTextObject returns the item's first text descendant in paint order,
-// skipping hidden subtrees: the marker aligns with that line, not the box top.
 func firstTextObject(a *layout.Arena, obj *layout.Object) *layout.Object {
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
@@ -805,12 +714,12 @@ func (b *Builder) paintMeter(obj *layout.Object, rect frame.Rect, opacity float3
 	high := parseF("high", maxVal)
 	opt := parseF("optimum", (minVal+maxVal)/2)
 
-	meterColor := frame.RGB(40, 167, 69) // Green
+	meterColor := frame.RGB(40, 167, 69)
 	if opt >= high {
 		if val < low {
-			meterColor = frame.RGB(220, 53, 69) // Red
+			meterColor = frame.RGB(220, 53, 69)
 		} else if val < high {
-			meterColor = frame.RGB(255, 193, 7) // Yellow
+			meterColor = frame.RGB(255, 193, 7)
 		}
 	} else if opt <= low {
 		if val > high {

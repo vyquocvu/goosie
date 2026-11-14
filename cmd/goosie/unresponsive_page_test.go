@@ -13,10 +13,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// FR-JS-06: a page whose script exceeds the CPU budget must show a prompt that
-// names the two honest outcomes, not silently display (or silently discard) the
-// interrupted document.
-
 func newUnresponsiveTestPath(t *testing.T) *framePath {
 	t.Helper()
 	f := newNavTestPath(t)

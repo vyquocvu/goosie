@@ -36,42 +36,36 @@ func TestModernNotSelectorMultipleArguments(t *testing.T) {
 }
 
 func TestModernSelectorSpecificity(t *testing.T) {
-	// :not(#id) should have specificity (1, 0, 0)
 	notID := css.ParseSelector(":not(#id)")
 	a, b, c := notID.Specificity()
 	if a != 1 || b != 0 || c != 0 {
 		t.Errorf(":not(#id) specificity = (%d, %d, %d), want (1, 0, 0)", a, b, c)
 	}
 
-	// :not(.cls, #id) should take the maximum argument specificity -> (1, 0, 0)
 	notMulti := css.ParseSelector(":not(.cls, #id)")
 	a, b, c = notMulti.Specificity()
 	if a != 1 || b != 0 || c != 0 {
 		t.Errorf(":not(.cls, #id) specificity = (%d, %d, %d), want (1, 0, 0)", a, b, c)
 	}
 
-	// :has(#id) should take argument specificity -> (1, 0, 0)
 	hasID := css.ParseSelector(":has(#id)")
 	a, b, c = hasID.Specificity()
 	if a != 1 || b != 0 || c != 0 {
 		t.Errorf(":has(#id) specificity = (%d, %d, %d), want (1, 0, 0)", a, b, c)
 	}
 
-	// :has(> .item, #main) should take max specificity -> (1, 0, 0)
 	hasMulti := css.ParseSelector(":has(> .item, #main)")
 	a, b, c = hasMulti.Specificity()
 	if a != 1 || b != 0 || c != 0 {
 		t.Errorf(":has(> .item, #main) specificity = (%d, %d, %d), want (1, 0, 0)", a, b, c)
 	}
 
-	// :where(#id, .class) must contribute (0, 0, 0)
 	whereSel := css.ParseSelector(":where(#id, .class)")
 	a, b, c = whereSel.Specificity()
 	if a != 0 || b != 0 || c != 0 {
 		t.Errorf(":where(#id, .class) specificity = (%d, %d, %d), want (0, 0, 0)", a, b, c)
 	}
 
-	// :is(.a, #b) takes max specificity -> (1, 0, 0)
 	isSel := css.ParseSelector(":is(.a, #b)")
 	a, b, c = isSel.Specificity()
 	if a != 1 || b != 0 || c != 0 {
@@ -98,8 +92,6 @@ func TestIsAndWhereUseForgivingSelectorLists(t *testing.T) {
 		t.Fatal(":is() matched when none of its valid members matched")
 	}
 
-	// Invalid alternatives do not contribute specificity. The remaining ID
-	// selector still supplies :is()'s maximum specificity.
 	isSelector := css.ParseSelector(`div:is(#winner, :not-a-real-pseudo, .good)`)
 	a, b, c := isSelector.Specificity()
 	if a != 1 || b != 0 || c != 1 {

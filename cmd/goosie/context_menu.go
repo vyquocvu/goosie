@@ -16,7 +16,6 @@ const (
 	menuPadding    = 4
 )
 
-// ContextMenuItem represents an option in the popup context menu.
 type ContextMenuItem struct {
 	Label     string
 	Action    string
@@ -25,13 +24,6 @@ type ContextMenuItem struct {
 	Disabled  bool
 }
 
-// ContextMenu represents an in-viewport context menu popup.
-//
-// mu guards every field: the chrome pump owns the menu and mutates it through
-// the locked methods below, while an off-thread observer (an e2e journey or
-// automation bridge) reads a consistent copy via Snapshot. The pump's own
-// direct field reads in intercept stay on the pump goroutine; anything reading
-// from another goroutine must take a Snapshot instead of touching the fields.
 type ContextMenu struct {
 	mu      sync.Mutex
 	Visible bool
@@ -41,12 +33,10 @@ type ContextMenu struct {
 	Hover   int
 }
 
-// NewContextMenu creates a new empty context menu.
 func NewContextMenu() *ContextMenu {
 	return &ContextMenu{Hover: -1}
 }
 
-// Show populates and opens the context menu at (x, y) with boundary clamping.
 func (cm *ContextMenu) Show(x, y, maxW, maxH int32, items []ContextMenuItem, scale int32) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -67,7 +57,6 @@ func (cm *ContextMenu) Show(x, y, maxW, maxH int32, items []ContextMenuItem, sca
 	}
 	cm.H = totalH
 
-	// Clamp to viewport bounds
 	if x+cm.W > maxW {
 		x = maxW - cm.W - 4*scale
 	}
@@ -85,7 +74,6 @@ func (cm *ContextMenu) Show(x, y, maxW, maxH int32, items []ContextMenuItem, sca
 	cm.Visible = true
 }
 
-// Hide closes the context menu.
 func (cm *ContextMenu) Hide() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -94,9 +82,6 @@ func (cm *ContextMenu) Hide() {
 	cm.Items = nil
 }
 
-// Snapshot returns an independent copy of the menu for off-thread observers.
-// The returned value owns its Items slice and a zero mutex, so callers can read
-// its fields without locking and without copying the live lock.
 func (cm *ContextMenu) Snapshot() *ContextMenu {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -112,16 +97,12 @@ func (cm *ContextMenu) Snapshot() *ContextMenu {
 	}
 }
 
-// IsVisible reports whether the menu is open, under the lock, so callers on any
-// goroutine can guard on it without reading the field directly. Draw and Rect
-// re-check Visible under their own lock, so a hide racing this check is harmless.
 func (cm *ContextMenu) IsVisible() bool {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	return cm.Visible
 }
 
-// Rect returns the bounding box of the context menu.
 func (cm *ContextMenu) Rect() frame.Rect {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -131,7 +112,6 @@ func (cm *ContextMenu) Rect() frame.Rect {
 	return frame.Rect4(cm.X, cm.Y, cm.X+cm.W, cm.Y+cm.H)
 }
 
-// UpdateHover updates the hovered item based on pointer position.
 func (cm *ContextMenu) UpdateHover(pos frame.Point, scale int32) bool {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -168,7 +148,6 @@ func (cm *ContextMenu) UpdateHover(pos frame.Point, scale int32) bool {
 	return cm.Hover != oldHover
 }
 
-// HitItem checks if pos clicks on an active context menu item.
 func (cm *ContextMenu) HitItem(pos frame.Point, scale int32) (ContextMenuItem, bool) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -198,14 +177,12 @@ func (cm *ContextMenu) HitItem(pos frame.Point, scale int32) (ContextMenuItem, b
 	return ContextMenuItem{}, false
 }
 
-// Draw renders the context menu on buf.
 func (cm *ContextMenu) Draw(buf *frame.Bitmap, fonts *raster.Fonts, scale int32) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 	if !cm.Visible || scale < 1 {
 		return
 	}
-	// Menu card background
 	bgRect := frame.Rect4(cm.X, cm.Y, cm.X+cm.W, cm.Y+cm.H)
 	borderColor := frame.RGB(200, 204, 210)
 	bgColor := frame.RGB(255, 255, 255)
@@ -215,7 +192,6 @@ func (cm *ContextMenu) Draw(buf *frame.Bitmap, fonts *raster.Fonts, scale int32)
 	sepColor := frame.RGB(226, 230, 235)
 	disabledTextColor := frame.RGB(160, 165, 175)
 
-	// Draw border & background
 	buf.FillRect(bgRect, borderColor, nil)
 	innerRect := frame.Rect4(cm.X+scale, cm.Y+scale, cm.X+cm.W-scale, cm.Y+cm.H-scale)
 	buf.FillRect(innerRect, bgColor, nil)
@@ -241,7 +217,6 @@ func (cm *ContextMenu) Draw(buf *frame.Bitmap, fonts *raster.Fonts, scale int32)
 			tColor = hoverTextColor
 		}
 
-		// Draw label
 		if fonts != nil && it.Label != "" {
 			textX := cm.X + 12*scale
 			textY := curY + (itemH-int32(fontSize))/2 + int32(fontSize)*4/5
@@ -272,8 +247,6 @@ func drawMenuText(buf *frame.Bitmap, fonts *raster.Fonts, text string, x, y int3
 	}
 }
 
-// BuildContextMenuItems builds the context menu items list depending on what
-// was clicked under (contentX, contentY).
 func BuildContextMenuItems(linkURL, imageURL, selText, focusedText string, isEditable, canBack, canForward bool) []ContextMenuItem {
 	var items []ContextMenuItem
 
@@ -304,7 +277,6 @@ func BuildContextMenuItems(linkURL, imageURL, selText, focusedText string, isEdi
 		items = append(items, ContextMenuItem{Separator: true})
 	}
 
-	// Navigation & Page items
 	items = append(items, ContextMenuItem{Label: "Back", Action: "back", Disabled: !canBack})
 	items = append(items, ContextMenuItem{Label: "Forward", Action: "forward", Disabled: !canForward})
 	items = append(items, ContextMenuItem{Label: "Reload", Action: "reload"})
@@ -316,9 +288,6 @@ func BuildContextMenuItems(linkURL, imageURL, selText, focusedText string, isEdi
 	return items
 }
 
-// BuildTabContextMenuItems builds the actions menu for the tab at tabIndex.
-// Every entry carries the tab's id so the host acts on the tab the user
-// right-clicked, not whichever tab is active by the time the menu closes.
 func BuildTabContextMenuItems(tab *tabs.Tab, tabIndex, tabCount int, canReopen bool) []ContextMenuItem {
 	pinLabel := "Pin Tab"
 	if tab.Pinned() {

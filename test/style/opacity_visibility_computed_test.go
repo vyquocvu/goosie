@@ -8,12 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// TestOpacityClampsToUnitRange is the style-layer half of GOOSIE-VIS-001. The
-// expected values are Chromium's getComputedStyle('opacity'), measured in
-// TASK-044 section 2.2: a valid opacity is a <number> or <percentage> clamped to
-// [0,1]. Before the fix opacity:5 was stored verbatim as 5.0 (only the rasterizer's
-// "0/1 sentinel" hid the fact), and an unparseable value fell through to 0,
-// which now would drop the subtree.
 // qc:BR-197
 func TestOpacityClampsToUnitRange(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -35,10 +29,10 @@ func TestOpacityClampsToUnitRange(t *testing.T) {
 		id   string
 		want float32
 	}{
-		{"a", 0}, {"b", 0.5}, {"c", 0.5}, {"d", 1}, // opacity:5 clamps to 1
-		{"e", 0}, {"f", 0.5}, // 0% -> 0, 50% -> 0.5
+		{"a", 0}, {"b", 0.5}, {"c", 0.5}, {"d", 1},
+		{"e", 0}, {"f", 0.5},
 		{"g", 1},
-		{"bad", 1}, // an invalid value must not resolve to 0 and hide the box
+		{"bad", 1},
 	}
 	for _, tc := range cases {
 		el := doc.ElementByID(tc.id)
@@ -55,9 +49,6 @@ func TestOpacityClampsToUnitRange(t *testing.T) {
 	}
 }
 
-// TestVisibilityInheritsAndRestores pins the inheritance rule measured in
-// section 2.3: visibility inherits, so a hidden parent hides a silent child, but
-// a child that reasserts visible is visible again and passes visible down.
 // qc:BR-197
 func TestVisibilityInheritsAndRestores(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -83,9 +74,9 @@ func TestVisibilityInheritsAndRestores(t *testing.T) {
 		want string
 	}{
 		{"p", "hidden"},
-		{"silent", "hidden"}, // inherits hidden
-		{"shown", "visible"}, // reasserts visible
-		{"grand", "visible"}, // inherits the restored visible
+		{"silent", "hidden"},
+		{"shown", "visible"},
+		{"grand", "visible"},
 	}
 	for _, tc := range cases {
 		el := doc.ElementByID(tc.id)

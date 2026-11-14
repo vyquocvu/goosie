@@ -7,21 +7,13 @@ import (
 	"github.com/dop251/goja"
 )
 
-// AbortController and AbortSignal API implementation.
-
-// setupAbortController installs AbortController and AbortSignal constructors.
 func (r *Runtime) setupAbortController() {
-	// AbortController constructor.
 	controllerCtor := func(call goja.ConstructorCall) *goja.Object {
 		obj := r.vm.NewObject()
 		signalObj := r.newAbortSignal(false, goja.Undefined())
 
 		_ = obj.Set("signal", signalObj)
 
-		// abort(reason) method. An absent or undefined reason installs the
-		// default AbortError DOMException; any value the page passed - null
-		// included - is kept verbatim, as scripts/verify-br123-fetch-abort.js
-		// measured in Chromium.
 		_ = obj.Set("abort", func(call goja.FunctionCall) goja.Value {
 			reason := r.resolveAbortReason(call.Arguments)
 			if fn, ok := goja.AssertFunction(signalObj.Get("__abort__")); ok {
@@ -33,7 +25,6 @@ func (r *Runtime) setupAbortController() {
 		return obj
 	}
 
-	// Install AbortController.
 	controllerVal := r.vm.ToValue(controllerCtor)
 	_ = r.vm.Set("AbortController", controllerVal)
 	if win := r.vm.Get("window"); win != nil {
@@ -42,19 +33,12 @@ func (r *Runtime) setupAbortController() {
 		}
 	}
 
-	// Install AbortSignal as a plain object with static methods.
 	signalObj := r.vm.NewObject()
 
-	// AbortSignal.abort(reason) static method.
 	_ = signalObj.Set("abort", func(call goja.FunctionCall) goja.Value {
 		return r.newAbortSignal(true, r.resolveAbortReason(call.Arguments))
 	})
 
-	// AbortSignal.timeout(ms) static method. Creates a signal that automatically
-	// aborts after ms milliseconds with a TimeoutError DOMException as the reason.
-	// Per Chromium measurement (scripts/verify-br123-fetch-abort.js section 8):
-	// reason is undefined before the timer fires, then becomes a TimeoutError
-	// DOMException with name="TimeoutError", message="signal timed out", code=23.
 	_ = signalObj.Set("timeout", func(call goja.FunctionCall) goja.Value {
 		ms := int64(0)
 		if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) && !goja.IsNull(call.Arguments[0]) {
@@ -89,11 +73,6 @@ func (r *Runtime) setupAbortController() {
 	}
 }
 
-// resolveAbortReason turns abort()'s argument list into the reason value the
-// signal carries. An absent or undefined argument means the default abort,
-// which Chromium reports as
-// "AbortError: signal is aborted without reason"; every other value - null
-// included - is kept as the page wrote it.
 func (r *Runtime) resolveAbortReason(args []goja.Value) goja.Value {
 	if len(args) >= 1 && args[0] != nil && !goja.IsUndefined(args[0]) {
 		return args[0]
@@ -101,15 +80,10 @@ func (r *Runtime) resolveAbortReason(args []goja.Value) goja.Value {
 	return r.newAbortErrorDOMException()
 }
 
-// newAbortErrorDOMException builds the default abort reason: a DOMException
-// named AbortError with the message Chromium's own signal.reason carries.
 func (r *Runtime) newAbortErrorDOMException() goja.Value {
 	return r.newDOMExceptionValue("AbortError", "signal is aborted without reason")
 }
 
-// newDOMExceptionValue constructs an exception through the page's DOMException
-// constructor, so `err instanceof DOMException` holds for engine-raised values
-// the same way it does for ones the script built itself.
 func (r *Runtime) newDOMExceptionValue(name, message string) goja.Value {
 	if constructor, ok := goja.AssertConstructor(r.vm.Get("DOMException")); ok {
 		if exception, err := constructor(nil, r.vm.ToValue(message), r.vm.ToValue(name)); err == nil {
@@ -161,9 +135,6 @@ func (r *Runtime) newAbortSignal(aborted bool, reason goja.Value) *goja.Object {
 			stateReason = call.Arguments[0]
 		}
 		r.runAbortAlgorithms(signal)
-		// Create an abort event and dispatch it. The onabort property handler
-		// is called directly; addEventListener('abort', ...) listeners are
-		// invoked through dispatchGenericEvent.
 		eventObj := r.jsCreateLegacyEvent("Event")
 		if evt, ok := eventObj.(*goja.Object); ok {
 			_ = evt.Set("type", "abort")

@@ -13,53 +13,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// These are the paint-stage oracles for GOOSIE-SHADOWRUN-001's anonymous-box
-// multiplier: layout wraps a run of inline content in anonymous block boxes
-// (internal/layout/anonymous.go), each starts from a verbatim copy of the
-// generating element's ComputedStyle (style.AnonymousBlockStyle: `s = *parent`),
-// and paintBoxShadow has no owner test, so a block that generates two anonymous
-// boxes emitted the element's shadow three times.
-//
-// Every number below was measured before it was encoded, with Chromium 131.0.6778.33
-// through Playwright and cmd/goosie-headless on this host at 400x200 DPR 1, on the
-// document the tests rasterize: a 300x76 block at (20,20) declaring
-// `box-shadow:0 0 10px 6px rgba(200,0,0,0.5)` and holding `one two` and `three four`
-// in inline spans, optionally split by a 20px-tall div. cmd/dump-layout puts the two
-// anonymous boxes at (20,20,300,18) and (20,58,300,18) when the div is present, and
-// generates none when it is not.
-//
-//	what the declaration changes (with-shadow minus without-shadow pixels),
-//	re-measured 2026-11-13 in the 340x120 tile after BR-281 replaced the
-//	concentric-ring blur with the Gaussian field it measured against Chromium
-//	  Chromium    plain 16636   anon 16636   symmetric difference 0
-//	  Goosie pre  plain 13056   anon 23856   symmetric difference 10800
-//	  Goosie post plain 15332   anon 15332   symmetric difference 0, and 1304 px
-//	    of tail difference against Chromium's set, every one of them 1 level
-//	pixels (270,48), in the 20px div's band past the text
-//	  Chromium white, Goosie pre (202,13,13), Goosie post white
-//	the element's own ring outside the box, (330,60)
-//	  Chromium (249,230,230); Goosie read (213,59,59) under the ring model and
-//	  (250,232,232) now, 1-2 levels off, so this row is no longer the blur's
-//	  worst case
-//	shadow-coloured fills on the display list, one declared layer
-//	  no inline content 16 / one anonymous band 16 / two anonymous bands 48 pre,
-//	  16 post; two declared layers 12 and 36 pre, 28 post (the field's cells)
-//
-// The shape deliberately wraps the text in inline spans. Raw text directly inside
-// the shadowed block is a SECOND multiplier of the same defect - the run's style
-// comes from the element through style.inheritStyle, box-shadow included - and it
-// is measured but not fixed here (TASK-053 §6, proposal 2 in §9). Spans make the
-// anonymous-box contribution the only one on the list: a span does not declare the
-// shadow and box-shadow does not inherit, so a span's runs emit none.
-
-// apFillKey names a fill command by everything that decides its pixels, so two
-// documents that differ only by a declaration can be subtracted.
 func apFillKey(c paint.DisplayCmd) string {
 	return fmt.Sprintf("(%d,%d,%d,%d)|%d|%v", c.Rect.X0, c.Rect.Y0, c.Rect.X1, c.Rect.Y1, c.Color, c.Opacity)
 }
 
-// apAddedFills returns the fill commands present in with but not in without, sorted
-// so a shape comparison is order-independent.
 func apAddedFills(with, without []paint.DisplayCmd) []string {
 	have := make(map[string]int, len(without))
 	for _, c := range without {
@@ -83,10 +40,6 @@ func apAddedFills(with, without []paint.DisplayCmd) []string {
 	return out
 }
 
-// apAnonymousBlocks counts the block boxes layout generated that have no DOM node,
-// which is what an anonymous block box is. It is the vacuity guard for this file:
-// a shape that stopped generating the wrappers would make the shadow assertions
-// trivially true.
 func apAnonymousBlocks(t *testing.T, css, body string) int {
 	t.Helper()
 	fonts, err := raster.NewFonts()
@@ -116,25 +69,16 @@ const (
 	apTwoLayer = `.box{width:300px;height:76px;margin:20px;box-shadow:1px 1px 2px rgb(200,0,0),0 0 4px rgb(0,0,200)}`
 
 	apNoInline = `<div class="box"></div>`
-	// Two anonymous boxes: the spans are inline content with a block sibling between
-	// them.
 	apTwoBands = `<div class="box"><span>one two</span><div style="height:20px"></div><span>three four</span></div>`
-	// No anonymous box: inline content only, so nothing needs a block wrapper.
-	apNoBands = `<div class="box"><span>one two</span><span>three four</span></div>`
+	apNoBands  = `<div class="box"><span>one two</span><span>three four</span></div>`
 )
 
-// TestAnonymousBlockEmitsNoBoxShadowCommands pins the display list: the fills a
-// box-shadow declaration adds are the element's own, and their number and geometry
-// do not change when layout has to generate one or two anonymous blocks around the
-// content. N fills per declaring element, zero per generated box.
 // qc:BR-231
 func TestAnonymousBlockEmitsNoBoxShadowCommands(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		css  string
-		body string
-		// anon is how many anonymous block boxes the body generates; wantFills is
-		// the number of fills the declaration adds to the no-anon shape.
+		name      string
+		css       string
+		body      string
 		anon      int
 		wantFills int
 	}{
@@ -174,10 +118,6 @@ func TestAnonymousBlockEmitsNoBoxShadowCommands(t *testing.T) {
 			wantFills: 28,
 		},
 		{
-			// Control: nothing declared, nothing emitted. A mechanism that suppresses
-			// the copy by suppressing shadows altogether fails the cases above, not
-			// this one, which is here so "zero fills" is never the expected answer for
-			// a declared layer.
 			name:      "no declaration",
 			css:       apBoxShape,
 			body:      apTwoBands,
@@ -202,8 +142,6 @@ func TestAnonymousBlockEmitsNoBoxShadowCommands(t *testing.T) {
 		})
 	}
 
-	// The geometry, not only the count: the element sits at the same place in all
-	// three shapes, so the fills it adds must be the same rects.
 	base := apAddedFills(ibDisplayList(t, apOneLayer, apNoInline, 800), ibDisplayList(t, apBoxShape, apNoInline, 800))
 	for _, shape := range []struct {
 		name string
@@ -225,8 +163,6 @@ func TestAnonymousBlockEmitsNoBoxShadowCommands(t *testing.T) {
 	}
 }
 
-// apRaster renders one document through the same seam the tile path uses and
-// returns the bitmap; the tile covers the block, its margin and the whole ring.
 func apRaster(t *testing.T, css, body string) *frame.Bitmap {
 	t.Helper()
 	fonts, err := raster.NewFonts()
@@ -252,8 +188,6 @@ func apRaster(t *testing.T, css, body string) *frame.Bitmap {
 	return bitmap
 }
 
-// apChanged returns the pixels where two renders of the same size differ, which is
-// exactly the set a declaration paints.
 func apChanged(a, b *frame.Bitmap) map[[2]int]struct{} {
 	out := map[[2]int]struct{}{}
 	w, h := a.W, a.H
@@ -267,16 +201,6 @@ func apChanged(a, b *frame.Bitmap) map[[2]int]struct{} {
 	return out
 }
 
-// TestAnonymousBlockBoxShadowPaintIsShapeInvariant is the rasterised half. The
-// declaration must paint the same pixels whether or not layout generated anonymous
-// boxes, because the boxes are not the element and css-backgrounds-3 §7.1 makes
-// box-shadow non-inherited: the generated box owns no shadow of its own.
-//
-// Measured for this document (see the file comment): Chromium's changed-pixel sets
-// are identical in both shapes (16636 px); Goosie's differed by 10800 px before the
-// collapse, and the extra pixels were the two 300x18 rings the wrappers painted,
-// 3600 of them inside the block's own box between the text and its right edge where
-// Chromium and Goosie-without-wrappers are white.
 // qc:BR-232
 func TestAnonymousBlockBoxShadowPaintIsShapeInvariant(t *testing.T) {
 	plain := apChanged(apRaster(t, apOneLayer, apNoBands), apRaster(t, apBoxShape, apNoBands))
@@ -303,18 +227,10 @@ func TestAnonymousBlockBoxShadowPaintIsShapeInvariant(t *testing.T) {
 		t.Errorf("the declaration paints %d px without anonymous boxes and %d with them; %d px differ, first at %v: the wrappers painted the element's ring around themselves (Goosie pre-fix differed by 10800 px, Chromium by 0)",
 			len(plain), len(anon), len(extra), extra[:min(8, len(extra))])
 	}
-	// Anti-vacuity: the declaration must still paint a ring. Goosie measures 15332 px
-	// on the field BR-281 implemented and Chromium 16636 on this document; a floor of
-	// 12000 is below both and far above zero, so a mechanism that simply drops
-	// box-shadow cannot pass.
 	if len(anon) < 12000 {
 		t.Errorf("the declaration changes only %d px, want >=12000: box-shadow must still paint the element's own ring (Goosie 15332, Chromium 16636)", len(anon))
 	}
 
-	// The wrappers' rings landed here: inside the block's own box, right of both
-	// text lines, where nothing but the element paints. Chromium and the correct
-	// render are white for every one of these pixels; before the collapse Goosie
-	// changed 3600 of them.
 	var intruding [][2]int
 	for p := range anon {
 		if p[0] >= 220 && p[0] < 320 && p[1] >= 20 && p[1] < 96 {
@@ -327,18 +243,11 @@ func TestAnonymousBlockBoxShadowPaintIsShapeInvariant(t *testing.T) {
 			len(intruding))
 	}
 
-	// One point in the 20px div's band, past both text lines, stated as a pixel so a
-	// future refactor cannot satisfy the set comparison by painting nothing there for
-	// a different reason.
 	withAnon := apRaster(t, apOneLayer, apTwoBands)
 	if got, want := withAnon.At(270, 48), frame.RGB(255, 255, 255); got != want {
 		t.Errorf("pixel (270,48) in the sibling block's band = %v, want %v: Chromium is white there and so is Goosie without wrapper boxes; with them it read (202,13,13)",
 			ibColorName(got), ibColorName(want))
 	}
-	// And the element's own ring must still be there: (330,60) is 10 px right of the
-	// block's edge, inside the 6 px spread plus blur. Pinned to the value measured on
-	// Chromium's own render of this document instead of a red-dominance band, because
-	// the retired ring model read a far redder pixel here.
 	if got := withAnon.At(330, 60); got != frame.RGB(250, 232, 232) {
 		t.Errorf("pixel (330,60) just outside the block = %v, want the measured (250,232,232), "+
 			"which is within 3 levels of Chromium's (249,230,230); the ring model read (213,59,59) here",
@@ -346,18 +255,6 @@ func TestAnonymousBlockBoxShadowPaintIsShapeInvariant(t *testing.T) {
 	}
 }
 
-// TestAnonymousBlockTextKeepsItsShadow is the oracle for the direction a blanket
-// collapse gets wrong. text-shadow inherits (css-text-decor-3 §3), so glyphs inside
-// an anonymous block are supposed to carry the element's shadow, and Chromium paints
-// it: 655 changed px in the plain document and 648 in the split one, all inside the
-// two bands. Goosie paints 610 in both, 482 of them blue-tinted.
-//
-// The document uses raw text on purpose: this engine gives a text run its style
-// through style.inheritStyle, so raw text is where text-shadow actually reaches the
-// glyphs. A blanket zero in AnonymousBlockStyle would not show up here - paint reads
-// the run's own style - which is why the cascade assertion lives in test/style/
-// (TestAnonymousBlockStyleKeepsInheritedTextShadow). What this test kills is the
-// other mistake: gating the run's text-shadow along with the box's.
 // qc:BR-233
 func TestAnonymousBlockTextKeepsItsShadow(t *testing.T) {
 	const ts = `.box{width:300px;height:76px;margin:20px;text-shadow:2px 2px 0 rgb(0,0,255)}`
@@ -387,7 +284,6 @@ func TestAnonymousBlockTextKeepsItsShadow(t *testing.T) {
 	if blue < 400 {
 		t.Errorf("%d px are blue-tinted, want >=400: the shadow colour must reach the glyphs inside the anonymous boxes (Goosie 482, Chromium 549 plain / 542 split)", blue)
 	}
-	// Control: without the declaration there is no blue at all.
 	plainBitmap := apRaster(t, tsNone, rawAnon)
 	for y := 0; y < 96; y++ {
 		for x := 0; x < 340; x++ {

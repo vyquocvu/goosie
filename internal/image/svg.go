@@ -1,28 +1,5 @@
 package image
 
-// Static SVG subset for <img> and CSS image contexts.
-//
-// What this answers: a standalone SVG document (including data: URIs) with a
-// width/height or viewBox, painted from flat shapes - rect, circle, ellipse,
-// line, polyline, polygon - with fill/stroke colors and opacity, nested <g>
-// fill/stroke inheritance, and translate/scale transforms. Paint order is
-// document order over transparency, the way an <img> composites.
-//
-// What it deliberately does not answer, and never will in an image decoder:
-// script, animation, external references (use, image, href, style sheets),
-// embedded HTML, text (no font engine is reachable from this package by the
-// import rules), paths, gradients/patterns (url() fills paint transparent),
-// filters, masks, clipping, and non-uniform preserveAspectRatio modes beyond
-// the default meet. Unsupported elements are skipped with their subtrees, so
-// a <defs> block never paints and a <path> leaves a hole rather than junk.
-//
-// Security posture: the input is untrusted bytes. Anything resembling an
-// entity attack surface ("<!DOCTYPE", "<!ENTITY", case-insensitive) is refused
-// before parsing; element count and nesting depth are capped; the raster is
-// bounded by the same MaxImageDimension/MaxDecodedImagePixels admission as
-// every other format. There is no script engine, no network, and no font
-// loading reachable from here by construction.
-
 import (
 	"bytes"
 	"encoding/xml"
@@ -34,43 +11,28 @@ import (
 )
 
 const (
-	// maxSVGElements caps the tags in one document: a static icon holds
-	// dozens, and anything past thousands is an attack, not artwork.
-	maxSVGElements = 8192
-	// maxSVGDepth caps nesting for the same reason.
-	maxSVGDepth = 64
-	// defaultSVGSize is the CSS replaced-element fallback (CSS Images §5):
-	// 300x150 when neither dimensions nor a viewBox answer.
+	maxSVGElements  = 8192
+	maxSVGDepth     = 64
 	defaultSVGSize  = 300
 	defaultSVGSizeH = 150
 )
 
-// svgColor is one sRGBA paint stop: unpremultiplied 0..1 channels with an
-// own alpha (fill-opacity baked in). The cumulative opacity chain in the state
-// multiplies in once, at draw time.
 type svgColor struct {
 	r, g, b, a float64
-	none       bool // "none" (or fully transparent): paints nothing
+	none       bool
 }
 
-// svgState is the inherited paint context <g> elements stack. The ctm maps
-// shape (viewBox) units to device px; it starts as the viewBox mapping and
-// every transform multiplies into it, so translate/scale/rotate/skew/matrix
-// all compose exactly.
 type svgState struct {
 	fill, stroke svgColor
-	opacity      float64    // cumulative opacity product down the chain
-	strokeW      float64    // inherited stroke-width in shape units
-	ctm          [6]float64 // a b c d e f: dx = a*x+c*y+e, dy = b*x+d*y+f
+	opacity      float64
+	strokeW      float64
+	ctm          [6]float64
 }
 
-// IsSVG reports whether data sniffs as a standalone SVG document.
 func IsSVG(data []byte) bool {
 	return isSVGData(data)
 }
 
-// isSVGData sniffs standalone SVG markup: optional XML prolog, comments and
-// whitespace, then a root <svg> element. Anything else is not ours.
 func isSVGData(data []byte) bool {
 	t := bytes.TrimSpace(data)
 	if len(t) == 0 || t[0] != '<' {
@@ -89,10 +51,6 @@ func isSVGData(data []byte) bool {
 	}
 }
 
-// rejectSVGAttackSurface refuses entity-declaration tricks before parsing:
-// internal-subset entities are how billion-laughs payloads smuggle
-// exponential expansion into an otherwise_plain XML document, and a static
-// <img> SVG never needs a DOCTYPE at all.
 func rejectSVGAttackSurface(data []byte) error {
 	lower := bytes.ToLower(data)
 	if bytes.Contains(lower, []byte("<!doctype")) || bytes.Contains(lower, []byte("<!entity")) {
@@ -101,8 +59,6 @@ func rejectSVGAttackSurface(data []byte) error {
 	return nil
 }
 
-// svgLength parses a CSS/SVG length to px. pctBase answers "%" (a viewport
-// fraction); em/ex fall back to the 16px root the cascade leaves alone.
 func svgLength(s string, pctBase float64) (float64, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -137,14 +93,9 @@ func svgLength(s string, pctBase float64) (float64, bool) {
 	return 0, false
 }
 
-// svgColorOf parses a paint value: "none", #rgb/#rrggbb/#rrggbbaa, rgb()/rgba(),
-// or one of the 16 basic CSS color keywords. url() references (gradients,
-// patterns) and anything else report ok=false and paint transparent, which is
-// the honest rendering of an unsupported fill.
 func svgColorOf(s string, opacity float64) (svgColor, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		// Unspecified: the caller applies the spec default (black fill).
 		return svgColor{}, false
 	}
 	if strings.EqualFold(s, "none") {
@@ -235,8 +186,6 @@ func svgColorOf(s string, opacity float64) (svgColor, bool) {
 	return svgColor{r: r * a, g: g * a, b: b * a, a: a}, true
 }
 
-// svgKeyword maps the 16 basic CSS color keywords (CSS Color §4). Anything
-// beyond them in an SVG fill is rare enough to stay transparent.
 func svgKeyword(s string) (float64, float64, float64, bool) {
 	switch strings.ToLower(s) {
 	case "black":
@@ -279,7 +228,6 @@ func svgKeyword(s string) (float64, float64, float64, bool) {
 	return 0, 0, 0, false
 }
 
-// svgAttr reads one attribute from a start element.
 func svgAttr(el xml.StartElement, name string) string {
 	for _, a := range el.Attr {
 		if a.Name.Local == name {
@@ -289,9 +237,6 @@ func svgAttr(el xml.StartElement, name string) string {
 	return ""
 }
 
-// rejectDegenerateViewBox fails a root whose viewBox carries a zero width
-// or height: per SVG 1.1 section 7.7 that disables rendering. svgViewport
-// shares it so forced rasters and probed sizes agree.
 func rejectDegenerateViewBox(el xml.StartElement) error {
 	if vb := strings.Fields(svgAttr(el, "viewBox")); len(vb) == 4 {
 		vw, vwErr := strconv.ParseFloat(vb[2], 64)
@@ -303,11 +248,6 @@ func rejectDegenerateViewBox(el xml.StartElement) error {
 	return nil
 }
 
-// svgViewport resolves the raster size: width/height win, else the viewBox,
-// else the 300x150 replaced-element fallback. Anything non-positive or past
-// the admission limits fails before a pixel is allocated. A viewBox with a
-// zero width or height disables rendering per SVG 1.1 section 7.7, so it
-// fails closed here rather than rasterizing a fallback the page never drew.
 func svgViewport(el xml.StartElement) (int, int, error) {
 	if err := rejectDegenerateViewBox(el); err != nil {
 		return 0, 0, err
@@ -315,10 +255,6 @@ func svgViewport(el xml.StartElement) (int, int, error) {
 	w, wOk := svgLength(svgAttr(el, "width"), 0)
 	h, hOk := svgLength(svgAttr(el, "height"), 0)
 	if (!wOk || w <= 0) || (!hOk || h <= 0) {
-		// One definite side plus a viewBox completes through the ratio:
-		// width 8px on a 4x64 viewBox is an 8x128 image, not a missing
-		// dimension. Percentages never resolve here (no viewport yet), so a
-		// percent side counts as missing.
 		vb := strings.Fields(svgAttr(el, "viewBox"))
 		if len(vb) == 4 {
 			if vw, err := strconv.ParseFloat(vb[2], 64); err == nil && vw > 0 {
@@ -334,8 +270,6 @@ func svgViewport(el xml.StartElement) (int, int, error) {
 			}
 		}
 	}
-	// Each indefinite side falls back to its own default object size, so a
-	// definite width is never swallowed by a missing height.
 	if w <= 0 {
 		w = defaultSVGSize
 	}
@@ -352,9 +286,6 @@ func svgViewport(el xml.StartElement) (int, int, error) {
 	return wi, hi, nil
 }
 
-// svgMapping maps viewBox units to device px under preserveAspectRatio="meet"
-// (the default): uniform scale, centered. "none" stretches; anything else is
-// treated as meet and documented as such.
 func svgMapping(el xml.StartElement, w, h int) (sx, sy, ox, oy float64) {
 	sx, sy = 1, 1
 	vb := strings.Fields(svgAttr(el, "viewBox"))
@@ -381,10 +312,6 @@ func svgMapping(el xml.StartElement, w, h int) (sx, sy, ox, oy float64) {
 	return sx, sy, ox, oy
 }
 
-// svgTransform folds translate/scale/rotate/skew/matrix into the state's
-// affine matrix by exact composition. Skew and rotate are fully supported:
-// coverage tests run in shape space through the inverse map, so no axis
-// assumption leaks into rasterization.
 func svgTransform(st svgState, s string) svgState {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -476,8 +403,6 @@ func svgTransform(st svgState, s string) svgState {
 	return st
 }
 
-// svgOpacity parses an opacity/fill-opacity/stroke-opacity value, defaulting
-// to 1 and clamping into range.
 func svgOpacity(s string) float64 {
 	if s = strings.TrimSpace(s); s == "" {
 		return 1
@@ -502,8 +427,6 @@ func clamp01(f float64) float64 {
 	return f
 }
 
-// svgStrokeWidth parses stroke-width in viewBox units; unparseable means the
-// spec default 1.
 func svgStrokeWidth(s string) float64 {
 	if f, ok := svgLength(s, 0); ok && f >= 0 {
 		return f
@@ -511,7 +434,6 @@ func svgStrokeWidth(s string) float64 {
 	return 1
 }
 
-// svgPoints parses a points="x,y ..." list.
 func svgPoints(s string) [][2]float64 {
 	var out [][2]float64
 	s = strings.ReplaceAll(s, ",", " ")
@@ -530,34 +452,20 @@ func svgPoints(s string) [][2]float64 {
 	return out
 }
 
-// svgPaint resolves the fill/stroke the state already folded: fill defaults
-// to spec-black, stroke to none.
 func svgPaint(st svgState) (fill, stroke svgColor, sw float64) {
 	return st.fill, st.stroke, st.strokeW
 }
 
-// svgElementState folds one element's presentation attributes and transform
-// over its parent state. Opacity accumulates down the chain and applies once
-// at draw; an unparseable paint value keeps the inherited one (the
-// declaration is dropped, not transparent): a url() gradient degrades to
-// whatever flat paint surrounds it rather than a hole.
 func svgElementState(parent svgState, el xml.StartElement) svgState {
 	st := parent
 	st.opacity *= svgOpacity(svgAttr(el, "opacity"))
-	// Paint alphas stay definition-local (their own fill-opacity only); the
-	// cumulative chain multiplies once at draw, so inherited paints pick up
-	// every opacity above them exactly once.
 	if v := svgAttr(el, "fill"); v != "" {
 		if strings.HasPrefix(v, "url(") {
-			// Gradients/patterns are unsupported: transparent signals the
-			// hole honestly instead of inheriting an unrelated flat paint
-			// (at the root that would be spec-black).
 			st.fill = svgColor{none: true}
 		} else if c, ok := svgColorOf(v, svgOpacity(svgAttr(el, "fill-opacity"))); ok {
 			st.fill = c
 		}
 	} else if v := svgAttr(el, "fill-opacity"); v != "" {
-		// A lone fill-opacity scales the inherited fill.
 		st.fill.a *= svgOpacity(v)
 	}
 	if v := svgAttr(el, "stroke"); v != "" {
@@ -575,14 +483,11 @@ func svgElementState(parent svgState, el xml.StartElement) svgState {
 	return svgTransform(st, svgAttr(el, "transform"))
 }
 
-// svgCanvas is the raster target: premultiplied RGBA, painter's order.
 type svgCanvas struct {
 	px   *gimage.RGBA
 	w, h int
 }
 
-// invert returns the shape-space map of a device point. A singular matrix
-// (zero scale) collapses the shape to nothing and reports false.
 func (st svgState) invert() ([6]float64, bool) {
 	a, b, c, d, e, f := st.ctm[0], st.ctm[1], st.ctm[2], st.ctm[3], st.ctm[4], st.ctm[5]
 	det := a*d - b*c
@@ -592,13 +497,10 @@ func (st svgState) invert() ([6]float64, bool) {
 	return [6]float64{d / det, -b / det, -c / det, a / det, (c*f - d*e) / det, (b*e - a*f) / det}, true
 }
 
-// devScale is the device px per shape unit, for stroke widths: the mean of
-// the matrix column norms, exact under uniform scale.
 func (st svgState) devScale() float64 {
 	return (st.devScaleX() + st.devScaleY()) / 2
 }
 
-// devScaleX/devScaleY are the per-axis scales the percentage resolver needs.
 func (st svgState) devScaleX() float64 {
 	return math.Hypot(st.ctm[0], st.ctm[1])
 }
@@ -607,13 +509,10 @@ func (st svgState) devScaleY() float64 {
 	return math.Hypot(st.ctm[2], st.ctm[3])
 }
 
-// devBox maps shape-space corners to a clipped device bbox.
 func (c *svgCanvas) devBox(st svgState, pts ...[2]float64) (float64, float64, float64, float64, bool) {
 	return c.devBoxPad(st, 0, pts...)
 }
 
-// devBoxPad is devBox expanded by pad device px first: strokes and
-// zero-area geometry (a horizontal line has no height) still own pixels.
 func (c *svgCanvas) devBoxPad(st svgState, pad float64, pts ...[2]float64) (float64, float64, float64, float64, bool) {
 	a, b, cc, d, e, f := st.ctm[0], st.ctm[1], st.ctm[2], st.ctm[3], st.ctm[4], st.ctm[5]
 	x0, y0 := math.Inf(1), math.Inf(1)
@@ -641,7 +540,6 @@ func (c *svgCanvas) devBoxPad(st svgState, pad float64, pts ...[2]float64) (floa
 	return x0, y0, x1, y1, true
 }
 
-// svgBlend composites one premultiplied src pixel src-over dst in place.
 func svgBlend(dst []uint8, sr, sg, sb, sa float64) {
 	if sa <= 0 {
 		return
@@ -658,9 +556,6 @@ func svgBlend(dst []uint8, sr, sg, sb, sa float64) {
 	dst[3] = uint8((sa+da*inv)*255 + 0.5)
 }
 
-// paintMask fills device pixels whose inverse-mapped center passes cover.
-// col carries definition-local rgb with an already-effective alpha (the
-// caller folded the opacity chain); blending is premultiplied src-over.
 func (c *svgCanvas) paintMask(st svgState, x0, y0, x1, y1 float64, cover func(sx, sy float64) bool, col svgColor) {
 	if col.none || col.a <= 0 {
 		return
@@ -671,7 +566,6 @@ func (c *svgCanvas) paintMask(st svgState, x0, y0, x1, y1 float64, cover func(sx
 	}
 	ix0, iy0 := int(x0), int(y0)
 	ix1, iy1 := int(x1), int(y1)
-	// Defensive clamp: stroke halos expand past the clipped geometry box.
 	if ix0 < 0 {
 		ix0 = 0
 	}
@@ -709,11 +603,6 @@ func (c *svgCanvas) paintMask(st svgState, x0, y0, x1, y1 float64, cover func(sx
 	}
 }
 
-// The painters below evaluate coverage in shape space, so rotation and skew
-// need no special casing: the inverse map already unrotated the pixel.
-
-// paintRect fills the axis-aligned rect; rx/ry (rounded corners) are drawn
-// square, a documented limitation.
 func (c *svgCanvas) paintRect(st svgState, x, y, w, h float64, col svgColor) {
 	if w <= 0 || h <= 0 {
 		return
@@ -727,15 +616,11 @@ func (c *svgCanvas) paintRect(st svgState, x, y, w, h float64, col svgColor) {
 	}, col)
 }
 
-// paintRectStroke strokes a rect by painting the outer rect in stroke color
-// and the inset interior in fill color: exact under any affine map because
-// both passes share it.
 func (c *svgCanvas) paintRectStroke(st svgState, x, y, w, h, sw float64, stroke, fill svgColor) {
 	c.paintRect(st, x-sw/2, y-sw/2, w+sw, h+sw, stroke)
 	c.paintRect(st, x+sw/2, y+sw/2, w-sw, h-sw, fill)
 }
 
-// paintEllipse fills (or ring-strokes) an ellipse; a circle is rx == ry.
 func (c *svgCanvas) paintEllipse(st svgState, cx, cy, rx, ry float64, col svgColor) {
 	if rx <= 0 || ry <= 0 {
 		return
@@ -751,8 +636,6 @@ func (c *svgCanvas) paintEllipse(st svgState, cx, cy, rx, ry float64, col svgCol
 	}, col)
 }
 
-// paintEllipseStroke strokes an ellipse as an outer ellipse in stroke color
-// with the inner ellipse filled over it.
 func (c *svgCanvas) paintEllipseStroke(st svgState, cx, cy, rx, ry, sw float64, stroke, fill svgColor) {
 	s := st.devScale()
 	if s <= 0 {
@@ -763,7 +646,6 @@ func (c *svgCanvas) paintEllipseStroke(st svgState, cx, cy, rx, ry, sw float64, 
 	c.paintEllipse(st, cx, cy, rx-d, ry-d, fill)
 }
 
-// segDist is the distance from p to segment ab.
 func segDist(px, py, ax, ay, bx, by float64) float64 {
 	dx, dy := bx-ax, by-ay
 	l2 := dx*dx + dy*dy
@@ -779,8 +661,6 @@ func segDist(px, py, ax, ay, bx, by float64) float64 {
 	return math.Hypot(px-(ax+t*dx), py-(ay+t*dy))
 }
 
-// paintPoly strokes (and optionally even-odd fills) a point list; closed
-// joins the last point to the first for polygons.
 func (c *svgCanvas) paintPoly(st svgState, pts [][2]float64, closed bool, fill, stroke svgColor, sw float64) {
 	if len(pts) == 0 {
 		return
@@ -789,9 +669,6 @@ func (c *svgCanvas) paintPoly(st svgState, pts [][2]float64, closed bool, fill, 
 	if s <= 0 {
 		s = 1
 	}
-	// Stroke tolerance lives in shape space; under uniform scale it equals
-	// the device half-width exactly. The bbox pads by the device halo so
-	// zero-area geometry (a straight horizontal line) still owns pixels.
 	half := sw / 2 / s
 	halo := sw * s / 2
 	x0, y0, x1, y1, ok := c.devBoxPad(st, halo, pts...)
@@ -829,11 +706,6 @@ func (c *svgCanvas) paintPoly(st svgState, pts [][2]float64, closed bool, fill, 
 	}
 }
 
-// dim resolves one geometry attribute in shape space. Percentages resolve
-// against the tile (viewport) through the axis scale: a non-uniform map
-// needs each axis separately, since averaging them (as a single mean scale
-// would) collapses percentages on the squashed axis. Anything unparseable is
-// zero, matching SVG error handling for geometry.
 func (c *svgCanvas) dim(st svgState, el xml.StartElement, name string, isX bool) float64 {
 	s := svgAttr(el, name)
 	base := 0.0
@@ -855,7 +727,6 @@ func (c *svgCanvas) dim(st svgState, el xml.StartElement, name string, isX bool)
 	return v
 }
 
-// dimR resolves r, whose percentage is the normalized viewport diagonal.
 func (c *svgCanvas) dimR(st svgState, el xml.StartElement) float64 {
 	s := svgAttr(el, "r")
 	base := 0.0
@@ -870,9 +741,6 @@ func (c *svgCanvas) dimR(st svgState, el xml.StartElement) float64 {
 	return v
 }
 
-// paintShape dispatches one element, folding the cumulative opacity into the
-// resolved paints exactly once. It reports false for elements with no paint
-// of their own (groups are expanded by the walker, the rest skipped).
 func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 	if st.opacity <= 0 {
 		return
@@ -938,10 +806,6 @@ func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 		}
 		c.paintPoly(st, pts, true, fill, stroke, sw)
 	case "path":
-		// Paths fill even-odd (see svgPath) and stroke like polylines; an
-		// unparseable d ends the path, never the document. An open subpath
-		// still fills its implicit closure, but the closing edge itself is
-		// never stroked, so that takes two passes.
 		for _, sub := range svgPath(svgAttr(el, "d")) {
 			if len(sub.pts) < 2 {
 				continue
@@ -961,13 +825,8 @@ func (c *svgCanvas) paintShape(st svgState, el xml.StartElement) {
 			c.paintPoly(st, sub.pts, false, svgColor{none: true}, stroke, sw)
 		}
 	}
-	// path, text, image, use, foreignObject, filter, mask, clipPath and
-	// everything else: skipped with their subtrees by the walker.
 }
 
-// svgRootState builds the initial paint state from the viewBox mapping:
-// identity user transform, opaque, spec-default black fill, no stroke,
-// width-1 stroke for when a stroke appears.
 func svgRootState(el xml.StartElement, w, h int) svgState {
 	sx, sy, ox, oy := svgMapping(el, w, h)
 	return svgState{
@@ -979,9 +838,6 @@ func svgRootState(el xml.StartElement, w, h int) svgState {
 	}
 }
 
-// parseSVG parses a standalone SVG document with admission guards. Shapes
-// rasterize onto cv as encountered (document order); every pushed state pops
-// exactly once, including shapes and the root.
 func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err error) {
 	if err := rejectSVGAttackSurface(data); err != nil {
 		return 0, 0, err
@@ -1020,9 +876,6 @@ func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err err
 				haveRoot = true
 				var err error
 				if forceW > 0 && forceH > 0 {
-					// A forced raster still honors a degenerate viewBox:
-					// zero width or height disables rendering, so fail
-					// closed instead of stretching nothing across pixels.
 					if err := rejectDegenerateViewBox(t); err != nil {
 						return 0, 0, err
 					}
@@ -1044,8 +897,6 @@ func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err err
 			parent := stack[len(stack)-1]
 			switch name {
 			case "g", "a":
-				// <a> without link semantics paints its children; hrefs are
-				// never followed.
 				stack = append(stack, svgElementState(parent, t))
 			case "rect", "circle", "ellipse", "line", "polyline", "polygon", "path":
 				st := svgElementState(parent, t)
@@ -1058,13 +909,8 @@ func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err err
 				"image", "use", "foreignObject", "script", "style", "animate",
 				"animateTransform", "animateMotion", "set", "switch",
 				"symbol", "marker", "view":
-				// Unsupported or metadata: skip the subtree. Script never
-				// runs, external references never resolve, animation never
-				// advances - there is no clock, network, or JS here.
 				skipDepth = depth
 			default:
-				// Unknown elements paint nothing but their children may hold
-				// supported shapes (e.g. extension wrappers): inherit state.
 				stack = append(stack, svgElementState(parent, t))
 			}
 		case xml.EndElement:
@@ -1087,7 +933,6 @@ func parseSVG(data []byte, cv *svgCanvas, forceW, forceH int) (w, h int, err err
 	return w, h, nil
 }
 
-// svgProbeDims returns the raster size without painting.
 func svgProbeDims(data []byte) (int, int, error) {
 	w, h, err := parseSVG(data, nil, 0, 0)
 	if err != nil {
@@ -1096,7 +941,6 @@ func svgProbeDims(data []byte) (int, int, error) {
 	return w, h, nil
 }
 
-// decodeSVG rasterizes a standalone SVG document to premultiplied RGBA.
 func decodeSVG(data []byte) (gimage.Image, error) {
 	cv := &svgCanvas{}
 	w, h, err := parseSVG(data, cv, 0, 0)
@@ -1109,9 +953,6 @@ func decodeSVG(data []byte) (gimage.Image, error) {
 	return cv.px, nil
 }
 
-// DecodeSVGAt rasterizes a standalone SVG document at an explicit size,
-// for vector backgrounds whose tile (not the intrinsic size) establishes
-// the viewport. Dimensions outside admission fail before allocating.
 func DecodeSVGAt(data []byte, w, h int) (gimage.Image, error) {
 	if w <= 0 || h <= 0 || w > MaxImageDimension || h > MaxImageDimension {
 		return nil, fmt.Errorf("image: svg raster size %dx%d outside admission", w, h)
@@ -1129,10 +970,6 @@ func DecodeSVGAt(data []byte, w, h int) (gimage.Image, error) {
 	return cv.px, nil
 }
 
-// SVGPreserveNone reports whether the root disables aspect preservation.
-// It affects only how the decoder maps the viewBox into the raster
-// (stretch instead of meet): the viewBox ratio still sizes cover/contain
-// tiles. Non-SVG input is false.
 func SVGPreserveNone(data []byte) bool {
 	if err := rejectSVGAttackSurface(data); err != nil {
 		return false
@@ -1154,10 +991,6 @@ func SVGPreserveNone(data []byte) bool {
 	}
 }
 
-// SVGIntrinsicKind reports whether a standalone SVG carries intrinsic
-// dimensions (absolute width and height) and an intrinsic ratio (a usable
-// viewBox). Percentages are not intrinsic without a viewport to resolve
-// against. Non-SVG input reports false, false with no error.
 func SVGIntrinsicKind(data []byte) (hasDims, hasRatio bool) {
 	if err := rejectSVGAttackSurface(data); err != nil {
 		return false, false
@@ -1189,11 +1022,6 @@ func SVGIntrinsicKind(data []byte) (hasDims, hasRatio bool) {
 	}
 }
 
-// SVGDefersBothSides reports whether a standalone SVG leaves both sides
-// indefinite: no absolute width, no absolute height, and no usable viewBox
-// to complete through. Percentages count as indefinite (no viewport here).
-// Callers sizing such sources against a positioning area use the area, not
-// the 300x150 fallback. Non-SVG input reports false.
 func SVGDefersBothSides(data []byte) bool {
 	if err := rejectSVGAttackSurface(data); err != nil {
 		return false
@@ -1227,11 +1055,6 @@ func SVGDefersBothSides(data []byte) bool {
 	}
 }
 
-// SVGRatio reports the root viewBox ratio (width, height) when usable.
-// Partial dimensions complete through this ratio, so cover/contain size
-// from it directly: completing to pixels first would round an extreme
-// ratio into a fabricated one. Non-SVG input or no usable viewBox reports
-// ok=false.
 func SVGRatio(data []byte) (rw, rh float64, ok bool) {
 	if err := rejectSVGAttackSurface(data); err != nil {
 		return 0, 0, false
@@ -1264,7 +1087,6 @@ func SVGRatio(data []byte) (rw, rh float64, ok bool) {
 	}
 }
 
-// svgConfig adapts SVG dimensions to an image.Config for Probe.
 func svgConfig(data []byte) (gimage.Config, error) {
 	w, h, err := svgProbeDims(data)
 	if err != nil {

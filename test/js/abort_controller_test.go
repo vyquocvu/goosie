@@ -53,8 +53,6 @@ func TestAbortControllerAbort(t *testing.T) {
 	if !val.Bool {
 		t.Error("signal should be aborted after abort()")
 	}
-	// Measured in Chromium: abort() with no argument installs a DOMException
-	// named AbortError reading "AbortError: signal is aborted without reason".
 	if v, ok := r.Global("reasonName"); !ok || v.Str != "AbortError" {
 		t.Errorf("reason.name = %q, want %q", v.Str, "AbortError")
 	}

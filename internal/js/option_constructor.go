@@ -4,9 +4,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// installLegacyOptionConstructor implements the HTML legacy Option() factory.
-// Unlike HTMLOptionElement's interface constructor, Option() creates and
-// returns a detached option with the supplied text, value, and selectedness.
 func (r *Runtime) installLegacyOptionConstructor() {
 	proto := r.protoForTag("option")
 	constructor, ok := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
@@ -25,9 +22,6 @@ func (r *Runtime) installLegacyOptionConstructor() {
 			option.SetAttribute("value", call.Argument(1).String())
 		}
 		defaultSelected := len(call.Arguments) > 2 && !goja.IsUndefined(call.Argument(2)) && call.Argument(2).ToBoolean()
-		// The third argument sets the selected content attribute only. The
-		// initial selectedness remains false unless the fourth argument is
-		// provided, matching the legacy constructor's special rule.
 		selected := false
 		if len(call.Arguments) > 3 && !goja.IsUndefined(call.Argument(3)) {
 			selected = call.Argument(3).ToBoolean()

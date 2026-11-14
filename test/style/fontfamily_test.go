@@ -9,7 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// slotFor returns the face the first element named tag resolves to.
 func slotFor(t *testing.T, html, tag string) frame.FontSlot {
 	t.Helper()
 	doc := domtest.Parse(html)
@@ -35,9 +34,6 @@ func slotFor(t *testing.T, html, tag string) frame.FontSlot {
 }
 
 func TestFamilyDefaultsToSerif(t *testing.T) {
-	// A document that names no family draws in the engine's standard font, which
-	// is what Chromium's is on macOS. The embedded Go face is a fallback, not the
-	// default, and getting this wrong moves where every line on a page wraps.
 	got := slotFor(t, `<html><body><p>text</p></body></html>`, "p")
 	if want := (frame.FontSlot{Family: frame.FontTimes}); got != want {
 		t.Errorf("default slot = %+v, want %+v", got, want)
@@ -59,8 +55,6 @@ func TestFamilyListResolves(t *testing.T) {
 		{"Georgia, serif", frame.FontGeorgia},
 		{"Verdana", frame.FontVerdana},
 		{"Go Regular", frame.FontGo},
-		// A family this engine cannot serve is skipped, so the list keeps
-		// falling through to the next candidate rather than drawing the first.
 		{"Totally Made Up Font, monospace", frame.FontCourier},
 		{"-apple-system, system-ui, BlinkMacSystemFont, sans-serif", frame.FontArial},
 		{"Totally Made Up Font", frame.FontTimes},

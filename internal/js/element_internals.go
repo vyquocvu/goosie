@@ -8,9 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// elementInternalsState is the per-element backing state for the Web-exposed
-// ElementInternals object. It intentionally lives with the custom element
-// instance so repeated attachInternals() calls preserve object identity.
 type elementInternalsState struct {
 	node              *dom.Node
 	formAssociated    bool
@@ -547,9 +544,6 @@ func (r *Runtime) elementInternalsFor(value goja.Value) *elementInternalsState {
 	return nil
 }
 
-// ElementInternalsARIA returns the string-backed ARIA property supplied by
-// ElementInternals for node. The engine uses this when deriving accessibility
-// semantics; content attributes remain a separate source of ARIA state.
 func (r *Runtime) ElementInternalsARIA(node *dom.Node, property string) string {
 	if r == nil || node == nil {
 		return ""
@@ -565,17 +559,11 @@ func (r *Runtime) ElementInternalsARIA(node *dom.Node, property string) string {
 	return value.String()
 }
 
-// ElementInternalsAccessibleName resolves host ARIA and ElementInternals name
-// sources. The bool reports whether an author-provided name source was set,
-// including an explicitly empty or unresolved reference list.
 func (r *Runtime) ElementInternalsAccessibleName(node *dom.Node) (string, bool) {
 	if r == nil || node == nil {
 		return "", false
 	}
 	state := r.elementInternals[node]
-	// ARIA on the host takes precedence over ElementInternals. The IDL
-	// Element-reference list is kept separately from its reflected content
-	// attribute so an explicit empty or invalid list still overrides internals.
 	if node.HasAttribute("aria-labelledby") && node.GetAttribute("aria-labelledby") != "" {
 		ids := strings.Fields(node.GetAttribute("aria-labelledby"))
 		refs := make([]interface{}, 0, len(ids))

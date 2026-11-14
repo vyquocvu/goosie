@@ -26,7 +26,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
-// internalNavHeader returns standard top navigation for all goosie:// internal pages.
 func internalNavHeader(active string) string {
 	links := []struct {
 		ID   string
@@ -58,7 +57,6 @@ func internalNavHeader(active string) string {
 	return b.String()
 }
 
-// internalPageTemplate wraps page body inside standard Goosie styling.
 func internalPageTemplate(activeTab, title, bodyHTML string) string {
 	nav := internalNavHeader(activeTab)
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -260,7 +258,6 @@ td.val {
 </html>`, html.EscapeString(title), nav, bodyHTML)
 }
 
-// buildVersionPageHTML generates the goosie://version diagnostic report.
 func buildVersionPageHTML(f *framePath) (string, string) {
 	tabCount := 0
 	closedCount := 0
@@ -337,8 +334,6 @@ func buildVersionPageHTML(f *framePath) (string, string) {
 	return "About Goosie", internalPageTemplate("version", "About Goosie", body)
 }
 
-// mgmtNoticeHTML renders an action-feedback banner on the management pages.
-// The message is escaped; kind is "ok" or "err".
 func mgmtNoticeHTML(kind, msg string) string {
 	bg, border, fg := "#e6f4ea", "#34a853", "#137333"
 	if kind == "err" {
@@ -348,8 +343,6 @@ func mgmtNoticeHTML(kind, msg string) string {
 		bg, border, fg, html.EscapeString(msg))
 }
 
-// mgmtSearchFormHTML renders the shared search box used by the bookmarks and
-// history management pages. GET submission re-renders the page filtered by q.
 func mgmtSearchFormHTML(page, placeholder, query string) string {
 	return fmt.Sprintf(`
       <form action="goosie://%s" method="GET" style="display:flex;gap:8px;margin-bottom:16px;max-width:480px;">
@@ -358,9 +351,6 @@ func mgmtSearchFormHTML(page, placeholder, query string) string {
       </form>`, page, html.EscapeString(query), placeholder, placeholder)
 }
 
-// isLinkableURL reports whether a stored URL is safe to expose as a clickable
-// link. Only http, https and file URLs are navigable by the shell; anything
-// else (javascript:, data:, hostile schemes) is rendered as inert text.
 func isLinkableURL(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -373,8 +363,6 @@ func isLinkableURL(raw string) bool {
 	return false
 }
 
-// mgmtEntryTitleHTML renders an entry title as a link when the target URL is
-// navigable, or as inert escaped text otherwise.
 func mgmtEntryTitleHTML(targetURL, title string) string {
 	if isLinkableURL(targetURL) {
 		return fmt.Sprintf(`<a class="list-link" href="%s">%s</a>`, html.EscapeString(targetURL), html.EscapeString(title))
@@ -382,10 +370,6 @@ func mgmtEntryTitleHTML(targetURL, title string) string {
 	return fmt.Sprintf(`<span>%s</span>`, html.EscapeString(title))
 }
 
-// buildBookmarksPageHTML generates the goosie://bookmarks management page:
-// search, rename, delete and open for every saved bookmark. Mutations are
-// applied to the store and persisted immediately; failures surface as a
-// banner on the re-rendered page.
 func buildBookmarksPageHTML(f *framePath, rawURL string) (string, string) {
 	u, _ := url.Parse(rawURL)
 	action, targetURL, newTitle, query := "", "", "", ""
@@ -491,9 +475,6 @@ func buildBookmarksPageHTML(f *framePath, rawURL string) (string, string) {
 	return "Bookmarks", internalPageTemplate("bookmarks", "Bookmarks", b.String())
 }
 
-// buildHistoryPageHTML generates the goosie://history management page:
-// search, per-entry delete and clear-all (with a confirmation step) over the
-// visit log. Mutations persist immediately; failures surface as a banner.
 func buildHistoryPageHTML(f *framePath, rawURL string) (string, string) {
 	u, _ := url.Parse(rawURL)
 	action, targetURL, atParam, confirm, query := "", "", "", "", ""
@@ -574,7 +555,6 @@ func buildHistoryPageHTML(f *framePath, rawURL string) (string, string) {
 	if query != "" {
 		qSuffix = "&q=" + url.QueryEscape(query)
 	}
-	// Show newest first
 	for i := len(entries) - 1; i >= 0; i-- {
 		h := entries[i]
 		title := h.Title
@@ -602,7 +582,6 @@ func buildHistoryPageHTML(f *framePath, rawURL string) (string, string) {
 	return "Browsing History", internalPageTemplate("history", "Browsing History", b.String())
 }
 
-// buildDownloadsPageHTML generates the goosie://downloads viewer page.
 func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 	if u, err := url.Parse(rawURL); err == nil {
 		action := u.Query().Get("action")
@@ -657,7 +636,6 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 	renderedFiles := make(map[string]bool)
 	hasItems := false
 
-	// 1. Render items from download manager (active and recent)
 	if f.downloads != nil {
 		items := f.downloads.Items()
 		for i := len(items) - 1; i >= 0; i-- {
@@ -686,7 +664,6 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
           <span class="badge %s" style="margin-left: 8px;">%s</span>
         </div>`, html.EscapeString(it.Filename), badgeClass, html.EscapeString(string(it.Status))))
 
-			// Action buttons on the right
 			b.WriteString(`<div>`)
 			if it.Status == download.StatusActive {
 				if f.downloads.Pausable(it.ID) {
@@ -704,7 +681,6 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 			}
 			b.WriteString(`</div></div>`)
 
-			// Meta info
 			meta := it.FormattedSize()
 			if it.Status == download.StatusActive || it.Status == download.StatusPaused {
 				if it.Speed() > 0 {
@@ -723,10 +699,6 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 			}
 			b.WriteString(fmt.Sprintf(`<div class="list-meta">%s</div>`, meta))
 
-			// Progress bar for in-flight downloads, paused ones included. A
-			// transfer without Content-Length has no percentage; it reports
-			// its byte count and a visibly indeterminate bar instead of a
-			// full one that would read as complete.
 			if it.Status == download.StatusActive || it.Status == download.StatusPaused {
 				if pct := it.Percent(); pct < 0 {
 					b.WriteString(`<div class="progress-track indeterminate"><div class="progress-bar"></div></div>`)
@@ -738,7 +710,6 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 		}
 	}
 
-	// 2. Discover preexisting files on disk in the download directory
 	files, _ := os.ReadDir(dir)
 	for _, fi := range files {
 		if fi.IsDir() || strings.HasPrefix(fi.Name(), ".") || strings.Contains(fi.Name(), ".goosie-download") {
@@ -791,9 +762,6 @@ func formatFileSize(bytes int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
-// buildSettingsPageHTML renders the settings page and handles the deliberately
-// simple GET form used by other Goosie management pages. Settings are profile
-// scoped; private sessions can inspect them but cannot mutate the profile.
 func buildSettingsPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
 	settings := f.currentPreferences()
 	if settings.SearchURLTemplate == "" {
@@ -874,7 +842,6 @@ func buildSettingsPageHTML(f *framePath, rawURL string) (title, htmlContent stri
 	return "Settings", internalPageTemplate("settings", "Settings", b.String())
 }
 
-// buildInternalPageHTML routes goosie:// paths to their respective HTML generators.
 func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent string) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -914,7 +881,6 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 	case "unresponsive":
 		return buildUnresponsivePageHTML(rawURL)
 	default:
-		// Index page listing available internal pages
 		body := `<div class="card">
       <h1>Goosie Internal Pages</h1>
       <p style="color: #5f6368;">Available system and management pages:</p>
@@ -935,7 +901,6 @@ func (f *framePath) buildInternalPageHTML(rawURL string) (title, htmlContent str
 	}
 }
 
-// buildInspectPageHTML generates the Web Inspector page inspecting a live browser tab.
 func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
 	u, _ := url.Parse(rawURL)
 	targetIDStr := ""
@@ -1040,10 +1005,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	nodeCount, maxDepth := sess.DOMStats()
 	sheets := sess.Stylesheets()
 
-	// A select link in the DOM tree outlines that node in the inspected tab.
-	// Only the highlight is set here; the repaint is deferred to the chrome
-	// thread because this builder runs before the inspector tab commits, and a
-	// synchronous repaint would publish a half-built accessibility tree.
 	var selectedID dom.NodeID
 	if sess.Doc != nil {
 		switch {
@@ -1071,12 +1032,10 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 
 	var b strings.Builder
 
-	// Header card with tab picker
 	b.WriteString(`<div class="card">`)
 	b.WriteString(fmt.Sprintf(`<h1>Web Inspector &mdash; %s</h1>`, html.EscapeString(targetTab.Title())))
 	b.WriteString(fmt.Sprintf(`<p style="color: #5f6368; word-break: break-all;">Inspecting: <a href="%s" style="color: #1a73e8;">%s</a></p>`, html.EscapeString(targetTab.URL()), html.EscapeString(targetTab.URL())))
 
-	// Open tabs pill list
 	if len(allTabs) > 0 {
 		b.WriteString(`<div style="margin-top: 12px; margin-bottom: 8px;"><b style="font-size: 13px;">Open Tabs:</b> `)
 		for _, t := range allTabs {
@@ -1092,14 +1051,12 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 		b.WriteString(`</div>`)
 	}
 
-	// Metrics summary cards
 	b.WriteString(`<div style="display: flex; gap: 16px; margin-top: 16px;">`)
 	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 20px; font-weight: 700; color: #1a73e8;">%d</div><div style="font-size: 12px; color: #5f6368;">DOM Nodes</div></div>`, nodeCount))
 	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 20px; font-weight: 700; color: #188038;">%d</div><div style="font-size: 12px; color: #5f6368;">Tree Depth</div></div>`, maxDepth))
 	b.WriteString(fmt.Sprintf(`<div style="flex: 1; background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 6px; padding: 12px; text-align: center;"><div style="font-size: 20px; font-weight: 700; color: #e37400;">%d</div><div style="font-size: 12px; color: #5f6368;">Stylesheets</div></div>`, len(sheets)))
 	b.WriteString(`</div></div>`)
 
-	// Performance & Memory Meter Card
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 	allocMB := float64(mem.Alloc) / (1024 * 1024)
@@ -1122,7 +1079,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	b.WriteString(fmt.Sprintf(`<div style="font-size: 12px; color: #5f6368;">Total GC Cycles: <b>%d</b> &bull; Cumulative Allocated: <b>%.2f MB</b></div>`, mem.NumGC, float64(mem.TotalAlloc)/(1024*1024)))
 	b.WriteString(`</div>`)
 
-	// DOM Elements Tree Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Elements (DOM Tree)</h2>`)
 	b.WriteString(fmt.Sprintf(`<p style="font-size: 12px; color: #5f6368;">Click a tag name to highlight that node in the inspected tab. <a href="goosie://inspect?tab=%d&amp;select=clear" style="color: #1a73e8;">Clear highlight</a></p>`, targetTab.ID()))
@@ -1134,7 +1090,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div></div>`)
 
-	// CSS Box Model Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Computed CSS Box Model</h2>`)
 	b.WriteString(`<div style="margin: 16px auto; max-width: 480px; background-color: #fce8b2; border: 1px dashed #f29900; border-radius: 6px; padding: 14px; text-align: center; font-family: monospace; font-size: 12px;">
@@ -1150,7 +1105,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
       </div>
     </div></div>`)
 
-	// Active Stylesheets Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Active Stylesheets</h2>`)
 	if len(sheets) == 0 {
@@ -1164,7 +1118,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div>`)
 
-	// Device Emulation Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Device Emulation (Cmd+Shift+M)</h2>`)
 	b.WriteString(`<p style="color: #5f6368;">Test responsive layouts across mobile and tablet viewports.</p>`)
@@ -1195,7 +1148,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div>`)
 
-	// Shields & Privacy Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Shields &amp; Privacy</h2>`)
 	shieldsBadge := `<span class="badge badge-completed">Protection Active</span>`
@@ -1216,7 +1168,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
       </div>`, shieldsBadge, targetTab.BlockedTrackers(), toggleBtnClass, targetTab.ID(), toggleActionText))
 	b.WriteString(`</div>`)
 
-	// Appearance & Theme Mode Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Appearance &amp; Theme Mode</h2>`)
 	b.WriteString(`<p style="color: #5f6368; font-size: 13px;">Toggle browser theme and CSS <code>prefers-color-scheme</code> / <code>prefers-contrast</code> media query resolution.</p>`)
@@ -1237,7 +1188,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	b.WriteString(fmt.Sprintf(`<a style="%s" href="goosie://inspect?action=set_theme&theme=high-contrast&tab=%d">High Contrast</a> `, pillStyle("high-contrast"), targetTab.ID()))
 	b.WriteString(`</div></div>`)
 
-	// Web Storage (localStorage) Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Web Storage (localStorage)</h2>`)
 	origin := js.OriginOf(targetTab.URL())
@@ -1261,7 +1211,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div>`)
 
-	// Cookies Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Cookies (Active Jar)</h2>`)
 	var docHost string
@@ -1301,7 +1250,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div>`)
 
-	// Network Activity Log Card
 	b.WriteString(`<div class="card">`)
 
 	b.WriteString(`<h2>Network Activity</h2>`)
@@ -1339,7 +1287,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div>`)
 
-	// Console REPL Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Console REPL</h2>`)
 	if evalExpr != "" {
@@ -1361,7 +1308,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
       </form>
     </div>`, targetTab.ID(), html.EscapeString(evalExpr)))
 
-	// Progressive Web App (PWA) & Manifest Card
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Progressive Web App (PWA) &amp; Manifest</h2>`)
 	m := targetTab.Manifest()
@@ -1412,7 +1358,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	}
 	b.WriteString(`</div>`)
 
-	// Site Permissions & Content Settings Card
 	origin = perms.NormalizeOrigin(targetTab.URL())
 	b.WriteString(`<div class="card">`)
 	b.WriteString(`<h2>Site Permissions &amp; Content Settings</h2>`)
@@ -1484,7 +1429,6 @@ func buildInspectPageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	return "Web Inspector", internalPageTemplate("inspect", "Web Inspector", b.String())
 }
 
-// buildReaderPageHTML renders the distraction-free Reader Mode page.
 func buildReaderPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
 	u, _ := url.Parse(rawURL)
 	targetURL := ""
@@ -1530,7 +1474,6 @@ func buildReaderPageHTML(f *framePath, rawURL string) (title, htmlContent string
 	return art.Title + " - Reader Mode", RenderReaderPageHTML(art)
 }
 
-// buildRestorePageHTML generates the session crash recovery and restore interface.
 func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent string) {
 	u, _ := url.Parse(rawURL)
 	action := ""
@@ -1613,7 +1556,6 @@ func buildRestorePageHTML(f *framePath, rawURL string) (title, htmlContent strin
 	return "Restore Session - Goosie", internalPageTemplate("restore", "Restore Session - Goosie", b.String())
 }
 
-// buildExtensionsPageHTML generates the user scripts & extensions management page.
 func buildExtensionsPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
 	u, _ := url.Parse(rawURL)
 	action := ""
@@ -1710,7 +1652,6 @@ func buildExtensionsPageHTML(f *framePath, rawURL string) (title, htmlContent st
 	return "Extensions - Goosie", internalPageTemplate("extensions", "Extensions - Goosie", b.String())
 }
 
-// buildFlagsPageHTML generates the experimental feature flags configuration page.
 func buildFlagsPageHTML(f *framePath, rawURL string) (title, htmlContent string) {
 	u, _ := url.Parse(rawURL)
 	action := ""
@@ -1766,7 +1707,6 @@ func buildFlagsPageHTML(f *framePath, rawURL string) (title, htmlContent string)
       </div>
     </div>`)
 
-	// Filter flags if query present
 	var filtered []flags.Flag
 	for _, fl := range allFlags {
 		if query == "" || strings.Contains(strings.ToLower(fl.Name), query) || strings.Contains(strings.ToLower(fl.Description), query) || strings.Contains(strings.ToLower(fl.ID), query) {
@@ -1841,10 +1781,6 @@ func buildFlagsPageHTML(f *framePath, rawURL string) (title, htmlContent string)
 	return "Experiments - Goosie", internalPageTemplate("flags", "Experiments - Goosie", b.String())
 }
 
-// renderDOMTreeHTML serializes the DOM hierarchy into syntax-highlighted HTML.
-// Each element's opening tag name is a link that selects the node for
-// highlighting in the inspected tab (tabID); selected marks the row currently
-// outlined. A zero selected means nothing is highlighted.
 func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int, selected dom.NodeID, tabID uint64) int {
 	if n == nil || limit <= 0 {
 		return limit
@@ -1899,7 +1835,6 @@ func renderDOMTreeHTML(b *strings.Builder, n *dom.Node, depth, limit int, select
 	return limit
 }
 
-// renderInternalPage compiles a goosie:// internal page into a frame Layer and engine Session.
 func (f *framePath) renderInternalPage(ctx context.Context, rawURL string, viewportW, viewportH int, scale float32) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: viewport: %w", err)
@@ -1941,6 +1876,6 @@ func (f *framePath) renderInternalPage(ctx context.Context, rawURL string, viewp
 	layer := frame.NewLayer(1, extent, budgetBytes, pool)
 	layer.SetContent(dl)
 
-	_ = title // title is tracked on Tab
+	_ = title
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, rawURL, nil
 }

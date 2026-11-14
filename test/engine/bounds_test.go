@@ -47,9 +47,6 @@ func TestSessionRejectsUnboundedInput(t *testing.T) {
 
 // qc:BR-162
 func TestSessionRejectsOversizedHTMLBeforeParsing(t *testing.T) {
-	// The payload is also millions of nodes and far past the depth limit, so a
-	// parser-first path would report one of those limits instead. Only a byte
-	// check that runs before the tree builder can answer with the byte cap.
 	html := strings.Repeat("<div>", engine.MaxDocumentBytes/5+1)
 	if len(html) <= engine.MaxDocumentBytes {
 		t.Fatalf("fixture = %d bytes, want > %d", len(html), engine.MaxDocumentBytes)
@@ -68,11 +65,6 @@ func TestSessionRejectsOversizedHTMLBeforeParsing(t *testing.T) {
 
 // qc:BR-164
 func TestSessionRejectsAdversarialSelectorShapes(t *testing.T) {
-	// The selector-count and part-count caps are exercised by
-	// TestSessionRejectsUnboundedInput. These are the two costs that those
-	// shapes cannot reach: a single compound carrying every condition, and a
-	// chain built only from descendant combinators. Both are cheap to write and
-	// expensive to match, so they are refused while the sheet is admitted.
 	tests := []struct {
 		name string
 		css  string
@@ -117,10 +109,6 @@ func TestParserStopsAtNodeAndDepthLimits(t *testing.T) {
 
 // qc:BR-163
 func TestSessionRejectsOverdeepProvidedTree(t *testing.T) {
-	// A MIME-aware parser can hand over a tree the HTML parser never built, so
-	// the depth bound has to be checked again before styling recurses into it.
-	// The validator stops at the first node past the limit, which is what keeps
-	// this from becoming a stack overflow on a deeply linked tree.
 	doc := dom.NewDocument()
 	parent := &doc.Node
 	for i := 0; i < 2000; i++ {

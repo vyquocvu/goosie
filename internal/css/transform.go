@@ -1,7 +1,3 @@
-// CSS transform property parsing. Supports the 2D transform functions:
-// translate, rotate, scale, skew, and matrix. Angles are converted to radians,
-// lengths to pixels.
-
 package css
 
 import (
@@ -9,38 +5,21 @@ import (
 	"strings"
 )
 
-// TransformFunc is one function in a CSS transform list. Args interpretation
-// depends on Name:
-//   - "translate": [tx, ty] in pixels
-//   - "rotate": [angle] in radians
-//   - "scale": [sx, sy] unitless
-//   - "skew": [ax, ay] in radians
-//   - "matrix": [a, b, c, d, tx, ty]
 type TransformFunc struct {
 	Name string
 	Args []float32
 }
 
-// TransformOrigin is the resolved transform-origin point. Percentages are
-// resolved against the element's dimensions at resolve time, so the origin
-// stores the raw percentage or pixel value and the mode to distinguish them.
 type TransformOrigin struct {
 	X, Y   float32
 	XIsPct bool
 	YIsPct bool
 }
 
-// DefaultTransformOrigin returns the default transform-origin of "50% 50%"
-// (center of the element).
 func DefaultTransformOrigin() TransformOrigin {
 	return TransformOrigin{X: 50, Y: 50, XIsPct: true, YIsPct: true}
 }
 
-// ParseTransform parses the CSS transform property value into a list of
-// transform functions. Supports: translate(tx[,ty]), translateX(tx),
-// translateY(ty), rotate(angle), scale(sx[,sy]), scaleX(sx), scaleY(sy),
-// skew(ax[,ay]), skewX(ax), skewY(ay), matrix(a,b,c,d,tx,ty).
-// Angles are converted to radians. Lengths are converted to pixels.
 func ParseTransform(value string) []TransformFunc {
 	value = strings.TrimSpace(value)
 	if value == "" || strings.EqualFold(value, "none") {
@@ -50,7 +29,6 @@ func ParseTransform(value string) []TransformFunc {
 	var funcs []TransformFunc
 	i := 0
 	for i < len(value) {
-		// Skip whitespace.
 		for i < len(value) && isTransformSpace(value[i]) {
 			i++
 		}
@@ -58,7 +36,6 @@ func ParseTransform(value string) []TransformFunc {
 			break
 		}
 
-		// Find the function name.
 		nameStart := i
 		for i < len(value) && value[i] != '(' {
 			i++
@@ -68,8 +45,7 @@ func ParseTransform(value string) []TransformFunc {
 		}
 		name := strings.ToLower(strings.TrimSpace(value[nameStart:i]))
 
-		// Find the matching closing paren.
-		i++ // skip '('
+		i++
 		depth := 1
 		argsStart := i
 		for i < len(value) && depth > 0 {
@@ -85,7 +61,7 @@ func ParseTransform(value string) []TransformFunc {
 		}
 		argsStr := value[argsStart:i]
 		if i < len(value) {
-			i++ // skip ')'
+			i++
 		}
 
 		fn := parseOneTransformFunc(name, argsStr)
@@ -153,7 +129,6 @@ func parseOneTransformFunc(name, argsStr string) TransformFunc {
 	return TransformFunc{}
 }
 
-// splitTransformArgs splits on commas that are outside parentheses.
 func splitTransformArgs(s string) []string {
 	var parts []string
 	depth := 0
@@ -177,9 +152,6 @@ func splitTransformArgs(s string) []string {
 	return parts
 }
 
-// parseTransformLength parses a CSS length at the given index. Supports px, em
-// (treated as px for now), and % (returned as a fraction). Returns 0 for
-// missing or unparseable values.
 func parseTransformLength(args []string, idx int) float32 {
 	if idx >= len(args) {
 		return 0
@@ -197,21 +169,14 @@ func parseTransformLengthValue(s string) float32 {
 		return float32(parseFloat(s[:len(s)-2]))
 	}
 	if strings.HasSuffix(lower, "em") || strings.HasSuffix(lower, "rem") {
-		// Treat em/rem as px * 16 for now, matching the rest of the engine.
 		return float32(parseFloat(s[:len(s)-2])) * 16
 	}
 	if strings.HasSuffix(lower, "%") {
-		// Percentages in translate are relative to element size. Store as a
-		// fraction so ResolveTransform can multiply by element dimensions.
 		return float32(parseFloat(s[:len(s)-1])) / 100
 	}
-	// Unitless number is treated as px.
 	return float32(parseFloat(s))
 }
 
-// parseTransformAngle parses a CSS angle at the given index. Supports deg, rad,
-// grad, turn. A bare number is treated as degrees (matching CSS convention for
-// transform functions). Returns 0 for missing values.
 func parseTransformAngle(args []string, idx int) float32 {
 	if idx >= len(args) {
 		return 0
@@ -223,8 +188,6 @@ func parseTransformAngle(args []string, idx int) float32 {
 	return parseAngleValue(s)
 }
 
-// parseAngleValue converts a CSS angle string to radians. The order matters:
-// "grad" must be checked before "rad" because "grad" ends with "rad".
 func parseAngleValue(s string) float32 {
 	lower := strings.ToLower(s)
 	if fn, ok := lengthFuncName(s); ok {
@@ -245,11 +208,9 @@ func parseAngleValue(s string) float32 {
 	if strings.HasSuffix(lower, "rad") {
 		return float32(parseFloat(s[:len(s)-3]))
 	}
-	// Bare number is degrees.
 	return float32(parseFloat(s)) * math.Pi / 180
 }
 
-// parseTransformNumber parses a unitless number at the given index.
 func parseTransformNumber(args []string, idx int) float32 {
 	if idx >= len(args) {
 		return 1
@@ -261,9 +222,6 @@ func parseTransformNumber(args []string, idx int) float32 {
 	return float32(parseFloat(s))
 }
 
-// ParseTransformOrigin parses the CSS transform-origin property. Default is
-// "50% 50%" (center). Supports keywords (left, center, right, top, bottom),
-// percentages, and pixel lengths.
 func ParseTransformOrigin(value string) TransformOrigin {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -325,8 +283,6 @@ func ParseTransformOrigin(value string) TransformOrigin {
 	if len(parts) >= 2 {
 		parseY(parts[1])
 	} else {
-		// If only one keyword is given and it's a horizontal keyword, Y defaults
-		// to center. If it's a vertical keyword, X defaults to center.
 		lower := strings.ToLower(parts[0])
 		switch lower {
 		case "top", "bottom":
@@ -341,8 +297,6 @@ func ParseTransformOrigin(value string) TransformOrigin {
 	return origin
 }
 
-// ResolveOrigin resolves the transform origin to pixel coordinates given the
-// element's dimensions.
 func (o TransformOrigin) ResolveOrigin(elementWidth, elementHeight float32) (float32, float32) {
 	ox := o.X
 	if o.XIsPct {

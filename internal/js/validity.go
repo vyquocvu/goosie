@@ -151,8 +151,6 @@ func (r *Runtime) refreshDocumentPatternMismatches() {
 	})
 }
 
-// RefreshInputPatternMismatch updates cached input validity after a host-side
-// user edit so CSS :invalid/:valid selectors observe the new value.
 func (r *Runtime) RefreshInputPatternMismatch(node *dom.Node) {
 	if r != nil {
 		if node != nil && node.Data == "input" {
@@ -245,9 +243,6 @@ func asciiEmailAddressToASCII(address string) string {
 	return address[:at+1] + domain
 }
 
-// SanitizeInputValue applies the current input state's HTML value
-// sanitization algorithm. Engine editing paths use this before committing a
-// user-selected value so script and user writes share the same normalization.
 func (r *Runtime) SanitizeInputValue(node *dom.Node, value string) string {
 	return r.sanitizeInputValue(node, value)
 }
@@ -477,11 +472,11 @@ func (r *Runtime) updateRangeValidity(node *dom.Node) {
 	switch typ {
 	case "number", "date", "month":
 	case "week":
-		stepScale = 7    // values are represented as day numbers
-		defaultBase = -3 // Monday of 1970-W01
+		stepScale = 7
+		defaultBase = -3
 	case "time", "datetime-local":
 		defaultStep = 60
-		stepScale = 1000 // values are represented in milliseconds
+		stepScale = 1000
 	default:
 		return
 	}
@@ -529,10 +524,6 @@ func (r *Runtime) updateRangeValidity(node *dom.Node) {
 	node.StepMismatch = math.Abs(quotient-math.Round(quotient)) > 1e-9
 }
 
-// exactNumberStepMismatch avoids losing the fractional part of large step
-// quotients. A number such as 17 divided by a very small step such as 3e-15
-// exceeds float64's integer precision, even though the exact decimal quotient
-// is not an integer.
 func exactNumberStepMismatch(node *dom.Node, stepText string, hasMinimum bool) (bool, bool) {
 	value, ok := new(big.Rat).SetString(node.InputControlValue())
 	if !ok {
@@ -743,10 +734,6 @@ func parseHTMLDate(value string) (float64, bool) {
 }
 
 func compileHTMLInputPattern(pattern string) (*regexp.Regexp, bool) {
-	// HTML compiles pattern with ECMAScript's Unicode Sets mode. Goja currently
-	// exposes the Unicode (u) transformer, so translate the supported v-mode
-	// string and set expressions before sending the remaining expression to
-	// RE2. Invalid v-mode patterns are ignored by constraint validation.
 	if translated, ok := translatePatternStringSet(pattern); ok {
 		pattern = translated
 	}
@@ -759,9 +746,6 @@ func compileHTMLInputPattern(pattern string) (*regexp.Regexp, bool) {
 		return nil, false
 	}
 	pattern = strings.ReplaceAll(pattern, `\p{ASCII_Hex_Digit}`, `[0-9A-Fa-f]`)
-	// Go's regexp engine lacks Unicode properties of strings. This translation
-	// covers emoji presentation characters, flags, keycaps, and ZWJ sequences;
-	// the Unicode RGI list still needs a generated table for exact membership.
 	emoji := `(?:[0-9#*]\x{FE0F}?\x{20E3}|[\x{1F1E6}-\x{1F1FF}]{2}|[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}](?:\x{FE0F}|[\x{1F3FB}-\x{1F3FF}])?(?:\x{200D}[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}](?:\x{FE0F}|[\x{1F3FB}-\x{1F3FF}])?)*)`
 	pattern = strings.ReplaceAll(pattern, `\p{RGI_Emoji}`, emoji)
 	transformed, err := parser.TransformRegExp(pattern, false, true)
@@ -928,9 +912,6 @@ func (r *Runtime) formControlValueMissing(node *dom.Node) bool {
 		case "hidden", "button", "reset", "submit", "image":
 			return false
 		}
-		// For value-mode input states, the required constraint only applies
-		// while the control is mutable. Checkbox, radio, and file states have
-		// their own rules above, which can remain missing while disabled.
 		if dom.IsFormControlDisabled(node) || node.HasAttribute("readonly") {
 			return false
 		}

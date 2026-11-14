@@ -1,4 +1,3 @@
-// Package session persists the set of open tabs across process restarts.
 package session
 
 import (
@@ -13,9 +12,6 @@ const (
 	MaxHistoryPerTab = 100
 )
 
-// TabState is one restored tab: where it was, and the back/forward trail.
-// ScrollX/ScrollY carry the viewport offset the tab was left at; they are
-// omitempty so journals written before scroll persistence load as 0.
 type TabState struct {
 	URL          string   `json:"url"`
 	Title        string   `json:"title,omitempty"`
@@ -25,14 +21,11 @@ type TabState struct {
 	ScrollY      int      `json:"scrollY,omitempty"`
 }
 
-// State is the full session: tabs in order and which one was active.
 type State struct {
 	Tabs   []TabState `json:"tabs"`
 	Active int        `json:"active"`
 }
 
-// Save writes the state atomically: a truncated or half-written file must never
-// replace a good session, so the bytes land in a temp file first and rename in.
 func Save(path string, s State) error {
 	s = clamp(s)
 	data, err := json.MarshalIndent(s, "", "  ")
@@ -57,7 +50,6 @@ func Save(path string, s State) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// Load reads a state file. A missing file is a fresh session, not an error.
 func Load(path string) (State, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -73,8 +65,6 @@ func Load(path string) (State, error) {
 	return clamp(s), nil
 }
 
-// clamp trims hostile state files down to the supported shape: entries the
-// restored browser can actually hold, with every index in range.
 func clamp(s State) State {
 	if len(s.Tabs) > MaxTabs {
 		s.Tabs = s.Tabs[:MaxTabs]
@@ -91,7 +81,6 @@ func clamp(s State) State {
 			t.HistoryIndex = -1
 		}
 		if t.URL != "" && t.HistoryIndex >= 0 && t.HistoryIndex < len(t.History) && t.History[t.HistoryIndex] != t.URL {
-			// The current entry is authoritative; re-sync the tab's URL to it.
 			t.URL = t.History[t.HistoryIndex]
 		}
 	}

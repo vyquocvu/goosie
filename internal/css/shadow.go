@@ -4,38 +4,24 @@ import (
 	"strings"
 )
 
-// BoxShadow is one resolved box-shadow layer. ColorIsCurrent marks a layer
-// whose color is the element's own `color` (explicit `currentcolor` or the
-// omitted-color default); the style cascade resolves it once `color` is final.
 type BoxShadow struct {
-	OffsetX float32
-	OffsetY float32
-	Blur    float32
-	Spread  float32
-	Color   Color
-	Inset   bool
-	// ColorIsCurrent resolves Color against the element's `color` property.
+	OffsetX        float32
+	OffsetY        float32
+	Blur           float32
+	Spread         float32
+	Color          Color
+	Inset          bool
 	ColorIsCurrent bool
 }
 
-// TextShadow is one resolved text-shadow layer.
 type TextShadow struct {
-	OffsetX float32
-	OffsetY float32
-	Blur    float32
-	Color   Color
-	// ColorIsCurrent resolves Color against the element's `color` property.
+	OffsetX        float32
+	OffsetY        float32
+	Blur           float32
+	Color          Color
 	ColorIsCurrent bool
 }
 
-// ParseBoxShadow parses a box-shadow property value into one or more shadow
-// layers. Returns nil when the value is "none" or unparseable.
-//
-// A single invalid layer invalidates the whole declaration (CSS Backgrounds
-// §6.1.1), so `box-shadow: none, red 0 -100px` drops everything rather than
-// painting the valid-looking layers.
-//
-// Syntax: [inset? <offset-x> <offset-y> <blur-radius>? <spread-distance>? <color>?]#
 func ParseBoxShadow(value string) []BoxShadow {
 	value = strings.TrimSpace(value)
 	if strings.EqualFold(value, "none") || value == "" {
@@ -57,11 +43,6 @@ func ParseBoxShadow(value string) []BoxShadow {
 	return shadows
 }
 
-// ParseTextShadow parses a text-shadow property value into one or more shadow
-// layers. Returns nil when the value is "none" or unparseable. Like
-// ParseBoxShadow, one bad layer drops the whole declaration.
-//
-// Syntax: [<offset-x> <offset-y> <blur-radius>? <color>?]#
 func ParseTextShadow(value string) []TextShadow {
 	value = strings.TrimSpace(value)
 	if strings.EqualFold(value, "none") || value == "" {
@@ -83,8 +64,6 @@ func ParseTextShadow(value string) []TextShadow {
 	return shadows
 }
 
-// splitShadowLayers splits a shadow value on commas that are not inside
-// parentheses (so rgb()/hsla() survive intact).
 func splitShadowLayers(value string) []string {
 	var layers []string
 	depth := 0
@@ -108,7 +87,6 @@ func splitShadowLayers(value string) []string {
 	return layers
 }
 
-// parseOneBoxShadow parses a single box-shadow layer.
 func parseOneBoxShadow(s string) (BoxShadow, bool) {
 	var shadow BoxShadow
 	tokens := splitShadowTokens(s)
@@ -131,19 +109,14 @@ func parseOneBoxShadow(s string) (BoxShadow, bool) {
 			colorFound = true
 			continue
 		}
-		// Try to parse as a length.
 		v := ParseValue(tok)
 		if l := resolveShadowLength(v); l != 0 || (v.Type == ValueLength || v.Type == ValueNumber) {
 			lengths = append(lengths, l)
 			continue
 		}
-		// Unknown token: the layer - and with it the declaration - is invalid.
 		return shadow, false
 	}
 
-	// Need exactly offsetX and offsetY, plus optional blur and spread.
-	// A negative blur radius is invalid; offsets and the spread may be negative,
-	// since a negative spread is how a shadow is shrunk inside its box.
 	if len(lengths) < 2 || len(lengths) > 4 {
 		return shadow, false
 	}
@@ -159,13 +132,11 @@ func parseOneBoxShadow(s string) (BoxShadow, bool) {
 		shadow.Spread = lengths[3]
 	}
 	if !colorFound {
-		// Omitted color defaults to currentcolor; the cascade fills it in.
 		shadow.ColorIsCurrent = true
 	}
 	return shadow, true
 }
 
-// parseOneTextShadow parses a single text-shadow layer.
 func parseOneTextShadow(s string) (TextShadow, bool) {
 	var shadow TextShadow
 	tokens := splitShadowTokens(s)
@@ -189,14 +160,12 @@ func parseOneTextShadow(s string) (TextShadow, bool) {
 			lengths = append(lengths, l)
 			continue
 		}
-		// Unknown token: the layer - and with it the declaration - is invalid.
 		return shadow, false
 	}
 
 	if len(lengths) < 2 || len(lengths) > 3 {
 		return shadow, false
 	}
-	// A negative blur radius is invalid; offsets may be negative.
 	if len(lengths) >= 3 && lengths[2] < 0 {
 		return shadow, false
 	}
@@ -206,14 +175,11 @@ func parseOneTextShadow(s string) (TextShadow, bool) {
 		shadow.Blur = lengths[2]
 	}
 	if !colorFound {
-		// Omitted color defaults to currentcolor; the cascade fills it in.
 		shadow.ColorIsCurrent = true
 	}
 	return shadow, true
 }
 
-// splitShadowTokens splits a shadow layer value on whitespace outside
-// parentheses, keeping color function calls like rgb() intact.
 func splitShadowTokens(s string) []string {
 	var tokens []string
 	depth := 0
@@ -250,8 +216,6 @@ func splitShadowTokens(s string) []string {
 	return tokens
 }
 
-// resolveShadowLength converts a CSS value to a float32 pixel length for
-// shadow offsets. Returns 0 for non-length values.
 func resolveShadowLength(v Value) float32 {
 	return v.ToLength()
 }

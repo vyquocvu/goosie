@@ -13,7 +13,7 @@ func TestAccentColorParsing(t *testing.T) {
 	tests := []struct {
 		name   string
 		value  string
-		expect bool // should parse successfully
+		expect bool
 	}{
 		{"auto", "auto", true},
 		{"blue keyword", "blue", true},

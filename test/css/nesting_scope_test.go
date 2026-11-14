@@ -32,7 +32,6 @@ func TestNesting_AmpersandExpansion(t *testing.T) {
 		t.Fatalf("expected 6 rules, got %d", len(sheet.Rules))
 	}
 
-	// 1. .card
 	if sheet.Rules[0].SelectorStrs[0] != ".card" {
 		t.Errorf("rule 0 = %q, want .card", sheet.Rules[0].SelectorStrs[0])
 	}
@@ -40,7 +39,6 @@ func TestNesting_AmpersandExpansion(t *testing.T) {
 		t.Errorf("rule 0 decls = %v", sheet.Rules[0].Declarations)
 	}
 
-	// 2. .card .title
 	if sheet.Rules[1].SelectorStrs[0] != ".card .title" {
 		t.Errorf("rule 1 = %q, want '.card .title'", sheet.Rules[1].SelectorStrs[0])
 	}
@@ -48,22 +46,18 @@ func TestNesting_AmpersandExpansion(t *testing.T) {
 		t.Errorf("rule 1 decls = %v", sheet.Rules[1].Declarations)
 	}
 
-	// 3. .card:hover
 	if sheet.Rules[2].SelectorStrs[0] != ".card:hover" {
 		t.Errorf("rule 2 = %q, want '.card:hover'", sheet.Rules[2].SelectorStrs[0])
 	}
 
-	// 4. .card.active
 	if sheet.Rules[3].SelectorStrs[0] != ".card.active" {
 		t.Errorf("rule 3 = %q, want '.card.active'", sheet.Rules[3].SelectorStrs[0])
 	}
 
-	// 5. .card + .card
 	if sheet.Rules[4].SelectorStrs[0] != ".card + .card" {
 		t.Errorf("rule 4 = %q, want '.card + .card'", sheet.Rules[4].SelectorStrs[0])
 	}
 
-	// 6. body.dark .card
 	if sheet.Rules[5].SelectorStrs[0] != "body.dark .card" {
 		t.Errorf("rule 5 = %q, want 'body.dark .card'", sheet.Rules[5].SelectorStrs[0])
 	}
@@ -83,12 +77,10 @@ func TestNesting_MultipleParentSelectors(t *testing.T) {
 		t.Fatalf("expected 2 rules, got %d", len(sheet.Rules))
 	}
 
-	// Rule 0: h1, h2
 	if len(sheet.Rules[0].SelectorStrs) != 2 {
 		t.Fatalf("rule 0 selectors count = %d, want 2", len(sheet.Rules[0].SelectorStrs))
 	}
 
-	// Rule 1: h1 .sub, h2 .sub, h1 span, h2 span
 	sels := sheet.Rules[1].SelectorStrs
 	want := []string{"h1 .sub", "h2 .sub", "h1 span", "h2 span"}
 	if len(sels) != len(want) {
@@ -148,10 +140,6 @@ func TestNesting_NestedAtRules(t *testing.T) {
 		}
 	`, css.MediaOptions{ViewportWidth: 800})
 
-	// Rule 0: .card (width: 100%)
-	// Rule 1: .card (width: 50%) with media width >= 600
-	// Rule 2: .card .inner (padding: 10px) with media width >= 600
-	// Rule 3: .card (padding: 20px) with container query
 	if len(sheet.Rules) != 4 {
 		t.Fatalf("expected 4 rules, got %d", len(sheet.Rules))
 	}
@@ -182,17 +170,14 @@ func TestScopeRule_Parsing(t *testing.T) {
 		t.Fatalf("expected 3 rules, got %d", len(sheet.Rules))
 	}
 
-	// Rule 0: p within .card
 	if sheet.Rules[0].ScopeRoot != ".card" || sheet.Rules[0].ScopeLimit != "" {
 		t.Errorf("rule 0 scope = root:%q limit:%q", sheet.Rules[0].ScopeRoot, sheet.Rules[0].ScopeLimit)
 	}
 
-	// Rule 1: :scope within .card
 	if sheet.Rules[1].ScopeRoot != ".card" {
 		t.Errorf("rule 1 scopeRoot = %q", sheet.Rules[1].ScopeRoot)
 	}
 
-	// Rule 2: p within .article to .comments
 	if sheet.Rules[2].ScopeRoot != ".article" || sheet.Rules[2].ScopeLimit != ".comments" {
 		t.Errorf("rule 2 scope = root:%q limit:%q", sheet.Rules[2].ScopeRoot, sheet.Rules[2].ScopeLimit)
 	}

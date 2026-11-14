@@ -16,21 +16,13 @@ var (
 	tabTextActive  = frame.RGB(35, 35, 35)
 	newTabBtnColor = frame.RGB(120, 120, 120)
 	closeBtnColor  = frame.RGB(145, 145, 145)
-	// tabRadius rounds the top corners of the active tab. The toolbar below is
-	// the same white, so the open tab reads as connected to the page chrome.
-	tabRadius = int32(8)
-	titleSize = int32(14)
-	// The icon column is reserved on every tab so titles start at the same x
-	// whether or not the site supplied an icon: a placeholder is drawn in the
-	// slot rather than collapsing the layout.
-	tabIconSize  = int32(16)
-	tabIconInset = int32(8)
-	tabTextGap   = int32(6)
+	tabRadius      = int32(8)
+	titleSize      = int32(14)
+	tabIconSize    = int32(16)
+	tabIconInset   = int32(8)
+	tabTextGap     = int32(6)
 )
 
-// tabPalette is the color set one appearance theme paints the strip with. The
-// active tab background deliberately matches the toolbar background so the two
-// chrome surfaces read as one.
 type tabPalette struct {
 	barBg      frame.Color
 	activeBg   frame.Color
@@ -82,9 +74,6 @@ func tabPaletteFor(theme string) tabPalette {
 	}
 }
 
-// DrawTabBar renders the tab bar onto the top of buf. Layout is computed in
-// logical pixels and multiplied by scale, so a HiDPI window gets a chrome of
-// the same physical size a 1x window shows, not a shrunken one.
 func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *raster.Fonts, scale int32) {
 	if buf == nil || buf.Empty() {
 		return
@@ -104,8 +93,6 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 	dragID, dragX, dragging := mgr.Dragging()
 
 	for i, tab := range tabsList {
-		// The dragged tab leaves its slot and rides the pointer, drawn
-		// last on top.
 		if dragging && tab.ID() == dragID {
 			continue
 		}
@@ -117,8 +104,6 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 		drawTabBody(buf, tab, lr, r, i == activeIdx, fonts, scale, p)
 	}
 
-	// The dragged tab follows the pointer, clamped to the strip, with an
-	// insertion line at the slot it would land in.
 	if dragging {
 		tw := TabWidthFor(n, w)
 		dx := dragX
@@ -149,9 +134,6 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 		}
 	}
 
-	// Scroll chevrons overlay the strip's right end once tabs overflow. The
-	// zone is repainted opaque first: clipped tabs sliding underneath must
-	// not bleed through the controls.
 	if left, right, ok := ChevronRects(int32(len(tabsList)), w); ok {
 		lr := scaleRect(frame.Rect4(left.X0, 0, right.X1, TabBarHeight), scale)
 		buf.FillRect(frame.Rect4(lr.X0, 0, lr.X1, int32(TabBarHeight)*scale), p.barBg, nil)
@@ -160,9 +142,6 @@ func DrawTabBar(buf *frame.Bitmap, mgr *TabManager, scrollOffset int32, fonts *r
 	}
 }
 
-// drawTabBody paints one tab: background, title text and close button.
-// lr is the logical rect (for text layout and the close button), r is the
-// scaled device rect.
 func drawTabBody(buf *frame.Bitmap, tab *Tab, lr, r frame.Rect, active bool, fonts *raster.Fonts, scale int32, p tabPalette) {
 	textColor := p.text
 	isIncognito := tab.Incognito()
@@ -206,9 +185,6 @@ func scaleRect(r frame.Rect, scale int32) frame.Rect {
 	return frame.Rect4(r.X0*scale, r.Y0*scale, r.X1*scale, r.Y1*scale)
 }
 
-// drawTabFavicon paints the site icon into the reserved icon column, resampling
-// it to 16 logical pixels. A tab without one shows the placeholder instead, so
-// the strip never has a ragged title edge.
 func drawTabFavicon(buf *frame.Bitmap, tab *Tab, lr frame.Rect, fallback frame.Color, scale int32) {
 	size := tabIconSize * scale
 	x := lr.X0 + tabIconInset*scale
@@ -225,8 +201,6 @@ func drawTabFavicon(buf *frame.Bitmap, tab *Tab, lr frame.Rect, fallback frame.C
 	drawTabPlaceholderIcon(buf, dst, fallback, scale)
 }
 
-// drawTabPlaceholderIcon strokes a page glyph with two text rules: a neutral
-// mark that reads as "document" at 16px on both light and dark tabs.
 func drawTabPlaceholderIcon(buf *frame.Bitmap, r frame.Rect, c frame.Color, scale int32) {
 	if r.W() < 8*scale || r.H() < 8*scale {
 		return
@@ -251,8 +225,6 @@ func drawTabPlaceholderIcon(buf *frame.Bitmap, r frame.Rect, c frame.Color, scal
 	drawLineAA(buf, x0+3*float64(scale), mid+step, x1-2*float64(scale), mid+step, thick, c)
 }
 
-// fillRoundedTop fills r with its two top corners rounded, leaving the bottom
-// edge square so the tab meets the toolbar without a seam.
 func fillRoundedTop(buf *frame.Bitmap, r frame.Rect, radius int32, c frame.Color) {
 	if radius > r.H() {
 		radius = r.H()
@@ -384,9 +356,6 @@ func drawCloseButton(buf *frame.Bitmap, r frame.Rect, c frame.Color, scale int32
 	drawLineAA(buf, x1, y0, x0, y1, thick, c)
 }
 
-// drawChevron paints one scroll control: a ‹ (dir -1) or › (dir +1) centered
-// in r, in device pixels. Two stroked segments, the same AA technique as the
-// close button's cross.
 func drawChevron(buf *frame.Bitmap, r frame.Rect, dir int32, c frame.Color, scale int32) {
 	cx := float64(r.X0+r.X1) / 2
 	cy := float64(r.Y0+r.Y1) / 2
@@ -396,7 +365,6 @@ func drawChevron(buf *frame.Bitmap, r frame.Rect, dir int32, c frame.Color, scal
 	if thick < 1.5 {
 		thick = 1.5
 	}
-	// The tip leads toward dir: ‹ (dir -1) points left, › (dir +1) right.
 	tipX := cx + float64(dir)*arm
 	endX := cx - float64(dir)*arm
 	drawLineAA(buf, tipX, cy, endX, cy-half, thick, c)

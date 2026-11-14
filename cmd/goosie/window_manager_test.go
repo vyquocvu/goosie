@@ -26,8 +26,6 @@ func testManagerConfig(t *testing.T) config {
 	return c
 }
 
-// waitWindows polls the manager's window count until it equals want or the
-// deadline passes. Teardown runs on a goroutine, so the count settles async.
 func waitWindows(t *testing.T, m *windowManager, want int) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -68,7 +66,6 @@ func TestManagerSpawnTwoWindows(t *testing.T) {
 		t.Fatal("two windows share one platform window")
 	}
 	waitWindows(t, m, 2)
-	// Both loops are live: each window presents independently.
 	if f1.loop == nil || f2.loop == nil {
 		t.Fatal("a spawned window has no loop")
 	}
@@ -99,7 +96,6 @@ func TestManagerCloseOneKeepsOthers(t *testing.T) {
 		t.Fatal("manager signalled done while a window is still open")
 	default:
 	}
-	// f2 is still registered and its loop has not been torn down.
 	m.mu.Lock()
 	stillThere := len(m.windows) == 1 && m.windows[0] == f2
 	m.mu.Unlock()
@@ -145,7 +141,6 @@ func TestManagerRunSavesAndTearsDown(t *testing.T) {
 	}
 	t.Cleanup(m.cleanup)
 
-	// Seed a bookmark so the shared history/bookmark save path has state.
 	if m.profile.bookmarks != nil {
 		m.profile.bookmarks.Toggle("https://example.test/", "Example")
 	}
@@ -153,7 +148,6 @@ func TestManagerRunSavesAndTearsDown(t *testing.T) {
 	runErr := make(chan error, 1)
 	go func() { runErr <- m.run() }()
 
-	// Wait for the primary window to exist, then close it to end the run.
 	var primary *framePath
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -204,8 +198,6 @@ func TestManagerLastTabClosesWindow(t *testing.T) {
 	}
 	waitWindows(t, m, 2)
 
-	// f1 has exactly one tab (the startup tab). Closing it fires onCloseLast,
-	// which closes f1's window; the manager must remove f1 and keep f2.
 	tabs1 := f1.tabMgr.Tabs()
 	if len(tabs1) != 1 {
 		t.Fatalf("f1 tab count = %d, want 1", len(tabs1))
@@ -335,9 +327,6 @@ func TestManagerCollectsLaterWindowError(t *testing.T) {
 	runErr := make(chan error, 1)
 	go func() { runErr <- m.run() }()
 
-	// Wait for the primary window and its first presented frame. By then run()
-	// has taken its errs snapshot (in the old, primary-only code) and is blocked
-	// at <-m.done, so a channel appended now stands for a window spawned later.
 	var primary *framePath
 	deadline := time.Now().Add(3 * time.Second)
 	presented := false
@@ -480,10 +469,6 @@ func TestManagerNewWindowNilHookNoop(t *testing.T) {
 	if !ok {
 		t.Fatal("primary window is not a chromeWindow")
 	}
-	// Simulate the legacy paced/screenshot/private path, which never installs a
-	// manager link: both hooks nil, neither shortcut nor menu action spawns or
-	// panics. No key events are injected, so the idle pump never reads onNewWindow
-	// concurrently with these writes.
 	f1.newWindow = nil
 	cw.onNewWindow = nil
 	if cw.handleTabShortcut('n', surface.ModCommand) {

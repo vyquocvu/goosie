@@ -31,9 +31,6 @@ func pumpSession(t *testing.T, html string, withJS bool) (*engine.Session, *js.R
 	return sess, rt, inv
 }
 
-// TestPumpJSFiresTimers pins the event-loop turn: a 0ms timer scheduled by
-// a classic script must not run during load, and must have run (with its DOM
-// mutation visible) after one pump.
 func TestPumpJSFiresTimers(t *testing.T) {
 	html := `<html><body><p id="t">waiting</p><script>setTimeout(function(){document.getElementById('t').textContent='fired';},0);</script></body></html>`
 	sess, _, _ := pumpSession(t, html, true)
@@ -75,9 +72,6 @@ func TestPumpJSSameValueDOMWritesSkipPipeline(t *testing.T) {
 	}
 }
 
-// A class written by a timer callback must be resolved and re-laid-out in the
-// same pump turn: the computed colour and the box width both change without a
-// reload, and exactly one style/layout pass is charged for it.
 // qc:BR-090
 func TestPumpJSChangedAttributeStillRebuildsStylesAndLayout(t *testing.T) {
 	html := `<html><head><style>.active { color: red; width: 200px; }</style></head><body>
@@ -110,9 +104,6 @@ func TestPumpJSChangedAttributeStillRebuildsStylesAndLayout(t *testing.T) {
 	}
 }
 
-// A timer that rewrites a text node and an attribute must update all three
-// consumers of the document in the same pump turn: the DOM, the accessibility
-// tree (text label and link target), and the painted display list.
 // qc:BR-089
 func TestPumpJSMutationReachesDOMAccessibilityTreeAndPaint(t *testing.T) {
 	html := `<html><body style="margin: 0;">
@@ -162,9 +153,6 @@ func TestPumpJSMutationReachesDOMAccessibilityTreeAndPaint(t *testing.T) {
 	}
 }
 
-// A one-shot requestAnimationFrame callback runs exactly once per frame turn,
-// and its DOM write must reach the frozen display list rather than stopping at
-// the DOM.
 // qc:BR-113
 func TestPumpJSRunsRAF(t *testing.T) {
 	html := `<html><body><p id="t">waiting</p><script>
@@ -199,9 +187,6 @@ requestAnimationFrame(function(){
 	}
 }
 
-// Cancelled timers and animation frames must not touch the document: no
-// callback runs, PumpJS reports no visual work, and the painted text keeps its
-// load-time value.
 // qc:BR-114
 func TestPumpJSCancelledTimersAndFramesDoNotTouchTheDocument(t *testing.T) {
 	html := `<html><body style="margin: 0;"><p id="t">still</p><script>
@@ -240,9 +225,6 @@ cancelAnimationFrame(frame);
 	}
 }
 
-// Removing a node must drop it from the layout arena, hit testing and the
-// accessibility tree, and a node appended in the same turn must appear in all
-// three. This is the engine-level stale-reference contract.
 // qc:BR-112
 func TestPumpJSDOMNodeReplacementDropsStaleReferences(t *testing.T) {
 	html := `<html><body style="margin: 0;">
@@ -317,8 +299,6 @@ func TestPumpJSDOMNodeReplacementDropsStaleReferences(t *testing.T) {
 	}
 }
 
-// Canvas drawing is visible output even when its callback does not mutate the
-// DOM, so PumpJS must request one repaint for the new recorded operations.
 func TestPumpJSCanvasRAFRepaintsOnlyWhenDrawingChanges(t *testing.T) {
 	html := `<html><body><canvas id="c" width="10" height="10"></canvas><script>
 		var ctx = document.getElementById('c').getContext('2d');
@@ -334,8 +314,6 @@ func TestPumpJSCanvasRAFRepaintsOnlyWhenDrawingChanges(t *testing.T) {
 	}
 }
 
-// TestPumpJSWithoutRuntime is the headless/no-JS contract: no runtime, no
-// work, no panic.
 func TestPumpJSWithoutRuntime(t *testing.T) {
 	sess, _, _ := pumpSession(t, `<html><body><p>x</p></body></html>`, false)
 	if sess.PumpJS(800) {
@@ -343,7 +321,6 @@ func TestPumpJSWithoutRuntime(t *testing.T) {
 	}
 }
 
-// TestPumpJSClosedSession: pumping after Close must not panic or hang.
 func TestPumpJSClosedSession(t *testing.T) {
 	html := `<html><body><script>setTimeout(function(){},0);</script></body></html>`
 	sess, _, _ := pumpSession(t, html, true)

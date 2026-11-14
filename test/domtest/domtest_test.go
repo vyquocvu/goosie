@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestFixtureLimitsTrackEngineCaps is why this package spells the caps as literals rather
-// than importing them: internal/engine depends on internal/style, so a fixture helper that
-// depends back on engine makes internal/style's own test binary an import cycle. The
-// equality is what has to hold, so the equality is what is asserted.
 func TestFixtureLimitsTrackEngineCaps(t *testing.T) {
 	got := fixtureLimits()
 	want := dom.ParseLimits{

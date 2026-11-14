@@ -11,22 +11,14 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// Web Workers API implementation.
-
-// WorkerTask represents a unit of work executed in a worker.
 type WorkerTask func(data any) any
 
-// WorkerRunner executes worker scripts. The engine provides the concrete
-// implementation; internal/js defines the interface so it does not import
-// platform-specific code.
 type WorkerRunner interface {
 	Run(scriptURL string, onData func(any), onError func(error)) error
 	PostMessage(data any) error
 	Terminate() error
 }
 
-// WorkerDialer creates worker runners. The engine wires the concrete dialer
-// at pipeline assembly time.
 type WorkerDialer interface {
 	CreateWorker(scriptURL string) (WorkerRunner, error)
 }
@@ -35,7 +27,6 @@ type workerTaskDrainer interface {
 	DrainTasks()
 }
 
-// workerObj holds the internal state of one Worker object.
 type workerObj struct {
 	mu         sync.Mutex
 	runner     WorkerRunner
@@ -53,7 +44,6 @@ type workerEventListener struct {
 	callback goja.Value
 }
 
-// workerMessage is a pending message to be drained.
 type workerMessage struct {
 	worker *workerObj
 	data   any
@@ -98,7 +88,6 @@ func workerStateOf(r *Runtime) *workerState {
 	return s
 }
 
-// setupWorker installs the Worker constructor on the global scope.
 func (r *Runtime) setupWorker(dialer WorkerDialer) {
 	if dialer == nil {
 		dialer = &localWorkerDialer{runtime: r}
@@ -124,7 +113,6 @@ func (r *Runtime) setupWorker(dialer WorkerDialer) {
 		obj := call.This
 		w.obj = obj
 
-		// Event handlers (initially null).
 		_ = obj.Set("onmessage", goja.Null())
 		_ = obj.Set("onerror", goja.Null())
 		_ = obj.Set("onmessageerror", goja.Null())
@@ -166,7 +154,6 @@ func (r *Runtime) setupWorker(dialer WorkerDialer) {
 			return goja.Undefined()
 		})
 
-		// postMessage(data) method.
 		_ = obj.Set("postMessage", func(call goja.FunctionCall) goja.Value {
 			w.mu.Lock()
 			if w.terminated {
@@ -199,7 +186,6 @@ func (r *Runtime) setupWorker(dialer WorkerDialer) {
 			return goja.Undefined()
 		})
 
-		// terminate() method.
 		_ = obj.Set("terminate", func(call goja.FunctionCall) goja.Value {
 			w.mu.Lock()
 			if w.terminated {
@@ -217,7 +203,6 @@ func (r *Runtime) setupWorker(dialer WorkerDialer) {
 			return goja.Undefined()
 		})
 
-		// Start the worker asynchronously.
 		state.mu.Lock()
 		if state.closed || len(state.workers) >= maxWorkersPerRuntime {
 			state.mu.Unlock()
@@ -273,7 +258,6 @@ func (r *Runtime) setupWorker(dialer WorkerDialer) {
 				}
 			}
 
-			// Set up message callbacks.
 			if err := runner.Run(scriptURL,
 				func(data any) {
 					state.mu.Lock()
@@ -483,8 +467,6 @@ func (r *Runtime) newSharedWorkerPort(shared *localSharedWorkerRunner) *goja.Obj
 	return pagePort
 }
 
-// DrainWorkerMessages drains pending worker messages and fires them on the
-// main goroutine. Call this from Tick.
 func (r *Runtime) DrainWorkerMessages() {
 	state := workerStateOf(r)
 	if state == nil {
@@ -770,8 +752,6 @@ func (w *localSharedWorkerRunner) Terminate() error {
 	return nil
 }
 
-// decodeDataWorkerURL reads a data: URL only after bounding its encoded size,
-// then enforces the ordinary worker-script byte limit on the decoded source.
 func decodeDataWorkerURL(raw string) (source string, isDataURL bool, err error) {
 	comma := strings.IndexByte(raw, ',')
 	if comma < 0 || !strings.EqualFold(raw[:comma], "data:") {

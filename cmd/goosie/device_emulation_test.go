@@ -57,30 +57,25 @@ func TestCycleDeviceEmulation(t *testing.T) {
 	}
 	tab.SetSession(sess)
 
-	// Initially Desktop
 	if f.ActiveEmulation() != nil {
 		t.Fatal("expected ActiveEmulation == nil initially")
 	}
 
-	// 1st cycle -> iPhone 15 Pro
 	f.cycleDeviceEmulation()
 	if f.ActiveEmulation() == nil || f.ActiveEmulation().ID != "iphone-15-pro" {
 		t.Fatalf("expected iphone-15-pro, got %+v", f.ActiveEmulation())
 	}
 
-	// 2nd cycle -> Pixel 7
 	f.cycleDeviceEmulation()
 	if f.ActiveEmulation() == nil || f.ActiveEmulation().ID != "pixel-7" {
 		t.Fatalf("expected pixel-7, got %+v", f.ActiveEmulation())
 	}
 
-	// 3rd cycle -> iPad Air
 	f.cycleDeviceEmulation()
 	if f.ActiveEmulation() == nil || f.ActiveEmulation().ID != "ipad-air" {
 		t.Fatalf("expected ipad-air, got %+v", f.ActiveEmulation())
 	}
 
-	// 4th cycle -> Desktop (nil)
 	f.cycleDeviceEmulation()
 	if f.ActiveEmulation() != nil {
 		t.Fatalf("expected nil after cycling past last preset, got %+v", f.ActiveEmulation())
@@ -104,7 +99,6 @@ func TestDeviceEmulationShortcutCmdShiftM(t *testing.T) {
 		emulationToggled++
 	}
 
-	// Trigger Cmd+Shift+M ('m')
 	evKeyM := surface.Event{
 		Kind: surface.EvKey,
 		Key:  'm',
@@ -114,7 +108,6 @@ func TestDeviceEmulationShortcutCmdShiftM(t *testing.T) {
 		t.Fatalf("Cmd+Shift+M lowercase failed: handled=%v toggled=%d", cw.intercept(evKeyM), emulationToggled)
 	}
 
-	// Trigger Cmd+Shift+M ('M')
 	evKeyCapM := surface.Event{
 		Kind: surface.EvKey,
 		Key:  'M',
@@ -137,7 +130,6 @@ func TestInspectPageDeviceEmulation(t *testing.T) {
 	}
 	tab.SetSession(sess)
 
-	// Verify inspect page contains Device Emulation card
 	title, htmlContent := f.buildInternalPageHTML("goosie://inspect")
 	if !strings.Contains(title, "Web Inspector") {
 		t.Fatalf("expected title Web Inspector, got %q", title)
@@ -149,13 +141,11 @@ func TestInspectPageDeviceEmulation(t *testing.T) {
 		t.Error("expected html to contain iphone-15-pro link")
 	}
 
-	// Switch emulation via inspect URL
 	f.buildInternalPageHTML("goosie://inspect?action=emulate&device=iphone-15-pro")
 	if f.ActiveEmulation() == nil || f.ActiveEmulation().ID != "iphone-15-pro" {
 		t.Fatalf("expected active emulation iphone-15-pro, got %+v", f.ActiveEmulation())
 	}
 
-	// Reset emulation via inspect URL
 	f.buildInternalPageHTML("goosie://inspect?action=emulate&device=reset")
 	if f.ActiveEmulation() != nil {
 		t.Fatalf("expected active emulation reset to nil, got %+v", f.ActiveEmulation())

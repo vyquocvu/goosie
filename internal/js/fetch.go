@@ -14,43 +14,22 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Fetch resource limits.
 const (
-	// MaxConcurrentFetches bounds the number of in-flight fetch requests per
-	// document. A page that fires twenty fetches at once would otherwise open
-	// twenty connections; the limit keeps one misbehaving tab from starving
-	// the others.
 	MaxConcurrentFetches = 6
 
-	// MaxFetchBodyBytes bounds the request body sent through fetch. The
-	// response body limit (MaxResponseBytes = 16 MiB) lives in the net
-	// package and is enforced by the HTTP client.
 	MaxFetchBodyBytes = 1 << 20
 
-	// FetchTimeout bounds one fetch request.
 	FetchTimeout = 30 * time.Second
 )
 
-// ErrFetchNotAvailable reports that fetch was called without an HTTP client.
 var ErrFetchNotAvailable = fmt.Errorf("fetch is not available")
 
-// ErrTooManyConcurrentFetches reports that the per-document fetch limit is
-// already reached.
 var ErrTooManyConcurrentFetches = fmt.Errorf("too many concurrent fetches")
 
-// HTTPFetcher is the interface the engine's HTTP client satisfies for fetch.
-// It is defined here so that internal/js does not import internal/net, which
-// the archtest import graph forbids. The engine wires the concrete client in
-// at pipeline assembly time. The context parameter carries cancellation: when
-// the fetch is aborted, the context is cancelled and the transport should
-// tear down the socket rather than continuing to download bytes.
 type HTTPFetcher interface {
 	Fetch(ctx context.Context, url string, method string, headers map[string]string, body []byte) (*FetchResponse, error)
 }
 
-// FetchOptions mirrors the JS RequestInit dictionary. Only the fields the
-// engine currently supports are present; the rest are silently ignored so a
-// script that passes them does not get a confusing error.
 type FetchOptions struct {
 	Method       string
 	Headers      map[string]string
@@ -60,9 +39,6 @@ type FetchOptions struct {
 	Credentials  string
 }
 
-// FetchResponse is the result of a fetch, exposed to JS as a Response-like
-// object. The fields are populated by the HTTP client and copied onto the JS
-// response wrapper by makeResponseObject.
 type FetchResponse struct {
 	Status     int
 	StatusText string
@@ -71,16 +47,6 @@ type FetchResponse struct {
 	URL        string
 	OK         bool
 }
-
-// ---------------------------------------------------------------------------
-// Per-Runtime fetch state.
-//
-// internal/js can only import internal/dom (archtest), so a *Runtime cannot
-// carry a *fetchState field without modifying js.go. Instead, the fetchState
-// is stored as a hidden property on the per-Runtime goja VM. Each VM belongs
-// to exactly one document, so this is per-document state with no process-wide
-// mutable globals.
-// ---------------------------------------------------------------------------
 
 const fetchStateKey = "__fetchState__"
 
@@ -100,44 +66,28 @@ func fetchOf(r *Runtime) *fetchState {
 	return fs
 }
 
-// ---------------------------------------------------------------------------
-// Internal types.
-// ---------------------------------------------------------------------------
-
-// fetchCallback is one pending callback waiting for DrainFetchCallbacks to
-// invoke it on the main goroutine. The goroutine that completes the HTTP
-// request fills in the plain-Go fields; the drain step creates goja values
-// and calls the JS function, keeping all VM access on one thread.
 type fetchCallback struct {
-	fn       goja.Value   // the JS function to call
-	isReject bool         // true → call as onRejected, false → onFulfilled
-	arg      interface{}  // *FetchResponse for resolve, string or goja.Value for reject
-	chain    *thenableObj // non-nil when this callback feeds a chained thenable
+	fn       goja.Value
+	isReject bool
+	arg      interface{}
+	chain    *thenableObj
 }
 
-// thenableObj holds the per-promise callback state. A thenable is the
-// callback-based substitute for a Promise in goja, which has no native
-// Promise support. Each call to .then() or .catch() returns a new thenable
-// so that chaining compiles, and return-value propagation between chained
-// calls is handled by propagateToChain.
 type thenableObj struct {
 	r               *Runtime
-	obj             *goja.Object // the JS object with .then() and .catch()
-	mu              sync.Mutex   // guards resolved, rejected, result, thenCB, catchCB, chain
+	obj             *goja.Object
+	mu              sync.Mutex
 	resolved        bool
 	rejected        bool
-	result          interface{} // goja.Value once settled
-	callbackPending bool        // a queued fetch callback will deliver this settlement
+	result          interface{}
+	callbackPending bool
 
 	thenCB  goja.Value
 	catchCB goja.Value
 
-	// Chained thenable: set by then/catch to receive the outcome of the
-	// callback's return value.
 	chain *thenableObj
 }
 
-// fetchState is the per-Runtime bookkeeping for the fetch subsystem.
 type fetchState struct {
 	client    HTTPFetcher
 	ctx       context.Context
@@ -146,12 +96,6 @@ type fetchState struct {
 	callbacks []fetchCallback
 }
 
-// fetchAbort is the plain-Go mirror of an AbortSignal. It is created on the
-// VM goroutine and awaited by the request goroutine, so the signal itself is
-// never touched off-thread: the abort algorithm reads signal.reason into a
-// goja.Value while it still runs on the VM goroutine, and the request
-// goroutine only passes that value along. Chromium rejects with the reason
-// object itself, so its identity and type have to survive the hop.
 type fetchAbort struct {
 	mu      sync.Mutex
 	aborted bool
@@ -181,21 +125,11 @@ func (a *fetchAbort) fired() (bool, goja.Value) {
 	return a.aborted, a.reason
 }
 
-// reasonValue is the rejection value an aborted request settles with. It only
-// reads what the VM goroutine stored, so the request goroutine can call it.
 func (a *fetchAbort) reasonValue() goja.Value {
 	_, reason := a.fired()
 	return reason
 }
 
-// ---------------------------------------------------------------------------
-// Setup.
-// ---------------------------------------------------------------------------
-
-// setupFetch registers the fetch() function on both the global scope and the
-// window object. It replaces the stub installed by setupUnsupportedAPIs. When
-// client is nil the function is left in a form that rejects every call with
-// "fetch is not available".
 func (r *Runtime) setupFetch(client HTTPFetcher) {
 	if client == nil {
 		r.installFetchWrapper()
@@ -217,9 +151,6 @@ func (r *Runtime) setupFetch(client HTTPFetcher) {
 	}
 }
 
-// installFetchWrapper replaces the throwing stub with a JS wrapper that
-// returns a thenable which immediately rejects with "fetch is not available".
-// This is the path taken when no HTTP client was supplied.
 func (r *Runtime) installFetchWrapper() {
 	_, _ = r.vm.RunString(`
 		(function() {
@@ -245,13 +176,6 @@ func (r *Runtime) installFetchWrapper() {
 	`)
 }
 
-// ---------------------------------------------------------------------------
-// Option parsing and URL resolution.
-// ---------------------------------------------------------------------------
-
-// parseFetchOpts extracts a FetchOptions from the optional second argument to
-// fetch(url, init). A missing or non-object argument yields the zero value,
-// which doFetch interprets as GET with no headers and no body.
 func (r *Runtime) parseFetchOpts(val goja.Value) (FetchOptions, error) {
 	var opts FetchOptions
 	if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
@@ -305,11 +229,6 @@ func (r *Runtime) parseFetchOpts(val goja.Value) (FetchOptions, error) {
 	return opts, nil
 }
 
-// resolveFetchURL resolves a possibly-relative URL against the document URL
-// from Options.URL. Absolute URLs pass through; relative ones are resolved
-// with the document URL as the base. An unparseable result falls back to the
-// raw input so the HTTP client sees the original string and can return its
-// own error.
 func (r *Runtime) resolveFetchURL(raw string) string {
 	if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
 		return raw
@@ -326,18 +245,8 @@ func (r *Runtime) resolveFetchURL(raw string) string {
 	return resolved.String()
 }
 
-// fetchSignalInvalidMessage is the TypeError text Chromium puts on the
-// rejection of fetch(url, {signal: <not an AbortSignal>}), measured verbatim by
-// scripts/verify-br123-fetch-abort.js section 6.
 const fetchSignalInvalidMessage = "Failed to execute 'fetch' on 'Window': Failed to read the 'signal' property from 'RequestInit': Failed to convert value to 'AbortSignal'."
 
-// followFetchSignal reads RequestInit.signal on the VM goroutine and returns a
-// plain-Go abort control the request goroutine can wait on, plus a rejection
-// value when the init is not usable. The control is nil when no signal was
-// supplied. A `signal` that is present but not an AbortSignal rejects with a
-// TypeError and never reaches the client, the way Chromium's RequestInit
-// conversion does; Goosie identifies its own signals by the internal
-// registration hook because an AbortSignal has no private slot in this runtime.
 func (r *Runtime) followFetchSignal(init goja.Value) (*fetchAbort, goja.Value) {
 	if init == nil || goja.IsUndefined(init) || goja.IsNull(init) {
 		return nil, nil
@@ -370,8 +279,6 @@ func (r *Runtime) followFetchSignal(init goja.Value) (*fetchAbort, goja.Value) {
 		control.fire(reason())
 		return control, nil
 	}
-	// The algorithm runs synchronously on the VM goroutine, either now (if the
-	// signal is already aborted) or inside AbortController.abort().
 	_, _ = register(signal, r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		control.fire(reason())
 		return goja.Undefined()
@@ -379,8 +286,6 @@ func (r *Runtime) followFetchSignal(init goja.Value) (*fetchAbort, goja.Value) {
 	return control, nil
 }
 
-// invalidFetchSignalError builds the TypeError value Chromium rejects a fetch
-// with when RequestInit.signal holds anything that is not an AbortSignal.
 func (r *Runtime) invalidFetchSignalError() goja.Value {
 	if ctor, ok := goja.AssertConstructor(r.vm.Get("TypeError")); ok {
 		if err, newErr := ctor(nil, r.vm.ToValue(fetchSignalInvalidMessage)); newErr == nil {
@@ -390,13 +295,6 @@ func (r *Runtime) invalidFetchSignalError() goja.Value {
 	return r.vm.ToValue(fetchSignalInvalidMessage)
 }
 
-// ---------------------------------------------------------------------------
-// Fetch execution.
-// ---------------------------------------------------------------------------
-
-// doFetch is the Go side of fetch(url, opts). It validates inputs, enforces
-// the concurrent limit, launches the request goroutine, and returns a
-// thenable JS object.
 func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	fs := fetchOf(r)
 	if fs == nil || fs.client == nil {
@@ -410,8 +308,6 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 
 	resolvedURL := r.resolveFetchURL(rawURL)
 
-	// fetch(url) with no init still issues a GET; parseFetchOpts also defaults
-	// the method, but it is only called when an init object is present.
 	opts := FetchOptions{Method: "GET"}
 	var abort *fetchAbort
 	if len(call.Arguments) >= 2 {
@@ -427,7 +323,6 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 		}
 	}
 
-	// Enforce request body limit before handing bytes to the network.
 	bodyLen := len(opts.Body)
 	if opts.HasBodyBytes {
 		bodyLen = len(opts.BodyBytes)
@@ -436,8 +331,6 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 		return r.makeRejectThenable("request body exceeds limit")
 	}
 
-	// An already-aborted signal rejects without starting the request. This
-	// also keeps the concurrent-fetch slot free for a request that can run.
 	if abort != nil {
 		if fired, reason := abort.fired(); fired {
 			return r.rejectThenableWithValue(reason)
@@ -452,8 +345,6 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	fs.active++
 	fs.mu.Unlock()
 
-	// Capture the shared subresource budget on the VM thread so the request
-	// goroutine never locks r.mu off-thread. nil leaves the fetch ungated.
 	budget := r.subresourceBudget()
 
 	t := r.newThenable()
@@ -463,15 +354,6 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	return t.obj
 }
 
-// runFetch executes on a dedicated goroutine. It calls the HTTP client and
-// queues exactly one callback (resolve or reject) for DrainFetchCallbacks to
-// invoke on the main goroutine. All goja interaction happens in the drain
-// step, not here. fs is captured from doFetch so this goroutine never calls
-// fetchOf (a vm.Get) off the VM thread. budget is the shared subresource
-// budget captured on the VM thread; the response body is charged to it, and a
-// body that does not fit is rejected so the page cannot pull unbounded bytes.
-// abort, when non-nil, lets the promise reject before the client returns; the
-// eventual response is then dropped rather than applied.
 func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t *thenableObj, budget SubresourceBudget, abort *fetchAbort) {
 	defer func() {
 		fs.mu.Lock()
@@ -481,19 +363,15 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 
 	withCredentials := opts.Credentials == "include"
 
-	// CORS enforcement
 	documentURL := r.opts.URL
 	if IsCORSRequest(documentURL, fetchURL) {
-		// Add Origin header for cross-origin requests
 		origin := getOrigin(documentURL)
 		if opts.Headers == nil {
 			opts.Headers = make(map[string]string)
 		}
 		opts.Headers["Origin"] = origin
 
-		// Check if preflight is needed
 		if NeedsPreflight(opts.Method, opts.Headers) {
-			// Send preflight OPTIONS request
 			preflightHeaders := buildPreflightHeaders(origin, opts.Method, opts.Headers)
 			preflightResp, err, aborted := callFetcher(fs.ctx, abort, func(ctx context.Context) (*FetchResponse, error) {
 				return fs.client.Fetch(ctx, fetchURL, "OPTIONS", preflightHeaders, nil)
@@ -506,7 +384,6 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 				fs.rejectFetch(t, "preflight failed: "+err.Error())
 				return
 			}
-			// Check preflight response
 			if !CheckPreflightResponse(origin, opts.Method, opts.Headers, preflightResp.Headers, withCredentials) {
 				fs.rejectFetch(t, "preflight CORS check failed")
 				return
@@ -526,17 +403,11 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 		return
 	}
 
-	// Charge the response body to the document's shared subresource budget.
-	// The client already materialized the body within MaxResponseBytes, so
-	// this is the same accounting CSS/fonts/images use; a body that does not
-	// fit fails the fetch cleanly (rejected promise) rather than silently
-	// succeeding past the cap.
 	if err == nil && budget != nil && !budget.Take(len(resp.Body)) {
 		err = fmt.Errorf("fetch response exceeds the document subresource budget")
 		resp = nil
 	}
 
-	// Check CORS on response for cross-origin requests
 	if err == nil && IsCORSRequest(documentURL, fetchURL) {
 		origin := getOrigin(documentURL)
 		if !CheckCORSResponse(origin, resp.Headers, withCredentials) {
@@ -550,17 +421,9 @@ func (r *Runtime) runFetch(fs *fetchState, fetchURL string, opts FetchOptions, t
 		return
 	}
 
-	// Per the Fetch spec, non-OK responses still resolve (not reject); the
-	// caller inspects response.ok / response.status to decide.
 	fs.resolveFetch(t, resp)
 }
 
-// callFetcher runs one HTTPFetcher call and waits for either its result or an
-// abort. The context passed to the fetcher is cancelled when the abort fires,
-// so the transport tears down the socket rather than continuing to download
-// bytes that will be thrown away. When an abort and a result are both ready,
-// abort wins, matching the Fetch spec's preference for rejecting a request
-// that has not settled yet.
 func callFetcher(baseCtx context.Context, abort *fetchAbort, fn func(context.Context) (*FetchResponse, error)) (resp *FetchResponse, err error, aborted bool) {
 	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
@@ -570,8 +433,6 @@ func callFetcher(baseCtx context.Context, abort *fetchAbort, fn func(context.Con
 		return resp, err, false
 	}
 
-	// Cancel the context when the abort fires so the in-flight HTTP request
-	// is torn down at the socket level, not just ignored when it returns.
 	go func() {
 		<-abort.done
 		cancel()
@@ -597,8 +458,6 @@ func callFetcher(baseCtx context.Context, abort *fetchAbort, fn func(context.Con
 	}
 }
 
-// rejectFetch settles a thenable as rejected and queues exactly one callback
-// for the VM drain. The worker goroutine never touches goja.
 func (fs *fetchState) rejectFetch(t *thenableObj, msg interface{}) {
 	t.settleFetch(nil, msg, true)
 	fs.mu.Lock()
@@ -610,8 +469,6 @@ func (fs *fetchState) rejectFetch(t *thenableObj, msg interface{}) {
 	fs.mu.Unlock()
 }
 
-// resolveFetch settles a thenable as fulfilled and queues exactly one callback
-// for the VM drain.
 func (fs *fetchState) resolveFetch(t *thenableObj, resp *FetchResponse) {
 	t.settleFetch(resp, nil, false)
 	fs.mu.Lock()
@@ -623,12 +480,6 @@ func (fs *fetchState) resolveFetch(t *thenableObj, resp *FetchResponse) {
 	fs.mu.Unlock()
 }
 
-// ---------------------------------------------------------------------------
-// Thenable construction and chaining.
-// ---------------------------------------------------------------------------
-
-// newThenable creates a JS object with .then() and .catch() methods and
-// returns the Go-side bookkeeping handle.
 func (r *Runtime) newThenable() *thenableObj {
 	t := &thenableObj{r: r}
 	obj := r.vm.NewObject()
@@ -653,9 +504,6 @@ func (r *Runtime) newThenable() *thenableObj {
 		result := t.result
 		t.mu.Unlock()
 
-		// If the promise already settled before .then() was called, the
-		// callback was never queued. Fire it now so late-attached
-		// listeners still see the result.
 		if resolved && onOK != nil {
 			t.mu.Lock()
 			pending := t.callbackPending
@@ -706,9 +554,6 @@ func (r *Runtime) newThenable() *thenableObj {
 	return t
 }
 
-// invokeResolvedCallback fires a callback for a thenable that already settled
-// before .then()/.catch() was attached. The response/error is wrapped in a
-// fresh JS value on the main goroutine.
 func (r *Runtime) invokeResolvedCallback(fn goja.Value, isReject bool, result interface{}, chain *thenableObj) {
 	f, ok := goja.AssertFunction(fn)
 	if !ok {
@@ -728,9 +573,6 @@ func (r *Runtime) invokeResolvedCallback(fn goja.Value, isReject bool, result in
 	}
 }
 
-// propagateToChain feeds a callback's return value into the chained thenable.
-// If the return is itself a thenable, the chain waits for it; otherwise the
-// chain resolves immediately.
 func (r *Runtime) propagateToChain(ret goja.Value, chain *thenableObj) {
 	if ret == nil || goja.IsUndefined(ret) {
 		return
@@ -750,8 +592,6 @@ func (r *Runtime) propagateToChain(ret goja.Value, chain *thenableObj) {
 	chain.resolve(ret)
 }
 
-// resolve marks the thenable as fulfilled and invokes the stored callback if
-// one was registered. Called from DrainFetchCallbacks on the main goroutine.
 func (t *thenableObj) resolve(val goja.Value) {
 	t.resolved = true
 	t.result = val
@@ -765,9 +605,6 @@ func (t *thenableObj) resolve(val goja.Value) {
 	}
 }
 
-// reject marks the thenable as rejected and invokes the stored catch callback
-// if one was registered. Called from DrainFetchCallbacks on the main
-// goroutine.
 func (t *thenableObj) reject(val goja.Value) {
 	t.rejected = true
 	t.result = val
@@ -781,14 +618,6 @@ func (t *thenableObj) reject(val goja.Value) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Response object.
-// ---------------------------------------------------------------------------
-
-// makeResponseObject builds a JS Response-like object from a FetchResponse.
-// The object exposes the standard properties (status, statusText, ok, url,
-// headers) and the body-consumption methods text() and json(), each of which
-// returns a thenable so callers can use .then() uniformly.
 func (r *Runtime) makeResponseObject(resp *FetchResponse) *goja.Object {
 	obj := r.vm.NewObject()
 	if r.responseProto != nil {
@@ -801,8 +630,6 @@ func (r *Runtime) makeResponseObject(resp *FetchResponse) *goja.Object {
 	_ = obj.Set("url", resp.URL)
 	bodyStr := string(resp.Body)
 
-	// Headers: expose as a plain object with lowercase keys and a get()
-	// method, matching the subset of the Headers interface scripts rely on.
 	headersObj := r.vm.NewObject()
 	if resp.Headers != nil {
 		for k, v := range resp.Headers {
@@ -822,15 +649,12 @@ func (r *Runtime) makeResponseObject(resp *FetchResponse) *goja.Object {
 	})
 	_ = obj.Set("headers", headersObj)
 
-	// text() returns a thenable that resolves with the body string.
 	_ = obj.Set("text", func(call goja.FunctionCall) goja.Value {
 		t := r.newThenable()
 		t.resolve(r.vm.ToValue(bodyStr))
 		return t.obj
 	})
 
-	// json() returns a thenable that resolves with the parsed body or
-	// rejects with a syntax error message.
 	_ = obj.Set("json", func(call goja.FunctionCall) goja.Value {
 		t := r.newThenable()
 		var parsed interface{}
@@ -845,10 +669,6 @@ func (r *Runtime) makeResponseObject(resp *FetchResponse) *goja.Object {
 	return obj
 }
 
-// setupResponse installs the constructor-backed Response surface used by
-// Fetch and structured-clone consumers. Network responses continue to use
-// makeResponseObject; synthetic responses retain the same body bytes and
-// expose fresh body-consumption results.
 func (r *Runtime) setupResponse() {
 	prototype := r.vm.NewObject()
 	ctor, ok := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
@@ -983,32 +803,17 @@ func (r *Runtime) responseBodyInit(value goja.Value) ([]byte, string, error) {
 	return []byte(value.String()), "", nil
 }
 
-// ---------------------------------------------------------------------------
-// Callback queue and drain.
-// ---------------------------------------------------------------------------
-
-// makeRejectThenable creates a thenable that is already rejected with the
-// given error message. The catch callback fires on the next DrainFetchCallbacks
-// call.
 func (r *Runtime) makeRejectThenable(msg string) goja.Value {
 	return r.rejectThenableWithValue(r.vm.ToValue(msg))
 }
 
-// rejectThenableWithValue returns an already-rejected thenable carrying val.
-// An abort or an invalid RequestInit field settles with a specific JS object -
-// the signal's reason, a TypeError - so the value travels untouched rather than
-// as text the page has to re-wrap.
 func (r *Runtime) rejectThenableWithValue(val goja.Value) goja.Value {
 	t := r.newThenable()
-	// Mark the thenable as rejected immediately so that .catch() calls
-	// that arrive before DrainFetchCallbacks can still fire.
 	t.rejected = true
 	t.result = val
 
 	fs := fetchOf(r)
 	if fs == nil {
-		// No fetch state at all: the thenable is already settled, so
-		// any .catch() attached later will fire via invokeResolvedCallback.
 		return t.obj
 	}
 
@@ -1024,13 +829,6 @@ func (r *Runtime) rejectThenableWithValue(val goja.Value) goja.Value {
 	return t.obj
 }
 
-// DrainFetchCallbacks invokes every pending fetch callback on the current
-// goroutine. It must be called from the same goroutine that calls Run and
-// Tick, because it creates goja values and calls JS functions.
-//
-// In wave 2 this will be folded into Tick so that a single call drains both
-// timers and fetch callbacks. Until then, hosts call it explicitly after
-// allowing time for fetch goroutines to complete.
 func (r *Runtime) DrainFetchCallbacks() {
 	fs := fetchOf(r)
 	if fs == nil {
@@ -1053,9 +851,6 @@ func (r *Runtime) DrainFetchCallbacks() {
 	}
 }
 
-// PendingFetches reports the number of fetch requests still running on
-// background goroutines. Hosts and tests use it to wait for in-flight work
-// instead of guessing a sleep duration.
 func (r *Runtime) PendingFetches() int {
 	fs := fetchOf(r)
 	if fs == nil {
@@ -1066,9 +861,6 @@ func (r *Runtime) PendingFetches() int {
 	return fs.active
 }
 
-// invokeOneCallback dispatches a single fetch callback. It builds the JS
-// argument from the plain-Go data, calls the function, and propagates the
-// return value to a chained thenable if one exists.
 func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 	fn := cb.fn
 	chain := cb.chain
@@ -1088,8 +880,6 @@ func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 		}
 	}
 	if fn == nil || goja.IsUndefined(fn) {
-		// No callback registered. If there is a chain, propagate the raw
-		// value so the chain does not stall.
 		if cb.chain != nil && !cb.isReject {
 			if resp, ok := cb.arg.(*FetchResponse); ok {
 				cb.chain.resolve(r.makeResponseObject(resp))
@@ -1113,8 +903,6 @@ func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 
 	ret, err := r.callBounded(func() (goja.Value, error) { return f(nil, arg) })
 	if err != nil {
-		// An interrupt drops this response rather than wedging the drain;
-		// timers and RAF re-arm by design, one-shot completions do not.
 		return
 	}
 
@@ -1123,8 +911,6 @@ func (r *Runtime) invokeOneCallback(cb fetchCallback) {
 	}
 }
 
-// settleFetch records a fetch result without touching goja from its worker
-// goroutine. The queued callback is delivered later on the Runtime goroutine.
 func (t *thenableObj) settleFetch(value interface{}, err interface{}, rejected bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

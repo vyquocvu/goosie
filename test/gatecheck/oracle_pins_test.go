@@ -14,10 +14,6 @@ type oraclePins struct {
 	Interaction struct{ Playwright, Chromium string } `json:"interaction"`
 }
 
-// TestOraclePinsAreConsistent keeps every oracle declaration in the repo
-// agreeing with testdata/oracle-pins.json: the CI requirements file, the
-// Node manifest and lockfile, and the recorded interaction references.
-// Fail closed by design: no t.Skip on any path.
 func TestOraclePinsAreConsistent(t *testing.T) {
 	root := parityRepoRoot(t)
 	read := func(rel string) []byte {
@@ -82,9 +78,6 @@ func TestOraclePinsAreConsistent(t *testing.T) {
 	}
 }
 
-// TestParityOracleCheckLogic exercises check_oracle_version without needing
-// a wrong playwright installed: a mismatch must produce an error, the pinned
-// version must produce none.
 func TestParityOracleCheckLogic(t *testing.T) {
 	py := parityPython(t)
 	root := parityRepoRoot(t)

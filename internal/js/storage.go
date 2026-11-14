@@ -12,30 +12,16 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Web Storage API implementation for localStorage and sessionStorage.
-// localStorage persists across sessions and is scoped per-origin.
-// sessionStorage is per-tab session and scoped per-origin.
-
-// MaxStorageBytes is the per-store quota, matching the ~5 MiB browsers
-// grant each origin. Keys and values both count, in UTF-8 bytes (close to
-// the UTF-16 code units the spec counts, without a second encoding pass).
-// Writes past it throw instead of growing: an unbounded store is a memory
-// DoS any page reaches with a loop.
 const MaxStorageBytes = 5 << 20
 
-// storageObj holds the internal state of a Storage object.
 type storageObj struct {
-	mu   sync.RWMutex
-	data map[string]string
-	// Order tracks insertion order for key(index) method.
-	order []string
-	// used prices stored bytes (keys plus values) against MaxStorageBytes.
-	used int64
-	// onChange is an optional callback triggered when data changes (e.g. for disk persistence).
+	mu       sync.RWMutex
+	data     map[string]string
+	order    []string
+	used     int64
 	onChange func()
 }
 
-// newStorageObj creates a new empty storage object.
 func newStorageObj() *storageObj {
 	return &storageObj{
 		data:  make(map[string]string),
@@ -43,19 +29,14 @@ func newStorageObj() *storageObj {
 	}
 }
 
-// OriginStorageRegistry provides thread-safe, origin-scoped Web Storage
-// instances. It optionally persists localStorage to disk as JSON files,
-// while sessionStorage remains in-memory and isolated per session/tab.
 type OriginStorageRegistry struct {
 	mu           sync.RWMutex
 	localStores  map[string]*storageObj
-	sessionStore map[string]*storageObj // keyed by sessionID + "\x00" + origin
+	sessionStore map[string]*storageObj
 	baseDir      string
 	incognito    bool
 }
 
-// NewOriginStorageRegistry creates a storage registry. If baseDir is non-empty
-// and incognito is false, localStorage data is persisted to disk under baseDir.
 func NewOriginStorageRegistry(baseDir string, incognito bool) *OriginStorageRegistry {
 	return &OriginStorageRegistry{
 		localStores:  make(map[string]*storageObj),
@@ -65,7 +46,6 @@ func NewOriginStorageRegistry(baseDir string, incognito bool) *OriginStorageRegi
 	}
 }
 
-// GetLocalStorage returns the shared localStorage object for the given origin.
 func (r *OriginStorageRegistry) GetLocalStorage(origin string) *storageObj {
 	if origin == "" {
 		origin = "null"
@@ -89,7 +69,6 @@ func (r *OriginStorageRegistry) GetLocalStorage(origin string) *storageObj {
 	return s
 }
 
-// GetSessionStorage returns the sessionStorage object for the given tab session and origin.
 func (r *OriginStorageRegistry) GetSessionStorage(sessionID, origin string) *storageObj {
 	if origin == "" {
 		origin = "null"
@@ -171,7 +150,6 @@ func escapeOrigin(origin string) string {
 	return b.String()
 }
 
-// OriginOf parses the origin (scheme + "://" + host + port) of a URL string.
 func OriginOf(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
@@ -196,7 +174,6 @@ func OriginOf(rawURL string) string {
 	return scheme + "://" + host
 }
 
-// setupStorage installs localStorage and sessionStorage on the global scope.
 func (r *Runtime) setupStorage() {
 	origin := OriginOf(r.opts.URL)
 	var localStore *storageObj
@@ -214,11 +191,9 @@ func (r *Runtime) setupStorage() {
 	r.installStorage("sessionStorage", sessionStore)
 }
 
-// installStorage installs a storage object on the global scope and window.
 func (r *Runtime) installStorage(name string, storage *storageObj) {
 	obj := r.vm.NewObject()
 
-	// getItem(key) - returns the value or null.
 	_ = obj.Set("getItem", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Null()
@@ -233,10 +208,6 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		return r.vm.ToValue(val)
 	})
 
-	// setItem(key, value) - stores the key-value pair, throwing a
-	// QuotaExceededError-named failure past MaxStorageBytes. The lock is
-	// released before throwing: panicking while holding it would wedge the
-	// store for every later call.
 	_ = obj.Set("setItem", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return goja.Undefined()
@@ -269,7 +240,6 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		return goja.Undefined()
 	})
 
-	// removeItem(key) - removes the key-value pair, freeing its budget.
 	_ = obj.Set("removeItem", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Undefined()
@@ -281,7 +251,6 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		if prev, exists := storage.data[key]; exists {
 			storage.used -= int64(len(key) + len(prev))
 			delete(storage.data, key)
-			// Remove from order.
 			for i, k := range storage.order {
 				if k == key {
 					storage.order = append(storage.order[:i], storage.order[i+1:]...)
@@ -300,7 +269,6 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		return goja.Undefined()
 	})
 
-	// clear() - removes all key-value pairs, freeing the whole budget.
 	_ = obj.Set("clear", func(call goja.FunctionCall) goja.Value {
 		storage.mu.Lock()
 		storage.data = make(map[string]string)
@@ -316,7 +284,6 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		return goja.Undefined()
 	})
 
-	// key(index) - returns the key at the given index.
 	_ = obj.Set("key", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Null()
@@ -334,9 +301,6 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		return r.vm.ToValue(key)
 	})
 
-	// length is a live numeric property, not a method: pages read it as a
-	// number, and sloppy assignment to it is ignored via the undefined
-	// setter rather than replacing the count.
 	_ = obj.DefineAccessorProperty("length",
 		r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 			storage.mu.RLock()
@@ -346,10 +310,8 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 		}),
 		goja.Undefined(), goja.FLAG_FALSE, goja.FLAG_TRUE)
 
-	// Install on global scope.
 	_ = r.vm.Set(name, obj)
 
-	// Also install on window object.
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set(name, obj)
@@ -357,9 +319,6 @@ func (r *Runtime) installStorage(name string, storage *storageObj) {
 	}
 }
 
-// quotaExceededError builds the QuotaExceededError-named failure a
-// past-budget setItem throws. Plain error object with the spec name, which
-// is what callers assert on; there is no DOMException hierarchy yet.
 func quotaExceededError(r *Runtime) goja.Value {
 	e := r.vm.NewObject()
 	_ = e.Set("name", "QuotaExceededError")
@@ -367,13 +326,11 @@ func quotaExceededError(r *Runtime) goja.Value {
 	return e
 }
 
-// StorageEntry represents a key-value entry in web storage.
 type StorageEntry struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
-// DumpLocalStorage returns a snapshot of all entries in localStorage for an origin.
 func (r *OriginStorageRegistry) DumpLocalStorage(origin string) []StorageEntry {
 	if r == nil {
 		return nil
@@ -403,7 +360,6 @@ func (r *OriginStorageRegistry) DumpLocalStorage(origin string) []StorageEntry {
 	return out
 }
 
-// ClearLocalStorage drops all keys in localStorage for an origin.
 func (r *OriginStorageRegistry) ClearLocalStorage(origin string) {
 	if r == nil {
 		return
@@ -428,11 +384,6 @@ func (r *OriginStorageRegistry) ClearLocalStorage(origin string) {
 	}
 }
 
-// ClearAllLocalStorage drops every origin's localStorage. It clears the
-// in-memory stores and removes the profile's JSON files, including files for
-// origins this session never loaded, and returns how many stores and files it
-// erased. The stores stay live with their persistence hook attached, so a write
-// after the clear is saved again. An incognito registry never touches baseDir.
 func (r *OriginStorageRegistry) ClearAllLocalStorage() (origins, files int, err error) {
 	if r == nil {
 		return 0, 0, nil
@@ -481,7 +432,6 @@ func (r *OriginStorageRegistry) ClearAllLocalStorage() (origins, files int, err 
 	return origins, files, errors.Join(problems...)
 }
 
-// SetLocalStorageItem sets a key-value pair in localStorage for an origin.
 func (r *OriginStorageRegistry) SetLocalStorageItem(origin, key, val string) {
 	if r == nil {
 		return
@@ -499,7 +449,6 @@ func (r *OriginStorageRegistry) SetLocalStorageItem(origin, key, val string) {
 	}
 }
 
-// RemoveLocalStorageItem removes a key from localStorage for an origin.
 func (r *OriginStorageRegistry) RemoveLocalStorageItem(origin, key string) {
 	if r == nil {
 		return

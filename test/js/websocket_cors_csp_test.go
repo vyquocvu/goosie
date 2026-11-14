@@ -7,7 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// mockWSConn is a mock WebSocket connection for testing.
 type mockWSConn struct {
 	sent    []string
 	closed  bool
@@ -49,7 +48,6 @@ type mockClosedError struct{}
 
 func (e *mockClosedError) Error() string { return "connection closed" }
 
-// mockWSDialer is a mock WebSocket dialer for testing.
 type mockWSDialer struct {
 	conn      *mockWSConn
 	protocol  string
@@ -100,7 +98,7 @@ func TestWebSocketConstructor(t *testing.T) {
 	if !ok {
 		t.Fatal("readyState not found")
 	}
-	if val.Num != 0 { // CONNECTING
+	if val.Num != 0 {
 		t.Errorf("readyState = %v, want 0 (CONNECTING)", val.Num)
 	}
 }
@@ -171,7 +169,6 @@ func TestWebSocketSend(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Wait for connection to open.
 	time.Sleep(50 * time.Millisecond)
 
 	err = r.Run(`
@@ -228,7 +225,7 @@ func TestWebSocketClose(t *testing.T) {
 	if !ok {
 		t.Fatal("state not found")
 	}
-	if val.Num != 3 { // CLOSED
+	if val.Num != 3 {
 		t.Errorf("readyState = %v, want 3 (CLOSED)", val.Num)
 	}
 
@@ -267,8 +264,6 @@ func TestWebSocketOnWindow(t *testing.T) {
 		t.Errorf("url = %q, want %q", val.Str, "wss://echo.example.com")
 	}
 }
-
-// CORS tests
 
 func TestCORSIsCORSRequest(t *testing.T) {
 	tests := []struct {
@@ -334,8 +329,6 @@ func TestCORSNeedsPreflight(t *testing.T) {
 		}
 	}
 }
-
-// CSP tests
 
 func TestCSPParse(t *testing.T) {
 	header := "default-src 'self'; script-src 'self' https://cdn.example.com; img-src *; style-src 'unsafe-inline'"

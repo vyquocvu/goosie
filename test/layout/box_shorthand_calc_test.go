@@ -9,12 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// The cascade test pins what a `calc()` in a shorthand resolves to; this pins that a
-// page actually moves. At a 900 px frame `padding: calc(10vh - 4px) 3px` is 86 px
-// top and bottom, so the block after a 20 px tall box starts at 192. Before the split
-// was made parenthesis-aware every side of that declaration resolved from a fragment of
-// the expression, the box got no padding, and the rest of the document sat 172 px higher.
-
 func layoutAtViewport(t *testing.T, html, sheet string, w, h float32) *layout.Arena {
 	t.Helper()
 	doc := domtest.Parse(html)
@@ -38,8 +32,6 @@ func TestCalcPaddingInAShorthandMovesTheFlow(t *testing.T) {
 	if !almostEqual(section.Y, 192) {
 		t.Errorf("section.Y = %v, want 192 (86 top padding + 20 box + 86 bottom padding)", section.Y)
 	}
-	// The horizontal side has to be read off a child: a sibling's X is set by its own
-	// containing block, which is the body here, not by the box it follows.
 	p := findByTag(arena, "p")
 	if p == nil {
 		t.Fatal("p not found")

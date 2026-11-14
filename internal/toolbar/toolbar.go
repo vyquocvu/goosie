@@ -19,7 +19,6 @@ const (
 	FocusAddress
 )
 
-// SuggestionKind distinguishes search suggestions, bookmarks, and history entries.
 type SuggestionKind int
 
 const (
@@ -28,7 +27,6 @@ const (
 	SuggestHistory
 )
 
-// Suggestion is one autocompleted destination displayed in the omnibox dropdown.
 type Suggestion struct {
 	Title string
 	URL   string
@@ -37,11 +35,8 @@ type Suggestion struct {
 
 const textSize = 14
 
-// SuggestDebounce is how long typing must pause before the omnibox queries the
-// profile for suggestions (FR-NAV-04).
 const SuggestDebounce = 50 * time.Millisecond
 
-// Special key codes matching the darwin shim's GOOSIE_KEY_* constants.
 const (
 	keyUp    = 0xF700
 	keyDown  = 0xF701
@@ -64,14 +59,9 @@ var (
 	disabledColor    = frame.RGB(205, 205, 205)
 	selectionColor   = frame.RGB(180, 210, 250)
 	separatorColor   = frame.RGB(222, 222, 222)
-	// secureColor marks the https lock: distinct from body text so the
-	// origin signal reads at a glance rather than as another word.
-	secureColor = frame.RGB(30, 130, 70)
+	secureColor      = frame.RGB(30, 130, 70)
 )
 
-// chromePalette is the color set one appearance theme paints the toolbar with.
-// Every draw path reads State.palette so a theme switch changes pixels, not
-// just a stored flag.
 type chromePalette struct {
 	button           frame.Color
 	barBg            frame.Color
@@ -124,8 +114,6 @@ var lightPalette = chromePalette{
 	suggestURL:       frame.RGB(128, 134, 139),
 }
 
-// The dark toolbar background is #181818, the same value setTheme gives the
-// active tab, so the tab and the chrome below it read as one surface.
 var darkPalette = chromePalette{
 	button:           frame.RGB(208, 208, 208),
 	barBg:            frame.RGB(45, 45, 48),
@@ -189,8 +177,6 @@ func paletteFor(theme string) chromePalette {
 	}
 }
 
-// pal returns the active palette, falling back to light for a zero-value State
-// (used by hosts and tests that build the struct literally).
 func (s *State) pal() chromePalette {
 	if s.palette == (chromePalette{}) {
 		return lightPalette
@@ -198,8 +184,6 @@ func (s *State) pal() chromePalette {
 	return s.palette
 }
 
-// Clipboard is the platform clipboard interface. The darwin package provides
-// the real implementation; tests use nopClipboard.
 type Clipboard interface {
 	Read() string
 	Write(string)
@@ -211,12 +195,6 @@ func (nopClipboardImpl) Read() string { return "" }
 func (nopClipboardImpl) Write(string) {}
 
 type State struct {
-	// mu serializes the three threads sharing the chrome: the event pump
-	// (clicks/keys), the navigation drain (loading flags, URL sync, history
-	// swaps), and the UI loop (Draw). Public methods lock; same-package
-	// helpers assume the lock is held. Host callbacks (OnNavigate and
-	// friends) and clipboard calls always run after unlock: the host calls
-	// straight back into these methods.
 	mu            sync.Mutex
 	URL           string
 	Input         string
@@ -239,10 +217,8 @@ type State struct {
 	OnFindChanged func(string)
 	OnFindNext    func(bool)
 	OnFindClose   func()
-	// OnFindOpen runs with a restored query when find mode starts, so the host
-	// can show its match count without waiting for the first keystroke.
-	OnFindOpen func(string)
-	Clipboard  Clipboard
+	OnFindOpen    func(string)
+	Clipboard     Clipboard
 
 	Suggestions     []Suggestion
 	SelectedSuggest int
@@ -261,12 +237,9 @@ type State struct {
 	ZoomBadgeUntil time.Time
 	OnResetZoom    func()
 
-	fonts *raster.Fonts
-	scale int32
-	// palette is the appearance theme's color set; zero means light.
-	palette chromePalette
-	// dragging tracks an in-progress address-bar drag selection: press sets
-	// dragAnchor, motion extends to the cursor, release ends it.
+	fonts      *raster.Fonts
+	scale      int32
+	palette    chromePalette
 	dragging   bool
 	dragAnchor int
 }
@@ -284,16 +257,12 @@ func NewState(width int32, fonts *raster.Fonts) *State {
 	}
 }
 
-// SetTheme selects the appearance palette the toolbar paints with. Unknown
-// names fall back to light, matching the content theme resolver.
 func (s *State) SetTheme(theme string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.palette = paletteFor(theme)
 }
 
-// SetScale sets the device pixels per logical pixel the chrome draws at.
-// Layout and hit testing stay in logical pixels; only Draw multiplies.
 func (s *State) SetScale(n int32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -323,9 +292,6 @@ func (s *State) SetBounds(width int32) {
 	s.Bounds = frame.Rect4(0, 0, width, ToolbarHeight*s.sc())
 }
 
-// BoundsWidth reports the full window device width the last resize delivered.
-// The tab strip spans the same width, so the host's tab-bar hit testing
-// derives its logical strip width from here rather than from the click point.
 func (s *State) BoundsWidth() int32 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -354,9 +320,6 @@ func (s *State) SetLoading(loading bool) {
 	s.Loading = loading
 }
 
-// AccessibilitySnapshot returns the current address-bar and navigation state
-// for the native accessibility tree. The history cursor has its own lock, so
-// both availability checks happen while this toolbar snapshot is stable.
 func (s *State) AccessibilitySnapshot() (value string, focused, findActive, loading, canBack, canForward bool, downloads int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -375,9 +338,6 @@ func (s *State) AccessibilitySnapshot() (value string, focused, findActive, load
 	return
 }
 
-// SetAccessibilityValue applies an AXValue write to the address field without
-// submitting it. Navigation remains an explicit Enter/Go action, matching a
-// person typing into the omnibox.
 func (s *State) SetAccessibilityValue(value string) {
 	s.mu.Lock()
 	var closeFind func()
@@ -398,14 +358,12 @@ func (s *State) SetAccessibilityValue(value string) {
 	}
 }
 
-// SetError records a load error for the address bar to display.
 func (s *State) SetError(err string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Error = err
 }
 
-// SetDownloadStats updates the toolbar download indicators.
 func (s *State) SetDownloadStats(activeCount, totalCount int, progress float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -414,14 +372,12 @@ func (s *State) SetDownloadStats(activeCount, totalCount int, progress float64) 
 	s.DownloadProgress = progress
 }
 
-// SetIncognito updates whether the toolbar draws in private incognito dark mode.
 func (s *State) SetIncognito(incognito bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Incognito = incognito
 }
 
-// SetZoom updates the current zoom level and activates the transient zoom badge.
 func (s *State) SetZoom(z float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -429,7 +385,6 @@ func (s *State) SetZoom(z float64) {
 	s.ZoomBadgeUntil = time.Now().Add(2500 * time.Millisecond)
 }
 
-// ResetZoom resets the zoom to 100%.
 func (s *State) ResetZoom() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -437,14 +392,12 @@ func (s *State) ResetZoom() {
 	s.ZoomBadgeUntil = time.Time{}
 }
 
-// ZoomPercent reports the current zoom as a whole-percent label, e.g. "125%".
 func (s *State) ZoomPercent() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return FormatZoomPercent(s.Zoom)
 }
 
-// FormatZoomPercent renders a zoom factor as a whole-percent label.
 func FormatZoomPercent(z float64) string {
 	return fmt.Sprintf("%d%%", int(z*100+0.5))
 }
@@ -465,24 +418,11 @@ func (s *State) zoomBadgeRect(r frame.Rect, sc int32) (frame.Rect, bool) {
 	return frame.Rect4(badgeX0, badgeY0, badgeX1, badgeY1), true
 }
 
-// ZoomBadge reports the transient zoom indicator the address bar paints: its
-// whole-percent label and its rect in logical toolbar-row coordinates, the same
-// space AddressBarRect uses, so a caller translates it into the window exactly
-// as it translates every other chrome control.
-//
-// shown is false precisely when zoomBadgeRect hides the badge - find mode open,
-// a non-positive zoom factor, or 100% once the badge's grace has run out -
-// because this reads the very predicate the paint path reads. The accessibility
-// tree therefore cannot publish a node the pixels do not show, nor hide one the
-// pixels do.
 func (s *State) ZoomBadge(toolbarW int32) (label string, r frame.Rect, shown bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sc := s.sc()
 	lr := AddressBarRect(toolbarW)
-	// zoomBadgeRect works in device pixels, as the paint path does: build the
-	// device rect from the same logical address bar, then scale the answer back
-	// down. Integer division can shift an edge by at most one logical pixel.
 	br, ok := s.zoomBadgeRect(frame.Rect4(lr.X0*sc, lr.Y0*sc, lr.X1*sc, lr.Y1*sc), sc)
 	if !ok {
 		return "", frame.Rect{}, false
@@ -490,18 +430,12 @@ func (s *State) ZoomBadge(toolbarW int32) (label string, r frame.Rect, shown boo
 	return FormatZoomPercent(s.Zoom), frame.Rect4(br.X0/sc, br.Y0/sc, br.X1/sc, br.Y1/sc), true
 }
 
-// GetFocus reports where keyboard input currently goes.
 func (s *State) GetFocus() Focus {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Focus
 }
 
-// SyncFromTab copies one tab's display state into the toolbar: URL, loading
-// flag, error, and the history object the buttons read. It replaces the
-// direct field writes the navigation drain used to do racily. The dropdown is
-// dropped too: suggestions were produced for the departing tab, and showing
-// them after a switch leaks the old tab's (or an incognito tab's) context.
 func (s *State) SyncFromTab(url string, loading bool, errStr string, h *History) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -517,14 +451,12 @@ func (s *State) SyncFromTab(url string, loading bool, errStr string, h *History)
 	s.closeSuggestionsLocked()
 }
 
-// FindCounts reports find-mode state for the host to display.
 func (s *State) FindCounts() (active bool, total, index int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.FindActive, s.FindTotal, s.FindIndex
 }
 
-// SetFindResult publishes one find pass outcome.
 func (s *State) SetFindResult(total, index int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -532,7 +464,6 @@ func (s *State) SetFindResult(total, index int) {
 	s.FindIndex = index
 }
 
-// ResetFindCounts clears a finished find pass.
 func (s *State) ResetFindCounts() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -540,10 +471,6 @@ func (s *State) ResetFindCounts() {
 	s.FindIndex = 0
 }
 
-// OpenFind reuses the address bar as the find field. Opening while find mode is
-// already active re-focuses the field and selects the restored query, so the
-// next keystroke replaces it like any other input. A restored query is reported
-// through OnFindOpen so the host can recompute its match count.
 func (s *State) OpenFind() {
 	s.mu.Lock()
 	pending := s.openFindLocked()
@@ -576,8 +503,6 @@ func (s *State) openFindLocked() []func() {
 	return []func(){func() { cb(query) }}
 }
 
-// CloseFind restores the address bar to the current URL and keeps the query
-// for the next OpenFind.
 func (s *State) closeFindLocked() {
 	if !s.FindActive {
 		return
@@ -593,10 +518,6 @@ func (s *State) closeFindLocked() {
 	s.Focus = FocusNone
 }
 
-// CursorAt returns the pointer shape for a hover at pos, in device pixels
-// relative to the toolbar's top edge - the same coordinate contract as
-// HandleClick. The nav buttons ask for the hand, the editable bar for the
-// text I-beam, and everything else for the default arrow.
 func (s *State) CursorAt(pos frame.Point) surface.Cursor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -626,9 +547,6 @@ func (s *State) HandleClick(pos frame.Point, button surface.Button) {
 	s.HandlePointer(pos, button, surface.PointerPress)
 }
 
-// HandlePointer routes a full press/motion/release gesture. Presses on the
-// buttons fire, presses in the address bar focus and start a drag selection,
-// motion extends it, and release ends it - the same shape as a normal input.
 func (s *State) HandlePointer(pos frame.Point, button surface.Button, action surface.PointerAction) {
 	s.mu.Lock()
 	pending := s.handlePointerLocked(pos, button, action)
@@ -638,9 +556,6 @@ func (s *State) HandlePointer(pos frame.Point, button surface.Button, action sur
 	}
 }
 
-// blurLocked leaves the address bar like a normal input: focus goes, the drag
-// ends, and an uncommitted URL edit reverts to the committed URL so the next
-// focus starts from what the page shows.
 func (s *State) blurLocked() {
 	s.Focus = FocusNone
 	s.dragging = false
@@ -652,9 +567,6 @@ func (s *State) blurLocked() {
 	s.clearSelection()
 }
 
-// FocusURL focuses the address bar and selects all, exiting find mode. It is
-// the Cmd+L entry point: host callbacks return for the caller to fire after
-// unlock.
 func (s *State) FocusURL() {
 	s.mu.Lock()
 	pending := s.focusURLLocked()
@@ -681,8 +593,6 @@ func (s *State) focusURLLocked() []func() {
 	return pending
 }
 
-// displayTextLocked reports what drawAddressBar paints, so hit testing maps
-// onto the same string the pixels show.
 func (s *State) displayTextLocked() string {
 	if s.Focus == FocusAddress || s.FindActive {
 		return s.Input
@@ -696,9 +606,6 @@ func (s *State) displayTextLocked() string {
 	return s.Input
 }
 
-// addressTextXDev returns the device-pixel X where the address text starts,
-// mirroring drawAddressBar: the default padding, or the lock-icon offset when
-// an origin mark is drawn.
 func (s *State) addressTextXDev(toolbarW int32) int32 {
 	sc := s.sc()
 	lr := AddressBarRect(toolbarW)
@@ -709,10 +616,6 @@ func (s *State) addressTextXDev(toolbarW int32) int32 {
 	return x
 }
 
-// hitCursorDev maps a device-pixel X to a rune index in the displayed text,
-// clamping drags that run past either end. Boundaries advance in 26.6 fixed
-// point exactly like drawText and measureText, and the nearest boundary wins
-// so a click lands on the closer side of a glyph.
 func (s *State) hitCursorDev(devX int32, toolbarW int32) int {
 	sc := s.sc()
 	text := s.displayTextLocked()
@@ -754,8 +657,6 @@ func (s *State) hitCursorDev(devX int32, toolbarW int32) int {
 			bestDist = d
 			best = i + 1
 		}
-		// Boundaries only move right, so once the overshoot exceeds the
-		// best distance no later boundary can win.
 		if b > devX && b-devX > bestDist {
 			break
 		}
@@ -763,11 +664,6 @@ func (s *State) hitCursorDev(devX int32, toolbarW int32) int {
 	return best
 }
 
-// pressAddressLocked focuses the bar and starts a drag. A press on an
-// unfocused bar selects all (so typing replaces and Cmd+C copies the URL);
-// the press point stays the drag anchor so a press-and-drag still selects a
-// range instead of keeping the select-all. A press on a focused bar places
-// the caret.
 func (s *State) pressAddressLocked(devX int32, toolbarW int32) {
 	if s.FindActive {
 		s.Focus = FocusAddress
@@ -796,7 +692,6 @@ func (s *State) pressAddressLocked(devX int32, toolbarW int32) {
 	s.dragAnchor = at
 }
 
-// dragAddressLocked extends the press's selection to the current pointer.
 func (s *State) dragAddressLocked(devX int32, toolbarW int32) {
 	if !s.dragging || s.Focus != FocusAddress {
 		return
@@ -807,28 +702,21 @@ func (s *State) dragAddressLocked(devX int32, toolbarW int32) {
 	s.SelEnd = at
 }
 
-// handleClickLocked applies one click; host callbacks return for the caller
-// to fire after unlock.
 func (s *State) handleClickLocked(pos frame.Point, button surface.Button) []func() {
 	return s.handlePointerLocked(pos, button, surface.PointerPress)
 }
 
-// handlePointerLocked applies one pointer phase; host callbacks return for
-// the caller to fire after unlock.
 func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, action surface.PointerAction) []func() {
 	var pending []func()
 	fire := func(fn func()) {
 		pending = append(pending, fn)
 	}
 	sc := s.sc()
-	// Release always ends a drag, wherever it lands.
 	if action == surface.PointerRelease {
 		s.dragging = false
 		if button != surface.ButtonLeft && button != surface.ButtonNone {
 			return nil
 		}
-		// A release outside the chrome defocuses like a press there; a
-		// release inside needs no further work.
 		if pos.Y >= int32(ToolbarHeight)*sc {
 			if s.FindActive {
 				s.closeFindLocked()
@@ -846,8 +734,6 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 		return pending
 	}
 	if action == surface.PointerMotion {
-		// A drag that runs outside the bar clamps to the nearer end, like a
-		// normal input; anything else is a hover.
 		if s.dragging && s.Focus == FocusAddress {
 			w := s.Bounds.W() / sc
 			s.dragAddressLocked(pos.X, w)
@@ -937,8 +823,6 @@ func (s *State) handlePointerLocked(pos frame.Point, button surface.Button, acti
 	return pending
 }
 
-// HandleKey dispatches a key event with no modifier information. It exists
-// for backward compatibility; HandleKeyEvent is the full entry point.
 func (s *State) HandleKey(r rune) {
 	s.mu.Lock()
 	pending := s.handleKeyEventLocked(r, 0)
@@ -948,7 +832,6 @@ func (s *State) HandleKey(r rune) {
 	}
 }
 
-// HandleKeyEvent dispatches a key event with modifier flags.
 func (s *State) HandleKeyEvent(key rune, mods surface.KeyMod) {
 	s.mu.Lock()
 	pending := s.handleKeyEventLocked(key, mods)
@@ -958,8 +841,6 @@ func (s *State) HandleKeyEvent(key rune, mods surface.KeyMod) {
 	}
 }
 
-// handleKeyEventLocked dispatches a key event; clipboard reads and host
-// callbacks return for the caller to run after unlock.
 func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 	if s.FindActive {
 		return s.handleFindKeyLocked(key, mods)
@@ -974,7 +855,6 @@ func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 		return nil
 	}
 	if key == 0x1b {
-		// Esc closes suggestions dropdown if open, or reverts uncommitted edit.
 		if len(s.Suggestions) > 0 {
 			s.closeSuggestionsLocked()
 			return nil
@@ -990,8 +870,6 @@ func (s *State) handleKeyEventLocked(key rune, mods surface.KeyMod) []func() {
 	return pending
 }
 
-// clipboardPending wraps deferred clipboard work from an edit into a
-// post-unlock closure.
 func (s *State) clipboardPending(wantPaste bool, copyText string, cb Clipboard) []func() {
 	if (copyText == "" && !wantPaste) || cb == nil {
 		return nil
@@ -999,9 +877,6 @@ func (s *State) clipboardPending(wantPaste bool, copyText string, cb Clipboard) 
 	return []func(){func() { s.finishClipboard(wantPaste, copyText, cb) }}
 }
 
-// handleFindKeyLocked edits the find query. Enter steps to the next match,
-// Shift+Enter to the previous, Cmd/Ctrl+G repeats that step, Esc closes, and
-// any other edit reports the new query to the host.
 func (s *State) handleFindKeyLocked(key rune, mods surface.KeyMod) []func() {
 	switch key {
 	case 0x1b:
@@ -1037,8 +912,6 @@ func (s *State) handleFindKeyLocked(key rune, mods surface.KeyMod) []func() {
 	return pending
 }
 
-// StepFind runs one programmatic next/previous step, the same work Enter and
-// Cmd+G perform while find is open. It is a no-op when find mode is closed.
 func (s *State) StepFind(backward bool) {
 	s.mu.Lock()
 	active := s.FindActive
@@ -1049,17 +922,11 @@ func (s *State) StepFind(backward bool) {
 	}
 }
 
-// editKeyLocked applies address-bar editing for one key event; it is shared
-// between URL entry and find mode. Clipboard work cannot run under the lock,
-// so a paste request and a copied string return for the caller to finish
-// after unlock.
 func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, copyText string, cb Clipboard) {
 	cmd := mods&surface.ModCommand != 0
 	ctrl := mods&surface.ModControl != 0
 	shift := mods&surface.ModShift != 0
 	opt := mods&surface.ModOption != 0
-	// Ctrl+C/V/X/A mirror Cmd on non-macOS platforms where the command key
-	// does not exist; a normal input accepts both.
 	editMod := cmd || ctrl
 
 	if key == 0x7f || key == '\b' {
@@ -1067,8 +934,6 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 		return
 	}
 
-	// Backward compat: bare control codes (1-26) without modifier flags are
-	// treated as Ctrl+letter from the old key path.
 	if !cmd && !shift && !opt && key >= 1 && key <= 26 {
 		ctrl = true
 		key = 'a' + (key-1)%26
@@ -1137,7 +1002,6 @@ func (s *State) editKeyLocked(key rune, mods surface.KeyMod) (wantPaste bool, co
 		}
 	case 'z', 'Z':
 		if editMod {
-			// Undo: no-op for now
 		} else {
 			s.insertChar(key)
 		}
@@ -1185,8 +1049,6 @@ func (s *State) submitInputLocked() []func() {
 	return []func(){func() { cb(url) }}
 }
 
-// finishClipboard runs deferred clipboard work after unlock: a copied string
-// writes out, a paste request reads back in under a fresh lock.
 func (s *State) finishClipboard(wantPaste bool, copyText string, cb Clipboard) {
 	if copyText != "" && cb != nil {
 		cb.Write(copyText)
@@ -1336,7 +1198,6 @@ func (s *State) drawDownloads(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c
 		thick = 1.5
 	}
 
-	// Tray: bottom horizontal bar and two upturned sides
 	trayHalfW := 6.0 * float64(sc)
 	trayBottomY := fcy + 4.5*float64(sc)
 	trayTopY := fcy + 1.5*float64(sc)
@@ -1344,18 +1205,15 @@ func (s *State) drawDownloads(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c
 	drawLineAA(backing, fcx-trayHalfW, trayTopY, fcx-trayHalfW, trayBottomY, thick, c)
 	drawLineAA(backing, fcx+trayHalfW, trayTopY, fcx+trayHalfW, trayBottomY, thick, c)
 
-	// Downward arrow stem
 	stemTopY := fcy - 6.0*float64(sc)
 	stemBottomY := fcy + 1.0*float64(sc)
 	drawLineAA(backing, fcx, stemTopY, fcx, stemBottomY, thick, c)
 
-	// Downward arrow head
 	tipY := fcy + 3.0*float64(sc)
 	baseY := fcy - 0.5*float64(sc)
 	headHalfW := 3.5 * float64(sc)
 	fillTriangleAA(backing, fcx, tipY, fcx-headHalfW, baseY, fcx+headHalfW, baseY, c)
 
-	// Active download progress indicator
 	if s.ActiveDownloads > 0 {
 		colors := s.pal()
 		activeColor := colors.barFocusBorder
@@ -1380,15 +1238,12 @@ func (s *State) drawDownloads(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c
 }
 
 func (s *State) drawArrow(backing *frame.Bitmap, ox, oy, x, y, dir, sc int32, c frame.Color, clip frame.Rect) {
-	// Filled triangle with AA coverage, in device pixels. Logical icon:
-	// tip 7px past center, base 5px behind center with half-height 6px.
 	fx := float64(ox) + float64(x)*float64(sc)
 	fy := float64(oy) + float64(y)*float64(sc)
 	tipX := fx + float64(dir)*7*float64(sc)
 	baseX := fx - float64(dir)*5*float64(sc)
 	halfH := 6 * float64(sc)
 	fillTriangleAA(backing, tipX, fy, baseX, fy-halfH, baseX, fy+halfH, c)
-	// Short stem so back/forward read as arrows, not triangles.
 	stemLen := 5 * float64(sc)
 	thick := 2 * float64(sc)
 	if thick < 2 {
@@ -1417,7 +1272,6 @@ func (s *State) drawReload(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c fr
 		thick = 1.5
 	}
 	rMid := rOut - thick/2
-	// 300° sweep with a 60° gap at the top-right, matching the old icon.
 	for py := int(fcy - rOut - 1); py <= int(fcy+rOut+1); py++ {
 		for px := int(fcx - rOut - 1); px <= int(fcx+rOut+1); px++ {
 			dx := float64(px) + 0.5 - fcx
@@ -1430,7 +1284,6 @@ func (s *State) drawReload(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c fr
 			if ang < 0 {
 				ang += 360
 			}
-			// Gap centered at -60° (300°): skip 270°..330°.
 			if ang >= 270 && ang <= 330 {
 				continue
 			}
@@ -1439,18 +1292,15 @@ func (s *State) drawReload(backing *frame.Bitmap, ox, oy, cx, cy, sc int32, c fr
 		}
 	}
 
-	// Arrow head at the end of the sweep (240°) pointing tangentially clockwise.
 	rad := 240.0 * 3.14159 / 180.0
 	sin, cos := sinF(rad), cosF(rad)
 	tipX := fcx + rMid*cos
 	tipY := fcy + rMid*sin
-	// Clockwise tangent.
 	tx, ty := -sin, cos
 	headLen := 5 * float64(sc)
 	headHalf := 3.2 * float64(sc)
 	bx := tipX + tx*headLen
 	by := tipY + ty*headLen
-	// Perpendicular.
 	px_, py_ := -ty, tx
 	fillTriangleAA(backing, tipX, tipY,
 		bx+px_*headHalf, by+py_*headHalf,
@@ -1503,7 +1353,6 @@ func fillTriangleAA(backing *frame.Bitmap, ax, ay, bx, by, cx, cy float64, c fra
 	maxX := int(ceilF(maxF(ax, maxF(bx, cx)) + 1))
 	minY := int(floorF(minF(ay, minF(by, cy)) - 1))
 	maxY := int(ceilF(maxF(ay, maxF(by, cy)) + 1))
-	// Edge lengths for distance normalization.
 	abx, aby := bx-ax, by-ay
 	bcx, bcy := cx-bx, cy-by
 	cax, cay := ax-cx, ay-cy
@@ -1513,7 +1362,6 @@ func fillTriangleAA(backing *frame.Bitmap, ax, ay, bx, by, cx, cy float64, c fra
 	if abLen == 0 || bcLen == 0 || caLen == 0 {
 		return
 	}
-	// Winding: inside when all cross products share the sign of the area.
 	area := (bx-ax)*(cy-ay) - (by-ay)*(cx-ax)
 	positive := area > 0
 	for py := minY; py <= maxY; py++ {
@@ -1621,11 +1469,6 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	}
 
 	textX := r.X0 + (BarPadding+4)*sc
-	// Origin marks: a lock for https, a broken lock for http, nothing for
-	// origins off the network. A shown error suppresses both — a certificate
-	// failure must never sit next to a reassuring lock. Cursor, selection and
-	// the find counter all derive from textX, so shifting it here moves the
-	// whole row right of either icon.
 	if s.Error == "" {
 		switch {
 		case isSecureScheme(s.URL):
@@ -1700,9 +1543,6 @@ func (s *State) drawAddressBar(backing *frame.Bitmap, toolbarW int32, clip frame
 	}
 }
 
-// isInsecureScheme reports whether url uses plain http, case-insensitively
-// and without allocating. "https://" fails at the fifth byte (s vs :), so no
-// separate exclusion is needed.
 func isInsecureScheme(url string) bool {
 	const p = "http://"
 	if len(url) < len(p) {
@@ -1720,8 +1560,6 @@ func isInsecureScheme(url string) bool {
 	return true
 }
 
-// isSecureScheme reports whether url uses https, case-insensitively and
-// without allocating: the address bar checks it on every Draw.
 func isSecureScheme(url string) bool {
 	const p = "https://"
 	if len(url) < len(p) {
@@ -1739,11 +1577,6 @@ func isSecureScheme(url string) bool {
 	return true
 }
 
-// drawPadlock paints a padlock icon for an origin mark: an arched shackle over
-// a rounded body, ~12x13 logical pixels centered near (fcx, fcy) in device
-// pixels. open breaks the shackle on the upper left for the http mark. Same
-// pixel techniques as the reload icon (arc sweep + fill), so no new
-// rasterizer machinery.
 func (s *State) drawPadlock(backing *frame.Bitmap, fcx, fcy float64, sc int32, c frame.Color, open bool) {
 	fsc := float64(sc)
 	rOut := 5 * fsc
@@ -1752,9 +1585,6 @@ func (s *State) drawPadlock(backing *frame.Bitmap, fcx, fcy float64, sc int32, c
 		thick = 1.5
 	}
 	rMid := rOut - thick/2
-	// Shackle: the upper half of the ring (angles 180..360), whose legs land
-	// on the body's top edge at the shackle center line. Open starts the arc
-	// at 230, leaving the upper-left quadrant missing.
 	lo := 180.0
 	if open {
 		lo = 230.0
@@ -1778,10 +1608,8 @@ func (s *State) drawPadlock(backing *frame.Bitmap, fcx, fcy float64, sc int32, c
 		}
 	}
 	if open {
-		// The surviving right leg plugs into the body it hangs from.
 		drawLineAA(backing, fcx+rMid, fcy-1, fcx+rMid, fcy+3*fsc, thick, c)
 	}
-	// Body: rounded box from the shackle line down 8 logical pixels.
 	body := frame.Rect4(int32(fcx-5*fsc+0.5), int32(fcy+0.5), int32(fcx+5*fsc+0.5), int32(fcy+8*fsc+0.5))
 	rad := frame.Corners{
 		TL: frame.Radius{X: float32(2 * sc), Y: float32(2 * sc)},
@@ -1831,12 +1659,7 @@ func (s *State) drawText(backing *frame.Bitmap, text string, x, y int32, c frame
 		return
 	}
 	size := int32(textSize) * s.sc()
-	// Fractional pen: accumulate 26.6 advances and round only glyph positions,
-	// matching measureText and paint/builder.go so cursor/selection agree.
 	var pen int32
-	// The zero slot is the embedded Go face: the chrome draws the same type it
-	// always has, whatever fonts the host has. y is the baseline; Bounds is
-	// already relative to the pen.
 	for _, rn := range text {
 		g := s.fonts.Glyph(size, rn, frame.FontSlot{})
 		adv := s.fonts.GlyphAdvanceFixed(size, rn, frame.FontSlot{})
@@ -1863,7 +1686,6 @@ func (s *State) measureText(text string) int32 {
 	return (pen + 32) >> 6
 }
 
-// CloseFind leaves find mode and restores the address bar.
 func (s *State) CloseFind() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1897,9 +1719,6 @@ func (s *State) closeSuggestionsLocked() {
 	s.suggestDue = time.Time{}
 }
 
-// runSuggestionsLocked queries the host immediately. Focus and pointer presses
-// use this path because the user has not typed; keystrokes go through
-// queueSuggestionsLocked so they can be debounced.
 func (s *State) runSuggestionsLocked() {
 	if s.OnQuerySuggest != nil && s.Input != "" {
 		s.Suggestions = s.OnQuerySuggest(s.Input)
@@ -1909,8 +1728,6 @@ func (s *State) runSuggestionsLocked() {
 	s.suggestDue = time.Time{}
 }
 
-// queueSuggestionsLocked records the latest input and restarts the debounce
-// window. The previous dropdown stays visible until the new query runs.
 func (s *State) queueSuggestionsLocked() {
 	if s.OnQuerySuggest == nil || s.Input == "" {
 		s.closeSuggestionsLocked()
@@ -1920,8 +1737,6 @@ func (s *State) queueSuggestionsLocked() {
 	s.suggestDue = time.Now().Add(SuggestDebounce)
 }
 
-// RefreshSuggestions runs the pending omnibox query once the 50ms debounce has
-// elapsed. Hosts call it each frame; it reports whether the dropdown changed.
 func (s *State) RefreshSuggestions(now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1939,35 +1754,30 @@ func (s *State) RefreshSuggestions(now time.Time) bool {
 	return true
 }
 
-// CloseSuggestions clears the current suggestions dropdown.
 func (s *State) CloseSuggestions() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closeSuggestionsLocked()
 }
 
-// HasSuggestions reports whether the suggestions dropdown is currently visible.
 func (s *State) HasSuggestions() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.Suggestions) > 0
 }
 
-// SuggestionCount reports how many suggestions are in the dropdown.
 func (s *State) SuggestionCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.Suggestions)
 }
 
-// SelectedSuggestion reports the index of the highlighted suggestion, or -1.
 func (s *State) SelectedSuggestion() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.SelectedSuggest
 }
 
-// SuggestionsRect returns the bounding rectangle of the suggestions dropdown.
 func (s *State) SuggestionsRect(topOffset int32) frame.Rect {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1982,7 +1792,6 @@ func (s *State) SuggestionsRect(topOffset int32) frame.Rect {
 	return frame.Rect4(bar.X0*sc, topOffset, bar.X1*sc, topOffset+totalH)
 }
 
-// HitSuggestion reports which suggestion was clicked, if any, and closes the dropdown.
 func (s *State) HitSuggestion(pos frame.Point, topOffset int32) (Suggestion, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2011,7 +1820,6 @@ func (s *State) HitSuggestion(pos frame.Point, topOffset int32) (Suggestion, boo
 	return Suggestion{}, false
 }
 
-// HoverSuggestion updates the highlighted suggestion based on pointer movement.
 func (s *State) HoverSuggestion(pos frame.Point, topOffset int32) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2039,7 +1847,6 @@ func (s *State) HoverSuggestion(pos frame.Point, topOffset int32) int {
 	return -1
 }
 
-// DrawSuggestions renders the autocomplete dropdown box beneath the address bar.
 func (s *State) DrawSuggestions(backing *frame.Bitmap, topOffset int32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -29,7 +29,6 @@ func TestPopover_AttributeAndProperty(t *testing.T) {
 	}
 	defer rt.Close()
 
-	// 1. Check popover property
 	v, err := rt.Evaluate("document.getElementById('p1').popover")
 	if err != nil || v != "auto" {
 		t.Errorf("p1.popover = %q, want 'auto', err: %v", v, err)
@@ -45,7 +44,6 @@ func TestPopover_AttributeAndProperty(t *testing.T) {
 		t.Errorf("p3.popover = %q, want 'null', err: %v", v, err)
 	}
 
-	// 2. Set popover property
 	_, err = rt.Evaluate("document.getElementById('p3').popover = 'auto'")
 	if err != nil {
 		t.Fatalf("set popover: %v", err)
@@ -95,7 +93,6 @@ func TestPopover_ShowHideToggle(t *testing.T) {
 		t.Fatalf("setup listeners: %v", err)
 	}
 
-	// Show popover
 	_, err = rt.Evaluate("document.getElementById('pop').showPopover()")
 	if err != nil {
 		t.Fatalf("showPopover: %v", err)
@@ -107,13 +104,11 @@ func TestPopover_ShowHideToggle(t *testing.T) {
 		t.Fatal("expected queued toggle event after showPopover()")
 	}
 
-	// Calling showPopover again should throw TypeError
 	_, err = rt.Evaluate("document.getElementById('pop').showPopover()")
 	if err == nil {
 		t.Fatal("expected showPopover on already open popover to throw error")
 	}
 
-	// Hide popover
 	_, err = rt.Evaluate("document.getElementById('pop').hidePopover()")
 	if err != nil {
 		t.Fatalf("hidePopover: %v", err)
@@ -125,7 +120,6 @@ func TestPopover_ShowHideToggle(t *testing.T) {
 		t.Fatal("expected queued toggle event after hidePopover()")
 	}
 
-	// Toggle popover
 	res, err := rt.Evaluate("document.getElementById('pop').togglePopover()")
 	if err != nil || res != "true" {
 		t.Fatalf("togglePopover open = %v, err: %v", res, err)
@@ -148,12 +142,10 @@ func TestPopover_ShowHideToggle(t *testing.T) {
 		t.Fatal("expected queued toggle event after closing togglePopover()")
 	}
 
-	// Verify events
 	evs, err := rt.Evaluate("window.events.join(',')")
 	if err != nil {
 		t.Fatalf("events evaluate: %v", err)
 	}
-	// Expected beforetoggle, toggle pairs for show, hide, toggle(open), toggle(close)
 	wantEvents := "beforetoggle:closed:open:true:false,toggle:closed:open:false:false,beforetoggle:open:closed:false:false,toggle:open:closed:false:false,beforetoggle:closed:open:true:false,toggle:closed:open:false:false,beforetoggle:open:closed:false:false,toggle:open:closed:false:false"
 	if evs != wantEvents {
 		t.Errorf("events = %q, want %q", evs, wantEvents)
@@ -184,16 +176,13 @@ func TestPopover_AutoDismissesOtherAutoPopovers(t *testing.T) {
 	pop2 := doc.ElementByID("pop2")
 	man := doc.ElementByID("man")
 
-	// Open manual
 	_, _ = rt.Evaluate("document.getElementById('man').showPopover()")
-	// Open pop1
 	_, _ = rt.Evaluate("document.getElementById('pop1').showPopover()")
 
 	if !man.IsPopoverOpen || !pop1.IsPopoverOpen {
 		t.Fatal("both man and pop1 should be open")
 	}
 
-	// Open pop2: should close pop1, but NOT man (manual)
 	_, _ = rt.Evaluate("document.getElementById('pop2').showPopover()")
 
 	if pop1.IsPopoverOpen {

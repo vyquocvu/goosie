@@ -5,10 +5,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// installInitialWindowNamedProperties installs the legacy Window named
-// properties contributed by ID-bearing elements that are in the parsed
-// document. The accessors resolve against the live document, so removing or
-// replacing an element changes the value observed through the property.
 func (r *Runtime) installInitialWindowNamedProperties() {
 	if r.domDoc == nil {
 		return
@@ -60,7 +56,6 @@ func (r *Runtime) installWindowNamedProperty(name string) {
 		return
 	}
 	win := r.vm.GlobalObject()
-	// Existing global bindings take precedence over legacy named properties.
 	if existing := win.Get(name); existing != nil && !goja.IsUndefined(existing) {
 		return
 	}
@@ -84,8 +79,6 @@ func (r *Runtime) installWindowNamedProperty(name string) {
 		if len(call.Arguments) > 0 {
 			value = call.Arguments[0]
 		}
-		// A declared global or explicit Window assignment shadows the legacy
-		// named property, as it does on a browser Window.
 		_ = win.DefineDataProperty(name, value, goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_TRUE)
 		return goja.Undefined()
 	})

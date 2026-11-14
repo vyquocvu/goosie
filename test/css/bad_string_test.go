@@ -7,12 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// A string with no closing quote is a CSS bad-string, and the spec ends it at
-// the newline so only the declaration that contains it is lost. Goosie instead
-// let the quote run to end of input, so `content: """;` swallowed the rest of
-// the stylesheet and the page painted that CSS as generated text. Every
-// expectation below is what Chromium computed on the same input, measured
-// 2026-10-26 (TASK-041 §1.2, §2.1).
 func declarationsFor(t *testing.T, sheet *css.Stylesheet, selector string) []css.Declaration {
 	t.Helper()
 	for _, r := range sheet.Rules {
@@ -39,8 +33,6 @@ func mustNotLeakCSS(t *testing.T, sheet *css.Stylesheet) {
 
 // qc:BR-186
 func TestBadStringEndsAtNewline(t *testing.T) {
-	// The broken content declaration and the one after it are both invalid (the
-	// bad-string ate the `;`), but the rules that follow must still parse.
 	sheet := css.Parse(".q::before {\n content: \"\"\";\n font-size: 48px;\n color: #3498db;\n}\n" +
 		".q { font-family: monospace; color: #000; }\n")
 	mustNotLeakCSS(t, sheet)
@@ -94,8 +86,6 @@ func TestBadStringSingleQuoteMatchesDoubleQuote(t *testing.T) {
 
 // qc:BR-186
 func TestEmptyStringStillGeneratesABox(t *testing.T) {
-	// The control for the cases above: a properly closed string must not be
-	// treated as a bad-string, or every `content: ""` rule would start dropping.
 	sheet := css.Parse(".t::before{content: \"\"; font-size: 48px;}")
 	mustNotLeakCSS(t, sheet)
 
@@ -113,10 +103,6 @@ func TestEmptyStringStillGeneratesABox(t *testing.T) {
 
 // qc:BR-186
 func TestBadStringInUnterminatedLastDeclaration(t *testing.T) {
-	// The common malformed shape: the last declaration of a block has no closing
-	// semicolon, so the bad string reaches the block end instead of a ';'.
-	// Chromium measured on this input drops the declaration and keeps the rules
-	// after it (.v colour, .w monospace), so nothing may carry stylesheet text.
 	sheet := css.Parse(".u{font-family:\"x;\n serif}\n.v{color:#0f0;}\n.w{font-family:monospace}")
 	mustNotLeakCSS(t, sheet)
 
@@ -133,9 +119,6 @@ func TestBadStringInUnterminatedLastDeclaration(t *testing.T) {
 
 // qc:BR-186
 func TestUnterminatedStringAtEOFStaysLenient(t *testing.T) {
-	// Chromium keeps a string that runs off the end of the sheet as a string
-	// (measured: font-family computes to the literal `x;`), so this must NOT be
-	// turned into a bad-string. The rule before it is unaffected.
 	sheet := css.Parse(".v{color:#0f0;}\n.u{font-family:\"x;")
 	mustNotLeakCSS(t, sheet)
 
@@ -151,13 +134,6 @@ func TestUnterminatedStringAtEOFStaysLenient(t *testing.T) {
 
 // qc:BR-186
 func TestEscapedNewlineContinuesAString(t *testing.T) {
-	// CSS Syntax L3 4.3.8: `\` + newline is a valid escape *inside* a string, so
-	// the token keeps going and the declaration is fine. Chromium measured on
-	// this exact shape keeps both declarations and computes the URL as
-	// `data:image/svg+xml,%3Csvg xmlns='a'%3E%3C/svg%3E` - the escape pair
-	// contributes no character - and the image loads. Goosie treated the escaped
-	// break as the line break that ends a bad-string and threw the declaration
-	// away, which is how every multi-line quoted data URI stopped painting.
 	sheet := css.Parse(".a{background:url(\"data:image/svg+xml,%3Csvg\\\n xmlns='a'%3E%3C/svg%3E\"); color:#0f0;}\n.b{color:#00f;}")
 
 	a := declarationsFor(t, sheet, ".a")
@@ -181,10 +157,6 @@ func TestEscapedNewlineContinuesAString(t *testing.T) {
 
 // qc:BR-186
 func TestEscapedNewlineVersusRawNewline(t *testing.T) {
-	// The pair that makes the test above an oracle rather than a loosening: the
-	// same sheet with the backslash removed must still lose the declarations.
-	// Chromium measured on the raw form keeps the *rule* (selectorText `.a`, one
-	// cssRule) and nothing inside it, so the block still cannot leak CSS bytes.
 	escaped := css.Parse(".a{font-family:\"Goosie\\\nSerif\"; color:#0f0;}")
 	raw := css.Parse(".a{font-family:\"Goosie\nSerif\"; color:#0f0;}")
 
@@ -199,9 +171,6 @@ func TestEscapedNewlineVersusRawNewline(t *testing.T) {
 
 // qc:BR-186
 func TestEscapedNewlineInSelectorString(t *testing.T) {
-	// The selector scanner reads the same escape rule, so an attribute value with
-	// an escaped line break must not make the prelude run past the `{`: Chromium
-	// measured 2 rules and the following `.z` still applying its colour.
 	sheet := css.Parse("a[title=\"x\\\ny\"]{color:#0f0;}\n.z{color:#00f;}")
 
 	if len(sheet.Rules) < 2 {

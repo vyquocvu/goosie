@@ -9,9 +9,6 @@ func TestParserCallbacksDoNotLoseCheckedAttribute(t *testing.T) {
 		limits,
 		nil,
 		func(node *Node, attr Attribute) {
-			// Runtime attribute callbacks can inspect checkedness while the
-			// parser is still processing this start tag. Reading it for the
-			// earlier type attribute must not mask the later checked attribute.
 			if node.Data == "input" && attr.Name == "type" {
 				_ = node.InputChecked()
 			}

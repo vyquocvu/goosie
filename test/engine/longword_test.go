@@ -8,10 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// A word with no break opportunity wider than the line is a real shape (a base64
-// blob, a long URL) and browsers overflow it. Refusing the whole document for it
-// is the bug: one text node denied the page. The laid-out fragments must stay
-// inside the guard's finite geometry and must still carry every rune.
 func TestUnbreakableWordIsSoftWrapped(t *testing.T) {
 	const word = "A"
 	const runes = 300000

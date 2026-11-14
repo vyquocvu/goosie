@@ -8,26 +8,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// containingBlock is the rect an absolutely positioned box resolves its insets,
-// width and height against: the padding box of the nearest positioned ancestor.
 type containingBlock struct {
 	x0, y0, w, h float32
 }
 
-// Positioning runs the positioning pass over an arena whose block and inline
-// passes have finished.
-//
-// A relatively positioned box keeps its layout position and is shifted out of
-// flow, taking its subtree with it and leaving a hole behind. An absolutely or
-// fixed positioned box was already skipped by block layout, so this pass lays it
-// out against its containing block. The walk is top-down because an absolute
-// box's position depends on its containing block being final, and a relative
-// shift has to move the containing block of the absolute descendants inside it.
-//
-// A fixed box's containing block is the initial one, which is why the pass takes
-// the viewport rect: `bottom` and a percentage height cannot resolve without a
-// viewport height. With viewportH of 0 the initial containing block degenerates
-// to the viewport's top edge, so a fixed box pinned by `bottom` lands above it.
 func Positioning(a *Arena, root ObjectID, viewportW, viewportH float32) {
 	icb := containingBlock{w: viewportW, h: viewportH}
 	anchors := map[string]ObjectID{}
@@ -50,9 +34,6 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 	if s != nil && s.Display == style.DisplayNone {
 		return
 	}
-	// Text nodes inherit their parent's style wholesale, including position, so
-	// only elements can position themselves. The document root has no style at
-	// all and only carries the walk.
 	element := obj.Node == nil || obj.Node.Element()
 	if s != nil && element {
 		switch s.Position {
@@ -73,8 +54,6 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 			shiftSubtree(a, id, dx, dy)
 			obj = a.Get(id)
 		case style.PositionSticky:
-			// Sticky positioning behaves like relative positioning within its
-			// containing block's bounds.
 			rel := containingBlock{cb.x0, cb.y0, cb.w, cb.h}
 			parentObj := a.Get(obj.Parent)
 			if parentObj != nil && parentObj.Style != nil {
@@ -93,7 +72,6 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 			} else if s.HasBottom {
 				dy = -resolvePctLength(s.Bottom, rel.h)
 			}
-			// Clamp sticky offset so the element stays within its parent's content rect
 			if parentObj != nil && parentObj.Style != nil {
 				_, py0, _, py1 := parentObj.ContentRect()
 				if dy > 0 && obj.Y+obj.H+dy > py1 {
@@ -142,21 +120,10 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 	}
 }
 
-// placeOutOfFlow sizes and positions one out-of-flow box, then runs block and
-// inline layout over its subtree. The box arrives with no geometry: block layout
-// leaves out-of-flow children to this pass so they take no part in the flow. The
-// caller hands over the containing block, which is the parent's for an absolute
-// box and the viewport's for a fixed one.
 func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[string]ObjectID, anchorNodes map[dom.NodeID]ObjectID) {
 	obj := a.Get(id)
 	s := obj.Style
-	// The box's own layout is this pass's job: clear the mark block layout left
-	// so the inline pass below runs over it.
 	obj.flags &^= flagOutOfFlow
-	// Margins, borders and padding percentages resolve against the containing
-	// block's width, exactly as they do for an in-flow block. Heights resolve
-	// against its height, and a containing block with no height of its own - an
-	// unset viewport - leaves those percentages auto.
 	sizeH := cb.h
 	if sizeH <= 0 {
 		sizeH = -1
@@ -170,18 +137,10 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 	insetT := resolvePctLength(s.Top, cb.h)
 	insetB := resolvePctLength(s.Bottom, cb.h)
 
-	// The CSS rule for over-constrained boxes: in a left-to-right writing mode
-	// `right` is the value that gets ignored.
 	x := obj.StaticX
 	w := obj.W
-	// `auto` is the only width that takes shrink-to-fit sizing. A percentage
-	// width is encoded as a negative sentinel, and resolveBoxSizes has already
-	// turned it into a concrete content width on obj.W (box-sizing included), so
-	// testing `s.Width < 0` here threw `width:50%` away as if it were auto.
 	shrinkW := resolvePctLength(s.Width, cb.w) < 0
 	centerX := normalizeAxis(s.JustifySelf) == "center" && s.HasLeft && s.HasRight
-	// stretched marks the one auto width that is not content-driven: both insets
-	// pinned, so the box takes whatever the two leave between them.
 	stretched := false
 	if !shrinkW {
 		switch {
@@ -201,9 +160,6 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 	} else if s.HasLeft {
 		x = cb.x0 + obj.MarginLeft + insetL
 	} else if s.HasRight {
-		// Right is pinned and the width is content-driven, so the left edge is
-		// only known once the content has been measured; place at the static
-		// position and let the measure below correct it.
 		x = obj.StaticX
 	}
 
@@ -290,14 +246,8 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 	measureW := w + obj.MarginLeft + obj.MarginRight + extra
 	switch {
 	case shrinkW:
-		// Max-content sizing: lay the box out at a width no text can fill, read
-		// back the extent its content took, and give the box that width.
 		measureW = maxFlexMeasureWidth
 	case !stretched:
-		// The width is already resolved, so the measure width only has to be a
-		// containing block the same resolution lands back on: handing it the
-		// border-box width instead made a percentage grow by its own padding on
-		// every pass, and carry its children out with it.
 		if s.WidthAnchor != "" {
 			measureW = w
 		} else {
@@ -326,23 +276,9 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 			if s.HasRight {
 				obj.X = cb.x0 + cb.w - obj.MarginRight - insetR - (contentW + extra)
 			}
-			// The measurement laid the words out inside a box as wide as the
-			// measure width, so they have to be brought back to the content
-			// origin the box now has. The width is the content's own extent, so
-			// no alignment has anywhere to spread.
 			shiftInlineContent(a, id, obj.X+obj.BorderLeft+obj.PaddingLeft-srcX, 0)
 			obj = a.Get(id)
 		} else {
-			// No inline extent: the content is block-level (or there is no
-			// content at all), so there are no words to read back. Fall back
-			// to the block preferred width rather than keeping the probe
-			// width, which stranded 10000px abspos boxes across pages (and
-			// blew every overflow clip and document extent around them). An
-			// empty box measures zero, which is its correct shrink-to-fit,
-			// and min/max-width still constrain the result. The subtree keeps
-			// its probe layout and spills visibly past the shrunk box instead
-			// of rewrapping: a rewrap needs a second full layout pass, while
-			// the spill matches overflow:visible, the common case.
 			bw, _ := absposContentW(a, id)
 			avail := cb.w - obj.MarginLeft - obj.MarginRight
 			if s.HasLeft {
@@ -384,9 +320,6 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 		shiftSubtree(a, id, 0, y-obj.Y)
 		obj = a.Get(id)
 	}
-	// A popover's UA rule leaves all four insets auto so its auto dimensions
-	// can shrink to its contents. Open popovers with no authored inset then
-	// occupy the viewport center as their default top-layer placement.
 	if obj.Node != nil && obj.Node.Element() && obj.Node.IsPopoverOpen && obj.Node.HasAttribute("popover") &&
 		s.Position == style.PositionFixed && !s.HasTop && !s.HasRight && !s.HasBottom && !s.HasLeft {
 		x := cb.x0 + (cb.w-obj.BorderW())/2
@@ -408,13 +341,8 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 			}
 		}
 	}
-	// The children blockInto positioned sit relative to this box's origin, which
-	// was final before the layout calls above, so nothing further is needed.
 }
 
-// positionAreaOffset places an auto-sized positioned box in the named physical
-// side area of its anchor. `span-all` centers the box on the anchor in the
-// perpendicular axis, as required by the 3x3 position-area grid.
 func positionAreaOffset(tokens []string, obj, anchor *Object) (float32, float32, bool) {
 	if len(tokens) == 0 || obj == nil || anchor == nil {
 		return 0, 0, false
@@ -453,13 +381,6 @@ func positionAreaOffset(tokens []string, obj, anchor *Object) (float32, float32,
 	}
 }
 
-// absposContentW measures the max-content width of an abspos box's subtree,
-// including words under block children. inlineExtent stops at blocks (by
-// design: flex items with block content take the itemMaxContentW path), and
-// itemMaxContentW only reads placed text runs and declared widths, so words
-// wrapped inside a plain block child are invisible to both. This walks every
-// in-flow descendant leaf with a measured width instead. Out-of-flow
-// descendants contribute nothing, matching maxContentW.
 func absposContentW(a *Arena, id ObjectID) (float32, bool) {
 	var minX, maxX float32
 	ok := false
@@ -494,9 +415,6 @@ func absposContentW(a *Arena, id ObjectID) (float32, bool) {
 	return maxX - minX, true
 }
 
-// shiftSubtree moves a box and everything inside it. Unlike shiftInlineContent
-// this includes block descendants: their positions were computed from this box's
-// origin, which has just moved.
 func shiftSubtree(a *Arena, id ObjectID, dx, dy float32) {
 	if dx == 0 && dy == 0 {
 		return
@@ -507,8 +425,6 @@ func shiftSubtree(a *Arena, id ObjectID, dx, dy float32) {
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
 		if k.Style != nil && k.Style.Position == style.PositionFixed {
-			// A fixed box is anchored to the viewport rather than to this subtree,
-			// so the shift that moves the subtree leaves it where it is.
 			continue
 		}
 		shiftSubtree(a, kid, dx, dy)

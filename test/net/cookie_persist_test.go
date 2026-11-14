@@ -102,8 +102,6 @@ func TestCookieLoadCorruptFileIsError(t *testing.T) {
 }
 
 func TestCookieStoreReplacesEarlierHostEntry(t *testing.T) {
-	// A cookie loaded under its Domain and then re-Set by a subdomain must
-	// not appear twice in the jar: (name, domain, path) is the identity.
 	path := filepath.Join(t.TempDir(), "cookies.json")
 	file := `[{"name":"k","value":"old","domain":"example.com","path":"/","hostOnly":false,"expires":"2099-01-01T00:00:00Z"}]`
 	if err := os.WriteFile(path, []byte(file), 0o644); err != nil {

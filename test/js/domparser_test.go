@@ -8,10 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// DOMParser
-// ---------------------------------------------------------------------------
-
 func TestDOMParserConstructorExists(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -174,7 +170,6 @@ func TestParseXMLDocumentBoundedRejectsTreeLimitsBeforeConstruction(t *testing.T
 func TestDOMParserParseFromStringHTML(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
-	// Parse a simple HTML string and check the body's first child tag name.
 	val, err := r.Evaluate(`
 		var dp = new DOMParser();
 		var doc = dp.parseFromString('<div>hello</div>', 'text/html');
@@ -428,7 +423,6 @@ func TestDOMParserParseFromStringComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
-	// Comment nodeType is 8.
 	if val != "8" {
 		t.Errorf("firstChild.nodeType = %q, want %q (comment)", val, "8")
 	}
@@ -665,7 +659,6 @@ func TestDOMParserReturnsDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
-	// Document nodeType is 9.
 	if val != "9" {
 		t.Errorf("nodeType = %q, want %q (document)", val, "9")
 	}
@@ -685,10 +678,6 @@ func TestDOMParserHTMLExposesDoctype(t *testing.T) {
 		t.Errorf("truncated doctype name = %q, want %q", val, "html")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// XMLSerializer
-// ---------------------------------------------------------------------------
 
 func TestXMLSerializerConstructorExists(t *testing.T) {
 	d := testDOM(t)
@@ -884,7 +873,6 @@ func TestXMLSerializerSerializeDocument(t *testing.T) {
 func TestDOMParserAndXMLSerializerRoundTrip(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
-	// Parse XML, serialize it back, and verify it matches.
 	input := `<data><item id="1">alpha</item><item id="2">beta</item></data>`
 	val, err := r.Evaluate(`
 		var dp = new DOMParser();
@@ -900,17 +888,11 @@ func TestDOMParserAndXMLSerializerRoundTrip(t *testing.T) {
 	}
 }
 
-// js_string is a test helper that wraps a Go string as a JS string literal.
 func js_string(s string) string {
-	// Escape backslashes and quotes for JS.
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
 	return `"` + s + `"`
 }
-
-// ---------------------------------------------------------------------------
-// Edge cases
-// ---------------------------------------------------------------------------
 
 func TestDOMParserEmptyHTML(t *testing.T) {
 	d := testDOM(t)
@@ -1031,8 +1013,6 @@ func TestXMLSerializerSerializeDocumentFragment(t *testing.T) {
 	}
 }
 
-// Verify that the parsed document's elements are accessible from the
-// serializer, testing the integration between DOMParser and XMLSerializer.
 func TestDOMParserXMLSerializerIntegration(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1055,7 +1035,6 @@ func TestDOMParserXMLSerializerIntegration(t *testing.T) {
 	}
 }
 
-// Verify that a node from a DOMParser document has the correct ownerDocument.
 func TestDOMParserOwnerDocument(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1072,7 +1051,6 @@ func TestDOMParserOwnerDocument(t *testing.T) {
 	}
 }
 
-// Test that the parsed HTML document has proper structure (html/head/body).
 func TestDOMParserHTMLStructure(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1090,7 +1068,6 @@ func TestDOMParserHTMLStructure(t *testing.T) {
 	}
 }
 
-// Verify that XML entity decoding works in attributes.
 func TestDOMParserXMLAttributeEntities(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1107,8 +1084,6 @@ func TestDOMParserXMLAttributeEntities(t *testing.T) {
 	}
 }
 
-// Test that DOMParser with text/html on the main document's runtime still
-// returns a DETACHED document (not the main document).
 func TestDOMParserReturnsDetachedDocument(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1125,7 +1100,6 @@ func TestDOMParserReturnsDetachedDocument(t *testing.T) {
 	}
 }
 
-// Verify that the DOMParser-created document has createElement.
 func TestDOMParserDocumentHasCreateElement(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1142,7 +1116,6 @@ func TestDOMParserDocumentHasCreateElement(t *testing.T) {
 	}
 }
 
-// Verify that the DOMParser-created document can create elements.
 func TestDOMParserDocumentCreateElement(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1155,13 +1128,11 @@ func TestDOMParserDocumentCreateElement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
-	// The tag name should be lowercase since dom.NewElement lowercases.
 	if val != "test" {
 		t.Errorf("createElement tagName = %q, want %q", val, "test")
 	}
 }
 
-// Test that DOMParser with a malformed XML still returns a document.
 func TestDOMParserMalformedXML(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1178,7 +1149,6 @@ func TestDOMParserMalformedXML(t *testing.T) {
 	}
 }
 
-// Test that XMLSerializer handles the main document.
 func TestXMLSerializerMainDocument(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1195,7 +1165,6 @@ func TestXMLSerializerMainDocument(t *testing.T) {
 	}
 }
 
-// Test that DOMParser creates a document with querySelector.
 func TestDOMParserDocumentQuerySelector(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1213,7 +1182,6 @@ func TestDOMParserDocumentQuerySelector(t *testing.T) {
 	}
 }
 
-// Test DOMParser with HTML containing special characters.
 func TestDOMParserHTMLSpecialChars(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1230,7 +1198,6 @@ func TestDOMParserHTMLSpecialChars(t *testing.T) {
 	}
 }
 
-// Test that XMLSerializer properly serializes the parsed XML with attributes.
 func TestXMLSerializerWithAttributes(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -1243,7 +1210,6 @@ func TestXMLSerializerWithAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
-	// Check that both attributes are present.
 	if !strings.Contains(val, `x="1"`) || !strings.Contains(val, `y="2"`) {
 		t.Errorf("serializeToString = %q, missing attributes", val)
 	}
@@ -1300,5 +1266,4 @@ func TestXMLSerializerIncludesDoctypeIdentifiers(t *testing.T) {
 	}
 }
 
-// Ensure that the dom package is imported (used by testDOM).
 var _ = dom.NewDocument

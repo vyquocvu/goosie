@@ -9,30 +9,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// BR-101's pointer half: a mouse user must be able to choose an option in a
-// <select>. Before this slice a press on the control only focused it - the
-// engine had no listbox state at all, so the only way to change a selection was
-// the keyboard path in select.go.
-//
-// The rules below are read off scripts/verify-br101-select-popup.js, which
-// drives Chromium's in-page form of the same control (<select size="3">, whose
-// rows the page can measure and click, unlike the OS-native popup of a closed
-// select). Lines quoted here are that script's output on this host:
-//
-//	RECTS   -> lb [40,60,180,62.5625], a [41,61,178,20.1875], b [41,81.1875,...], c [41,101.375,...]
-//	INITIAL -> {"value":"b","index":1,"selectedAttr":[false,true,false],"active":""}
-//	CLOSED-CLICK      -> {"active":"s","value":"2","events":["mousedown","focus","mouseup","click",...]}
-//	CLICK-A           -> {"value":"a","index":0,"selectedAttr":[false,true,false],"active":"lb"}
-//	EVENTS-CLICK-A    -> ["...mousedown","lb:focus","...mouseup value=a","lb:input","lb:change","...click"]
-//	CLICK-C-DISABLED  -> value stays "a"; EVENTS-CLICK-C -> [] (the press is swallowed whole)
-//	CLICK-OUTSIDE     -> {"value":"b","active":""} (the listbox keeps its value)
-//	AFTER-ESCAPE      -> {"value":"a","active":"lb"} (Escape changes nothing and keeps focus)
-//
 // qc:BR-101
 
-// selectPopupHTML mirrors the Chromium fixture in the anchor script: same
-// position, width and font size, the same three options with "b" authored
-// selected and "c" disabled, so the measured row geometry applies verbatim.
 const selectPopupHTML = `<html><head><style>` +
 	`html,body{margin:0}` +
 	`#sel{position:absolute;left:40px;top:60px;width:180px;font-size:16px}` +
@@ -55,9 +33,6 @@ func newPopupSession(t *testing.T, html string) *engine.Session {
 	return s
 }
 
-// eventLog records the types `kinds` arrives in, so an oracle can pin the order
-// and not just the count: Chromium fires input, then change, and both land
-// before the click event reaches the option.
 func eventLog(t *testing.T, s *engine.Session, id string, kinds ...string) *[]string {
 	t.Helper()
 	n := s.Doc.ElementByID(id)
@@ -72,8 +47,6 @@ func eventLog(t *testing.T, s *engine.Session, id string, kinds ...string) *[]st
 	return log
 }
 
-// openPopup presses the middle of the control, the way a pointer user does, and
-// returns the rows the listbox is showing.
 func openPopup(t *testing.T, s *engine.Session) []paint.ListBoxRow {
 	t.Helper()
 	x, y := clickPoint(t, s, "sel")
@@ -110,7 +83,6 @@ func TestPressOnAClosedSelectOpensTheListboxWithoutChangingTheValue(t *testing.T
 	if got := len(s.SelectPopupRows()); got != 3 {
 		t.Fatalf("the listbox shows %d rows, want one per option", got)
 	}
-	// CLOSED-CLICK: pressing a select focuses it and leaves the value alone.
 	if n := s.Focused(); n == nil || n.GetAttribute("id") != "sel" {
 		t.Errorf("focus after the press is %v, want the select", n)
 	}
@@ -122,11 +94,6 @@ func TestPressOnAClosedSelectOpensTheListboxWithoutChangingTheValue(t *testing.T
 	}
 }
 
-// The rows a pointer can hit must be the rows paint draws, and they must be
-// laid out the way Chromium lays out the in-page listbox: inset 1px from the
-// control's border box on x, uniform height, stacked with no gap, and one row
-// per option in tree order (RECTS).
-//
 // qc:BR-101
 func TestListboxRowsAreInsetUniformAndStacked(t *testing.T) {
 	s := newPopupSession(t, selectPopupHTML)
@@ -172,9 +139,6 @@ func boxRect(t *testing.T, s *engine.Session, id string) frame.RectF {
 	return frame.RectF{}
 }
 
-// CLICK-A is the whole point of the slice: a press on a row makes that option
-// the value, exactly once, in Chromium's event order.
-//
 // qc:BR-101
 func TestPressOnARowPicksThatOptionAndClosesTheListbox(t *testing.T) {
 	s := newPopupSession(t, selectPopupHTML)
@@ -201,12 +165,9 @@ func TestPressOnARowPicksThatOptionAndClosesTheListbox(t *testing.T) {
 	if n := s.Focused(); n == nil || n.GetAttribute("id") != "sel" {
 		t.Errorf("focus after the pick is %v, want the select (CLICK-A reports active lb)", n)
 	}
-	// EVENTS-CLICK-A: input, then change, one of each.
 	if got := *events; len(got) != 2 || got[0] != "input" || got[1] != "change" {
 		t.Errorf("the select saw %v, want [input change] (EVENTS-CLICK-A)", got)
 	}
-	// CLICK-A reports selectedAttr [false,true,false] after picking a: the press
-	// changes current selectedness and never rewrites the selected attribute.
 	if got := s.Doc.ElementByID("a").HasAttribute("selected"); got {
 		t.Error("picking a row wrote a selected content attribute onto the option")
 	}
@@ -215,8 +176,6 @@ func TestPressOnARowPicksThatOptionAndClosesTheListbox(t *testing.T) {
 	}
 }
 
-// CLICK-C-DISABLED fires no event at all and leaves the value alone.
-//
 // qc:BR-101
 func TestPressOnADisabledRowIsSwallowed(t *testing.T) {
 	s := newPopupSession(t, selectPopupHTML)
@@ -236,10 +195,6 @@ func TestPressOnADisabledRowIsSwallowed(t *testing.T) {
 	}
 }
 
-// The listbox is not modal in this engine, so the press that dismisses it is not
-// captured by it: CLICK-OUTSIDE shows the value surviving, and the page still
-// receives the click the user aimed at.
-//
 // qc:BR-101
 func TestPressOutsideTheListboxClosesItAndStillClicksWhatItLandsOn(t *testing.T) {
 	s := newPopupSession(t, selectPopupHTML)
@@ -265,10 +220,6 @@ func TestPressOutsideTheListboxClosesItAndStillClicksWhatItLandsOn(t *testing.T)
 	}
 }
 
-// Pressing the control whose listbox is already showing closes it. Without the
-// dismiss-does-not-reopen rule the second press would leave the rows up, so a
-// user could never get rid of the popup by the way they raised it.
-//
 // qc:BR-101
 func TestPressOnTheOpenSelectClosesItsListbox(t *testing.T) {
 	s := newPopupSession(t, selectPopupHTML)
@@ -286,9 +237,6 @@ func TestPressOnTheOpenSelectClosesItsListbox(t *testing.T) {
 	}
 }
 
-// AFTER-ESCAPE: Escape closes the listbox, changes nothing and keeps focus on
-// the control, so the keyboard user can carry on with the arrows.
-//
 // qc:BR-101
 func TestEscapeClosesTheListboxAndKeepsFocusAndValue(t *testing.T) {
 	s := newPopupSession(t, selectPopupHTML)
@@ -312,9 +260,6 @@ func TestEscapeClosesTheListboxAndKeepsFocusAndValue(t *testing.T) {
 	}
 }
 
-// A <select multiple> and a <select size="3"> are already listboxes: they show
-// their rows inline, so a press on them must not raise a second copy.
-//
 // qc:BR-101
 func TestAlreadyListboxSelectsDoNotOpenAPopup(t *testing.T) {
 	for _, html := range []string{
@@ -347,9 +292,6 @@ func TestPressOnADisabledSelectOpensNothing(t *testing.T) {
 	}
 }
 
-// The listbox belongs to the control that raised it: Tab (or any other focus
-// move) dismisses it rather than leaving rows hanging over a blurred control.
-//
 // qc:BR-101
 func TestFocusMovingAwayDismissesTheListbox(t *testing.T) {
 	s := newPopupSession(t, `<html><body style="margin:0">`+

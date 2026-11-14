@@ -15,36 +15,23 @@ import (
 	"time"
 )
 
-// Cookie limits are explicit units, not convenience constants: a hostile page
-// can set thousands of cookies per response, and an unbounded jar grows with
-// every navigation.
 const (
 	MaxCookiesPerHost = 50
 	MaxTotalCookies   = 3000
 )
 
-// Cookie is one stored cookie. HttpOnly and SameSite are parsed and kept for a
-// future scripting/cross-site boundary; nothing today can read a cookie except
-// this client's own requests.
 type Cookie struct {
 	Name     string
 	Value    string
-	Domain   string // empty means host-only
+	Domain   string
 	Path     string
 	Secure   bool
 	HttpOnly bool
-	Expires  time.Time // zero means session cookie
+	Expires  time.Time
 	hostOnly bool
-	// seq orders eviction: the insertion sequence, refreshed on overwrite.
-	// Map iteration order is random per run, so without it the victim was
-	// whoever the map happened to yield first and the newest cookie could
-	// go out before older ones.
-	seq uint64
+	seq      uint64
 }
 
-// CookieJar stores cookies between requests with policy enforcement: a Domain
-// attribute must match the host that set it, Secure cookies travel only over
-// HTTPS, and jar size is capped per host and in total.
 type CookieJar struct {
 	mu      sync.Mutex
 	entries map[string]*Cookie
@@ -59,9 +46,6 @@ func cookieKey(host, name, domain, path string) string {
 	return host + "\x00" + name + "\x00" + domain + "\x00" + path
 }
 
-// Store parses raw Set-Cookie header values from a response served by reqURL
-// and keeps every cookie that passes policy. Invalid attributes reject only
-// that cookie, never the rest of the response.
 func (j *CookieJar) Store(reqURL *url.URL, setCookies []string) {
 	if j == nil {
 		return
@@ -75,9 +59,6 @@ func (j *CookieJar) Store(reqURL *url.URL, setCookies []string) {
 			continue
 		}
 		if c.Domain != "" {
-			// Cookie tossing guard: a Domain attribute must be this host or a
-			// parent of it, and a bare TLD ("Domain=com") is refused so one
-			// site cannot claim cookies for every .com host.
 			if !hostMatchesDomain(host, c.Domain) || !strings.Contains(c.Domain, ".") {
 				continue
 			}
@@ -95,9 +76,6 @@ func (j *CookieJar) Store(reqURL *url.URL, setCookies []string) {
 			delete(j.entries, cookieKey(host, c.Name, c.Domain, c.Path))
 			continue
 		}
-		// (name, domain, path) identifies a cookie whatever host first stored
-		// it; a cookie loaded from disk under its Domain must be replaced, not
-		// duplicated, when a later response re-Sets it.
 		for k, old := range j.entries {
 			if old.Name == c.Name && old.Domain == c.Domain && old.Path == c.Path {
 				delete(j.entries, k)
@@ -110,8 +88,6 @@ func (j *CookieJar) Store(reqURL *url.URL, setCookies []string) {
 	}
 }
 
-// HeaderFor returns the Cookie header value for a request to reqURL, or ""
-// when no stored cookie applies.
 func (j *CookieJar) HeaderFor(reqURL *url.URL) string {
 	if j == nil {
 		return ""
@@ -160,8 +136,6 @@ func (j *CookieJar) HeaderFor(reqURL *url.URL) string {
 	return strings.Join(pairs, "; ")
 }
 
-// CookiesForDocument returns the "a=b; c=d" cookie string for rawURL,
-// excluding HttpOnly cookies which scripts must never see per RFC 6265.
 func (j *CookieJar) CookiesForDocument(rawURL string) string {
 	if j == nil {
 		return ""
@@ -181,7 +155,7 @@ func (j *CookieJar) CookiesForDocument(rawURL string) string {
 	var matches []*Cookie
 	for _, c := range j.entries {
 		if c.HttpOnly {
-			continue // Scripts must never read HttpOnly cookies
+			continue
 		}
 		if c.Secure && !secure {
 			continue
@@ -217,9 +191,6 @@ func (j *CookieJar) CookiesForDocument(rawURL string) string {
 	return strings.Join(pairs, "; ")
 }
 
-// SetCookieFromDocument stores one document.cookie assignment for rawURL.
-// Any HttpOnly attribute set by script is ignored (forced to false),
-// and an existing HttpOnly cookie cannot be overwritten by script.
 func (j *CookieJar) SetCookieFromDocument(rawURL, assignment string) {
 	if j == nil {
 		return
@@ -232,7 +203,6 @@ func (j *CookieJar) SetCookieFromDocument(rawURL, assignment string) {
 	if c == nil {
 		return
 	}
-	// Per RFC 6265: document.cookie cannot set HttpOnly cookies.
 	c.HttpOnly = false
 
 	host := strings.ToLower(reqURL.Hostname())
@@ -256,7 +226,6 @@ func (j *CookieJar) SetCookieFromDocument(rawURL, assignment string) {
 
 	key := cookieKey(host, c.Name, c.Domain, c.Path)
 
-	// A script must NOT overwrite an existing HttpOnly cookie.
 	for _, old := range j.entries {
 		if old.Name == c.Name && old.Domain == c.Domain && old.Path == c.Path {
 			if old.HttpOnly {
@@ -281,7 +250,6 @@ func (j *CookieJar) SetCookieFromDocument(rawURL, assignment string) {
 	j.evict(host)
 }
 
-// Clear drops every stored cookie, including session cookies.
 func (j *CookieJar) Clear() {
 	if j == nil {
 		return
@@ -291,7 +259,6 @@ func (j *CookieJar) Clear() {
 	j.mu.Unlock()
 }
 
-// persistedCookie is the on-disk form of a stored cookie.
 type persistedCookie struct {
 	Name     string    `json:"name"`
 	Value    string    `json:"value"`
@@ -303,9 +270,6 @@ type persistedCookie struct {
 	HostOnly bool      `json:"hostOnly,omitempty"`
 }
 
-// Save writes the jar's persistent cookies to path as JSON, atomically.
-// Session cookies are dropped by design: they end with the browsing session,
-// and an exit save is that end.
 func (j *CookieJar) Save(path string) error {
 	if j == nil {
 		return nil
@@ -350,10 +314,6 @@ func (j *CookieJar) Save(path string) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// Load merges cookies written by Save into the jar. A missing file is the
-// normal first-run case, not an error; expired and nameless entries are
-// dropped rather than stored. Domain-keyed entries loaded here are replaced,
-// never duplicated, when a later response re-Sets the same cookie.
 func (j *CookieJar) Load(path string) error {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -393,19 +353,12 @@ func (j *CookieJar) Load(path string) error {
 		j.nextSeq++
 		hosts[pc.Domain] = true
 	}
-	// Migration bound: a hostile or legacy file may carry more than the
-	// runtime invariants allow. Re-run the same eviction the live Store path
-	// uses so a loaded jar is indistinguishable from a built one.
 	for h := range hosts {
 		j.evict(h)
 	}
 	return nil
 }
 
-// evict enforces the jar limits, called with the lock held. Expired entries
-// go first, then the soonest-to-expire, then the longest-stored; session
-// cookies (no expiry) outrank expiring ones. The order is total: equal keys
-// break by name, so the victim never depends on map iteration order.
 func (j *CookieJar) evict(host string) {
 	total := len(j.entries)
 	var perHost int
@@ -467,8 +420,6 @@ func hostMatchesDomain(host, domain string) bool {
 	return strings.HasSuffix(host, "."+domain)
 }
 
-// defaultCookiePath is the directory portion of the request path (RFC 6265
-// 5.1.4): "/a/b" sets "/a/", "/" and paths without a slash set "/".
 func defaultCookiePath(reqPath string) string {
 	if i := strings.LastIndex(reqPath, "/"); i >= 0 {
 		return reqPath[:i+1]
@@ -476,7 +427,6 @@ func defaultCookiePath(reqPath string) string {
 	return "/"
 }
 
-// cookiePathMatch implements RFC 6265 5.1.4 path comparison.
 func cookiePathMatch(reqPath, cookiePath string) bool {
 	if reqPath == cookiePath {
 		return true
@@ -490,8 +440,6 @@ func cookiePathMatch(reqPath, cookiePath string) bool {
 	return len(reqPath) > len(cookiePath) && reqPath[len(cookiePath)] == '/'
 }
 
-// parseSetCookie parses one Set-Cookie value. nil means the value is invalid
-// or carries nothing usable.
 func parseSetCookie(raw string) *Cookie {
 	pair, attrs, _ := strings.Cut(raw, ";")
 	name, value, _ := strings.Cut(pair, "=")
@@ -543,7 +491,6 @@ func parseSetCookie(raw string) *Cookie {
 	return c
 }
 
-// AllCookies returns a snapshot of all active cookies currently held in the jar.
 func (j *CookieJar) AllCookies() []Cookie {
 	if j == nil {
 		return nil
@@ -561,9 +508,6 @@ func (j *CookieJar) AllCookies() []Cookie {
 	return out
 }
 
-// RemoveForDomain deletes every cookie whose Domain exactly matches domain and
-// returns how many were removed. Matching is exact so clearing one site cannot
-// take a parent domain's shared cookie, or a subdomain's own cookie, with it.
 func (j *CookieJar) RemoveForDomain(domain string) int {
 	if j == nil {
 		return 0
@@ -584,7 +528,6 @@ func (j *CookieJar) RemoveForDomain(domain string) int {
 	return removed
 }
 
-// CookiesForHost returns all active cookies matching the given hostname.
 func (j *CookieJar) CookiesForHost(host string) []Cookie {
 	if j == nil {
 		return nil

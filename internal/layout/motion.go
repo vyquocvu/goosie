@@ -7,7 +7,6 @@ import (
 	"unicode"
 )
 
-// computeMotionOffset computes (dx, dy) translation from an offset-path string and offset-distance length.
 func computeMotionOffset(pathStr string, distance float32) (float32, float32) {
 	if distance == 0 || pathStr == "" || pathStr == "none" {
 		return 0, 0
@@ -49,7 +48,6 @@ func computeRayOffset(param string, distance float32) (float32, float32) {
 		radians = val * math.Pi / 180.0
 	}
 
-	// 0deg points up along negative Y axis; angle grows clockwise in CSS.
 	dx := float32(float64(distance) * math.Sin(radians))
 	dy := float32(-float64(distance) * math.Cos(radians))
 	return dx, dy

@@ -9,10 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// `padding-inline` and friends are the only way several modern sheets say it:
-// MDN sets its page gutter with `padding-inline: max(1rem, calc(50vw - 720px +
-// 1rem))` and no physical equivalent, so an engine that ignores the logical name
-// renders the whole document flush against both edges.
 func logical(t *testing.T, html, sheet string) *style.ComputedStyle {
 	t.Helper()
 	doc := domtest.Parse(html)
@@ -70,9 +66,6 @@ func TestLogicalBoxPropertiesMapToThePhysicalOnes(t *testing.T) {
 	}
 }
 
-// The value the property carries is the whole reason for the function support:
-// one side is a share of the viewport, the other a floor in `rem`, and the frame
-// is 1600px here.
 func TestLogicalPaddingEvaluatesAFunctionOfViewportUnits(t *testing.T) {
 	s := logical(t, "<div>x</div>", "div { padding-inline: max(1rem, calc(50vw - 720px + 1rem)) }")
 	if s.PaddingLeft != 96 || s.PaddingRight != 96 {
@@ -119,7 +112,6 @@ func TestLogicalBordersAndInsets(t *testing.T) {
 }
 
 func TestLogicalDirectionRTL(t *testing.T) {
-	// LTR
 	sLTR := logical(t, "<div>x</div>", "div { direction: ltr; margin-inline-start: 10px; margin-inline-end: 20px; text-align: start; }")
 	if sLTR.Direction != "ltr" {
 		t.Errorf("direction = %q, want 'ltr'", sLTR.Direction)
@@ -127,16 +119,10 @@ func TestLogicalDirectionRTL(t *testing.T) {
 	if sLTR.MarginLeft != 10 || sLTR.MarginRight != 20 {
 		t.Errorf("LTR margin-inline-start/end = %v/%v, want 10/20", sLTR.MarginLeft, sLTR.MarginRight)
 	}
-	// `text-align: start` stays a value of its own. Measured, getComputedStyle
-	// echoes "start" for both directions (scripts/verify-br087-bidi.js
-	// x_cs_default_ltr, z_cs_start_rtl) and only the *line* knows which edge it
-	// anchors at, so the direction is layout's to resolve - unlike the
-	// margin-inline pair above, which feeds geometry the cascade itself owns.
 	if sLTR.TextAlign != style.TextAlignStart {
 		t.Errorf("LTR text-align: start = %v, want TextAlignStart", sLTR.TextAlign)
 	}
 
-	// RTL
 	sRTL := logical(t, "<div>x</div>", "div { direction: rtl; margin-inline-start: 10px; margin-inline-end: 20px; text-align: start; }")
 	if sRTL.Direction != "rtl" {
 		t.Errorf("direction = %q, want 'rtl'", sRTL.Direction)

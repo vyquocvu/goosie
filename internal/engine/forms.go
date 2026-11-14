@@ -12,36 +12,24 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// MaxFormControls bounds the number of controls per form.
 const MaxFormControls = 256
 
-// MaxFormDataBytes bounds the encoded form data payload.
-const MaxFormDataBytes = 1 << 20 // 1 MiB
+const MaxFormDataBytes = 1 << 20
 
-// FormFile is a file selected by an <input type="file"> when the submission
-// was assembled.
 type FormFile struct {
 	Filename    string
 	ContentType string
 	Data        []byte
 }
 
-// FormData is a single name/value pair from a form control. A file control
-// contributes one entry per selected file with File set; Value carries the
-// filename so URL-encoded and text/plain submissions stay correct.
 type FormData struct {
 	Name  string
 	Value string
 	File  *FormFile
 }
 
-// FileSource returns the files selected on a file input, in FileList order.
 type FileSource func(*dom.Node) []FormFile
 
-// CollectFormData gathers successful controls from a form element.
-// It walks the form's subtree in tree order and collects name/value pairs
-// from input, select, textarea, and button elements.
-// Disabled controls and controls without a name attribute are skipped.
 func CollectFormData(form, submitter *dom.Node) []FormData {
 	return collectFormData(form, submitter, nil)
 }
@@ -77,8 +65,6 @@ func collectFromNode(n, form, submitter *dom.Node, files FileSource, data *[]For
 					}
 				}
 			case isFileInput(n):
-				// A file control always contributes at least one entry; with no
-				// files selected it is an empty filename part.
 				var selected []FormFile
 				if files != nil {
 					selected = files(n)
@@ -124,13 +110,6 @@ func isSubmitButtonInAnyState(n, form *dom.Node) bool {
 	}
 }
 
-// FirstSubmitButton returns the first submit button in tree order, disabled or
-// not. Implicit submission picks its submitter this way: a disabled button
-// stays the chosen submitter and blocks the submission rather than handing the
-// job to the next button (measured in Chromium 131.0.6778.33 with /tmp/v2/run4.py
-// and /tmp/v2/run5b.py, 2026-11-13: Enter in a form whose first submit button
-// is disabled records no navigation at all, and removing that button lets the
-// same Enter submit `/s2?t2=t2v`).
 func FirstSubmitButton(form *dom.Node) *dom.Node {
 	if form == nil {
 		return nil
@@ -153,11 +132,6 @@ func FirstSubmitButton(form *dom.Node) *dom.Node {
 	return found
 }
 
-// disabledFormControlAt returns the nearest disabled form control at or above
-// n, or nil. Only the disableable controls suppress pointer input: a disabled
-// fieldset and a stray `disabled` attribute on a non-control both keep their
-// clicks (/tmp/v2/run7.py, 2026-11-13: `<fieldset disabled>` -> `click:fs2`,
-// `<div disabled>` -> `click:ddiv`).
 func disabledFormControlAt(n *dom.Node) *dom.Node {
 	for cur := n; cur != nil; cur = cur.Parent {
 		if dom.IsDisableableFormControl(cur) && dom.IsFormControlDisabled(cur) {
@@ -167,8 +141,6 @@ func disabledFormControlAt(n *dom.Node) *dom.Node {
 	return nil
 }
 
-// ValidateForm returns invalid controls in tree order. This intentionally
-// implements only required, email, and number constraints.
 func ValidateForm(form *dom.Node) []*dom.Node {
 	return validateForm(form, nil)
 }
@@ -250,10 +222,6 @@ func validateForm(form *dom.Node, files FileSource) []*dom.Node {
 	return invalid
 }
 
-// constraintValidationMessage names the constraint that made n invalid, using
-// the strings browsers show in their validation bubble. The caller only passes
-// controls validateForm already rejected, so the fallback covers a required
-// control with no more specific wording.
 func constraintValidationMessage(n *dom.Node) string {
 	if n == nil || !n.Element() {
 		return ""
@@ -303,17 +271,13 @@ func constraintValidationMessage(n *dom.Node) string {
 	return "Please fill out this field."
 }
 
-// isSuccessfulControl reports whether n is a successful control per HTML spec.
-// A successful control is one that is not disabled and has a name attribute.
 func isSuccessfulControl(n, form *dom.Node) bool {
 	if !n.Element() {
 		return false
 	}
-	// Check disabled
 	if dom.IsFormControlDisabled(n) {
 		return false
 	}
-	// Check name exists
 	if !n.HasAttribute("name") {
 		return false
 	}
@@ -323,28 +287,26 @@ func isSuccessfulControl(n, form *dom.Node) bool {
 		typ := strings.ToLower(n.GetAttribute("type"))
 		switch typ {
 		case "submit", "button", "reset":
-			return false // submitter is added at its tree-order position
+			return false
 		case "checkbox", "radio":
-			// Only successful if checked
 			return n.InputChecked()
 		case "file":
 			return true
 		case "image":
-			return false // not supported yet
+			return false
 		default:
-			return true // text, password, hidden, email, etc.
+			return true
 		}
 	case "textarea":
 		return true
 	case "select":
-		return true // value is the selected option
+		return true
 	case "button":
-		return false // submitter is added at its tree-order position
+		return false
 	}
 	return false
 }
 
-// controlValue returns the value of a form control.
 func controlValue(n *dom.Node) string {
 	switch n.Data {
 	case "input":
@@ -352,8 +314,6 @@ func controlValue(n *dom.Node) string {
 	case "textarea":
 		return n.InputControlValue()
 	case "select":
-		// The same rule the keyboard and the accessibility tree use, so a
-		// submitted value and an announced value cannot diverge.
 		if option := SelectedOption(n); option != nil {
 			return optionValue(option)
 		}
@@ -371,7 +331,6 @@ func controlSubmissionValue(n *dom.Node) string {
 	return controlValue(n)
 }
 
-// EncodeFormURLEncoded encodes form data as application/x-www-form-urlencoded.
 func EncodeFormURLEncoded(data []FormData) string {
 	var buf strings.Builder
 	for i, d := range data {
@@ -394,9 +353,6 @@ func normalizeFormLineBreaks(value string) string {
 	return strings.ReplaceAll(value, "\n", "\r\n")
 }
 
-// EncodeFormPlainText encodes form data as text/plain: each entry is written as
-// name=value followed by CRLF, with line breaks normalized and nothing escaped.
-// A value containing "=" or "&" is therefore deliberately lossy, as HTML defines.
 func EncodeFormPlainText(data []FormData) string {
 	var buf strings.Builder
 	for _, d := range data {
@@ -411,17 +367,13 @@ func EncodeFormPlainText(data []FormData) string {
 	return buf.String()
 }
 
-// EncodeFormMultipart encodes form data as multipart/form-data and returns the
-// boundary the caller must append to the Content-Type header. File entries carry
-// their filename, content type and bytes; text entries are written as UTF-8.
-// The payload is capped like every other form encoding.
 func EncodeFormMultipart(data []FormData) (string, []byte, error) {
 	var token [18]byte
 	if _, err := rand.Read(token[:]); err != nil {
 		return "", nil, fmt.Errorf("could not create multipart boundary: %w", err)
 	}
 	boundary := "----GoosieFormBoundary" + hex.EncodeToString(token[:])
-	closing := len(boundary) + 6 // "--" + boundary + "--\r\n"
+	closing := len(boundary) + 6
 	var body bytes.Buffer
 	for _, d := range data {
 		var header bytes.Buffer
@@ -440,7 +392,6 @@ func EncodeFormMultipart(data []FormData) (string, []byte, error) {
 			header.WriteString("\r\n\r\n")
 			payload = d.File.Data
 		}
-		// Check before copying so an oversized file never reaches the buffer.
 		if body.Len()+header.Len()+len(payload)+2+closing > MaxFormDataBytes {
 			return "", nil, fmt.Errorf("multipart form data exceeds %d bytes", MaxFormDataBytes)
 		}
@@ -464,9 +415,6 @@ func cleanMultipartContentType(value string) string {
 	return value
 }
 
-// fileSource returns the live file selections, or nil without a scripting
-// runtime. File selections belong to the runtime's File objects, so a document
-// with scripts disabled can only contribute an empty file part.
 func (s *Session) fileSource() FileSource {
 	if s.jsRT == nil {
 		return nil
@@ -484,8 +432,6 @@ func (s *Session) fileSource() FileSource {
 	}
 }
 
-// collectFormData gathers submission entries including the files currently
-// selected on file controls.
 func (s *Session) collectFormData(form, submitter *dom.Node) []FormData {
 	return collectFormData(form, submitter, s.fileSource())
 }
@@ -494,7 +440,6 @@ func (s *Session) validateForm(form *dom.Node) []*dom.Node {
 	return validateForm(form, s.fileSource())
 }
 
-// FormMethod returns the HTTP method for a form (GET, POST, or dialog).
 func FormMethod(form *dom.Node) string {
 	method := form.GetAttribute("method")
 	switch strings.ToLower(method) {
@@ -507,8 +452,6 @@ func FormMethod(form *dom.Node) string {
 	}
 }
 
-// isSubmitter reports whether n is a submit button. The form* override
-// attributes are honored only on these elements, never on a plain button.
 func isSubmitter(n *dom.Node) bool {
 	if n == nil || !n.Element() {
 		return false
@@ -532,9 +475,6 @@ func submitterAttr(submitter *dom.Node, name string) (string, bool) {
 	return submitter.GetAttribute(name), true
 }
 
-// FormMethodFor resolves the method of a submission. A submit button's
-// formmethod wins over the form's method when it names get, post, or dialog;
-// any other value leaves the form's method in force.
 func FormMethodFor(form, submitter *dom.Node) string {
 	if value, ok := submitterAttr(submitter, "formmethod"); ok {
 		switch strings.ToLower(value) {
@@ -549,20 +489,14 @@ func FormMethodFor(form, submitter *dom.Node) string {
 	return FormMethod(form)
 }
 
-// FormAction returns the action URL for a form.
-// Returns empty string if no action is specified.
 func FormAction(form *dom.Node) string {
 	return form.GetAttribute("action")
 }
 
-// FormTarget returns the browsing context name a form submits into. The empty
-// string means the form's own context, like _self.
 func FormTarget(form *dom.Node) string {
 	return strings.TrimSpace(form.GetAttribute("target"))
 }
 
-// FormTargetFor resolves the target with the submitter's formtarget override.
-// Like formaction and formmethod, the attribute only applies to a submit button.
 func FormTargetFor(form, submitter *dom.Node) string {
 	if value, ok := submitterAttr(submitter, "formtarget"); ok {
 		return strings.TrimSpace(value)
@@ -570,9 +504,6 @@ func FormTargetFor(form, submitter *dom.Node) string {
 	return FormTarget(form)
 }
 
-// FormActionFor resolves the action of a submission. A submit button's
-// formaction wins over the form's action, including an explicitly empty value,
-// which the host resolves to the current document URL.
 func FormActionFor(form, submitter *dom.Node) string {
 	if value, ok := submitterAttr(submitter, "formaction"); ok {
 		return value
@@ -580,13 +511,10 @@ func FormActionFor(form, submitter *dom.Node) string {
 	return FormAction(form)
 }
 
-// SubmitterNoValidate reports whether the activated submit button opted out of
-// constraint validation with formnovalidate.
 func SubmitterNoValidate(submitter *dom.Node) bool {
 	return isSubmitter(submitter) && submitter.HasAttribute("formnovalidate")
 }
 
-// FormEnctype returns the encoding type for a form.
 func FormEnctype(form *dom.Node) string {
 	enc := form.GetAttribute("enctype")
 	switch strings.ToLower(enc) {
@@ -599,9 +527,6 @@ func FormEnctype(form *dom.Node) string {
 	}
 }
 
-// FormEnctypeFor resolves the encoding of a submission. A submit button's
-// formenctype wins over the form's enctype when it names one of the three
-// supported encodings; otherwise the form's enctype applies.
 func FormEnctypeFor(form, submitter *dom.Node) string {
 	if value, ok := submitterAttr(submitter, "formenctype"); ok {
 		switch strings.ToLower(value) {
@@ -612,7 +537,6 @@ func FormEnctypeFor(form, submitter *dom.Node) string {
 	return FormEnctype(form)
 }
 
-// FindForm returns the ancestor form element for a control, or nil.
 func FindForm(control *dom.Node) *dom.Node {
 	for p := control.Parent; p != nil; p = p.Parent {
 		if p.Element() && p.Data == "form" {
@@ -622,8 +546,6 @@ func FindForm(control *dom.Node) *dom.Node {
 	return nil
 }
 
-// formForControl resolves a control's form, honouring the form attribute
-// before the ancestor chain.
 func formForControl(n *dom.Node) *dom.Node {
 	if n == nil {
 		return nil
@@ -636,9 +558,6 @@ func formForControl(n *dom.Node) *dom.Node {
 	return FindForm(n)
 }
 
-// noteControlBlur records that the user left a form control. Constraint
-// validation exposes :user-invalid/:user-valid once focus moves away, so a
-// required field reveals its error by tabbing out even without a submission.
 func (s *Session) noteControlBlur(n *dom.Node) {
 	if n == nil || !n.Element() {
 		return
@@ -658,9 +577,6 @@ func (s *Session) noteControlBlur(n *dom.Node) {
 	if form == nil {
 		return
 	}
-	// Promote the form only when the control that lost focus is itself
-	// invalid; leaving a valid field must not light up an untouched error in
-	// the same form.
 	for _, invalid := range s.validateForm(form) {
 		if invalid == n {
 			form.UserInteracted = true

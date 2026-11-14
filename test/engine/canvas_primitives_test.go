@@ -23,8 +23,6 @@ func canvasSession(t *testing.T, html string) *engine.Session {
 	return sess
 }
 
-// canvasImage returns the pixels the engine attached to the canvas element, or
-// nil when the element was not rasterized (JS absent or size rejected).
 func canvasImage(t *testing.T, sess *engine.Session, id string) image.Image {
 	t.Helper()
 	node := sess.Doc.ElementByID(id)
@@ -39,13 +37,6 @@ func canvasImage(t *testing.T, sess *engine.Session, id string) image.Image {
 	return img
 }
 
-// TestCanvasPrimitivesRasterizeAtDeclaredSize is the BR-115 oracle: a document
-// that draws rects, paths and arcs must produce a canvas bitmap whose intrinsic
-// size is exactly the element's width/height, and the recorded primitives must
-// reach those pixels. The engine replays canvas ops into a frame.Bitmap before
-// paint; before that replay there was no oracle for the resulting size or
-// contents, only for the op list.
-//
 // qc:BR-115
 func TestCanvasPrimitivesRasterizeAtDeclaredSize(t *testing.T) {
 	html := `<html><body>
@@ -107,16 +98,8 @@ func TestCanvasPrimitivesRasterizeAtDeclaredSize(t *testing.T) {
 	}
 }
 
-// TestCanvasOversizedDimensionIsNotRasterized keeps a declared canvas width
-// beyond the device dimension cap from allocating a bitmap at all. The replay
-// allocation is sized from the element's width/height, so without an admission
-// check a hostile attribute value reserves the whole product in one make.
-//
 // qc:BR-115
 func TestCanvasOversizedDimensionIsNotRasterized(t *testing.T) {
-	// 17000 is just over MaxDeviceDimension (16384) but only one row tall, so
-	// the pre-fix allocation stays small: the oracle is the admission check,
-	// not memory pressure.
 	html := `<html><body>
 		<canvas id="huge" width="17000" height="1"></canvas>
 		<script>
@@ -129,10 +112,6 @@ func TestCanvasOversizedDimensionIsNotRasterized(t *testing.T) {
 	}
 }
 
-// TestCanvasOversizedPixelAreaIsNotRasterized checks the pixel budget rather
-// than the per-dimension cap: 4097x4096 is one pixel past the 16 Mi-pixel
-// device budget while both sides stay under MaxDeviceDimension.
-//
 // qc:BR-115
 func TestCanvasOversizedPixelAreaIsNotRasterized(t *testing.T) {
 	html := `<html><body>

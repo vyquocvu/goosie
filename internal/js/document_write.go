@@ -27,10 +27,6 @@ func stateInput(state *documentWriteState) string {
 	return state.input.String()
 }
 
-// runtimeForDocumentWrite resolves the browsing-context runtime associated
-// with a document. A blank iframe can initially have only the parent's
-// WindowProxy and registry, so its runtime is created only if written markup
-// contains a parser-inserted script.
 func (r *Runtime) runtimeForDocumentWrite(doc *dom.Document) *Runtime {
 	if r == nil || doc == nil {
 		return r
@@ -41,9 +37,6 @@ func (r *Runtime) runtimeForDocumentWrite(doc *dom.Document) *Runtime {
 	return r
 }
 
-// documentOpen starts a new parser stream on the receiver document. Detached
-// documents use this path too, so all mutations are made against the receiver
-// rather than the runtime's active browsing-context document.
 func (r *Runtime) documentOpen(doc *dom.Document, object *goja.Object) goja.Value {
 	if doc == nil {
 		return goja.Undefined()
@@ -70,9 +63,6 @@ func (r *Runtime) documentClose(doc *dom.Document) goja.Value {
 		r.throwIfDynamicMarkupInsertionCounter(doc)
 		if state := r.documentWrites[doc]; state != nil {
 			input := state.input.String()
-			// Closing an unchanged stream still runs the EOF parser step. This
-			// matters for incomplete input such as a doctype, where ParseOpen has
-			// not yet synthesized the final html/head/body structure.
 			needsEOFParse := !state.hasAppliedInput || input != state.lastAppliedInput || doc.HTML == nil || doc.Body == nil
 			if needsEOFParse {
 				if parsed, err := dom.ParseBounded(input, documentWriteParseLimits()); err == nil {
@@ -96,9 +86,6 @@ func (r *Runtime) writeToDocument(doc *dom.Document, object *goja.Object, call g
 	owner := r.runtimeForDocumentWrite(doc)
 	if owner == r {
 		if frame := r.iframeForDocument(doc); frame != nil && r.iframeChildRuntimes[frame] == nil {
-			// Coerce once before deciding whether a real child realm is needed.
-			// Keeping this on the parent runtime for markup without scripts
-			// preserves the stable iframe registry exposed before navigation.
 			var text strings.Builder
 			for _, arg := range call.Arguments {
 				if arg != nil {
@@ -139,7 +126,6 @@ func (r *Runtime) writeToDocument(doc *dom.Document, object *goja.Object, call g
 	}
 	state := r.documentWrites[doc]
 	if state == nil {
-		// document.write after parsing implicitly opens a replacement document.
 		r.documentOpen(doc, object)
 		if owner := r.runtimeForDocumentWrite(doc); owner != nil && owner != r {
 			childObject, _ := owner.vm.Get("document").(*goja.Object)
@@ -165,8 +151,6 @@ func (r *Runtime) writeToDocument(doc *dom.Document, object *goja.Object, call g
 		}
 		registry := r.customElementRegistryForDocument(doc)
 		if node.Doc != nil && node.Doc.IsTemplateContentsOwnerDocument() {
-			// Parser-created nodes in template contents are inert and acquire
-			// their registry from the declarative shadow root when adopted there.
 			registry = nil
 		}
 		for _, attr := range attrs {
@@ -199,11 +183,6 @@ func (r *Runtime) writeToDocument(doc *dom.Document, object *goja.Object, call g
 	return goja.Undefined()
 }
 
-// runWrittenParserScripts executes newly completed parser script tokens after
-// their current document tree has been committed. The document.write parser
-// rebuilds its available-input tree on each write call, so script order is
-// tracked by token position to avoid replaying earlier scripts on a later
-// chunk.
 func (r *Runtime) runWrittenParserScripts(scripts []*dom.Node, state *documentWriteState) {
 	if state == nil {
 		return
@@ -217,8 +196,6 @@ func (r *Runtime) runWrittenParserScripts(scripts []*dom.Node, state *documentWr
 		}
 		state.executedScripts[i] = true
 		if err := r.RunParserScript(node.TextContent(), "document.write"); err != nil {
-			// Parser script exceptions are reported as script errors and do not
-			// escape through document.write or stop parsing subsequent tokens.
 			continue
 		}
 	}
@@ -290,7 +267,6 @@ func applyWrittenDocument(dst, parsed *dom.Document, state *documentWriteState) 
 		}
 	}
 	state.generated = nil
-	// Track manually inserted top-level nodes so they survive another write.
 	manualDoctype, manualElement := false, false
 	for n := dst.Node.FirstChild; n != nil; n = n.NextSibling {
 		manualDoctype = manualDoctype || n.Type == dom.NodeDoctype
@@ -329,16 +305,6 @@ func applyWrittenDocument(dst, parsed *dom.Document, state *documentWriteState) 
 	dst.MarkQueryDirty()
 }
 
-// documentWrite implements document.write(text) and document.writeln(text).
-//
-// Per the HTML5 spec:
-//   - During parsing (readyState === "loading"): insert HTML at the current
-//     parser insertion point. Since goosie runs scripts after parsing, this
-//     case is rare but handled for correctness.
-//   - After parsing (readyState !== "loading"): clear the document and write
-//     the new content as a replacement document.
-//
-// writeln is identical to write but appends a newline character.
 func (r *Runtime) documentWrite(call goja.FunctionCall, appendNewline bool) goja.Value {
 	if r.domDoc == nil {
 		return goja.Undefined()
@@ -349,7 +315,6 @@ func (r *Runtime) documentWrite(call goja.FunctionCall, appendNewline bool) goja
 		return r.writeToDocument(r.domDoc, obj, call, appendNewline)
 	}
 
-	// Coerce the argument to a string, matching the spec.
 	var text strings.Builder
 	for _, arg := range call.Arguments {
 		text.WriteString(arg.String())
@@ -363,14 +328,9 @@ func (r *Runtime) documentWrite(call goja.FunctionCall, appendNewline bool) goja
 		return goja.Undefined()
 	}
 
-	// Check readyState: "loading" means during parsing, anything else means after.
 	if r.readyState() == ReadyLoading {
 		if r.parserWriteDepth > 0 {
 			r.parserWriteBuffer.WriteString(written)
-			// Test-harness synchronous tests may inspect nodes later in the same
-			// parser script. Commit complete fragments now; keep an open element,
-			// partial tag, comment, or character reference buffered for the next
-			// write so chunked calls still form one stream.
 			if r.flushCompleteParserWrite() {
 				r.notifyMutation()
 			}
@@ -378,7 +338,6 @@ func (r *Runtime) documentWrite(call goja.FunctionCall, appendNewline bool) goja
 		}
 		r.writeDuringParsing(written)
 	} else {
-		// After parsing: clear the document and write new content.
 		r.writeAfterParsing(written)
 	}
 
@@ -408,15 +367,7 @@ func (r *Runtime) flushCompleteParserWrite() bool {
 	return true
 }
 
-// RunParserScript executes one classic parser-inserted script and then
-// tokenizes the combined document.write input produced by that script. The
-// tree builder currently resumes at the body insertion point; the engine's
-// parser integration can later provide the exact tokenizer insertion cursor.
 func (r *Runtime) RunParserScript(src, sourceURL string) error {
-	// A parser script reached from the HTML parser starts after the parser's
-	// pending mutations have had their checkpoint. Script-created scripts run
-	// synchronously inside the current script task, so leave their records for
-	// the outer checkpoint to batch with mutations made by that script.
 	if r.scriptExecutionDepth == 0 {
 		if err := r.drainMicrotasks(); err != nil {
 			return err
@@ -436,11 +387,6 @@ func (r *Runtime) RunParserScript(src, sourceURL string) error {
 	return err
 }
 
-// stripHTMLScriptComments implements the legacy HTML-like line comments that
-// remain part of classic-script parsing. Goja implements ECMAScript syntax but
-// does not recognize Annex B's line-leading <!-- and --> tokens. They are
-// comments only at the start of a line, so leave all other source (including
-// strings and mid-line operators) untouched.
 func stripHTMLScriptComments(src string) string {
 	var out strings.Builder
 	out.Grow(len(src))
@@ -464,8 +410,6 @@ func stripHTMLScriptComments(src string) string {
 	return out.String()
 }
 
-// RunParserDeferScript marks timers created by a deferred script so the
-// document lifecycle can honor the task ordering around DOMContentLoaded.
 func (r *Runtime) RunParserDeferScript(src, sourceURL string) error {
 	previous := r.inDeferScript
 	r.inDeferScript = true
@@ -473,9 +417,6 @@ func (r *Runtime) RunParserDeferScript(src, sourceURL string) error {
 	return r.RunParserScript(src, sourceURL)
 }
 
-// ensureDocumentStructure creates the basic html/head/body structure if it
-// does not already exist. This is needed when document.write is called on a
-// fresh or partially-constructed document.
 func (r *Runtime) ensureDocumentStructure() {
 	if r.domDoc.HTML == nil {
 		htmlElem := r.domDoc.NewElement("html")
@@ -494,11 +435,7 @@ func (r *Runtime) ensureDocumentStructure() {
 	}
 }
 
-// writeDuringParsing inserts HTML at the current parser insertion point.
-// Since the parser has typically finished by the time scripts run in goosie,
-// this appends to the body (or document root if no body exists yet).
 func (r *Runtime) writeDuringParsing(html string) {
-	// Ensure the basic document structure exists so we have a place to write.
 	r.ensureDocumentStructure()
 
 	target := r.domDoc.Body
@@ -511,15 +448,10 @@ func (r *Runtime) writeDuringParsing(html string) {
 
 	r.parseAndAppend(html, target)
 
-	// Update JS-side references if we created new structure.
 	r.updateDocumentRefs()
 }
 
-// writeAfterParsing clears the document and writes new content, per the
-// HTML5 spec legacy behavior for document.write after parsing completes.
 func (r *Runtime) writeAfterParsing(html string) {
-	// Clear first so parser-time callbacks observe the replacement document and
-	// connected callbacks run at the point each element is inserted.
 	r.clearDocument()
 	r.ensureDocumentStructure()
 	if r.domDoc.Body != nil {
@@ -528,8 +460,6 @@ func (r *Runtime) writeAfterParsing(html string) {
 	r.updateDocumentRefs()
 }
 
-// updateDocumentRefs refreshes the JS-side document.body, documentElement,
-// and head references after the DOM structure has changed.
 func (r *Runtime) updateDocumentRefs() {
 	doc := r.vm.Get("document")
 	if doc == nil {
@@ -550,10 +480,7 @@ func (r *Runtime) updateDocumentRefs() {
 	}
 }
 
-// clearDocument removes all children from the document node and resets
-// the document's cached element references.
 func (r *Runtime) clearDocument() {
-	// Credit the old nodes against the budget.
 	var old []*dom.Node
 	for c := r.domDoc.Node.FirstChild; c != nil; c = c.NextSibling {
 		old = append(old, c)
@@ -565,7 +492,6 @@ func (r *Runtime) clearDocument() {
 	r.notifyDisconnected(old, wasConnected)
 	r.releaseNodes(old)
 
-	// Reset cached references.
 	r.domDoc.HTML = nil
 	r.domDoc.Head = nil
 	r.domDoc.Body = nil
@@ -573,11 +499,7 @@ func (r *Runtime) clearDocument() {
 	r.domDoc.MarkQueryDirty()
 }
 
-// parseAndAppend parses HTML and appends the resulting nodes to target,
-// respecting the mutation budget.
 func (r *Runtime) parseAndAppend(html string, target *dom.Node) {
-	// Check if the HTML contains any tags. If not, treat it as plain text
-	// to preserve whitespace (including trailing newlines from writeln).
 	if !strings.Contains(html, "<") {
 		textNode := r.domDoc.NewText(html)
 		r.admitInsert("document.write", target, []*dom.Node{textNode}, func() {
@@ -591,7 +513,6 @@ func (r *Runtime) parseAndAppend(html string, target *dom.Node) {
 	}
 	parsed, err := r.parseDocumentWriteFragment(target, html)
 	if err != nil {
-		// Fallback: insert as text.
 		textNode := r.domDoc.NewText(html)
 		r.admitInsert("document.write", target, []*dom.Node{textNode}, func() {
 			target.AppendChild(textNode)
@@ -621,17 +542,12 @@ func (r *Runtime) parseDocumentWriteFragment(target *dom.Node, html string) (*do
 		if r.customElementNodeRegistries == nil {
 			r.customElementNodeRegistries = make(map[*dom.Node]*CustomElementRegistry)
 		}
-		// Fragment parsing uses a temporary Document. Carry the destination
-		// registry explicitly so definitions are visible during construction.
 		r.customElementNodeRegistries[node] = r.documentWriteRegistry(target)
 		return r.UpgradeParserElementWithAttributes(node, attrs)
 	}, func(node *dom.Node, attr dom.Attribute) {
 		r.ParserElementAttributeChanged(node, attr)
 	}, func(node *dom.Node) {
 		r.ParserNodeInserted(node)
-		// ParserElementInserted normally derives the registry from the parser
-		// parent. Fragment parsing's temporary root has no destination registry,
-		// so retain the one selected from the insertion context.
 		r.customElementNodeRegistries[node] = r.documentWriteRegistry(target)
 		if target.IsConnected() {
 			if def := r.customElementDefinitionForNode(node); def != nil {
@@ -649,9 +565,6 @@ func (r *Runtime) documentWriteRegistry(target *dom.Node) *CustomElementRegistry
 	return registry
 }
 
-// setupDocumentWrite installs document.write and document.writeln on the
-// document object. When no DOM is present, no-op stubs are installed so
-// that scripts probing for the API do not get a TypeError.
 func (r *Runtime) setupDocumentWrite() {
 	doc := r.vm.Get("document")
 	if doc == nil {
@@ -663,7 +576,6 @@ func (r *Runtime) setupDocumentWrite() {
 	}
 
 	if r.opts.DOM == nil {
-		// No DOM: install no-op stubs so document.write exists but does nothing.
 		_ = docObj.Set("write", func(goja.FunctionCall) goja.Value {
 			return goja.Undefined()
 		})

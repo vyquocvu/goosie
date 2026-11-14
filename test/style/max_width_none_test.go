@@ -4,9 +4,6 @@ import (
 	"testing"
 )
 
-// `max-width: none` states that there is no cap. Falling through the length
-// resolver treated the keyword as a zero-pixel one, so every box carrying it -
-// Wikipedia's infobox among them - collapsed to nothing.
 func TestMaxWidthNoneLeavesTheBoxUncapped(t *testing.T) {
 	s := styleFor(t, `<html><body><main class="p"></main></body></html>`,
 		`.p{max-width:none;max-height:none;min-width:none;min-height:none}`, "main")

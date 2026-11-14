@@ -4,12 +4,6 @@ import (
 	"testing"
 )
 
-// TestTableRowDeclaredHeightIsAMinimum covers the empty rows a list uses to gap
-// its items: Hacker News separates every story with
-// `<tr class="spacer" style="height:5px">` and puts a `height:10px` row under its
-// header bar. A row's own height is a floor on the row, whether or not it brings
-// any cell to hold it up, so dropping it makes every story 5px too tight and
-// slides the bottom of the page up by a story every four rows.
 func TestTableRowDeclaredHeightIsAMinimum(t *testing.T) {
 	t.Run("cell-less spacer row takes its height", func(t *testing.T) {
 		arena := session(t, `<html><body style="margin: 0;">
@@ -26,9 +20,6 @@ func TestTableRowDeclaredHeightIsAMinimum(t *testing.T) {
 		if !almostEqual(trs[1].H, 20) {
 			t.Fatalf("spacer row H = %v, want 20", trs[1].H)
 		}
-		// The rows are separated by the table's own border-spacing, read off the
-		// gap before the spacer rather than hardcoded: Chromium puts row three at
-		// 44 with the spacer at 22 and 2px between rows.
 		spacing := trs[1].Y - (trs[0].Y + trs[0].H)
 		if !almostEqual(trs[2].Y, trs[1].Y+trs[1].H+spacing) {
 			t.Errorf("row three Y = %v, want %v (the spacer must push it down)", trs[2].Y, trs[1].Y+trs[1].H+spacing)

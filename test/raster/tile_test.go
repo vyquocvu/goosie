@@ -93,8 +93,6 @@ func TestRasterizeTileFillAtTileEdgeIsClipped(t *testing.T) {
 		Rect:  frame.Rect4(250, 250, 400, 400),
 		Color: frame.RGB(0, 0, 255),
 	})
-	// The tile covers content [0,256); the command covers [250,400). Only the
-	// 6x6 corner belongs to this tile, and the rest must land in the neighbours.
 	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
@@ -113,7 +111,6 @@ func TestRasterizeTileNegativeOrigin(t *testing.T) {
 		Rect:  frame.Rect4(-10, -10, 10, 10),
 		Color: frame.RGB(9, 9, 9),
 	})
-	// The tile spans content [-256, 0); the command's right half is inside it.
 	if err := raster.RasterizeTile(dl, frame.Rect4(-256, -256, 0, 0), out, nil, nil, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile: %v", err)
 	}
@@ -190,9 +187,6 @@ func TestRasterizeTileTextIsDeterministicAcrossWorkers(t *testing.T) {
 		return hashTile(out)
 	}
 	want := render()
-	// A shared opentype.Face reuses scratch buffers between calls, so any race
-	// between concurrent rasters shows up here as a different hash long before it
-	// shows up on screen.
 	for _, workers := range []int{1, 2, 8} {
 		results := make(chan uint64, workers)
 		for i := 0; i < workers; i++ {
@@ -230,7 +224,6 @@ func TestRasterizeTileImageScalesIntoRect(t *testing.T) {
 			src.Set(x, y, color.RGBA{R: 255, A: 255})
 		}
 	}
-	// One green texel so the scaling is observable rather than a solid fill.
 	src.Set(0, 0, color.RGBA{G: 255, A: 255})
 
 	dl := build(t, paint.DisplayCmd{
@@ -247,7 +240,6 @@ func TestRasterizeTileImageScalesIntoRect(t *testing.T) {
 	if got := out.At(39, 39); got != frame.RGB(255, 0, 0) {
 		t.Fatalf("bottom-right = %v, want red", got)
 	}
-	// Nothing may escape the destination rect.
 	for y := 0; y < 256; y++ {
 		for x := 0; x < 256; x++ {
 			if x >= 8 && x < 40 && y >= 8 && y < 40 {
@@ -270,7 +262,6 @@ func TestRasterizeTileZeroAllocAfterWarmup(t *testing.T) {
 		textCmd("Pack my box with five dozen liquor jugs", 30, 90, 16),
 	)
 	out := newTile()
-	// Warm every glyph in the run into the atlas, then measure.
 	if err := raster.RasterizeTile(dl, frame.Rect4(0, 0, 256, 256), out, f, g, frame.TransparentBlack); err != nil {
 		t.Fatalf("RasterizeTile warmup: %v", err)
 	}
@@ -292,8 +283,6 @@ func TestGlyphCacheReusesFaceAcrossDPR(t *testing.T) {
 		t.Fatalf("NewFonts: %v", err)
 	}
 	g := raster.NewGlyphAtlas(1<<20, f)
-	// GlyphRun.Size is already a device-pixel size, so a 16px glyph at DPR 1 and
-	// a 16px glyph at DPR 2 are the same bitmap and must be rasterized once.
 	first := g.Get('a', 16, frame.FontSlot{})
 	second := g.Get('a', 16, frame.FontSlot{})
 	if !first.Ok || !second.Ok {
@@ -305,7 +294,6 @@ func TestGlyphCacheReusesFaceAcrossDPR(t *testing.T) {
 	if got := g.Stats().Misses; got != 1 {
 		t.Fatalf("Misses = %d, want 1 for two lookups of one glyph at one size", got)
 	}
-	// A different device size is a different bitmap, not a rescale.
 	if big := g.Get('a', 32, frame.FontSlot{}); big.Mask == first.Mask {
 		t.Fatal("32px reused the 16px mask; glyphs must be rasterized at their own size")
 	}
@@ -378,7 +366,7 @@ func textCmd(s string, x, y, size int32) paint.DisplayCmd {
 	pen := x
 	for _, r := range s {
 		glyphs = append(glyphs, paint.GlyphRun{Rune: r, X: pen, Y: y, Size: size})
-		pen += size / 2 // a fixed advance: the producer owns positioning
+		pen += size / 2
 	}
 	return paint.DisplayCmd{
 		Kind: paint.CmdText,

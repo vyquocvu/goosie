@@ -6,11 +6,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// GOOSIE-INLINEBORDER-001 layout oracle: a display:inline element that wraps
-// across lines records one border-box fragment per line, in line order; a
-// single-line element records exactly one; a borderless element records none.
 func TestInlineFragmentsCapture(t *testing.T) {
-	// Single line: one fragment.
 	arena := session(t, `<div style="width:400px"><span style="border:3px solid blue">word</span></div>`, 400)
 	layout.Inline(arena, layout.ObjectID(1))
 	span := findByTag(arena, "span")
@@ -21,7 +17,6 @@ func TestInlineFragmentsCapture(t *testing.T) {
 		t.Fatalf("single-line span: got %d fragments, want 1", len(span.InlineFragments))
 	}
 
-	// Wrapping: one fragment per line, strictly increasing Y0 (line order).
 	arena2 := session(t, `<div style="width:40px"><span style="border:3px solid blue">aa bb cc dd ee ff</span></div>`, 40)
 	layout.Inline(arena2, layout.ObjectID(1))
 	span2 := findByTag(arena2, "span")
@@ -38,7 +33,6 @@ func TestInlineFragmentsCapture(t *testing.T) {
 		}
 	}
 
-	// Borderless inline: no fragments captured (corpus stays byte-identical).
 	arena3 := session(t, `<div style="width:40px"><span>aa bb cc dd</span></div>`, 40)
 	layout.Inline(arena3, layout.ObjectID(1))
 	span3 := findByTag(arena3, "span")
@@ -50,11 +44,6 @@ func TestInlineFragmentsCapture(t *testing.T) {
 	}
 }
 
-// A single-line span's one fragment is both first and last, so it is the
-// content union expanded by the border on all four edges. inlineSelfRects sets
-// the span's BorderRect() to exactly that content union, so the fragment must
-// equal BorderRect() grown by the 3px border on every side. Deterministic: no
-// dependence on how many words land on each line.
 func TestInlineFragmentsEdgeExpansion(t *testing.T) {
 	arena := session(t, `<div style="width:400px"><span style="border:3px solid blue">word</span></div>`, 400)
 	layout.Inline(arena, layout.ObjectID(1))

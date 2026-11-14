@@ -1,11 +1,3 @@
-// Package engine wires the front-end (DOM, CSS, style, layout, paint) into the
-// v2 frame path.
-//
-// The engine is the top of the dependency stack: it imports every front-end
-// package and produces a paint.LayerDL that the surface can display. A Session
-// owns the pipeline for one document; the pipeline is Parse → Style → Layout →
-// Paint, and each stage is a pure function of its input so a change to one
-// stage does not force the others to be rebuilt.
 package engine
 
 import (
@@ -32,26 +24,17 @@ import (
 	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
-// Session is one document's pipeline state.
-//
-// A session holds the parsed DOM, the resolved styles, and the layout arena;
-// each field is the output of the previous stage. The pipeline is re-run from
-// the stage that changed: a style sheet edit re-runs style and below, a DOM
-// edit re-runs everything. The session does not own a network client; the
-// caller passes in fetched bytes so the engine stays testable without a network.
 type Session struct {
 	Doc          *dom.Document
 	Styles       map[dom.NodeID]*style.ComputedStyle
 	PseudoStyles map[style.PseudoKey]*style.ComputedStyle
 	Arena        *layout.Arena
 
-	metrics   layout.Metrics
-	viewportW float32
-	viewportH float32
-	linkBase  string
-	linker    CSSLinker
-	// documentURL is the final document URL every resource base shares. It is
-	// the scheme the mixed-content policy compares subresources against.
+	metrics     layout.Metrics
+	viewportW   float32
+	viewportH   float32
+	linkBase    string
+	linker      CSSLinker
 	documentURL string
 
 	scriptBase       string
@@ -61,89 +44,38 @@ type Session struct {
 	iframeLoader     IFrameDocumentLoader
 	iframeFormSubmit IFrameFormSubmitter
 
-	// sheets are the parsed stylesheets kept for RefreshAfterFonts: when
-	// deferred fonts land, styles must be re-resolved against the now-populated
-	// customFonts table so text picks the web faces instead of system fallbacks.
-	sheets []*css.Stylesheet
-	// styleResolver retains the compiled selector index for the current sheet
-	// set, avoiding a stylesheet-wide index rebuild on each interaction pass.
+	sheets        []*css.Stylesheet
 	styleResolver *style.Resolver
 
-	imgBase  string
-	imgFetch ImageFetcher
-	natural  map[dom.NodeID]layout.NaturalSize
-	images   map[dom.NodeID]stdimage.Image
-	// scriptImgs holds the pixels a script successfully assigned to an
-	// in-document <img>, keyed by node, and pendingScriptImgs holds this
-	// turn's results awaiting reconciliation. scriptImgsLayoutPending records
-	// that attached or dropped pixels still owe the arena a rebuild; PumpJS
-	// forces exactly one Reflow and then clears it. All three are guarded by
-	// imgMu: the pixel sink runs on the JS goroutine while deferred loads and
-	// their reflows can move the same tables. See script_image.go.
+	imgBase                 string
+	imgFetch                ImageFetcher
+	natural                 map[dom.NodeID]layout.NaturalSize
+	images                  map[dom.NodeID]stdimage.Image
 	scriptImgs              map[dom.NodeID]scriptImagePixels
 	pendingScriptImgs       map[dom.NodeID]scriptImagePixels
 	scriptImgsLayoutPending bool
 	bgImages                map[dom.NodeID]stdimage.Image
-	// pseudoBgImages holds background pixels declared on ::before/::after
-	// styles. A pseudo box is an anonymous layout object, so the image is
-	// keyed by the computed style pointer the layout object carries.
-	pseudoBgImages    map[*style.ComputedStyle]stdimage.Image
-	pseudoBgVectorRef map[*style.ComputedStyle]string
-	// borderImages holds decoded border-image sources by node, attached to
-	// the layout object's BorderImage like backgrounds (never natural).
-	borderImages map[dom.NodeID]stdimage.Image
-	// masks holds decoded mask-image sources by node, attached to the
-	// layout object's MaskImage like backgrounds (never natural).
-	masks map[dom.NodeID]stdimage.Image
-	// bgVectorSrc holds raw bytes for vector backgrounds without intrinsic
-	// dimensions or ratio: their raster size is the laid-out tile, known
-	// only after layout, so they decode in the Reflow attachment instead of
-	// the fetch pool. Keyed by URL; bgVectorRef maps nodes to it.
-	bgVectorSrc map[string][]byte
-	bgVectorRef map[dom.NodeID]string
-	bgNoRatio   map[string]bool
-	// imgReservation budgets decoded pixels across fetch and lazy vector
-	// rasterization alike; bgVectorUsed tracks the lazy share so each
-	// Reflow releases the previous tiles before reserving the new ones.
-	imgReservation *imageReservation
-	bgVectorUsed   int64
-	// scriptImgAttempts and scriptImgDeadline bound the script-created image
-	// path (`new Image()`/HTMLImageElement.src). They count attempts, not
-	// successes, against the same maxLoadedImages ceiling and ImageFetchBudget
-	// window the parse-time pool uses, so an unbounded `new Image()` loop in a
-	// script cannot outspend a page full of <img> tags. Guarded by imgMu.
-	scriptImgAttempts int
-	scriptImgDeadline time.Time
-	// sub budgets raw subresource bytes across linked sheets, @imports,
-	// fonts and images alike: per-class caps bound each family, but only a
-	// shared total stops a page from spending the maximum on every family
-	// at once.
-	sub *subBudget
-	// cssText memoises this navigation's fetched style sheet text by URL, so a
-	// sheet a later collection pass asks for again costs no request and no
-	// second byte charge. Read and written by the fetch pool's workers, hence
-	// the mutex inside.
-	cssText *cssTextCache
-	// styleInstalled names the sheet set s.sheets holds - the document's
-	// stylesheet-relevant DOM plus the media options it was collected under -
-	// so a pass that changed neither reuses it instead of re-collecting.
-	styleInstalled styleInstall
+	pseudoBgImages          map[*style.ComputedStyle]stdimage.Image
+	pseudoBgVectorRef       map[*style.ComputedStyle]string
+	borderImages            map[dom.NodeID]stdimage.Image
+	masks                   map[dom.NodeID]stdimage.Image
+	bgVectorSrc             map[string][]byte
+	bgVectorRef             map[dom.NodeID]string
+	bgNoRatio               map[string]bool
+	imgReservation          *imageReservation
+	bgVectorUsed            int64
+	scriptImgAttempts       int
+	scriptImgDeadline       time.Time
+	sub                     *subBudget
+	cssText                 *cssTextCache
+	styleInstalled          styleInstall
 
-	// imgMu guards the image maps and pendingImgs. LoadDeferredImages runs on
-	// the caller's goroutine and writes these maps while the session owner
-	// keeps reflowing, so every read and write crosses here.
 	imgMu sync.Mutex
 
-	// mixedMu guards the bounded mixed-content report list. Script, font and
-	// image goroutines can all name a downgraded URL during one session.
 	mixedMu      sync.Mutex
 	mixedReports []MixedContentReport
 	mixedSeen    map[string]struct{}
 
-	// Progressive paint state. WithDeferredImages collects the document's
-	// image references without fetching them, so the first frame goes out
-	// after document, CSS and fonts only; the refs wait here until
-	// LoadDeferredImages drains them.
 	deferImages bool
 	pendingImgs []imgRef
 
@@ -151,26 +83,11 @@ type Session struct {
 	fontFetch FontFetcher
 	fontReg   FontRegistry
 
-	// Deferred font loading mirrors deferred images: the first frame renders
-	// with system fallback fonts while @font-face files download in the
-	// background; LoadDeferredFonts re-resolves styles and reflows when they
-	// arrive so text swaps to the web faces without holding up first paint.
 	deferFonts   bool
 	pendingFonts []fontJob
 
-	// customFonts is this document's @font-face table: the families it declared
-	// and the registry indices that document's rasterizer handed back. The
-	// indices only mean something inside s.fontReg, so sharing one process-wide
-	// table made a second document's faces overwrite the first one's.
 	customFonts *style.CustomFonts
 
-	// Focus state for form editing. focus survives Reflow because reflow
-	// rebuilds only the layout arena, not the DOM; a new session per
-	// navigation starts unfocused. marked tracks the active IME text; input and
-	// textarea values and contenteditable Text nodes include it during
-	// composition when their editing caret is representable. focusValue records
-	// the value when a control gained focus; focusUserChanged records whether a
-	// user edit happened during that focus period, independently of script writes.
 	focus                  *dom.Node
 	focusState             atomic.Pointer[dom.Node]
 	hovered                *dom.Node
@@ -193,177 +110,71 @@ type Session struct {
 	rangePointerNode       *dom.Node
 	rangePointerMoved      bool
 
-	// pendingFilePicker is the file control whose native picker the host
-	// should open. The host drains it after the input that activated the
-	// control has been handled.
 	pendingFilePicker *dom.Node
 
-	// Text selection state. selActive and the two ends index the current
-	// arena's word list, so Reflow clears them the same rebuild that moves
-	// every word; a new session starts with nothing selected.
 	selActive bool
 	selAnchor selPos
 	selHead   selPos
 
-	// Find highlight state. findMarks are the rects from the most recent Find,
-	// each tied to the word box that paints it, and findActive selects the
-	// match painted in the active color. Like the selection, the marks point
-	// into the current arena, so Reflow clears them with it.
 	findMarks  []findMark
 	findActive int
 
-	// validationAnchor and validationMessage hold the constraint message a
-	// blocked submission is showing beside its first invalid control. The next
-	// user edit, click or successful submission dismisses it.
 	validationAnchor  *dom.Node
 	validationMessage string
 
-	// selectPopup is the <select> whose option rows a pointer raised. It names
-	// only the control: the rows are recomputed from the live box and option
-	// list on every read (listBoxLocked), so a reflow cannot leave stale
-	// geometry behind. Escape, a press outside the rows, a pick and focus
-	// leaving the control all clear it. Guarded by opMu.
 	selectPopup *dom.Node
 
-	// inspectNode is the DOM node the inspector is outlining. Only the node is
-	// stored: Paint re-resolves its box from the live arena (objectFor), so a
-	// reflow cannot leave a stale highlight behind, and a node with no box paints
-	// nothing. The overlay is paint-only and never mutates the DOM. Guarded by
-	// opMu.
 	inspectNode *dom.Node
 
-	// JS runtime for this document's scripts. nil when the caller did not
-	// supply WithJS, so a session without scripting works exactly as before.
-	jsRT *js.Runtime
-	// providedDoc is a bounded document tree from a non-HTML parser. It is used
-	// by MIME-aware loaders for XML/XHTML, which must not pass through the HTML
-	// tokenizer.
-	providedDoc *dom.Document
-	// parserExecutedScripts prevents the post-parse fallback pass from running
-	// inline or blocking external scripts that already ran at their parser pause.
+	jsRT                  *js.Runtime
+	providedDoc           *dom.Document
 	parserExecutedScripts map[*dom.Node]bool
 	parserExternalCount   int
 	runtimeBound          bool
-	// onViewportScroll is called when the JS runtime's viewport scroll offset
-	// changes (window.scrollTo, scrollTop on the scrolling element). The host
-	// sets this to bridge the value into the raster scheduler.
-	onViewportScroll func(x, y float64)
-	documentStartRan bool
+	onViewportScroll      func(x, y float64)
+	documentStartRan      bool
 
-	// drag is the in-flight drag-and-drop operation, or nil when nothing is
-	// being dragged. Owned by StartDrag/DragTo/EndDrag in drag.go and
-	// guarded by opMu like the rest of the interaction state.
 	drag           *dragState
 	testDriverDrag *testDriverDragCandidate
 
-	// touches holds the contacts a WPT testdriver touch sequence has put down and
-	// not yet lifted, keyed by the input source's id so parallel touch pointers
-	// keep separate contacts. Owned by TestDriverTouchAction in touch.go and
-	// guarded by opMu like the rest of the interaction state. touchSeq numbers the
-	// contacts so each keeps the identifier it was raised with.
 	touches  map[string]*dom.Touch
 	touchSeq int
 
-	// scriptErrs is a bounded window of the document's uncaught script errors
-	// and scriptErrTotal is how many there were. Errors still do not stop the
-	// load - that behaviour is deliberate and unchanged - they are only no
-	// longer thrown away: nine real pages painted nothing with rc 0 and an
-	// empty stderr because the reason lived in errors this function discarded
-	// (GOOSIE-LIVE-001). A page's error text is untrusted input, so both the
-	// number retained and the length of each message are capped; the total
-	// keeps reporting honest when a document throws a thousand times.
-	scriptErrMu    sync.Mutex
-	scriptErrs     []ScriptError
-	scriptErrTotal int
-	// scriptTimeoutTotal counts deadline stops specifically, so the chrome can
-	// prompt without matching error text. Kept under the same lock as the
-	// error window because it is written by the same call path.
+	scriptErrMu        sync.Mutex
+	scriptErrs         []ScriptError
+	scriptErrTotal     int
 	scriptTimeoutTotal int
 
-	// jsNodeBudget gates script-driven DOM insertions against this document's
-	// admission caps (node count, depth, attributes) before they happen, so a
-	// hostile page cannot grow the tree past the caps and have the overrun
-	// noticed only later by validateArena/walkDocument. nil when the caller did
-	// not supply WithJS.
 	jsNodeBudget *docNodeBudget
 
-	// media owns this document's video playback: one controller per element,
-	// the downloaded files behind them, and the backend that decodes them. nil
-	// when the caller did not supply WithMedia, so a session without a playback
-	// backend leaves <video> as the placeholder paint already draws.
 	media *mediaRegistry
 
-	// Transitions tracks active CSS transitions for animated property changes.
-	// nil when no transitions have been started.
 	Transitions *TransitionTracker
 
-	// Animations tracks active @keyframes animations. nil when no animations
-	// have been started.
 	Animations *AnimationController
 
-	// workCounts are per-session pipeline counters. They are intentionally
-	// monotonic so tests and diagnostics can take before/after snapshots around
-	// user interactions without relying on wall-clock timings.
-	workCounts pipelineWorkCounts
-	// styleDirty marks DOM mutations since the last style resolve. CSSOM reads
-	// synchronously refresh the cascade when a script asks for computed values.
-	styleDirty atomic.Bool
-	// layoutDirty marks document work not reflected in the layout arena yet.
-	// CSSOM View geometry reads synchronously flush this work.
+	workCounts  pipelineWorkCounts
+	styleDirty  atomic.Bool
 	layoutDirty atomic.Bool
 
-	// inv is the caller's invalidation batch. When non-nil, JSMutationSink
-	// records DOM mutations into it so the pipeline knows to re-style and
-	// re-layout. Set via WithInvalidation.
 	inv *Invalidation
 
-	// Appearance preferences for media query evaluation.
 	darkMode     bool
 	highContrast bool
 
-	// userScripts configured for injection into this document.
 	userScripts []*userscript.Script
 
-	// lifecycleMu keeps a pump turn from overlapping Close. PumpJS deliberately
-	// composes opMu-locked primitives instead of holding opMu for the whole
-	// turn, so opMu alone does not exclude a concurrent teardown: the JS runtime
-	// it drives is single-threaded and cannot be closed underneath a callback.
-	// PumpJS takes the read side for one turn; Close takes the write side before
-	// opMu, so the lock order is always lifecycleMu then opMu.
-	lifecycleMu sync.RWMutex
-	// opMu serializes pipeline operations across threads: the UI pump
-	// (input handlers, the JS pump, repaints) and navigation drains
-	// (session install/teardown, deferred completions) share sessions, and
-	// pipeline state (Styles, Arena, focus, selection) must move atomically
-	// between them. Lock order is opMu before imgMu; nothing takes those in
-	// reverse, and no opMu-guarded method calls another one. Leaf helpers
-	// (layout/paint/metrics, the JS runtime, invalidation records) never
-	// take opMu.
-	opMu sync.Mutex
-	// deferredActive counts in-flight deferred font/image loads, which write
-	// image and font tables outside opMu by design. PumpJS skips reflowing
-	// while it is nonzero and retries next tick, so a pump reflow never
-	// reads a half-attached document.
+	lifecycleMu    sync.RWMutex
+	opMu           sync.Mutex
 	deferredActive int32
 }
 
-// WorkCounts reports how many expensive pipeline stages this session has run.
-// The counters are useful for deterministic performance assertions: tests can
-// compare snapshots around an interaction and catch redundant restyles,
-// relayouts, or display-list builds without timing a machine-dependent path.
-// StyleNodeVisits counts nodes actually given to the style resolver; an
-// incremental interaction can resolve fewer than the full document.
 type WorkCounts struct {
 	StyleResolves     uint64
 	StyleNodeVisits   uint64
 	LayoutBuilds      uint64
 	DisplayListBuilds uint64
-	// CSSCollections counts the passes that walked the document for style
-	// declarations and collected the sheet set the cascade resolves against.
-	// A page whose scripts mutate nothing owes one collection, so a count that
-	// grows with the number of scripts is the re-collection storm the sheet memo
-	// and the install signature exist to stop.
-	CSSCollections uint64
+	CSSCollections    uint64
 }
 
 type pipelineWorkCounts struct {
@@ -374,8 +185,6 @@ type pipelineWorkCounts struct {
 	cssCollections    atomic.Uint64
 }
 
-// WorkCounts returns a concurrency-safe snapshot of this session's pipeline
-// work counters.
 func (s *Session) WorkCounts() WorkCounts {
 	if s == nil {
 		return WorkCounts{}
@@ -389,17 +198,11 @@ func (s *Session) WorkCounts() WorkCounts {
 	}
 }
 
-// collectSheets runs one style sheet collection and counts it. Everything the
-// cascade needs about this navigation travels with the session, so the four
-// places that install a sheet set share one entry point.
 func (s *Session) collectSheets(doc *dom.Document, authorCSS []string) ([]*css.Stylesheet, error) {
 	s.workCounts.cssCollections.Add(1)
 	return checkedSheets(doc, authorCSS, s.linkBase, s.linker, s.mediaOptions(), s.sub, s.cssText, s.reportMixed)
 }
 
-// LayoutPassCounts returns a concurrency-safe snapshot of the per-formatting-
-// context dispatch counts from the current arena generation, indexed by
-// layout.FCKind. It reads s.Arena under opMu, the same lock SelectionBounds uses.
 func (s *Session) LayoutPassCounts() [5]uint64 {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -409,65 +212,31 @@ func (s *Session) LayoutPassCounts() [5]uint64 {
 	return s.Arena.PassCounts
 }
 
-// CSSLinker fetches one linked style sheet. base is the document URL the href
-// resolves against; the returned string is the sheet's CSS text. A linker that
-// fails simply contributes no rules for that href; document rendering does not
-// stop for one missing sheet. Linked sheets are fetched concurrently, so a
-// linker may be called from several goroutines at once.
 type CSSLinker func(base, href string) (string, error)
 
-// IFrameDocumentLoader fetches and parses a child HTML document for an iframe.
-// The embedding layer owns network policy and byte decoding; engine supplies
-// the parent URL and the iframe's source attribute.
 type IFrameDocumentLoader func(base, src string) (*dom.Document, error)
 
-// IFrameFormSubmitter posts an encoded form body to a child browsing context
-// and returns its bounded parsed response document. The caller owns transport
-// and origin policy.
 type IFrameFormSubmitter func(base, target, contentType string, body []byte) (*dom.Document, error)
 
-// ImageFetcher fetches one image subresource's raw bytes. base is the document
-// URL the src resolves against; the returned bytes are the encoded image. A
-// fetcher that fails leaves that image undecoded, and the box keeps the layout
-// space its attributes reserve, so a missing image does not stop rendering.
 type ImageFetcher func(base, url string) ([]byte, error)
 
-// FontResult is one fetched @font-face resource: raw bytes plus the
-// response headers the CORS check reads. Headers may be nil for
-// non-network sources, which the check treats as same-origin-safe.
 type FontResult struct {
 	Data    []byte
 	Headers map[string]string
 }
 
-// FontFetcher fetches one @font-face resource. Same shape as ImageFetcher,
-// but the result carries response headers: cross-origin faces require an
-// Access-Control-Allow-Origin grant (see fontCORSAllowed), so the engine
-// must see more than bytes.
 type FontFetcher func(base, url string) (FontResult, error)
 
-// FontRegistry accepts parsed font bytes and returns a 1-based index. The
-// engine calls it for every @font-face src it fetches; raster.Fonts satisfies
-// this interface.
 type FontRegistry interface {
 	Register(data []byte) (uint16, error)
 }
 
-// Option adjusts how a Session is built.
 type Option func(*Session)
 
-// WithMetrics supplies real font measurements so the inline pass measures word
-// widths and paint emits per-glyph advances from the same source. Without it,
-// layout falls back to a half-em-per-glyph estimate and paint stretches text.
 func WithMetrics(m layout.Metrics) Option {
 	return func(s *Session) { s.metrics = m }
 }
 
-// WithViewportH supplies the height the document's viewport is laid out
-// against. A fixed box resolves `bottom` and a percentage height against it, and
-// the viewport units are a share of it. Without it the initial containing block
-// has no height, so a bottom-pinned box lands above the visible area and `vh`
-// falls back to the size the CSS parser assumed.
 func WithViewportH(h float32) Option {
 	return func(s *Session) {
 		if finite(float64(h)) && h > 0 {
@@ -513,11 +282,6 @@ func validateDocumentTreeLimits(doc *dom.Document, limits dom.ParseLimits) error
 	return visit(&doc.Node, 0)
 }
 
-// WithLinkedCSS lets the session resolve and fetch <link rel=stylesheet>
-// sheets during the same document walk that collects <style> blocks, so the
-// sheets keep their document-order position in the cascade. base is the
-// document's final URL (after redirects); href resolution happens here so the
-// fetcher only ever sees absolute URLs.
 func WithLinkedCSS(base string, fetch CSSLinker) Option {
 	return func(s *Session) {
 		s.linkBase = base
@@ -528,10 +292,6 @@ func WithLinkedCSS(base string, fetch CSSLinker) Option {
 	}
 }
 
-// WithImages lets the session fetch and decode the <img> subresources a
-// document references during construction, so layout can size each image box
-// from its intrinsic size and paint can draw it. base is the document's final
-// URL, which srcs resolve against.
 func WithImages(base string, fetch ImageFetcher) Option {
 	return func(s *Session) {
 		s.imgBase = base
@@ -542,10 +302,6 @@ func WithImages(base string, fetch ImageFetcher) Option {
 	}
 }
 
-// WithDeferredImages is WithImages for the progressive-paint path: the
-// document's image references are collected during construction but nothing
-// is fetched, so the caller can paint the first frame immediately and call
-// LoadDeferredImages to bring the images in afterwards.
 func WithDeferredImages(base string, fetch ImageFetcher) Option {
 	return func(s *Session) {
 		s.imgBase = base
@@ -557,10 +313,6 @@ func WithDeferredImages(base string, fetch ImageFetcher) Option {
 	}
 }
 
-// WithCustomFontLoading lets the session fetch @font-face resources and
-// register them before style resolution. base is the document URL that font
-// src URLs resolve against; reg receives the raw font bytes and returns a
-// 1-based index threaded through FontSlot.CustomIdx.
 func WithCustomFontLoading(base string, fetch FontFetcher, reg FontRegistry) Option {
 	return func(s *Session) {
 		s.fontBase = base
@@ -572,11 +324,6 @@ func WithCustomFontLoading(base string, fetch FontFetcher, reg FontRegistry) Opt
 	}
 }
 
-// WithDeferredCustomFontLoading is WithCustomFontLoading for the
-// progressive-paint path: @font-face descriptors are collected during
-// construction but the font files are not fetched, so the first frame renders
-// with system fallback fonts and LoadDeferredFonts brings the web faces in
-// afterwards without holding up first paint.
 func WithDeferredCustomFontLoading(base string, fetch FontFetcher, reg FontRegistry) Option {
 	return func(s *Session) {
 		s.fontBase = base
@@ -589,11 +336,6 @@ func WithDeferredCustomFontLoading(base string, fetch FontFetcher, reg FontRegis
 	}
 }
 
-// WithScripts lets the session fetch <script src> bundles during construction
-// so external scripts run in document order between the inline ones. base is
-// the document's final URL (after redirects); srcs resolve against it and the
-// fetcher only ever sees absolute http(s) URLs. Without it, only inline
-// scripts run and bundle-booted pages stay shells.
 func WithScripts(base string, fetch ScriptFetcher) Option {
 	return func(s *Session) {
 		s.scriptBase = base
@@ -604,10 +346,6 @@ func WithScripts(base string, fetch ScriptFetcher) Option {
 	}
 }
 
-// WithIFrameDocumentLoader supplies the child-document loader used by iframe
-// browsing contexts. The engine refuses a plaintext child document under an
-// HTTPS parent before the loader runs, because an iframe is active mixed
-// content.
 func WithIFrameDocumentLoader(loader IFrameDocumentLoader) Option {
 	return func(s *Session) {
 		if loader == nil {
@@ -624,22 +362,14 @@ func WithIFrameDocumentLoader(loader IFrameDocumentLoader) Option {
 	}
 }
 
-// WithIFrameFormSubmitter supplies the host transport for POST forms whose
-// target names a child browsing context.
 func WithIFrameFormSubmitter(submit IFrameFormSubmitter) Option {
 	return func(s *Session) { s.iframeFormSubmit = submit }
 }
 
-// WithContentLanguage supplies the response's Content-Language value to the
-// document language algorithm used by selectors when no element declares one.
 func WithContentLanguage(value string) Option {
 	return func(s *Session) { s.contentLanguage = value }
 }
 
-// WithDocumentEncoding supplies the encoding already selected while decoding
-// a network response. The parser receives Unicode text, so its meta scan must
-// not replace the byte decoder's result (especially when a BOM or transport
-// charset took precedence).
 func WithDocumentEncoding(label string) Option {
 	return func(s *Session) { s.documentEncoding = documentEncodingLabel(label) }
 }
@@ -654,63 +384,41 @@ func documentEncodingLabel(label string) string {
 	return label
 }
 
-// WithJS supplies a JavaScript runtime for executing the document's classic
-// scripts. The engine walks <script> elements in document order after the DOM
-// is built and runs each one through the runtime. Script errors are recorded
-// but do not stop the pipeline: a page with a broken ad script still renders.
-// console receives the runtime's console output; pass nil to discard it.
 func WithJS(rt *js.Runtime) Option {
 	return func(s *Session) { s.jsRT = rt }
 }
 
-// WithDocumentTree supplies a document already parsed by a MIME-aware parser.
-// The session still applies its tree admission limits before styling or script
-// execution. The raw source should also be passed as NewSession's first
-// argument so the document byte limit is enforced.
 func WithDocumentTree(doc *dom.Document) Option {
 	return func(s *Session) { s.providedDoc = doc }
 }
 
-// WithInvalidation supplies the invalidation batch that JSMutationSink records
-// DOM mutations into. Without it, JSMutationSink is a no-op and the engine
-// does not learn about script-driven DOM changes.
 func WithInvalidation(inv *Invalidation) Option {
 	return func(s *Session) { s.inv = inv }
 }
 
-// WithDarkMode configures whether the session matches (prefers-color-scheme: dark).
 func WithDarkMode(enabled bool) Option {
 	return func(s *Session) {
 		s.darkMode = enabled
 	}
 }
 
-// WithHighContrast configures whether the session matches (prefers-contrast: more).
 func WithHighContrast(enabled bool) Option {
 	return func(s *Session) {
 		s.highContrast = enabled
 	}
 }
 
-// WithUserScripts configures user scripts to execute during the document lifecycle.
 func WithUserScripts(scripts []*userscript.Script) Option {
 	return func(s *Session) {
 		s.userScripts = scripts
 	}
 }
 
-// fontJob is one @font-face descriptor set queued for fetching.
 type fontJob struct {
 	family, srcURL, weightStr, styleStr string
-	// base is the document URL the src resolved against: the CORS origin
-	// the response headers are judged against.
-	base string
+	base                                string
 }
 
-// NewSession parses HTML and builds the pipeline state. The caller provides the
-// raw HTML and any author style sheets; <style> blocks inside the document are
-// collected automatically, and the UA stylesheet is added internally.
-// The returned session has a fully laid-out arena ready for paint.
 func NewSession(html string, authorCSS []string, viewportW float32, opts ...Option) (*Session, error) {
 	s := &Session{sub: &subBudget{}, cssText: &cssTextCache{}}
 	for _, opt := range opts {
@@ -771,17 +479,8 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	}
 	s.Doc = doc
 	doc.ContentLanguage = s.contentLanguage
-	// Bind the completed document as well, so iframes and other DOM objects
-	// created after the last parser script are visible to the runtime.
 	s.bindJSRuntime(doc)
-	// The image maps and decoded-pixel reservation exist before deferred scripts
-	// or image loading; parser-time scripts used the same reservation from the
-	// first parser pause.
 	s.initImageMaps()
-	// Inline scripts can synchronously read getComputedStyle. Collect the
-	// stylesheets before running page scripts, then lazily resolve the cascade on
-	// the first CSSOM read. The normal final style phase resolves it once for
-	// documents that do not query computed style during script execution.
 	preScriptSheets, err := s.collectSheets(doc, authorCSS)
 	if err != nil {
 		return nil, err
@@ -814,26 +513,11 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	if err := s.Reflow(viewportW); err != nil {
 		return nil, err
 	}
-	// The document is parsed, styled and laid out, so now run the lifecycle
-	// events a page's own boot registered on: DOMContentLoaded on the document
-	// (whose propagation path ends at window, where four of vnexpress's
-	// listeners sit) and then load on the window, with readyState moved to
-	// "interactive" and "complete" in between.
-	//
-	// Firing here rather than at the end of the parse is a deliberate deviation
-	// from browser timing, and the reason is measurable: Goosie runs every
-	// script after the whole document exists, and a ready handler that reads a
-	// computed style or measures a box must see the load cascade, not an empty
-	// style map. The cost is that the handler's writes arrive after the first
-	// layout pass, so a mutation re-runs style and layout here - exactly what
-	// the pump does for a later timer callback.
 	startupTaskRan := s.jsRT != nil && s.jsRT.TickDeferredTimer()
 	lifecycleMutated := false
 	if s.jsRT != nil {
 		s.jsRT.AutofocusDocument()
 		lifecycleMutated = s.jsRT.FireDocumentDOMContentLoaded()
-		// HTML's load event waits for child navigables. Resolve parser-discovered
-		// iframe documents after DOMContentLoaded and before firing document load.
 		s.jsRT.FlushIFrameLoads()
 		lifecycleMutated = s.jsRT.FireDocumentLoad() || lifecycleMutated
 	}
@@ -842,8 +526,6 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 			return nil, err
 		}
 	}
-	// Lifecycle callbacks discard their errors by design, so a deadline stop in
-	// DOMContentLoaded or load would otherwise leave no trace in this session.
 	s.noteScriptTimeout()
 	return s, nil
 }
@@ -877,28 +559,15 @@ func stylesheetDOMSignature(doc *dom.Document) string {
 	return signature.String()
 }
 
-// styleInstall names the sheet set a session has installed: which stylesheet
-// declarations the document carried, and under which media options they were
-// collected. Collecting asks the DOM twice over - walk it, then parse every
-// sheet it found - so a pass whose signature matches owes no collection at all.
-//
-// The media half is not decoration. @media conditions resolve while parsing, so
-// toggling dark mode or high contrast changes what the same text compiles to
-// even though no attribute moved.
 type styleInstall struct {
 	dom   string
 	media css.MediaOptions
 }
 
-// installSignature describes the collection a session would run right now, for
-// comparison with the one whose sheets are installed.
 func (s *Session) installSignature(doc *dom.Document) styleInstall {
 	return styleInstall{dom: stylesheetDOMSignature(doc), media: s.mediaOptions()}
 }
 
-// bindJSRuntime connects the live parser document to its realm. The first call
-// installs document-scoped providers; later calls refresh the DOM wrapper and
-// mutation-budget baseline after parser construction has added more nodes.
 func (s *Session) bindJSRuntime(doc *dom.Document) {
 	s.Doc = doc
 	s.initImageMaps()
@@ -940,11 +609,6 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		s.installLayoutProviders()
 		s.jsRT.SetSubresourceBudget(s.sub)
 		s.jsRT.SetImageLoader(s)
-		// The pixels a successful script load produced come back through this
-		// sink. It only records them; PumpJS attaches them after the turn and
-		// forces the layout that makes an in-document <img> paint (see
-		// script_image.go). Installed next to the loader, before any script
-		// runs, so a synchronous during-parse assignment is recorded too.
 		s.jsRT.SetImagePixelSink(s.retainScriptImage)
 		s.jsRT.SetViewportRect(0, 0, s.viewportW, s.viewportH)
 		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
@@ -1051,8 +715,6 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		s.jsRT.SetDOM(doc)
 		s.runtimeBound = true
 	} else {
-		// The same document is being appended by the tree builder. Rebinding it
-		// would discard live wrapper, image-load, and iframe state caches.
 		s.jsRT.QueueExistingIFrames()
 	}
 	s.jsRT.RefreshDocumentTreeReferences()
@@ -1064,9 +726,6 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 	}
 }
 
-// runParserScript is called by the tree builder at each parser pause. It
-// executes parser-inserted classic inline scripts and blocking external scripts
-// against the partially constructed live document before the next token.
 func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS []string) {
 	if s.jsRT == nil || doc == nil || node == nil || !node.Element() || node.Data != "script" || !isClassicScript(node) {
 		return
@@ -1125,11 +784,6 @@ func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS [
 	if source == "" {
 		return
 	}
-	// Stylesheets preceding this script are already in the live tree. Install
-	// their current cascade so synchronous CSSOM reads in the script see them.
-	// A page with 23 scripts and nothing new to install used to collect 23 times
-	// over, each pass re-requesting every linked sheet; the signature says when
-	// the tree or the media options actually moved.
 	if sig := s.installSignature(doc); sig != s.styleInstalled {
 		sheets, err := s.collectSheets(doc, authorCSS)
 		if err != nil {
@@ -1147,16 +801,6 @@ func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS [
 	}
 }
 
-// loadFonts extracts @font-face rules from every stylesheet, fetches the font
-// files, registers them with the font registry, and keeps the resulting
-// family→index table on the session so style resolution can match custom family
-// names against this document's own faces.
-//
-// Fetching runs through a bounded worker pool, the same shape as loadImages:
-// pages declare several families and weights, and a sequential walk spends
-// the whole wall-clock budget on the first handful. Registration stays on
-// this goroutine in document order so registry indices are deterministic and
-// a later rule overwrites the same family exactly as the sequential walk did.
 func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 	if s.fontFetch == nil || s.fontReg == nil {
 		return
@@ -1172,17 +816,10 @@ func (s *Session) loadFonts(sheets []*css.Stylesheet) {
 	s.applyFontJobs(jobs)
 }
 
-// DeferredFontsPending reports how many @font-face references were collected
-// but not yet fetched.
 func (s *Session) DeferredFontsPending() int {
 	return len(s.pendingFonts)
 }
 
-// LoadDeferredFonts fetches and registers the @font-face resources that
-// WithDeferredCustomFontLoading postponed, then calls onReady with the number
-// of fonts that registered successfully. The caller runs it on its own
-// goroutine; onReady fires once every font has settled, after which the caller
-// should re-resolve styles and reflow so text swaps to the web faces.
 func (s *Session) LoadDeferredFonts(onReady func(loaded int)) {
 	jobs := s.pendingFonts
 	s.pendingFonts = nil
@@ -1192,8 +829,6 @@ func (s *Session) LoadDeferredFonts(onReady func(loaded int)) {
 		}
 		return
 	}
-	// In-flight deferred work gates PumpJS reflows (see deferredActive):
-	// the font table attaches outside opMu by design.
 	atomic.AddInt32(&s.deferredActive, 1)
 	defer atomic.AddInt32(&s.deferredActive, -1)
 	s.applyFontJobs(jobs)
@@ -1202,9 +837,6 @@ func (s *Session) LoadDeferredFonts(onReady func(loaded int)) {
 	}
 }
 
-// RefreshAfterFonts re-resolves styles against the now-populated customFonts
-// table. Call it after LoadDeferredFonts completes so text picks up the web
-// faces instead of the system fallbacks the first paint used.
 func (s *Session) RefreshAfterFonts() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -1220,8 +852,6 @@ func (s *Session) RefreshAfterFonts() {
 	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, s.Styles, s.customFonts)
 }
 
-// applyFontJobs fetches font bytes through a bounded worker pool and registers
-// each successful result with the font registry, populating s.customFonts.
 func (s *Session) applyFontJobs(jobs []fontJob) {
 	data := make([]FontResult, len(jobs))
 	deadline := time.Now().Add(FontFetchBudget)
@@ -1241,9 +871,6 @@ func (s *Session) applyFontJobs(jobs []fontJob) {
 			if err != nil {
 				return
 			}
-			// The shared subresource total prices fonts against the same
-			// bytes stylesheets and images spend: over budget, the face
-			// stays unfetched and text keeps its fallback.
 			if !s.sub.take(len(fetched.Data)) {
 				return
 			}
@@ -1262,9 +889,6 @@ func (s *Session) applyFontJobs(jobs []fontJob) {
 		if fetchedBytes > maxFontBytes {
 			return
 		}
-		// Bytes transferred still count above; use is a separate question.
-		// A cross-origin face without a CORS grant never registers, and
-		// text keeps its fallback exactly as for a corrupt download.
 		if !fontCORSAllowed(jobs[i].base, jobs[i].srcURL, data[i].Headers) {
 			continue
 		}
@@ -1277,16 +901,11 @@ func (s *Session) applyFontJobs(jobs []fontJob) {
 		italic := j.styleStr == "italic" || j.styleStr == "oblique"
 		fonts.Register(j.family, idx, bold, italic, light)
 	}
-	// The table publishes under opMu so a concurrent pump reflow resolving
-	// styles never reads a half-attached table. Fetching above stays
-	// outside the lock: holding it across network I/O would stall the pump.
 	s.opMu.Lock()
 	s.customFonts = fonts
 	s.opMu.Unlock()
 }
 
-// collectFontJobs walks every stylesheet's @font-face rules and builds the
-// fetch job list: family, resolved src URL, weight and style descriptors.
 func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
 	var jobs []fontJob
 	for _, sheet := range sheets {
@@ -1320,10 +939,6 @@ func collectFontJobs(sheets []*css.Stylesheet, fontBase string) []fontJob {
 	return jobs
 }
 
-// extractFontURL pulls the first url(...) reference out of a @font-face src
-// value, escapes decoded — the payload is about to be fetched. The src property
-// can carry multiple fallback formats; the engine only serves TrueType and
-// OpenType, so the first url() is the one to try.
 func extractFontURL(v string) string {
 	t, ok := css.ScanURL(v)
 	if !ok {
@@ -1332,58 +947,24 @@ func extractFontURL(v string) string {
 	return css.URLPayload(t)
 }
 
-// maxFontRequests caps how many @font-face sources one document may fetch so a
-// stylesheet that references dozens of weights cannot stall first paint.
 const maxFontRequests = 16
 
-// maxFontBytes caps the total font payload one document may download. A single
-// woff2 is typically 20–100 KiB; 10 MiB covers generous real-world pages while
-// blocking a hostile stylesheet that references gigabytes of font data.
 const maxFontBytes = 10 << 20
 
-// FontFetchBudget is the wall-clock deadline for all font fetching. After this
-// elapses, remaining @font-face rules are skipped and the document falls back
-// to system fonts.
-//
-// It bounds spawn scheduling inside the engine; hosts also cancel in-flight
-// work with it (a deadline context around their fetchers), because a hung
-// host would otherwise ride out the transport timeout instead.
 const FontFetchBudget = 6 * time.Second
 
-// maxLoadedImages bounds how many image subresources one document may fetch,
-// so a page that references hundreds cannot stall the first frame.
 const maxLoadedImages = 256
 
-// ScriptFetcher fetches one external classic script. base is the document URL
-// the src resolves against; the returned bytes are the script source. A
-// fetcher that fails leaves that bundle unexecuted, and the page keeps the
-// globals its other scripts set, so one missing bundle does not stop
-// rendering. Concurrent calls must be safe; the engine fetches through a
-// bounded pool.
 type ScriptFetcher func(base, url string) ([]byte, error)
 
-// maxExternalScripts bounds how many <script src> bundles one document may
-// fetch, mirroring maxLinkedSheets: a page that references hundreds cannot
-// stall the first frame behind them.
 const maxExternalScripts = 32
 
-// ScriptFetchBudget stops external-script fetching past a wall-clock
-// deadline; bundles left unfetched are skipped exactly like failed ones.
 const ScriptFetchBudget = 6 * time.Second
 
-// ImageFetchBudget stops subresource fetching past a wall-clock deadline so a
-// slow or unreachable host cannot push the first render past its time limit;
-// images left unfetched simply reserve their box and paint nothing.
-//
-// Like FontFetchBudget it bounds spawn scheduling; hosts cancel in-flight
-// work with it around their fetchers for the same reason.
 const ImageFetchBudget = 6 * time.Second
 
-// MaxDocumentDecodedPixels bounds the total decoded pixels one document may
-// retain across all its images and backgrounds.
 const MaxDocumentDecodedPixels = 33554432
 
-// imageReservation tracks per-document decoded pixel reservations.
 type imageReservation struct {
 	limit    int64
 	reserved int64
@@ -1410,35 +991,19 @@ func (r *imageReservation) release(pixels int64) {
 	r.reserved -= pixels
 }
 
-// imgRef is one image subresource reference found in the document: the node
-// that wants it, the absolute URL it resolves to, and whether it is a CSS
-// background rather than an <img>.
 type imgRef struct {
-	id  dom.NodeID
-	abs string
-	bg  bool
-	// pseudo is set for a generated ::before/::after background. The host
-	// node ID is not used: the layout object the pixels attach to is the
-	// pseudo box, which is keyed by this style pointer.
+	id     dom.NodeID
+	abs    string
+	bg     bool
 	pseudo *style.ComputedStyle
-	// border marks a border-image source: fetched and budgeted like a
-	// background (no layout natural size), attached to BorderImage.
 	border bool
-	// mask marks a mask-image source: fetched and budgeted like a
-	// background (no layout natural size), attached to MaskImage.
-	mask bool
+	mask   bool
 }
 
-// loadImages collects the document's image references during NewSession.
-// With WithImages it fetches and applies them before the first layout; with
-// WithDeferredImages it only stores the references for LoadDeferredImages.
 func (s *Session) loadImages() {
 	if s.Doc == nil {
 		return
 	}
-	// Document-inline data: images resolve without a fetcher, so sessions
-	// without one (headless, tests) still render them; network URLs simply
-	// find nothing to call and stay empty.
 	s.initImageMaps()
 	if s.deferImages {
 		s.pendingImgs = s.collectImageRefs()
@@ -1448,10 +1013,6 @@ func (s *Session) loadImages() {
 	s.applyImages(refs, s.fetchImages(refs))
 }
 
-// initImageMaps creates the image tables and the per-document pixel
-// reservation. It is idempotent: NewSession calls it before scripts so a
-// script-created image draws on the same reservation as a parsed <img>, and
-// loadImages calls it again only when a session was built some other way.
 func (s *Session) initImageMaps() {
 	if s.imgReservation != nil {
 		return
@@ -1472,21 +1033,12 @@ func (s *Session) initImageMaps() {
 	s.bgVectorUsed = 0
 }
 
-// DeferredImagesPending reports how many image references WithDeferredImages
-// collected but has not fetched yet.
 func (s *Session) DeferredImagesPending() int {
 	s.imgMu.Lock()
 	defer s.imgMu.Unlock()
 	return len(s.pendingImgs)
 }
 
-// LoadDeferredImages fetches and applies the image references that
-// WithDeferredImages postponed, then calls onReady with the number of images
-// that decoded successfully. It blocks for the duration of the fetch, so the
-// interactive caller runs it on its own goroutine; onReady fires from that
-// goroutine once every image has settled, after which a Reflow sees the new
-// intrinsic sizes. Calling it on a session without deferred work reports 0
-// immediately.
 func (s *Session) LoadDeferredImages(onReady func(loaded int)) {
 	s.imgMu.Lock()
 	refs := s.pendingImgs
@@ -1505,10 +1057,6 @@ func (s *Session) LoadDeferredImages(onReady func(loaded int)) {
 	}
 }
 
-// collectImageRefs walks the styled document for <img> srcs and
-// background-image URLs in document order. A URL can back several nodes (an
-// <img> and a background), so each unique target is fetched once and fanned
-// back out to all of them.
 func (s *Session) collectImageRefs() []imgRef {
 	var refs []imgRef
 	var uniq []string
@@ -1519,8 +1067,6 @@ func (s *Session) collectImageRefs() []imgRef {
 		}
 		if n.Data == "img" {
 			if src := strings.TrimSpace(resolveImgSource(n, s.viewportW)); src != "" {
-				// data: payloads are document-inline bytes, not network
-				// subresources: they bypass URL resolution and decode locally.
 				if strings.HasPrefix(src, "data:") {
 					refs = append(refs, imgRef{id: n.ID, abs: src})
 					if !seen[src] {
@@ -1611,10 +1157,6 @@ func (s *Session) collectImageRefs() []imgRef {
 	return refs
 }
 
-// fetchImageBytes resolves one image reference to raw bytes: data: URIs
-// decode inline (no fetcher needed, no network), everything else goes through
-// the host fetcher. A nil fetcher therefore still renders document-inline
-// images, which is what headless and fetcher-less test sessions need.
 func (s *Session) fetchImageBytes(u string) ([]byte, error) {
 	if strings.HasPrefix(u, "data:") {
 		return decodeDataImageURL(u)
@@ -1629,12 +1171,6 @@ func (s *Session) fetchImageBytes(u string) ([]byte, error) {
 	return s.imgFetch(s.imgBase, u)
 }
 
-// fetchImages downloads and decodes each unique reference through a bounded
-// worker pool. A page can carry dozens of images; a sequential walk spends
-// the whole wall-clock budget on the first handful (at ~0.8s each, a 6s
-// budget covers only ~7), leaving the rest to reserve their box and paint
-// nothing. Fetching concurrently lets the same deadline cover the page, which
-// is what a real browser does and what the reference renders assume.
 func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 	uniq := make([]string, 0, len(refs))
 	seen := make(map[string]bool)
@@ -1651,11 +1187,6 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 	byURL := make(map[string]stdimage.Image, len(uniq))
 	var mu sync.Mutex
 	loaded := 0
-	// The attempt ceiling counts attempts, not successes: only the first
-	// maxLoadedImages unique references in document order ever reach a worker.
-	// Failed requests do not replenish the allowance, so 257 failing URLs cost
-	// 256 fetches rather than an unbounded burst of dials. The in-worker
-	// loaded check below stays as defense in depth.
 	if len(uniq) > maxLoadedImages {
 		uniq = uniq[:maxLoadedImages]
 	}
@@ -1689,20 +1220,9 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 			if err != nil || len(data) == 0 {
 				return
 			}
-			// Raw image bytes join the shared subresource total before
-			// anything decodes them: the pixel reservation bounds decoded
-			// cost, but 256 individually-capped responses could still spend
-			// gigabytes encoded without this.
 			if !s.sub.take(len(data)) {
 				return
 			}
-			// Vector backgrounds without intrinsic dimensions or ratio
-			// rasterize after layout at their tile size (see Reflow):
-			// decoding now could only guess a viewport. So do
-			// preserveAspectRatio=none images, which never keep a ratio
-			// and always tile the area. Stash the bounded bytes instead;
-			// anything else decodes as before. URLs backing <img>
-			// elements always decode immediately for layout.
 			if bgOnly[u] && imgdec.IsSVG(data) {
 				hasDims, hasRatio := imgdec.SVGIntrinsicKind(data)
 				if (!hasDims && !hasRatio) || imgdec.SVGPreserveNone(data) {
@@ -1744,15 +1264,10 @@ func (s *Session) fetchImages(refs []imgRef) map[string]stdimage.Image {
 	return byURL
 }
 
-// applyImages fans decoded pixels back out to the nodes that referenced them
-// and records intrinsic sizes for layout.
 func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 	s.imgMu.Lock()
 	defer s.imgMu.Unlock()
 	for _, r := range refs {
-		// Masks resolve before the vector-background deferral below: an
-		// intrinsic-less mask SVG has no tile-size raster path yet, so it
-		// stays unattached (painting unmasked) rather than joining one.
 		if r.mask {
 			if img, ok := byURL[r.abs]; ok {
 				s.masks[r.id] = img
@@ -1761,8 +1276,6 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 		}
 		if r.bg {
 			if _, ok := s.bgVectorSrc[r.abs]; ok {
-				// Intrinsic-less SVGs deferred for tile-size raster have
-				// no border-image use; drop them instead of misattaching.
 				if r.border {
 					continue
 				}
@@ -1797,12 +1310,6 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 	}
 }
 
-// attachVectorBackground rasterizes one vector background without intrinsic
-// dimensions at its laid-out tile size and attaches it with the vector flag,
-// so paint negotiates the same tile both sides of the boundary. The caller
-// holds imgMu; admission clamps the tile before a pixel is allocated, and
-// the tile joins the document pixel budget (releasing happens wholesale per
-// Reflow, see the attach loop).
 func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs string) {
 	data, ok := s.bgVectorSrc[abs]
 	if !ok || len(data) == 0 {
@@ -1812,17 +1319,11 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	if obj.Style == nil {
 		return
 	}
-	// The tile negotiates against the background-positioning area, exactly
-	// like paint: anything else decodes a raster paint would slice apart.
 	x0, y0, x1, y1 := obj.BgAreaRect(obj.Style.BackgroundOrigin)
 	areaW, areaH := x1-x0, y1-y0
 	if areaW <= 0 || areaH <= 0 {
 		return
 	}
-	// Natural dimensions feed the standard negotiation branches (auto with
-	// partial dims, explicit lengths); the vector branches ignore them.
-	// A source deferring both sides has nothing to size from, so auto
-	// tiles the area instead of the 300x150 fallback.
 	var natW, natH float32
 	if cfg, err := imgdec.Probe(data); err == nil {
 		natW, natH = float32(cfg.Width), float32(cfg.Height)
@@ -1830,11 +1331,6 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	if obj.Style.BackgroundSize == style.BgSizeAuto && imgdec.SVGDefersBothSides(data) {
 		natW, natH = areaW, areaH
 	}
-	// Cover and contain scale by ratio: without full intrinsic dimensions
-	// use the true viewBox ratio, not pixel-completed dimensions, so an
-	// extreme ratio still sizes to ~zero (contain drops) or astronomic
-	// (cover clamps to the area) instead of a rounded fabrication. Full
-	// dimensions govern their own tile.
 	if bs := obj.Style.BackgroundSize; bs == style.BgSizeCover || bs == style.BgSizeContain {
 		if hasDims, _ := imgdec.SVGIntrinsicKind(data); !hasDims {
 			if rw, rh, ok := imgdec.SVGRatio(data); ok {
@@ -1848,11 +1344,6 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 		return
 	}
 	if tw > imgdec.MaxImageDimension || th > imgdec.MaxImageDimension {
-		// Only cover can overshoot admission (its tile covers the area by
-		// scaling up): shrink the raster ratio-preserving instead of
-		// dropping the background. Paint recomputes the same tile geometry
-		// from the clamped raster's preserved ratio and upscales. Lengths
-		// stay fail-closed so paint cannot negotiate a different tile.
 		if obj.Style.BackgroundSize != style.BgSizeCover {
 			return
 		}
@@ -1863,9 +1354,6 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 		tw = int(float64(tw)*scale + 0.5)
 		th = int(float64(th)*scale + 0.5)
 		if tw <= 0 || th <= 0 {
-			// An extreme ratio collapses a side to nothing even clamped:
-			// rasterize the area itself, stretched. Paint places an auto
-			// tile 1:1 at the same area.
 			tw = int(areaW + 0.5)
 			th = int(areaH + 0.5)
 		}
@@ -1888,36 +1376,23 @@ func (s *Session) attachVectorBackground(candidate *layout.Arena, i int, abs str
 	obj.BgNoRatio = s.bgNoRatio[abs]
 }
 
-// styleViewport is the frame the cascade resolves the viewport units against. A
-// session created without a size leaves them to the parser's fallback.
 func (s *Session) styleViewport() style.Viewport {
 	return style.Viewport{W: s.viewportW, H: s.viewportH, DarkMode: s.darkMode}
 }
 
-// recordViewportWidth keeps the session's viewport in step with a layout pass
-// that was handed a new width. A width that is not a usable size is ignored
-// rather than baked into the viewport units, which would poison every length
-// downstream.
 func (s *Session) recordViewportWidth(w float32) {
 	if finite(float64(w)) && w > 0 && w <= MaxGeometry {
 		s.viewportW = w
 	}
 }
 
-// Viewport returns the configured viewport width and height of the session.
 func (s *Session) Viewport() (w, h float32) {
 	return s.viewportW, s.viewportH
 }
 
-// Reflow runs layout only, retaining the document, computed style identities,
-// and font metrics. The old arena is untouched unless the candidate validates.
-// Like Paint, this method must be called by the session's single owner.
 func (s *Session) Reflow(viewportW float32) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
-	// imgMu comes off before intersection dispatch below. An error return
-	// earlier in the function still ends with it held, so the unlock is
-	// conditional rather than a second defer.
 	s.imgMu.Lock()
 	imgLocked := true
 	defer func() {
@@ -1949,10 +1424,6 @@ func (s *Session) Reflow(viewportW float32) error {
 	if err := validateArena(candidate); err != nil {
 		return err
 	}
-	// Hand each laid-out image box its decoded pixels so paint can draw it. The
-	// arena is rebuilt every reflow, so this attachment has to run each time.
-	// Lazy vector tiles release wholesale first: they re-rasterize per Reflow
-	// while fetched pixels stay retained, so only the lazy share resets.
 	if s.imgReservation != nil {
 		s.imgReservation.release(s.bgVectorUsed)
 		s.bgVectorUsed = 0
@@ -1975,11 +1446,6 @@ func (s *Session) Reflow(viewportW float32) error {
 				if img, ok := s.borderImages[n.ID]; ok {
 					candidate.Objects[i].BorderImage = img
 				}
-				// Vector backgrounds without intrinsics rasterize here, at
-				// the laid-out tile size, because only now is the tile
-				// known. Skipped boxes (zero area, over-limit tiles, decode
-				// failures) keep no image and paint nothing, like any
-				// missing subresource.
 				if abs, ok := s.bgVectorRef[n.ID]; ok {
 					s.attachVectorBackground(candidate, i, abs)
 				}
@@ -1989,9 +1455,6 @@ func (s *Session) Reflow(viewportW float32) error {
 			}
 		}
 	}
-	// Hand each video box its current presentation state. The arena is rebuilt
-	// here while frames arrive between reflows, so without this a style change
-	// would blank a playing video until its next frame.
 	if s.media != nil {
 		for i := range candidate.Objects {
 			if n := candidate.Objects[i].Node; n != nil && n.Data == "video" {
@@ -2001,10 +1464,6 @@ func (s *Session) Reflow(viewportW float32) error {
 			}
 		}
 	} else {
-		// No backend was installed, so nothing in this document can ever play.
-		// The view says so rather than leaving the element looking like a video
-		// that has not started yet, and the builder drops the control bar with
-		// it: a bar that can never do anything is the worse of the two.
 		for i := range candidate.Objects {
 			if n := candidate.Objects[i].Node; n != nil && n.Data == "video" {
 				candidate.Objects[i].Media = paint.VideoView{
@@ -2015,8 +1474,6 @@ func (s *Session) Reflow(viewportW float32) error {
 			}
 		}
 	}
-	// Render canvas elements: replay recorded ops into a bitmap and attach it
-	// as the box's Image so the paint pipeline draws it like any other image.
 	if s.jsRT != nil {
 		for i := range candidate.Objects {
 			if n := candidate.Objects[i].Node; n != nil && n.Data == "canvas" {
@@ -2031,22 +1488,12 @@ func (s *Session) Reflow(viewportW float32) error {
 						}
 						frame.ReplayCanvasOps(b, frameOps, w, h)
 						candidate.Objects[i].Image = b.AsRGBA()
-						// Store the rendered pixels on the JS context so
-						// getImageData can read actual pixel values.
 						s.jsRT.SetCanvasBitmap(int(n.ID), b.RGBA, w, h)
 					}
 				}
 			}
 		}
 	}
-	// Update intersection observer geometry and check intersections.
-	//
-	// CheckIntersections runs the page's callbacks on this goroutine, and a
-	// callback that assigns img.src re-enters the loader (LoadScriptImage ->
-	// beginScriptImage), which takes imgMu. Go mutexes are not reentrant, so
-	// the lock ends here: holding it across the dispatch deadlocked every page
-	// whose observer loaded an image, and vneconomy.vn hung to its 120 s sweep
-	// deadline with beginScriptImage parked in Lock.
 	if s.jsRT != nil {
 		s.imgMu.Unlock()
 		imgLocked = false
@@ -2062,22 +1509,12 @@ func (s *Session) Reflow(viewportW float32) error {
 	}
 	s.Arena = candidate
 	s.layoutDirty.Store(false)
-	// Selection ends index the old arena's word list; the rebuild just moved
-	// every word, so the highlight would paint on the wrong boxes.
 	s.selActive = false
-	// Find marks hold old-arena word pointers, for the same reason.
 	s.findMarks = nil
 	s.findActive = 0
 	return nil
 }
 
-// hitBoxContains reports whether the layout-space point (tx, ty) lands on the
-// pixels obj actually owns. That is its border box minus whatever a
-// border-radius cuts away: Chromium measures the same way, so a corner point
-// outside the curve falls through to what is underneath
-// (scripts/verify-br073-effects.js). Paint and hit testing resolve the radius
-// through one rule so a corner cannot be invisible to the eye and still
-// capture the pointer.
 func hitBoxContains(obj *layout.Object, tx, ty float32) bool {
 	x0, y0, x1, y1 := obj.BorderRect()
 	if obj.Style == nil {
@@ -2086,8 +1523,6 @@ func hitBoxContains(obj *layout.Object, tx, ty float32) bool {
 	return obj.Style.UsedBorderRadius(x1-x0, y1-y0, 1).Contains(x0, y0, x1, y1, tx, ty)
 }
 
-// HitTestLink returns the href of the nearest ancestor <a> at the given
-// document-coordinate point (CSS pixels), or empty string if no link is there.
 func (s *Session) HitTestLink(x, y float32) string {
 	if s.Arena == nil {
 		return ""
@@ -2117,7 +1552,6 @@ func (s *Session) HitTestLink(x, y float32) string {
 	return ""
 }
 
-// HitTestImage returns the src of the nearest <img> at the given document point.
 func (s *Session) HitTestImage(x, y float32) string {
 	if s.Arena == nil {
 		return ""
@@ -2142,8 +1576,6 @@ func (s *Session) HitTestImage(x, y float32) string {
 	return ""
 }
 
-// resolveImgSource returns the effective image URL for an <img> element,
-// evaluating any parent <picture> and <source> elements against the current viewport.
 func resolveImgSource(n *dom.Node, viewportW float32) string {
 	if n.Parent != nil && n.Parent.Data == "picture" {
 		for c := n.Parent.FirstChild; c != nil; c = c.NextSibling {
@@ -2179,22 +1611,6 @@ func isSupportedImageType(typ string) bool {
 	return false
 }
 
-// ClickAt handles a click at the document-coordinate point. It finds an
-// activatable control at the point, fires a "click" event, and performs the
-// default action if the event was not prevented:
-//   - checkbox/radio: toggle the control
-//   - submit button: submit the form
-//   - reset button: reset the form
-//
-// While a <select> listbox is open a press on a row picks its option and a press
-// on the panel itself is spent dismissing it; every other press closes the
-// listbox and then continues as if the press had found no listbox, so the
-// control under the cursor still acts on that first click. A press that lands on
-// a closed select raises its listbox, and a press on the select whose listbox is
-// open closes it instead of raising it again.
-//
-// Returns true if an activatable control was found at the point, or the press
-// dismissed an open select listbox and the host has rows to stop painting.
 func (s *Session) ClickAt(x, y float32) bool {
 	s.dismissValidationBubble()
 	var dismissedPopup *dom.Node
@@ -2212,14 +1628,6 @@ func (s *Session) ClickAt(x, y float32) bool {
 		}
 	}
 	if disabled := disabledFormControlAt(hitNode); disabled != nil {
-		// A disabled form control takes part in no click. Measured in Chromium
-		// 131.0.6778.33 (/tmp/v2/run4.py, run8.py, run9.py, 2026-11-13): a
-		// press on the control itself dispatches no click to it or to any
-		// ancestor, a press on one of its children dispatches a click whose
-		// path stops at the control's boundary (capture and bubble run inside
-		// the subtree only, so the control, its form and the document's
-		// capture listeners never see it), and neither runs any activation
-		// behaviour.
 		if disabled != hitNode {
 			path := dom.EventPath(hitNode)
 			for i, node := range path {
@@ -2275,15 +1683,12 @@ func (s *Session) ClickAt(x, y float32) bool {
 	}
 	ev := dom.NewTrustedEvent("click", true, true)
 	if !dom.DispatchEvent(n, ev) {
-		return true // preventDefault was called
+		return true
 	}
 	s.runClickDefault(n)
 	return true
 }
 
-// toggleDetailsWithoutRuntime flips a details open state and dispatches the
-// toggle transitions the script runtime would otherwise own, including closing
-// the element's named group peers.
 func (s *Session) toggleDetailsWithoutRuntime(n *dom.Node) {
 	wasOpen := n.HasAttribute("open")
 	if wasOpen {
@@ -2306,9 +1711,6 @@ func (s *Session) toggleDetailsWithoutRuntime(n *dom.Node) {
 	}
 }
 
-// runClickDefault performs the default action for an activated control:
-// toggling checkbox/radio, or submitting/resetting the owning form for submit
-// and reset controls. Shared by pointer ClickAt and keyboard Enter activation.
 func (s *Session) runClickDefault(n *dom.Node) {
 	typ := strings.ToLower(n.GetAttribute("type"))
 	switch n.Data {
@@ -2416,8 +1818,6 @@ func (s *Session) runClickDefault(n *dom.Node) {
 	}
 }
 
-// activatableAt walks the arena in reverse paint order for the box containing
-// the point, then walks that box's ancestors for an activatable element.
 func (s *Session) activatableAt(x, y float32) *dom.Node {
 	if s.Arena == nil {
 		return nil
@@ -2443,9 +1843,6 @@ func (s *Session) activatableAt(x, y float32) *dom.Node {
 	return nil
 }
 
-// FormSubmission represents a form ready to be dispatched by the browser host.
-// Encoded holds the request body exactly as it must be sent; for
-// multipart/form-data that is binary data and Enctype carries the boundary.
 type FormSubmission struct {
 	Action  string
 	Method  string
@@ -2455,15 +1852,10 @@ type FormSubmission struct {
 	Encoded string
 }
 
-// SubmitForm fires a cancelable "submit" event on the form, then collects form
-// data and encodes it. The submission details are stored on the session for
-// the host to retrieve via PopSubmittedForm.
 func (s *Session) SubmitForm(form, submitter *dom.Node) {
 	s.submitForm(form, submitter)
 }
 
-// queueDialogClose fires the dialog's close event. It must be called without
-// opMu held: with no runtime the event dispatches synchronously.
 func (s *Session) queueDialogClose(node *dom.Node) {
 	if node == nil {
 		return
@@ -2480,9 +1872,6 @@ func (s *Session) queueDialogClose(node *dom.Node) {
 	})
 }
 
-// submitForm runs validation, the submit gate, and collection as separate
-// locked phases so no page-visible event dispatches under opMu: listeners may
-// call back into the session, and re-locking from a dispatch would deadlock.
 func (s *Session) submitForm(form, submitter *dom.Node) {
 	if form == nil {
 		return
@@ -2494,8 +1883,6 @@ func (s *Session) submitForm(form, submitter *dom.Node) {
 		invalid = s.validateForm(form)
 	}
 	if len(invalid) > 0 {
-		// A blocked submission is the user interaction that promotes
-		// :invalid into :user-invalid for the offending controls.
 		form.UserInteracted = true
 		for _, control := range invalid {
 			control.UserInteracted = true
@@ -2515,7 +1902,7 @@ func (s *Session) submitForm(form, submitter *dom.Node) {
 	}
 	ev := dom.NewTrustedEvent("submit", true, true)
 	if !dom.DispatchEvent(form, ev) {
-		return // preventDefault was called
+		return
 	}
 	s.opMu.Lock()
 	data := s.collectFormData(form, submitter)
@@ -2539,19 +1926,12 @@ func (s *Session) submitForm(form, submitter *dom.Node) {
 	}
 	rt := s.jsRT
 	s.opMu.Unlock()
-	// A target that names a live iframe navigates that browsing context, not the
-	// tab the form lives in. The runtime owns the frame load and reports whether
-	// the name matched; unmatched or reserved targets stay with the host below.
 	if rt != nil && (strings.EqualFold(method, "GET") || strings.EqualFold(method, "POST")) &&
 		rt.NavigateFormTargetToFrame(form, submitter) {
 		return
 	}
 	s.opMu.Lock()
 	action := FormActionFor(form, submitter)
-	// GET always uses URL encoding, whatever enctype or formenctype says. A
-	// POST honours text/plain and multipart/form-data; anything else, including
-	// a multipart encoder failure, uses URL encoding rather than claiming a body
-	// shape the request does not have.
 	declaredEnctype := FormEnctypeFor(form, submitter)
 	enctype := "application/x-www-form-urlencoded"
 	var encoded string
@@ -2584,7 +1964,6 @@ func (s *Session) submitForm(form, submitter *dom.Node) {
 	s.opMu.Unlock()
 }
 
-// PopSubmittedForm returns and clears the pending form submission, if any.
 func (s *Session) PopSubmittedForm() (*FormSubmission, bool) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2596,14 +1975,13 @@ func (s *Session) PopSubmittedForm() (*FormSubmission, bool) {
 	return sub, true
 }
 
-// ResetForm resets the form controls to their default values and fires a "reset" event.
 func (s *Session) ResetForm(form *dom.Node) {
 	if form == nil {
 		return
 	}
 	ev := dom.NewTrustedEvent("reset", false, true)
 	if !dom.DispatchEvent(form, ev) {
-		return // preventDefault was called
+		return
 	}
 
 	var resetNode func(n *dom.Node)
@@ -2622,7 +2000,6 @@ func (s *Session) ResetForm(form *dom.Node) {
 						reconcileFormRadioGroups(form)
 					}
 				case "submit", "reset", "button", "image":
-					// No-op
 				default:
 					n.ResetInputControlValue()
 					if s.jsRT != nil {
@@ -2681,31 +2058,18 @@ func reconcileFormRadioGroups(form *dom.Node) {
 	})
 }
 
-// Match is one find result: the document-space rect of an occurrence of the
-// query, in CSS pixels like every other engine coordinate.
 type Match struct {
 	X0, Y0, X1, Y1 float32
 }
 
-// maxFindMatches bounds the work a hostile page can make Find do.
 const maxFindMatches = 1000
 
-// findMark ties one Match rect to the word box whose paint emits the
-// highlight. match is the index into the Find result, so the active match can
-// switch color without re-running the search. The box is held by Key, not a
-// pointer: an arena *Object is only valid until the next allocating call, and
-// these marks live from Find until the next Paint or Reflow.
 type findMark struct {
 	key   layout.BoxKey
 	rect  Match
 	match int
 }
 
-// Find returns the rects of every visible occurrence of query, in tree order,
-// case-insensitively. Consecutive word boxes of a run are joined with single
-// spaces, so a query may span word boundaries and line breaks but not element
-// boundaries. The matches are also recorded for Paint to underlay with the
-// highlight until ClearFind or the next Find.
 func (s *Session) Find(query string) []Match {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2782,8 +2146,6 @@ func (s *Session) Find(query string) []Match {
 	return matches
 }
 
-// SetFindActive selects which match the most recent Find paints in the active
-// color. An out-of-range index leaves every match in the inactive color.
 func (s *Session) SetFindActive(index int) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2794,7 +2156,6 @@ func (s *Session) SetFindActive(index int) {
 	s.findActive = index
 }
 
-// ClearFind drops the highlight state left by Find.
 func (s *Session) ClearFind() {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2807,17 +2168,12 @@ func (s *Session) clearValidationBubbleLocked() {
 	s.validationMessage = ""
 }
 
-// dismissValidationBubble clears the message on an early interaction path that
-// does not already hold opMu.
 func (s *Session) dismissValidationBubble() {
 	s.opMu.Lock()
 	s.clearValidationBubbleLocked()
 	s.opMu.Unlock()
 }
 
-// SelectionBounds returns the union of selected word boxes in document
-// pixels, or false with no selection. Repaints damage exactly this (plus
-// the previous bounds across an update) instead of the whole document.
 func (s *Session) SelectionBounds() (frame.Rect, bool) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -2855,14 +2211,10 @@ func (s *Session) SelectionBounds() (frame.Rect, bool) {
 	if x1 <= x0 || y1 <= y0 {
 		return frame.Rect{}, false
 	}
-	// Outward rounding: damage must cover every touched pixel.
 	return frame.Rect4(int32(math.Floor(float64(x0))), int32(math.Floor(float64(y0))),
 		int32(math.Ceil(float64(x1))), int32(math.Ceil(float64(y1)))), true
 }
 
-// ScrollToID scrolls to the first element with the given ID in the document,
-// returning its Y coordinate (CSS pixels). If no matching element is found,
-// returns 0. Search order is document order for first-match semantics.
 func (s *Session) ScrollToID(targetID string) float32 {
 	if s.Arena == nil || targetID == "" {
 		return 0
@@ -2878,11 +2230,9 @@ func (s *Session) ScrollToID(targetID string) float32 {
 		}
 		obj := &objs[objID]
 
-		// Check this node for matching ID attribute
 		if obj.Node != nil {
 			for _, attr := range obj.Node.Attr {
 				if strings.EqualFold(attr.Name, "id") && attr.Value == targetID {
-					// Found target: get its top position
 					_, y, _, _ := obj.BorderRect()
 					if y > 0 {
 						foundY = y
@@ -2892,7 +2242,6 @@ func (s *Session) ScrollToID(targetID string) float32 {
 			}
 		}
 
-		// Continue walking children (first match wins in document order)
 		if foundY == 0 {
 			for k := obj.FirstKid; k != 0 && foundY == 0; k = objs[k].NextSibling {
 				walk(k)
@@ -2904,9 +2253,6 @@ func (s *Session) ScrollToID(targetID string) float32 {
 	return foundY
 }
 
-// matchRect maps a match spanning joined-string offsets [start, end) back onto
-// the word boxes it covers. Edges inside a box are interpolated proportionally
-// to character position, which is exact for full-word matches.
 func matchRect(words []*layout.Object, off []int, start, end int) (Match, int) {
 	first, last := 0, len(words)-1
 	for i := range words {
@@ -2952,12 +2298,6 @@ func parentObj(objs []layout.Object, o *layout.Object) *layout.Object {
 	return &objs[o.Parent]
 }
 
-// runScripts walks the DOM for <script> elements in document order and
-// executes each one through the JS runtime. A script error is isolated, not
-// fatal: a page with a broken script still renders, matching browser behavior
-// where one bad ad tag does not take down the page. Each error is recorded on
-// the session and reads back through ScriptErrors / ScriptErrorCount, so a
-// document that paints nothing can be told apart from one that never loaded.
 func (s *Session) runScripts() {
 	if s.jsRT == nil || s.Doc == nil {
 		return
@@ -2966,15 +2306,10 @@ func (s *Session) runScripts() {
 	if root == nil {
 		root = &s.Doc.Node
 	}
-	// Collect scripts in document order. Inline sources run from the tree;
-	// external bundles reserve a slot, fetch concurrently below, and run
-	// from their slot so execution order matches document order even though
-	// the bytes arrive out of order. External classic defer scripts run after
-	// parser-inserted classic scripts.
 	type scriptItem struct {
-		text        string // inline source, or fetched bundle once filled
-		ext         string // absolute bundle URL when external, else ""
-		name        string // sourceURL reported in stack traces
+		text        string
+		ext         string
+		name        string
 		deferScript bool
 		node        *dom.Node
 	}
@@ -2988,7 +2323,6 @@ func (s *Session) runScripts() {
 		if n.Element() && n.Data == "script" && isClassicScript(n) && !s.parserExecutedScripts[n] &&
 			(n.Namespace != dom.NSSVG || n.SVGScriptReady) {
 			if src := scriptSrc(n); src != "" {
-				// A src tag's inline text is ignored, per HTML.
 				if strings.HasPrefix(strings.ToLower(src), "data:") {
 					if text, ok := decodeDataScriptURL(src); ok {
 						items = append(items, scriptItem{text: text, name: src, deferScript: n.HasAttribute("defer") && !n.HasAttribute("async"), node: n})
@@ -3009,10 +2343,6 @@ func (s *Session) runScripts() {
 	}
 	collect(root)
 
-	// External bundles fetch through a bounded pool, the same shape as
-	// linked stylesheets: sequential fetching stalls the document behind
-	// the first slow host. Failures leave the slot empty and execution
-	// skips it, so one dead bundle never stops the page.
 	deadline := time.Now().Add(ScriptFetchBudget)
 	const scriptWorkers = 8
 	sem := make(chan struct{}, scriptWorkers)
@@ -3038,9 +2368,6 @@ func (s *Session) runScripts() {
 			if it.text == "" || it.deferScript != deferred {
 				continue
 			}
-			// A script error stays isolated - the rest of the document still runs
-			// and still renders, which is what a browser does with one bad ad tag -
-			// but it is no longer discarded.
 			var err error
 			if it.deferScript {
 				err = s.jsRT.RunParserDeferScript(it.text, it.name)
@@ -3056,9 +2383,6 @@ func (s *Session) runScripts() {
 	s.runUserScripts(userscript.RunAtDocumentEnd)
 }
 
-// decodeDataScriptURL decodes a bounded data: URL for a classic external
-// script. The URL is size-checked before percent or base64 decoding, then the
-// decoded source is checked against the normal per-script admission limit.
 func decodeDataScriptURL(raw string) (string, bool) {
 	if len(raw) > js.MaxScriptBytes*3+8192 {
 		return "", false
@@ -3106,7 +2430,6 @@ func decodeDataScriptURL(raw string) (string, bool) {
 	return string(source), true
 }
 
-// runUserScripts runs any configured user scripts matching the target lifecycle stage.
 func (s *Session) runUserScripts(stage userscript.RunAt) {
 	if s.jsRT == nil || len(s.userScripts) == 0 {
 		return
@@ -3129,7 +2452,6 @@ func (s *Session) runUserScripts(stage userscript.RunAt) {
 	}
 }
 
-// scriptSrc returns the src attribute of a script tag, or "" when inline.
 func scriptSrc(n *dom.Node) string {
 	for _, a := range n.Attr {
 		if strings.EqualFold(a.Name, "src") {
@@ -3145,10 +2467,6 @@ func scriptSrc(n *dom.Node) string {
 	return ""
 }
 
-// isClassicScript reports whether a script tag holds executable classic
-// JavaScript: no type (or a JavaScript MIME type) runs, while modules and
-// non-JS payloads (JSON-LD, templates) never do. nomodule scripts run:
-// without module support this engine is exactly the fallback audience.
 func isClassicScript(n *dom.Node) bool {
 	for _, a := range n.Attr {
 		if !strings.EqualFold(a.Name, "type") {
@@ -3168,10 +2486,6 @@ func isClassicScript(n *dom.Node) bool {
 	return true
 }
 
-// Close releases resources held by the session. If a JS runtime was supplied,
-// it is closed so the realm is torn down; any media elements stop and release
-// their downloaded files, because a document that is going away must not leave
-// audio playing behind it.
 func (s *Session) Close() {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
@@ -3199,16 +2513,6 @@ func (s *Session) Close() {
 	}
 }
 
-// PumpMedia advances every media controller one step and returns the
-// document-space rectangles whose painting changed. It applies whatever the
-// download workers produced, polls the backends for new frames and positions,
-// attaches the results to the laid-out video boxes, closes the elements that left
-// the document, and hands any transitions to the JavaScript runtime.
-//
-// It never reflows. A decoded frame is not a style change, and paying a layout
-// pass per video frame would put the document's cost on the display's clock
-// instead of on the page's own edits. Callers repaint the returned rectangles and
-// nothing else; an empty result means the tick was worth nothing.
 func (s *Session) PumpMedia() []frame.RectF {
 	if s.media == nil {
 		return nil
@@ -3219,8 +2523,6 @@ func (s *Session) PumpMedia() []frame.RectF {
 		return nil
 	}
 	dmg := s.media.pump(&s.Doc.Node, s.Arena)
-	// Drained under the lock, dispatched outside it: running a page's listener is
-	// user code, and user code must not run while the pipeline state is held.
 	var dispatch []mediaDispatch
 	if s.jsRT != nil {
 		dispatch = s.media.drainEvents()
@@ -3234,8 +2536,6 @@ func (s *Session) PumpMedia() []frame.RectF {
 	return dmg
 }
 
-// JSTitle returns the document title as seen by the JS runtime after script
-// execution. If no runtime was supplied, it returns the empty string.
 func (s *Session) JSTitle() string {
 	if s.jsRT == nil {
 		return ""
@@ -3243,14 +2543,6 @@ func (s *Session) JSTitle() string {
 	return s.jsRT.Title()
 }
 
-// PendingLoadTimerDelay reports how soon this document still owes a timer it
-// queued before its own load step, and false when no such timer is waiting.
-// It exists for hosts that decide when a frame is worth writing: a page that
-// reveals itself on a startup timer looks completely idle to the frame path
-// while that timer is pending, because every tile is drawn and nothing has
-// been repainted since the last one. The answer covers the work the pump would
-// run next, not the whole queue, so a page that polls on a long timer does not
-// hold a host waiting for it. A session with no runtime owes nothing.
 func (s *Session) PendingLoadTimerDelay() (time.Duration, bool) {
 	if s.jsRT == nil {
 		return 0, false
@@ -3260,81 +2552,41 @@ func (s *Session) PendingLoadTimerDelay() (time.Duration, bool) {
 	return s.jsRT.PendingLoadTimerDelay()
 }
 
-// PumpJS runs one event-loop turn for the document: timer, fetch, worker and
-// RAF callbacks fire, then the pipeline reflows if the turn changed the DOM.
-// It reports whether the caller must repaint for a DOM or canvas change.
-//
-// State-only callbacks do not repaint. While deferred font/image loads are in
-// flight the DOM reflow is skipped (their tables attach outside opMu by
-// design) and retried next tick; timers still fire, so work is delayed.
 func (s *Session) PumpJS(viewportW float32) bool {
 	if s.jsRT == nil {
 		return false
 	}
-	// One pump turn at a time, and never during teardown: Close waits for this
-	// read side before it closes the realm. See lifecycleMu.
 	s.lifecycleMu.RLock()
 	defer s.lifecycleMu.RUnlock()
 	canvasBefore := s.jsRT.CanvasVisualStamp()
-	// A scroll offset written during the previous frame is delivered here, before
-	// any animation frame callback of this one, which is the point a page that
-	// scrolled and then asked for a frame sees its scroll event.
 	s.jsRT.FlushScrollEvents()
 	s.jsRT.Tick()
 	if s.jsRT.HasPendingRAF() {
 		s.jsRT.TickRAF(time.Now())
 	}
-	// Timer and animation-frame callbacks swallow their interrupt errors, so
-	// this is where a deadline stop becomes session state the chrome can act on.
 	s.noteScriptTimeout()
-	// Attribute changes made by timer or message callbacks can queue new
-	// iframe navigations after the document's initial load. Process those
-	// navigations as part of the event-loop pump so their child scripts and
-	// load events can run instead of waiting forever for startup lifecycle.
 	s.jsRT.FlushIFrameLoads()
 	s.fixupDisabledFocus()
 	canvasChanged := canvasBefore != s.jsRT.CanvasVisualStamp()
-	// Script image results recorded by the pixel sink during Tick are
-	// reconciled after every callback of the turn has run, so the last src
-	// write wins. A turn that still owes a layout from an earlier postponed
-	// turn reports layoutPending even when nothing changed this turn.
 	layoutPending := s.drainScriptImages()
-	// Mutation state is captured before Reset: it decides between a full
-	// re-resolve and skipping straight to repaint below.
 	mutated := s.focusStylePending
 	if s.inv != nil {
 		mutated = mutated || !s.inv.Empty()
 		s.inv.Reset()
 	}
 	if !mutated && !layoutPending {
-		// Timers/RAF can contain state-only work and even a continuously
-		// rescheduled no-op animation loop. Every DOM write notifies the sink;
-		// canvas operations are the other observable output in this runtime.
-		// Avoid full frame commits when neither changed.
 		return canvasChanged
 	}
 	if atomic.LoadInt32(&s.deferredActive) > 0 {
 		s.focusStylePending = true
-		// The layout-pending bit stays set: the next tick must still realize
-		// the attached pixels once the deferred tables have settled.
 		return false
 	}
 	s.focusStylePending = false
-	// Re-resolve before reflowing: scripts may have added nodes or classes
-	// the load-time cascade never saw, and unstyled nodes are skipped by
-	// layout. Stored sheets (linked and imported, in order) resolve exactly
-	// as at load. Reflow takes opMu itself; PumpJS composes locked
-	// primitives and never holds it, so reflow cannot deadlock against a
-	// concurrent Close.
 	layouts := s.workCounts.layoutBuilds.Load()
 	if err := s.RestyleAndReflow(viewportW); err != nil {
 		return false
 	}
 	if layoutPending && s.workCounts.layoutBuilds.Load() == layouts {
-		// RestyleAndReflow can refresh computed styles without rebuilding the
-		// arena when the cascade is unchanged. That is not enough here: the
-		// attached pixels changed s.natural, which only a real layout reads.
-		// Build once because the restyle path did not.
 		if err := s.Reflow(viewportW); err != nil {
 			return false
 		}
@@ -3345,11 +2597,6 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	return true
 }
 
-// RestyleAndReflow resolves the document's current CSS state and rebuilds its
-// layout when a layout input changed. For geometry-neutral style changes it
-// refreshes arena style pointers and leaves the existing layout in place. It is
-// used when an interaction changes selector state such as :checked, :focus, or
-// :placeholder-shown without a script DOM mutation.
 func (s *Session) RestyleAndReflow(viewportW float32) error {
 	if s == nil {
 		return nil
@@ -3385,9 +2632,6 @@ func (s *Session) RestyleAndReflow(viewportW float32) error {
 	return s.Reflow(viewportW)
 }
 
-// HasPseudoClassRule reports whether an author stylesheet contains a selector
-// that depends on pseudo. Interaction code uses it to avoid a full document
-// style and layout pass when changing a state that no page rule observes.
 func (s *Session) HasPseudoClassRule(pseudo string) bool {
 	if s == nil || pseudo == "" {
 		return false
@@ -3410,23 +2654,11 @@ func (s *Session) HasPseudoClassRule(pseudo string) bool {
 	return false
 }
 
-// HasValidityClassRules reports whether an author sheet styles a validity
-// pseudo-class. Those states follow a control's value and interaction history
-// without changing its box, so a value edit or a blocked submission must
-// re-resolve styles even where layout is known to be stable.
 func (s *Session) HasValidityClassRules() bool {
 	return s.HasPseudoClassRule("valid") || s.HasPseudoClassRule("invalid") ||
 		s.HasPseudoClassRule("user-valid") || s.HasPseudoClassRule("user-invalid")
 }
 
-// JSMutationSink returns a function suitable for js.Options.OnMutation that
-// records DOM mutations in the session's invalidation batch. The caller passes
-// it to the JS runtime at construction time; when a script mutates the DOM
-// (setAttribute, appendChild, innerHTML, etc.), the runtime fires the callback
-// and the engine learns it must re-style and re-layout.
-//
-// If no invalidation was supplied via WithInvalidation, the returned function
-// is a no-op so a session without invalidation tracking still works.
 func (s *Session) JSMutationSink() func() {
 	return func() {
 		if s.inv != nil {
@@ -3435,11 +2667,6 @@ func (s *Session) JSMutationSink() func() {
 	}
 }
 
-// JSLiveNodeCount reports how many nodes the script admission budget counts as
-// live in this document. It exposes the budget's counter for tests and
-// diagnostics so they can assert a hostile script never pushed the tree past
-// MaxDocumentNodes. It returns 0 when no JS runtime was supplied, since the
-// budget is only built for a scripted session.
 func (s *Session) JSLiveNodeCount() int {
 	if s == nil || s.jsNodeBudget == nil {
 		return 0
@@ -3447,11 +2674,6 @@ func (s *Session) JSLiveNodeCount() int {
 	return s.jsNodeBudget.liveCount()
 }
 
-// SubresourceBytesUsed reports the raw subresource bytes this document has
-// charged to its shared budget across linked sheets, @imports, fonts, images
-// and JS fetch/XHR responses. It exposes the pool the per-family caps all draw
-// on, so a test can assert a fetch was accounted rather than slipping past the
-// budget. It returns 0 when the session has no budget.
 func (s *Session) SubresourceBytesUsed() int64 {
 	if s == nil || s.sub == nil {
 		return 0
@@ -3461,31 +2683,14 @@ func (s *Session) SubresourceBytesUsed() int64 {
 	return s.sub.used
 }
 
-// HasPendingDOMMutation reports whether a synchronous script callback has
-// changed the document since the last PumpJS. Input handlers run inside Edit;
-// when one mutates the DOM, the pump will restyle and reflow the resulting
-// state. The caller can avoid doing a native reflow immediately before that
-// full mutation pass. Invalidation is single-owner and this query must be made
-// on the same thread that dispatches document events and calls PumpJS.
 func (s *Session) HasPendingDOMMutation() bool {
 	return s != nil && s.inv != nil && s.inv.domMutationPending
 }
 
-// CanDeferControlEditReflow reports whether the next PumpJS turn can perform
-// the style and layout work for a synchronous input-handler mutation. While
-// deferred resources are active PumpJS intentionally postpones that work, so
-// the caller must keep its immediate reflow instead of leaving stale geometry
-// on screen.
 func (s *Session) CanDeferControlEditReflow() bool {
 	return s.HasPendingDOMMutation() && atomic.LoadInt32(&s.deferredActive) == 0
 }
 
-// FocusedInputValueDoesNotAffectLayout reports whether the focused control is
-// a single-line text input whose intrinsic box size is independent of its
-// current value. Paint reads that value directly from the DOM node, so a
-// repaint is sufficient unless an input handler queued a DOM mutation (which
-// CanDeferControlEditReflow handles separately). Textareas and button-like
-// inputs are deliberately excluded: their content can participate in layout.
 func (s *Session) FocusedInputValueDoesNotAffectLayout() bool {
 	if s == nil {
 		return false
@@ -3503,8 +2708,6 @@ func (s *Session) FocusedInputValueDoesNotAffectLayout() bool {
 	}
 }
 
-// ActiveElement returns the focused node without taking the pipeline mutex so
-// scripts can read document.activeElement from inside focus/blur handlers.
 func (s *Session) ActiveElement() *dom.Node {
 	if s == nil {
 		return nil
@@ -3521,8 +2724,6 @@ func (s *Session) ActiveElement() *dom.Node {
 	return s.Doc.HTML
 }
 
-// TickAnimations advances all active animations to the given time.
-// Returns true if any animation is still active (needs another frame).
 func (s *Session) TickAnimations(now time.Time) bool {
 	if s.Animations == nil {
 		return false
@@ -3534,9 +2735,6 @@ func (s *Session) TickAnimations(now time.Time) bool {
 	return active
 }
 
-// AnimationsActive reports whether any @keyframes animation is in progress.
-// This is the method the surface loop checks to decide whether to keep
-// producing frames.
 func (s *Session) AnimationsActive() bool {
 	if s.Animations == nil {
 		return false
@@ -3544,14 +2742,10 @@ func (s *Session) AnimationsActive() bool {
 	return s.Animations.HasActive()
 }
 
-// startAnimations scans computed styles for animation declarations and
-// registers them with the AnimationController. Keyframes are looked up from
-// the session's stylesheets.
 func (s *Session) startAnimations() {
 	if s.Styles == nil {
 		return
 	}
-	// Collect keyframes from all stylesheets.
 	kfMap := make(map[string][]css.KeyframeStop)
 	for _, sheet := range s.sheets {
 		for _, kf := range sheet.Keyframes {
@@ -3561,7 +2755,6 @@ func (s *Session) startAnimations() {
 	if len(kfMap) == 0 {
 		return
 	}
-	// Check if any style has an animation-name that matches a keyframes rule.
 	hasAnimations := false
 	for _, cs := range s.Styles {
 		if cs.AnimationName != "" {
@@ -3601,20 +2794,10 @@ func (s *Session) startAnimations() {
 	}
 }
 
-// StyleSheetText answers the CSS text this navigation already fetched for one
-// absolute style sheet URL. document.styleSheets parses a linked sheet's rules
-// from it, and ok is false when the memo holds nothing - the URL was never
-// requested, or its request failed - so that sheet reports no rules, which is
-// the measured answer for a <link> whose fetch 404s.
-//
-// The engine owns the fetch and internal/js may not reach it, so this narrow
-// reader is what SetLinkedCSSProvider installs. The memo belongs to the session
-// from construction and locks itself, so no session lock is taken here.
 func (s *Session) StyleSheetText(url string) (string, bool) {
 	return s.cssText.lookup(url)
 }
 
-// Stylesheets returns a slice of parsed stylesheets applied to this session.
 func (s *Session) Stylesheets() []*css.Stylesheet {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -3623,7 +2806,6 @@ func (s *Session) Stylesheets() []*css.Stylesheet {
 	return out
 }
 
-// DOMStats computes the total node count and maximum depth of the session's DOM tree.
 func (s *Session) DOMStats() (nodeCount int, maxDepth int) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -3647,8 +2829,6 @@ func (s *Session) DOMStats() (nodeCount int, maxDepth int) {
 	return nodeCount, maxDepth
 }
 
-// EvaluateJS runs a JavaScript expression against the document's JS runtime
-// and returns its string result.
 func (s *Session) EvaluateJS(expr string) (string, error) {
 	s.opMu.Lock()
 	rt := s.jsRT
@@ -3659,47 +2839,36 @@ func (s *Session) EvaluateJS(expr string) (string, error) {
 	return rt.Evaluate(expr)
 }
 
-// DarkMode reports whether the session is operating under dark color scheme.
 func (s *Session) DarkMode() bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.darkMode
 }
 
-// HighContrast reports whether the session is operating under high contrast mode.
 func (s *Session) HighContrast() bool {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
 	return s.highContrast
 }
 
-// SetDarkMode updates the dark color scheme mode for the session.
 func (s *Session) SetDarkMode(enabled bool) {
 	s.opMu.Lock()
 	s.darkMode = enabled
 	s.opMu.Unlock()
 }
 
-// SetHighContrast updates the high contrast mode for the session.
 func (s *Session) SetHighContrast(enabled bool) {
 	s.opMu.Lock()
 	s.highContrast = enabled
 	s.opMu.Unlock()
 }
 
-// SetViewportScrollCallback installs a function the session calls when the JS
-// runtime's viewport scroll offset changes (window.scrollTo, scrollTop on the
-// scrolling element). The host uses this to bridge the value into the raster
-// scheduler so painted tiles follow the JS offset.
 func (s *Session) SetViewportScrollCallback(fn func(x, y float64)) {
 	s.opMu.Lock()
 	s.onViewportScroll = fn
 	s.opMu.Unlock()
 }
 
-// SyncViewportScroll pushes a viewport scroll offset from the host into the JS
-// runtime. The host calls this after scrolling the raster scheduler (e.g. from
-// a wheel or keyboard gesture) so window.scrollY reflects the painted position.
 func (s *Session) SyncViewportScroll(x, y float64) {
 	if s.jsRT == nil {
 		return

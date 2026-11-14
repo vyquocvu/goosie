@@ -8,17 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// The dial-time guard in internal/net is handed this predicate, so it has to
-// answer the same question the URL-resolution rule answers - just about an
-// address the resolver returned rather than a name the author wrote. Two lists
-// that drift apart would leave a page refused for naming 169.254.169.254 and
-// served for naming a host that resolves to it, which is the hole in the wrong
-// half of the pair.
-
-// addressOf takes the host out of one of localAuthorities and returns it as an
-// address, or nil for the entries that are names rather than addresses. Those
-// names belong to the resolution-time rule alone: no resolver answer can be
-// called db.internal at dial time.
 func addressOf(authority string) net.IP {
 	host := authority
 	if h, _, err := net.SplitHostPort(authority); err == nil {
@@ -46,8 +35,6 @@ func TestAddressBlockedAgreesWithTheResolutionRule(t *testing.T) {
 }
 
 func TestAddressBlockedAllowsPublicAddresses(t *testing.T) {
-	// The other half: a guard that blocks everything is a browser that cannot
-	// browse. These are the addresses the public web actually answers on.
 	for _, s := range []string{"8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:4700:4700::1111", "2001:4860:4860::8888"} {
 		ip := net.ParseIP(s)
 		if ip == nil {

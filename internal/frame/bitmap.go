@@ -5,12 +5,8 @@ import (
 	"image/color"
 )
 
-// Color is a premultiplied RGBA pixel packed as R<<24|G<<16|B<<8|A so that a
-// uint32 store is one aligned word and byte order in memory is RGBA on a little
-// endian host, matching what a bitmap context expects.
 type Color uint32
 
-// RGBA builds a premultiplied color from straight components.
 func RGBA(r, g, b, a uint8) Color {
 	if a == 255 {
 		return Color(uint32(r)<<24 | uint32(g)<<16 | uint32(b)<<8 | 255)
@@ -21,41 +17,26 @@ func RGBA(r, g, b, a uint8) Color {
 	return Color(ra<<24 | ga<<16 | ba<<8 | uint32(a))
 }
 
-// RGB builds an opaque color.
 func RGB(r, g, b uint8) Color { return RGBA(r, g, b, 255) }
 
-// A returns the alpha byte, which is also the coverage of a premultiplied color.
 func (c Color) A() uint8 { return uint8(c & 0xFF) }
 
-// R returns the premultiplied red byte.
 func (c Color) R() uint8 { return uint8(c >> 24) }
 
-// G returns the premultiplied green byte.
 func (c Color) G() uint8 { return uint8(c >> 16 & 0xFF) }
 
-// B returns the premultiplied blue byte.
 func (c Color) B() uint8 { return uint8(c >> 8 & 0xFF) }
 
-// RGBA returns the color as a standard-library premultiplied RGBA8 value.
 func (c Color) RGBA() color.RGBA { return color.RGBA{R: c.R(), G: c.G(), B: c.B(), A: c.A()} }
 
-// AsColor converts a standard-library premultiplied RGBA8 color into a Bitmap
-// color. It is the inverse of RGBA, and the reason both types can stay 8-bit
-// premultiplied with no conversion table.
 func AsColor(c color.RGBA) Color {
 	return Color(uint32(c.R)<<24 | uint32(c.G)<<16 | uint32(c.B)<<8 | uint32(c.A))
 }
 
-// Opaque returns whether the color covers a pixel completely. The blit paths
-// have a whole-line copy fast path gated on this, so it is on the hot path.
 func (c Color) Opaque() bool { return c.A() == 255 }
 
-// TransparentBlack is the cleared-buffer value: no coverage, nothing to blend.
 const TransparentBlack Color = 0
 
-// BlendOver returns src composited over dst, both premultiplied. The +127 is
-// the rounding term for the /255, without which repeated compositing drifts
-// dark.
 func BlendOver(dst, src Color) Color {
 	sa := uint32(src.A())
 	if sa == 255 {
@@ -72,9 +53,6 @@ func BlendOver(dst, src Color) Color {
 	return Color(r<<24 | g<<16 | b<<8 | a)
 }
 
-// BlendOverCoverage blends an opaque color c over dst with partial coverage cov in [0..255].
-// It computes (c * cov + dst * (255 - cov) + 127) / 255 directly, avoiding redundant
-// intermediate scaling and rounding divisions.
 func BlendOverCoverage(dst Color, c Color, cov uint8) Color {
 	if cov == 255 {
 		return c
@@ -91,17 +69,12 @@ func BlendOverCoverage(dst Color, c Color, cov uint8) Color {
 	return Color(r<<24 | g<<16 | b<<8 | a)
 }
 
-// Bitmap is an owned RGBA buffer with an explicit stride. Stride is a field
-// rather than W*4 so a sub-region or a platform-owned buffer can be wrapped
-// without copying, and so every access path is exercised by the tests.
 type Bitmap struct {
 	RGBA   []byte
 	W, H   int
 	Stride int
 }
 
-// NewBitmap allocates a zeroed bitmap of the given size. Pooling is layered on
-// top by BitmapPool; this constructor is the non-pooled path used at setup time.
 func NewBitmap(w, h int) *Bitmap {
 	if w <= 0 || h <= 0 {
 		return &Bitmap{}
@@ -110,43 +83,25 @@ func NewBitmap(w, h int) *Bitmap {
 	return &Bitmap{RGBA: make([]byte, stride*h), W: w, H: h, Stride: stride}
 }
 
-// Empty reports whether the bitmap has no pixels.
 func (b *Bitmap) Empty() bool { return b == nil || len(b.RGBA) == 0 || b.W <= 0 || b.H <= 0 }
 
-// Bounds returns the bitmap's extent in its own local coordinate space.
 func (b *Bitmap) Bounds() Rect { return Rect4(0, 0, int32(b.W), int32(b.H)) }
 
-// Size returns the dimensions as a Size, the key used by BitmapPool.
 func (b *Bitmap) Size() Size { return Size{W: int32(b.W), H: int32(b.H)} }
 
-// Bytes returns the backing allocation size, which is what tile budgets track.
 func (b *Bitmap) Bytes() int64 { return int64(len(b.RGBA)) }
 
-// AsRGBA reinterprets the buffer as an image.RGBA over the same memory, with no
-// copy. The layouts agree exactly: RGBA is four bytes per pixel in R, G, B, A
-// order, premultiplied, which is Color's packing, so this is a header and not a
-// conversion.
-//
-// It exists so the rasterizer can hand a tile to the standard drawing primitives
-// for antialiased glyph and image blending without a per-pixel At/Set round trip,
-// while every v2-owned path keeps using the typed Bitmap API.
 func (b *Bitmap) AsRGBA() *image.RGBA {
 	return &image.RGBA{Pix: b.RGBA, Stride: b.Stride, Rect: image.Rect(0, 0, b.W, b.H)}
 }
 
-// Reset zeroes every pixel, including padding bytes, so a buffer can be
-// returned to the pool in a defined state.
 func (b *Bitmap) Reset() { clear(b.RGBA) }
 
-// Pix returns the 4 bytes at (x, y), which must be in bounds.
 func (b *Bitmap) Pix(x, y int) []byte {
 	o := y*b.Stride + x*4
 	return b.RGBA[o : o+4 : o+4]
 }
 
-// At returns the pixel at (x, y), or TransparentBlack when out of bounds. The
-// bounds check stays here rather than at call sites because the sampling paths
-// legitimately read past an edge.
 func (b *Bitmap) At(x, y int) Color {
 	if x < 0 || y < 0 || x >= b.W || y >= b.H {
 		return TransparentBlack
@@ -155,7 +110,6 @@ func (b *Bitmap) At(x, y int) Color {
 	return Color(uint32(p[0])<<24 | uint32(p[1])<<16 | uint32(p[2])<<8 | uint32(p[3]))
 }
 
-// Set writes c at (x, y), ignoring out-of-bounds coordinates.
 func (b *Bitmap) Set(x, y int, c Color) {
 	if x < 0 || y < 0 || x >= b.W || y >= b.H {
 		return
@@ -167,10 +121,6 @@ func (b *Bitmap) Set(x, y int, c Color) {
 	p[3] = byte(c)
 }
 
-// FillRect writes c over the clipped region. An opaque color takes a
-// memset-style line path; a translucent one blends per pixel. writes, when
-// non-nil, counts touched pixels and is how the frame gate proves a warm
-// scroll did minimal pixel work.
 func (b *Bitmap) FillRect(r Rect, c Color, writes *int64) {
 	cl := r.Intersection(b.Bounds())
 	if cl.Empty() {
@@ -186,8 +136,6 @@ func (b *Bitmap) FillRect(r Rect, c Color, writes *int64) {
 			for i := range row[:4] {
 				row[i] = line[i]
 			}
-			// Double the written prefix until the row is covered: one memory
-			// write pass per row instead of per pixel.
 			for n := 4; n < len(row); n *= 2 {
 				copy(row[n:], row[:n])
 			}
@@ -211,17 +159,11 @@ func (b *Bitmap) FillRect(r Rect, c Color, writes *int64) {
 	}
 }
 
-// BlitOver composites src's srcRect onto b at dstOrigin, clipped to clip and to
-// both buffers. Opaque source rows take a whole-row copy; translucent rows
-// blend. It is the primitive the composer uses to paste tiles into the backing
-// store, and the one that has to be right for damage blitting to be trustworthy.
 func (b *Bitmap) BlitOver(src *Bitmap, dstOrigin Point, srcRect, clip Rect, writes *int64) {
 	if src == nil || src.Empty() {
 		return
 	}
 	dr := RectAt(dstOrigin, srcRect.Size())
-	// Also intersect with the region of dst that src's own pixels can reach, so
-	// a srcRect extending past src's bounds clips instead of indexing out of range.
 	reachable := RectAt(
 		dstOrigin.Translate(-srcRect.X0, -srcRect.Y0),
 		Size{W: int32(src.W), H: int32(src.H)},

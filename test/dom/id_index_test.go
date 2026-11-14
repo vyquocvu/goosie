@@ -8,8 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// buildIDDoc parses a real document, so Doc back-pointers are intact and the
-// ElementByID index path (not the degenerate-tree fallback) is exercised.
 func buildIDDoc(t *testing.T, body string) *dom.Document {
 	t.Helper()
 	doc, err := dom.ParseBounded("<html><body>"+body+"</body></html>", dom.ParseLimits{
@@ -115,7 +113,6 @@ func TestElementByIDIndexManyQueries(t *testing.T) {
 			t.Fatalf("ElementByID(%s) = nil", id)
 		}
 	}
-	// Mutate in the middle, then verify both sides.
 	mid := doc.ElementByID("p1000")
 	mid.Parent.RemoveChild(mid)
 	if doc.ElementByID("p1000") != nil {
@@ -131,7 +128,6 @@ func TestQueryIndexTagMutation(t *testing.T) {
 	if got := doc.ElementsByTagName("p"); len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
 	}
-	// Append under a different parent, remove another, re-query.
 	div := doc.Body.FirstChild
 	n := doc.NewElement("p")
 	div.AppendChild(n)
@@ -164,13 +160,11 @@ func TestQueryIndexClassMutation(t *testing.T) {
 	if got := doc.ElementsByClassName("a"); len(got) != 1 {
 		t.Fatalf("len = %d, want 1", len(got))
 	}
-	// Retarget via SetAttribute.
 	plain := doc.Body.FirstChild.NextSibling.NextSibling
 	plain.SetAttribute("class", "a")
 	if got := doc.ElementsByClassName("a"); len(got) != 2 {
 		t.Fatalf("after set len = %d, want 2", len(got))
 	}
-	// Remove the attribute entirely.
 	first := doc.Body.FirstChild
 	first.RemoveAttribute("class")
 	if got := doc.ElementsByClassName("a"); len(got) != 1 {
@@ -207,35 +201,26 @@ func TestJSQueryContainment(t *testing.T) {
 		}
 		return v.Str
 	}
-	// Whole-document indexed queries. p.x is 3, measured in Chromium
-	// 153.0.8010.12 on this fixture (2 under #inner, 1 after #outer). This
-	// line used to expect 0/3 and pin the "compound unsupported" answer;
-	// TASK-051 routes compounds through css.Selector, so the measured answer
-	// is the right one.
 	if got := run(`var out = document.querySelectorAll("p.x").length + "/" + document.querySelectorAll("p").length;`); got != "3/3" {
 		t.Fatalf("qsa = %q, want 3/3 (compound p.x and tag p both 3)", got)
 	}
 	if got := run(`var out = document.querySelector("#s").tagName;`); got != "SPAN" {
 		t.Fatalf("qs #s = %q", got)
 	}
-	// Element-rooted: must not escape the subtree.
 	if got := run(`var out = "" + document.querySelectorAll.call(document.querySelector("#inner"), "p").length;`); got != "1" {
 		t.Fatalf("rooted qsa = %q, want 1", got)
 	}
 	if got := run(`var out = document.querySelector.call(document.querySelector("#inner"), "span").id;`); got != "s" {
 		t.Fatalf("rooted qs = %q, want s", got)
 	}
-	// Class singular rooted.
 	if got := run(`var out = document.querySelector.call(document.querySelector("#outer"), ".x").textContent;`); got != "1" {
 		t.Fatalf("rooted class qs = %q, want 1", got)
 	}
-	// Root itself excluded even when it matches.
 	if got := run(`var out = document.querySelector.call(document.querySelector("#inner"), "#inner");`); got != "null" && got != "" {
 		t.Fatalf("self qs = %q, want null", got)
 	}
 }
 
-// newJSRT builds a runtime bound to doc.
 func newJSRT(doc *dom.Document) (*js.Runtime, error) {
 	return js.New(js.Options{URL: "https://example.test/", DOM: doc})
 }

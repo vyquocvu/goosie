@@ -99,7 +99,6 @@ func TestImageResultIgnoredWhenNavMovedOn(t *testing.T) {
 
 	f.applyNavResult(navResult{tabID: tab.ID(), serial: 9, url: "https://p/", layer: tab.Layer(), session: s})
 	res := <-f.imgResults
-	// A new navigation superseded this one before the images landed.
 	tab.Nav.Serial = 10
 
 	f.applyImageResult(res)

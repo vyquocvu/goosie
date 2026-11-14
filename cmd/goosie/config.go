@@ -15,7 +15,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/platform"
 )
 
-// config is one parsed invocation.
 type config struct {
 	url                 string
 	gate                bool
@@ -51,8 +50,6 @@ type config struct {
 	preferencesFile     string
 }
 
-// stateDir is where this invocation keeps persistent state: the default
-// profile lives in ~/.goosie, a named one in ~/.goosie/profiles/<name>.
 func (c config) stateDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -65,9 +62,6 @@ func (c config) stateDir() string {
 	return filepath.Join(base, "profiles", c.profile)
 }
 
-// effectiveDownloadDir gives an explicit CLI flag precedence over the profile,
-// then resolves relative values once so persistent settings never depend on a
-// later process working directory.
 func effectiveDownloadDir(cliDir string, explicit bool, profileDir string) (string, error) {
 	dir := cliDir
 	if !explicit && profileDir != "" {
@@ -83,8 +77,6 @@ func effectiveDownloadDir(cliDir string, explicit bool, profileDir string) (stri
 	return dir, nil
 }
 
-// devSize is the surface in device pixels: the units the frame path, the scheduler,
-// and the shim all measure a viewport in.
 func (c config) devSize() frame.Size {
 	return frame.Size{
 		W: int32(float64(c.width)*c.dpr + 0.5),
@@ -92,8 +84,6 @@ func (c config) devSize() frame.Size {
 	}
 }
 
-// vsyncPeriod is the interval a clock-paced backend ticks at. A native backend is
-// paced by its display and never reads this.
 func (c config) vsyncPeriod() time.Duration {
 	if c.bench {
 		return benchPeriod
@@ -101,15 +91,10 @@ func (c config) vsyncPeriod() time.Duration {
 	return displayPeriod
 }
 
-// paced reports whether this run is driven by a fixed frame count rather than by a
-// person closing the window. It takes a pointer so the session-journal goroutine
-// does not copy the whole config, whose viewport fields the chrome pump resizes.
 func (c *config) paced() bool {
 	return c.gate || c.bench || c.screenshot || c.screenshotSeq != ""
 }
 
-// parse turns os.Args into a config, and rejects the combinations that would draw
-// something other than what was asked for.
 func parse(args []string) (config, error) {
 	var c config
 	fs := flag.NewFlagSet("goosie", flag.ContinueOnError)
@@ -175,9 +160,6 @@ func parse(args []string) (config, error) {
 		return c, err
 	}
 	if c.bench || c.screenshot || c.screenshotSeq != "" {
-		// A rate run that depended on a panel's refresh would report the panel, and
-		// the nightly job wants the machine. An explicit -backend still wins, so a
-		// caller who means to measure a real display can say so with -gate.
 		if fs.Lookup("backend").Value.String() == "" {
 			c.backend = platform.Headless
 		}
@@ -226,9 +208,6 @@ func parse(args []string) (config, error) {
 	return c, nil
 }
 
-// sceneSpec maps -scene to a document. Two scenes is the whole list because two is
-// what the criteria distinguish: a page of flat colour exercises the grid and the
-// budget, and only a page with positioned glyphs exercises the atlas.
 func sceneSpec(name string) (paint.SceneSpec, error) {
 	switch name {
 	case "checkerboard":

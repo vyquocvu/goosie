@@ -6,9 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// Legacy presentational attributes paint the page when there is no CSS to
-// replace them (news.ycombinator.com's whole header bar is a <td bgcolor>), but
-// a real author rule for the same property must still win.
 func TestBgcolorPresentationalHint(t *testing.T) {
 	s := styleFor(t, `<html><body><table><tr><td bgcolor="#ff6600">x</td></tr></table></body></html>`, "", "td")
 	want := css.Color{R: 0xff, G: 0x66, B: 0x00, A: 0xff}

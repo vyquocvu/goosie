@@ -8,11 +8,6 @@ import (
 )
 
 // qc:BR-058
-//
-// TestJourneyClearCookiesForOneSite follows the settings page as a user would:
-// both cookie-holding sites are listed, Clear asks before touching anything,
-// confirming removes only the chosen site, and the surviving site is still
-// there in memory, in the rendered list, and in the profile file.
 func TestJourneyClearCookiesForOneSite(t *testing.T) {
 	browser := newBrowserE2E(t)
 	jar := browser.f.client.Jar()

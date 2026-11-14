@@ -9,9 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/bookmarks"
 )
 
-// TestBookmarkToggleAndContains verifies a fresh store starts empty, the first
-// toggle adds the page, and toggling the same URL again removes it instead of
-// creating a duplicate entry.
 // qc:BR-048
 func TestBookmarkToggleAndContains(t *testing.T) {
 	s := bookmarks.NewStore(filepath.Join(t.TempDir(), "bookmarks.json"))
@@ -43,8 +40,6 @@ func TestBookmarkListOrder(t *testing.T) {
 	}
 }
 
-// TestBookmarkSaveLoadRoundTrip verifies a saved URL and title survive a
-// process restart with the same profile path.
 // qc:BR-046
 func TestBookmarkSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bookmarks.json")
@@ -107,10 +102,6 @@ func TestBookmarkSaveLeavesNoTempFiles(t *testing.T) {
 	}
 }
 
-// TestBookmarksLoadBoundsHostileFile pins migration safety: a legacy or
-// hand-edited file with duplicates, unnavigable empty URLs and far more
-// entries than any real profile loads bounded, deduplicated and clean.
-// Valid stores already satisfy all three, so ordinary profiles are untouched.
 // qc:BR-048
 func TestBookmarksLoadBoundsHostileFile(t *testing.T) {
 	type entry struct {
@@ -188,8 +179,6 @@ func TestBookmarkRenameAndPersist(t *testing.T) {
 	if s.Rename("https://never.example", "X") {
 		t.Fatal("Rename of an unknown bookmark = true, want false")
 	}
-	// Rename stores verbatim, including hostile markup: escaping is the
-	// presentation layer's job.
 	hostile := `<script>alert("xss")</script>`
 	if !s.Rename("https://a.example", hostile) {
 		t.Fatal("Rename with hostile title = false, want true")
@@ -220,7 +209,6 @@ func TestBookmarkSearch(t *testing.T) {
 	if len(got) != 1 || got[0].URL != "https://golang.org/doc" {
 		t.Fatalf("Search(golang) = %+v, want the golang.org entry", got)
 	}
-	// Case-insensitive, matches title or URL.
 	if got := s.Search("EXAMPLE"); len(got) != 2 {
 		t.Fatalf("Search(EXAMPLE) = %d entries, want 2 (title + URL matches)", len(got))
 	}
@@ -230,7 +218,6 @@ func TestBookmarkSearch(t *testing.T) {
 	if got := s.Search("nomatchxyz"); len(got) != 0 {
 		t.Fatalf("Search(nomatchxyz) = %+v, want empty", got)
 	}
-	// Search results are copies: mutating them must not touch the store.
 	got = s.Search("golang")
 	got[0].Title = "mutated"
 	if s.List()[0].Title != "Go Documentation" {

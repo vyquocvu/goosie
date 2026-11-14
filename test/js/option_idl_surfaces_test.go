@@ -7,26 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// The option IDL surface, measured before it was written down: every
-// expectation below is a line of scripts/verify-br101-option-dom.js run against
-// Chromium 1.63 on this host on 2026-11-04. The three getters are three
-// different rules and only two of them normalise:
-//
-//	IDL  <option id="plain" selected>\n    Charcoal\n  </option>
-//	       text "Charcoal"  label "Charcoal"  value "Charcoal"  index 0
-//	IDL  <option id="runs" value="v-runs">  Hi   there </option>
-//	       text "Hi there"  label "Hi there"  value "v-runs"
-//	IDL  <option id="lab" label="  My Label  ">text content</option>
-//	       text "text content"  label "  My Label  "  value "text content"
-//	IDL  <option id="labempty" label="">empty label attr</option>
-//	       label ""            (an attribute that is present answers the empty string)
-//	IDL  <option id="labonly" label="Label only"></option>
-//	       text ""  label "Label only"  value ""
-//	IDL  <option id="blank" value="b">   </option>
-//	       text ""  label ""  value "b"
-//
-// So `value` and `text` fall back to the text content *normalised*, while
-// `label` reflects the content attribute verbatim whenever it is present.
 func optionIDLRuntime(t *testing.T) *js.Runtime {
 	t.Helper()
 	doc := domtest.Parse(`<!DOCTYPE html><html><body>
@@ -53,8 +33,6 @@ func TestOptionTextIsNormalisedWhileLabelReflectsTheAttribute(t *testing.T) {
 		{"runs text", `document.getElementById('runs').text`, "Hi there"},
 		{"runs label", `document.getElementById('runs').label`, "Hi there"},
 		{"runs value", `document.getElementById('runs').value`, "v-runs"},
-		// The label attribute answers verbatim, spaces and all, and never
-		// becomes the value: value falls back to the text content.
 		{"lab label", `document.getElementById('lab').label`, "  My Label  "},
 		{"lab text", `document.getElementById('lab').text`, "text content"},
 		{"lab value", `document.getElementById('lab').value`, "text content"},
@@ -70,9 +48,6 @@ func TestOptionTextIsNormalisedWhileLabelReflectsTheAttribute(t *testing.T) {
 	})
 }
 
-// IDL-SET: assigning the IDL attributes writes the content attributes verbatim
-// and reads back verbatim; the text content is untouched by either.
-//
 // qc:BR-101
 func TestOptionLabelAndValueAssignmentWritesContentAttributes(t *testing.T) {
 	rt := optionIDLRuntime(t)
@@ -87,11 +62,6 @@ func TestOptionLabelAndValueAssignmentWritesContentAttributes(t *testing.T) {
 	}
 }
 
-// OPTGROUP: an optgroup contributes no option of its own, its children flatten
-// into .options in tree order, .index counts the flattened list, and the group's
-// own label reflects the attribute verbatim. None of that makes the group label
-// part of an option's label.
-//
 // qc:BR-101
 func TestOptgroupFlattensIntoOptionsWithoutTouchingOptionLabels(t *testing.T) {
 	doc := domtest.Parse(`<!DOCTYPE html><html><body>
@@ -114,9 +84,6 @@ func TestOptgroupFlattensIntoOptionsWithoutTouchingOptionLabels(t *testing.T) {
 	})
 }
 
-// MULTIPLE: two authored selections stay two selections, and select.value plus
-// selectedIndex follow the FIRST of them.
-//
 // qc:BR-101
 func TestMultipleSelectReportsEverySelectionAndValuesTheFirst(t *testing.T) {
 	doc := domtest.Parse(`<!DOCTYPE html><html><body><form id="f">
@@ -131,8 +98,6 @@ func TestMultipleSelectReportsEverySelectionAndValuesTheFirst(t *testing.T) {
 			return [s.value, s.selectedIndex, [].map.call(s.selectedOptions, function(o){return o.id}).join(','),
 				[].map.call(s.options, function(o){return o.selected}).join(',')].join('|')})()`,
 			"b|1|b,c|false,true,true"},
-		// Runs before the mutation below: MULTIPLE two-selected reports
-		// formdata [["m","b"],["m","c"]] for exactly the authored pair.
 		{"formdata carries every authored selection", `new FormData(document.getElementById('f')).getAll('m').join(',')`, "b,c"},
 		{"after a third selection", `(function(){var s=document.getElementById('s');
 			s.options[0].selected = true;

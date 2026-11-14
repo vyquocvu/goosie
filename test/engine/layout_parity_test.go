@@ -13,11 +13,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// layoutTolerancePx is the allowed per-edge difference between our border
-// box and Chromium's getBoundingClientRect. Fixtures use fixed pixel sizes
-// with no text metrics in play, so geometry should agree up to rounding;
-// the tolerance exists for half-pixel rounding only, and any systematic
-// drift is a layout bug, not font noise.
 const layoutTolerancePx = 1
 
 type layoutRefBox struct {
@@ -29,11 +24,6 @@ type layoutReference struct {
 	Boxes    map[string]layoutRefBox `json:"boxes"`
 }
 
-// TestLayoutParityWithChromium lays every testdata/layout-parity fixture out
-// and compares each id-bearing element's border box against the Chromium
-// reference (testdata/gen_layout_refs.py regenerates them; never hand-edit).
-// A missing reference fails rather than skips: an unscored fixture is not
-// a passing one.
 // qc:BR-059
 func TestLayoutParityWithChromium(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)

@@ -7,12 +7,6 @@ import (
 	transport "github.com/vyquocvu/goosie/internal/net"
 )
 
-// TestNormalizeURLConvertsIDNToTheHostDNSCanResolve pins the one place the
-// address bar, the request, and DNS have to agree. A Unicode name is the name
-// the user typed; punycode is the name the resolver can ask for. Normalizing to
-// anything else - or rejecting the name after the address bar accepted it -
-// means the page the browser claims to show and the host it actually dialed are
-// two different things.
 // qc:BR-005
 func TestNormalizeURLConvertsIDNToTheHostDNSCanResolve(t *testing.T) {
 	unicodeURL, err := transport.NormalizeURL("https://пример.рф")
@@ -51,15 +45,8 @@ func TestNormalizeURLConvertsIDNToTheHostDNSCanResolve(t *testing.T) {
 	}
 }
 
-// TestNormalizeURLRejectsAnInvalidIDN is the other half of consistency: a name
-// the conversion cannot make dialable has to be an error here, before a request
-// is built, rather than a name passed to a resolver that will mangle or refuse
-// it later.
 // qc:BR-005
 func TestNormalizeURLRejectsAnInvalidIDN(t *testing.T) {
-	// Sixty U+00FC code points encode to a punycode label longer than DNS's 63
-	// byte limit. The ASCII spelling is what has to be measured, so the raw
-	// byte length of the input says nothing about whether it is valid.
 	oversized := "https://" + strings.Repeat("ü", 60) + ".example"
 	if got, err := transport.NormalizeURL(oversized); err == nil {
 		t.Fatalf("NormalizeURL accepted an over-long IDN label as %q", got)

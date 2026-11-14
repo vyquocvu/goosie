@@ -6,13 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestOutOfFlowWidthSurvivesEveryPass guards a full refresh, which is where an
-// out-of-flow box's width is resolved more than once. placeOutOfFlow measures the
-// box by handing block layout a width of `resolved width + padding + margins`,
-// and a percentage `width: 100%` then resolves against that - so the box picks up
-// its own padding each time the document is laid out. A fixed, full-width footer
-// is the shape that hits it: theuselessweb's footer grew 48px past the viewport
-// and its rows overflowed with it.
 func TestOutOfFlowWidthSurvivesEveryPass(t *testing.T) {
 	html := `<html><head><style>
 		body { margin: 0; }
@@ -39,10 +32,6 @@ func TestOutOfFlowWidthSurvivesEveryPass(t *testing.T) {
 	if diff := footer.W - 800; diff > 0.5 || diff < -0.5 {
 		t.Errorf("footer W = %v, want 800 (100%% of the viewport; padding sits outside a content box)", footer.W)
 	}
-	// Measured against Chromium in an 800px viewport: the centred row is its
-	// fit-content width - Chromium gives the same markup 108px - never the whole
-	// line, and its centre lands on the centre of the footer's content box, which
-	// starts 12px of padding in from the viewport edge.
 	if item.W >= footer.W {
 		t.Errorf("row W = %v, want below the footer's %v (only `align-items: stretch` fills the line)", item.W, footer.W)
 	}

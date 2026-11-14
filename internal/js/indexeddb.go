@@ -14,7 +14,6 @@ const (
 	maxIndexedDBKeyArrayLength = 1 << 16
 )
 
-// IndexedDB key kinds are ordered by the IndexedDB key comparison algorithm.
 type indexedDBKeyKind uint8
 
 const (
@@ -39,9 +38,6 @@ type indexedDBKeyRange struct {
 	lowerOpen, upperOpen bool
 }
 
-// setupIndexedDB installs the realm's stable IDBFactory object. The factory's
-// cmp() operation is useful independently of database persistence and follows
-// the ordering and invalid-key rules required by IndexedDB.
 func (r *Runtime) setupIndexedDB() {
 	factory := r.vm.NewObject()
 	datePrototype := r.vm.Get("Date").ToObject(r.vm).Get("prototype").ToObject(r.vm)
@@ -330,8 +326,6 @@ func compareUTF16(left, right string) int {
 }
 
 func utf16CodeUnits(value string) []uint16 {
-	// Goja's String export is UTF-8. This conversion preserves IndexedDB's
-	// UTF-16 code-unit order, including supplementary characters.
 	return utf16.Encode([]rune(value))
 }
 

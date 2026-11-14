@@ -11,12 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// TestObjectFitContainStaysInBox guards where a fitted image lands. `contain`
-// shrinks the picture to fit the content box and centres the result *in that
-// box*; the letterbox offsets are relative to the box, not to the page. Grid by
-// Example sets `img{object-fit:contain}` on every example thumbnail, and adding
-// the offsets to the page origin painted all eighteen of them stacked over the
-// header while their cards stayed empty.
 func TestObjectFitContainStaysInBox(t *testing.T) {
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 640, 292))); err != nil {
@@ -58,7 +52,6 @@ func TestObjectFitContainStaysInBox(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("no image command emitted")
 	}
-	// 640x292 contained into 200x400 keeps the width and centres vertically.
 	wantW := float64(200)
 	wantH := wantW * 292.0 / 640.0
 	wantX0, wantY0 := float64(bx0), float64(by0)+(float64(by1-by0)-wantH)/2

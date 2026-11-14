@@ -10,7 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// CustomElementRegistry implements the Custom Elements API.
 type CustomElementRegistry struct {
 	mu                  sync.Mutex
 	definitions         map[string]*customElementDefinition
@@ -127,7 +126,6 @@ func (r *Runtime) finishCustomElementReactionBatch(batch *customElementReactionB
 	}
 }
 
-// setupCustomElements installs the Custom Elements API on window.
 func (r *Runtime) setupCustomElements() {
 	r.customElementRegistryObjects = make(map[*goja.Object]*CustomElementRegistry)
 	r.customElementNodeRegistries = make(map[*dom.Node]*CustomElementRegistry)
@@ -143,10 +141,6 @@ func (r *Runtime) setupCustomElements() {
 	}
 	interfaceObject = r.vm.ToValue(registryInterface).(*goja.Object)
 	if prototype, ok := interfaceObject.Get("prototype").(*goja.Object); ok {
-		// Instance methods are installed on each registry object below so they
-		// close over that registry's own definition map. These prototype
-		// methods preserve the Web IDL interface shape and dispatch to the
-		// default registry when called with its branded object.
 		_ = prototype.Set("define", func(call goja.FunctionCall) goja.Value {
 			return r.jsCustomElementsDefine(call, r.customElementRegistry)
 		})
@@ -185,11 +179,6 @@ func (r *Runtime) setupCustomElements() {
 
 }
 
-// associateInitialNullRegistryAttributes captures the parser-only effect of
-// the customelementregistry attribute before page scripts can mutate it. The
-// attribute selects a null registry for the element and its descendants only
-// when the parser creates that subtree; adding it later does not change an
-// existing element's registry.
 func (r *Runtime) associateInitialNullRegistryAttributes() {
 	r.associateNullRegistryAttributesInDocument(r.domDoc)
 }
@@ -260,7 +249,6 @@ func (r *Runtime) newCustomElementRegistry(interfaceObject *goja.Object) (*Custo
 	return registry, registryObj
 }
 
-// jsCustomElementsDefine implements customElements.define(name, constructor, options).
 func (r *Runtime) jsCustomElementsDefine(call goja.FunctionCall, registry *CustomElementRegistry) goja.Value {
 	if len(call.Arguments) < 2 {
 		panic(r.vm.NewTypeError("Failed to execute 'define' on 'CustomElementRegistry': 2 arguments required"))
@@ -273,14 +261,10 @@ func (r *Runtime) jsCustomElementsDefine(call goja.FunctionCall, registry *Custo
 		panic(r.vm.NewTypeError("Custom element constructor is not a constructor"))
 	}
 
-	// Validate name
 	if !isValidCustomElementName(name) {
 		panic(r.customElementNameException("SyntaxError", fmt.Sprintf("'%s' is not a valid custom element name", name)))
 	}
 
-	// The registry checks the name and constructor before inspecting user
-	// supplied constructor properties. The definition-running flag is set
-	// before those property reads so reentrant define() calls fail in order.
 	registry.mu.Lock()
 	if _, exists := registry.definitions[name]; exists {
 		registry.mu.Unlock()
@@ -329,7 +313,6 @@ func (r *Runtime) jsCustomElementsDefine(call goja.FunctionCall, registry *Custo
 		callbacks[callbackName] = callback
 	}
 
-	// Parse options.
 	var extends string
 	hasExtends := false
 	if len(call.Arguments) >= 3 {
@@ -348,17 +331,12 @@ func (r *Runtime) jsCustomElementsDefine(call goja.FunctionCall, registry *Custo
 		panic(r.customElementDefinitionException("NotSupportedError", "Scoped custom element registries cannot define customized built-in elements"))
 	}
 
-	// observedAttributes is read from the constructor only when the prototype
-	// supplies attributeChangedCallback. Thenable/iterable conversion is done
-	// through Array.from so iterator getters and conversion exceptions propagate.
 	var observed []string
 	if _, hasAttributeChanged := callbacks["attributeChangedCallback"]; hasAttributeChanged && !goja.IsUndefined(callbacks["attributeChangedCallback"]) {
 		if obs := constructorObject.Get("observedAttributes"); obs != nil && !goja.IsUndefined(obs) {
 			observed = r.customElementStringSequence(obs)
 		}
 	}
-	// Web IDL reads these static properties in this order after the prototype
-	// callbacks and observedAttributes have been converted.
 	disableShadow := false
 	disableInternals := false
 	disabledFeatures := constructorObject.Get("disabledFeatures")
@@ -411,8 +389,6 @@ func (r *Runtime) jsCustomElementsDefine(call goja.FunctionCall, registry *Custo
 	registry.mu.Unlock()
 	running = false
 
-	// Scoped registries upgrade only elements in documents associated with
-	// that registry. The global registry upgrades candidates in its document.
 	if registry.isScoped {
 		registry.mu.Lock()
 		documents := append([]*dom.Document(nil), registry.scopedDocumentOrder...)
@@ -433,7 +409,6 @@ func (r *Runtime) jsCustomElementsDefine(call goja.FunctionCall, registry *Custo
 		r.upgradeCustomElements(name, registry, doc)
 	}
 
-	// Resolve the stable pending promise, if whenDefined() requested one.
 	registry.mu.Lock()
 	pending := registry.whenDefined[name]
 	delete(registry.whenDefined, name)
@@ -445,10 +420,6 @@ func (r *Runtime) jsCustomElementsDefine(call goja.FunctionCall, registry *Custo
 	return goja.Undefined()
 }
 
-// installProxyCustomElementHasInstance supplies OrdinaryHasInstance behavior
-// for Proxy-wrapped custom-element constructors. goja's default Function
-// @@hasInstance path currently rejects callable Proxy receivers, even though
-// the HTML constructor and newTarget handling support them.
 func (r *Runtime) installProxyCustomElementHasInstance(constructor *goja.Object) {
 	if constructor == nil {
 		return
@@ -496,10 +467,6 @@ func (r *Runtime) installProxyCustomElementHasInstance(constructor *goja.Object)
 	_ = target.DefineDataPropertySymbol(goja.SymHasInstance, hasInstance, goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 }
 
-// isHTMLUnknownElementName reports names whose HTML-namespace element
-// interface is HTMLUnknownElement. A few legacy names are still recognized
-// by the parser's atom table, but the HTML standard no longer defines an
-// element interface for them.
 func isHTMLUnknownElementName(name string) bool {
 	switch name {
 	case "bgsound", "blink", "isindex", "multicol", "nextid", "spacer":
@@ -565,7 +532,6 @@ func (r *Runtime) customElementStringSequence(value goja.Value) []string {
 	panic(r.vm.NewTypeError("Sequence conversion exceeded the element limit"))
 }
 
-// jsCustomElementsGet implements customElements.get(name).
 func (r *Runtime) jsCustomElementsGet(call goja.FunctionCall, registry *CustomElementRegistry) goja.Value {
 	if len(call.Arguments) < 1 {
 		return goja.Undefined()
@@ -579,7 +545,6 @@ func (r *Runtime) jsCustomElementsGet(call goja.FunctionCall, registry *CustomEl
 	return goja.Undefined()
 }
 
-// jsCustomElementsGetName implements CustomElementRegistry.getName().
 func (r *Runtime) jsCustomElementsGetName(call goja.FunctionCall, registry *CustomElementRegistry) goja.Value {
 	if len(call.Arguments) == 0 {
 		panic(r.vm.NewTypeError("Failed to execute 'getName' on 'CustomElementRegistry': 1 argument required"))
@@ -598,10 +563,6 @@ func (r *Runtime) jsCustomElementsGetName(call goja.FunctionCall, registry *Cust
 	return goja.Null()
 }
 
-// jsCustomElementsUpgrade upgrades unresolved custom elements in the
-// shadow-including subtree rooted at the supplied node. Template contents use
-// their inert owner document, so they do not resolve definitions from the
-// active document's registry.
 func (r *Runtime) jsCustomElementsUpgrade(call goja.FunctionCall, registry *CustomElementRegistry) goja.Value {
 	if len(call.Arguments) == 0 {
 		panic(r.vm.NewTypeError("Failed to execute 'upgrade' on 'CustomElementRegistry': 1 argument required"))
@@ -664,9 +625,6 @@ func (r *Runtime) jsCustomElementsUpgrade(call goja.FunctionCall, registry *Cust
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
 			visit(child)
 		}
-		// Deliberately skip TemplateContentNode. It belongs to an inert
-		// template-contents document and is not part of the shadow-including
-		// tree rooted at the template element.
 	}
 	if root != nil {
 		visit(root)
@@ -908,10 +866,6 @@ func (r *Runtime) customElementRegistryForNode(node *dom.Node) *CustomElementReg
 	if root := r.shadowRootForNode(node); root != nil {
 		return r.customElementRegistryForShadowRoot(root)
 	}
-	// A newly created element is detached until an insertion algorithm places
-	// it in a tree. Resolve its document registry directly: walking every
-	// wrapped shadow host to prove that the detached node is not inside one
-	// makes repeated custom-element construction quadratic in document size.
 	if node.Parent == nil {
 		for _, registry := range r.iframeRegistries {
 			if registry != nil && registry.document == node.Doc {
@@ -1021,9 +975,6 @@ func (r *Runtime) updateCustomElementRegistryOnAdoption(node *dom.Node, target *
 			}
 		}
 		if registry, associated := r.customElementShadowRegistries[root]; associated && registry != nil && !registry.isScoped && registry.document != nil && registry.document != target {
-			// A shadow root initialized with the source document's global
-			// registry follows its host to the destination document. Scoped
-			// registries and explicitly null roots retain their association.
 			r.customElementShadowRegistries[root] = r.customElementRegistryForDocument(target)
 		}
 		if registry, associated := r.customElementShadowRegistries[root]; associated && registry != nil && registry.isScoped {
@@ -1034,16 +985,10 @@ func (r *Runtime) updateCustomElementRegistryOnAdoption(node *dom.Node, target *
 	if shadowRoot != nil && shadowRoot.CustomElementRegistryNullDeclarative && r.customElementRegistryForShadowRoot(shadowRoot) == nil {
 		registry, associated := r.customElementNodeRegistries[node]
 		if !associated || registry == nil && r.customElementNullRegistryLocks[node] {
-			// The node inherits the declarative root's null association, or has
-			// an explicit null association. A non-null per-node association is
-			// independent and still follows its own adoption rules.
 			return
 		}
 	}
 	if r.customElementNullRegistryLocks[node] {
-		// A null association inherited inside a scoped tree remains null. In
-		// other contexts, cross-document adoption recomputes the effective
-		// registry from the destination document.
 		var parentRegistry *CustomElementRegistry
 		if shadowRoot != nil {
 			parentRegistry = r.customElementRegistryForShadowRoot(shadowRoot)
@@ -1078,9 +1023,6 @@ func (r *Runtime) customElementRegistryForDocument(doc *dom.Document) *CustomEle
 	if doc == nil {
 		return nil
 	}
-	// The active Document always uses this browsing context's current global
-	// registry. Associations in customElementDocumentRegistries preserve the
-	// registry of replaced Documents after iframe navigation.
 	if doc == r.domDoc {
 		return r.customElementRegistry
 	}
@@ -1143,8 +1085,6 @@ func (r *Runtime) associateParsedSubtreeWithRegistry(root *dom.Node, registry *C
 	visit(root, registry, preserveNull, false)
 }
 
-// jsCustomElementsInitialize associates a registry with a root and its
-// inclusive descendants whose registry is still null.
 func (r *Runtime) jsCustomElementsInitialize(call goja.FunctionCall, registry *CustomElementRegistry) goja.Value {
 	if len(call.Arguments) == 0 {
 		panic(r.vm.NewTypeError("Failed to execute 'initialize' on 'CustomElementRegistry': 1 argument required"))
@@ -1189,8 +1129,6 @@ func (r *Runtime) jsCustomElementsInitialize(call goja.FunctionCall, registry *C
 				r.customElementNodeRegistries[node] = registry
 				delete(r.customElementNullRegistryLocks, node)
 			} else if _, associated := r.customElementNodeRegistries[node]; !associated {
-				// Materialize an inherited association so it survives later moves
-				// out of the root that supplied it.
 				r.customElementNodeRegistries[node] = current
 			}
 		}
@@ -1331,7 +1269,6 @@ func (r *Runtime) notifyCustomElementAttributeChanged(node *dom.Node, name, oldV
 	reaction()
 }
 
-// jsCustomElementsWhenDefined implements customElements.whenDefined(name).
 func (r *Runtime) jsCustomElementsWhenDefined(call goja.FunctionCall, registry *CustomElementRegistry) goja.Value {
 	if len(call.Arguments) < 1 {
 		panic(r.vm.NewTypeError("Failed to execute 'whenDefined' on 'CustomElementRegistry': 1 argument required"))
@@ -1371,7 +1308,6 @@ func (r *Runtime) customElementDefinitionException(name, message string) goja.Va
 	return r.customElementNameException(name, message)
 }
 
-// upgradeCustomElements upgrades existing elements with the given tag name.
 func (r *Runtime) upgradeCustomElements(name string, registry *CustomElementRegistry, doc *dom.Document) {
 	if doc == nil {
 		return
@@ -1381,8 +1317,6 @@ func (r *Runtime) upgradeCustomElements(name string, registry *CustomElementRegi
 		return
 	}
 
-	// Walk the DOM and upgrade matching elements, including customized built-in
-	// candidates created before their definition was registered.
 	var upgrade func(n *dom.Node)
 	upgrade = func(n *dom.Node) {
 		if n.Type == dom.NodeElement && r.customElementDefinitionFromSet(n, map[string]*customElementDefinition{name: def}) == def && r.customElementRegistryForNode(n) == registry {
@@ -1404,7 +1338,6 @@ func (r *Runtime) upgradeCustomElements(name string, registry *CustomElementRegi
 		}
 	}
 
-	// Start from document's HTML element
 	if doc.HTML != nil {
 		upgrade(doc.HTML)
 	}
@@ -1423,9 +1356,6 @@ func (r *Runtime) customElementDefinitionIn(registry *CustomElementRegistry, nam
 	return registry.definitions[name]
 }
 
-// allocateDirectCustomElement backs `new MyElement()` when the derived
-// constructor reaches HTMLElement's base constructor outside an upgrade.
-// The instance's prototype identifies the registered custom element.
 func (r *Runtime) customElementDefinitionForConstructor(constructor *goja.Object) (*customElementDefinition, *CustomElementRegistry) {
 	if constructor == nil {
 		return nil, nil
@@ -1527,10 +1457,6 @@ func (r *Runtime) functionRealm(newTarget *goja.Object, fallback *Runtime) *Runt
 		}
 		return r
 	}
-	// WindowProxy wrappers can be layered (for example, when a constructor is
-	// imported through more than one iframe). A Proxy's GetFunctionRealm is the
-	// realm of its target, so follow imported aliases and prefer the innermost
-	// source realm over the wrapper runtime's own realm.
 	seen := make(map[*goja.Object]bool)
 	explicitRealm := false
 	for current := newTarget; current != nil && !seen[current]; {
@@ -1559,10 +1485,6 @@ func (r *Runtime) functionRealm(newTarget *goja.Object, fallback *Runtime) *Runt
 	if fallback == nil {
 		fallback = r
 	}
-	// Proxy [[GetPrototypeOf]] would identify the proxy target's Function
-	// prototype only in a single Goja runtime. Across iframe runtimes, imported
-	// callable wrappers retain their source realm in the map above; proxies over
-	// those wrappers inherit the registered constructor's realm as fallback.
 	return fallback
 }
 
@@ -1669,8 +1591,6 @@ func (r *Runtime) allocateDirectCustomElement(instance *goja.Object, def *custom
 	return true
 }
 
-// UpgradeParserElement applies an already-registered definition before the
-// tree builder inserts a parser-created element.
 func (r *Runtime) UpgradeParserElement(n *dom.Node) {
 	r.UpgradeParserElementInDocument(n, nDocument(n))
 }
@@ -1682,18 +1602,11 @@ func nDocument(node *dom.Node) *dom.Document {
 	return node.Doc
 }
 
-// UpgradeParserElementInDocument upgrades a parser-created node while
-// accounting synchronous reactions against its eventual owner document. Open
-// document.write reparses into a temporary Document before adopting the tree.
 func (r *Runtime) UpgradeParserElementInDocument(n *dom.Node, ownerDocument *dom.Document) *dom.Node {
 	if n == nil || n.Type != dom.NodeElement {
 		return n
 	}
 	if ownerDocument != nil && n.Doc != ownerDocument {
-		// Fragment and document.write parsers build tokens in a temporary
-		// Document. The HTML create-an-element-for-the-token algorithm still
-		// constructs the element for its eventual owner document, so establish
-		// that owner before the constructor runs.
 		n.AdoptInto(ownerDocument)
 	}
 	if n.HasAttribute("customelementregistry") {
@@ -1711,14 +1624,7 @@ func (r *Runtime) UpgradeParserElementInDocument(n *dom.Node, ownerDocument *dom
 		if r.isCustomElementInstance(n, def) {
 			return n
 		}
-		// HTML's create-an-element-for-the-token algorithm checkpoints before
-		// construction only when the JavaScript stack is empty. A synchronous
-		// document.write() from script still has an active stack and must leave
-		// queued promise and mutation-observer jobs for its caller's checkpoint.
 		if r.scriptExecutionDepth == 0 {
-			// A reported exception from a queued job does not abort the parser's
-			// create-an-element-for-the-token algorithm. The checkpoint runs
-			// before construction; it is not part of the constructor's result.
 			_ = r.drainMicrotasks()
 		}
 		replacement := n
@@ -1728,9 +1634,6 @@ func (r *Runtime) UpgradeParserElementInDocument(n *dom.Node, ownerDocument *dom
 	return n
 }
 
-// UpgradeParserElementWithAttributes makes the token's customized built-in
-// candidate available before construction while leaving the parsed attributes
-// off the element until the tree builder's attribute-processing step.
 func (r *Runtime) UpgradeParserElementWithAttributes(n *dom.Node, attrs []dom.Attribute) *dom.Node {
 	return r.UpgradeParserElementWithAttributesInDocument(n, attrs, nDocument(n))
 }
@@ -1751,9 +1654,6 @@ func (r *Runtime) UpgradeParserElementWithAttributesInDocument(n *dom.Node, attr
 	return r.UpgradeParserElementInDocument(n, ownerDocument)
 }
 
-// ParserElementAttributeChanged queues the parser-time attribute reaction
-// after the parser has constructed the element and attached the token's
-// attribute. The element may still be waiting for its insertion step.
 func (r *Runtime) ParserElementAttributeChanged(node *dom.Node, attr dom.Attribute) {
 	r.ParserElementAttributeChangedInDocument(node, attr, nDocument(node))
 }
@@ -1805,13 +1705,10 @@ func (r *Runtime) withDynamicMarkupInsertionCounter(doc *dom.Document, run func(
 	run()
 }
 
-// ParserElementInserted runs the connected reaction after tree insertion.
 func (r *Runtime) ParserElementInserted(n *dom.Node) {
 	r.parserElementInserted(n, nDocument(n), false)
 }
 
-// ParserNodeInserted records the parser's insertion step for MutationObserver
-// and then applies custom-element connection behavior for element nodes.
 func (r *Runtime) ParserNodeInserted(n *dom.Node) {
 	r.parserNodeInserted(n, nDocument(n), false)
 }
@@ -1878,10 +1775,6 @@ func (r *Runtime) associateParserElementRegistry(node *dom.Node) {
 		return
 	}
 	if nodeInDeclarativeShadowTemplate(node) {
-		// These nodes are parsed in the template's inert contents first, then
-		// moved into the declarative ShadowRoot when its end tag is processed.
-		// Do not freeze the temporary null association from the inert fragment;
-		// once moved, their effective registry comes from the ShadowRoot.
 		return
 	}
 	if node.Parent == nil {
@@ -1912,16 +1805,10 @@ func nodeInDeclarativeShadowTemplate(node *dom.Node) bool {
 	return false
 }
 
-// upgradeElement constructs one custom element and delivers parser-time
-// attributeChangedCallback reactions before insertion.
 func (r *Runtime) upgradeElement(n *dom.Node, def *customElementDefinition, synchronous, unknownFallback, parserCreated bool, parserOwnerDocument *dom.Document) *dom.Node {
 	if n == nil || def == nil || r.isFailedCustomElement(n) {
 		return n
 	}
-	// A failed construction leaves the pre-created element with its native
-	// fallback interface from the element's own realm. The custom constructor's
-	// prototype can belong to a different Window when a definition is adopted
-	// into another document, and must not become the failed element's prototype.
 	fallbackPrototype := r.unknownElementProto
 	fallbackInterface := "HTMLUnknownElement"
 	if def.extends != "" {
@@ -1983,15 +1870,8 @@ func (r *Runtime) upgradeElement(n *dom.Node, def *customElementDefinition, sync
 	r.customConstructionCrossRealmErrorRuntimes = r.customConstructionCrossRealmErrorRuntimes[:len(r.customConstructionCrossRealmErrorRuntimes)-1]
 	r.customConstructionAllowAdditional = r.customConstructionAllowAdditional[:len(r.customConstructionAllowAdditional)-1]
 	r.customHTMLElementConstruction--
-	// Parser construction does not use the synchronous-custom-elements checks
-	// from createElement(). Still, the parser performs a microtask checkpoint
-	// immediately after construction when the JS stack is empty. Preserve
-	// constructor mutations, but detect mutations made by those jobs.
 	constructorAttributes := append([]dom.Attribute(nil), n.Attr...)
 	if r.scriptExecutionDepth == 0 {
-		// A parser-triggered constructor can run with an empty JavaScript
-		// stack. In that case, the HTML construction algorithm checkpoints
-		// immediately after the constructor and before validating its result.
 		_ = r.drainMicrotasks()
 	}
 	if err != nil {
@@ -2000,9 +1880,6 @@ func (r *Runtime) upgradeElement(n *dom.Node, def *customElementDefinition, sync
 			errorValue = exception.Value()
 		}
 		if constructorCalledSuper && (parserCreated || !synchronous) {
-			// An upgrade starts with an existing element. Keep the custom
-			// prototype installed by the construction stack when its constructor
-			// throws; only synchronous createElement() uses the native fallback.
 			fallbackPrototype = old.Prototype()
 		}
 		if constructorExceptionReported {
@@ -2137,11 +2014,7 @@ func containsCustomAttribute(attributes []string, name string) bool {
 	return false
 }
 
-// invokeLifecycleCallback invokes a lifecycle callback on a custom element.
 func (r *Runtime) invokeLifecycleCallback(n *dom.Node, callback string) {
-	// Definitions retain callbacks captured at define() time. Re-reading from
-	// the element's prototype here would lose the reaction if script deletes
-	// or replaces that property after registration.
 	r.mu.Lock()
 	def := r.customElementInstances[n]
 	var nodeID int
@@ -2160,8 +2033,6 @@ func (r *Runtime) invokeLifecycleCallback(n *dom.Node, callback string) {
 	_, _ = fn(wrapper)
 }
 
-// invokeAdoptedCallbacks runs adopted reactions for a node and its
-// shadow-including descendants after their owner document has changed.
 func (r *Runtime) invokeAdoptedCallbacks(root *dom.Node, oldDoc, newDoc *dom.Document) {
 	if root == nil || oldDoc == nil || newDoc == nil || oldDoc == newDoc {
 		return
@@ -2198,9 +2069,6 @@ func (r *Runtime) invokeAdoptedCallbacks(root *dom.Node, oldDoc, newDoc *dom.Doc
 	visit(root)
 }
 
-// captureOwnerDocuments snapshots the root document of each inserted subtree.
-// DOM insertion adopts a node before the JS binding can dispatch the custom
-// element adopted reactions, so callers retain this pre-insertion value.
 func captureOwnerDocuments(nodes []*dom.Node) map[*dom.Node]*dom.Document {
 	documents := make(map[*dom.Node]*dom.Document, len(nodes))
 	for _, node := range nodes {
@@ -2387,9 +2255,6 @@ func (r *Runtime) adoptedReaction(node *dom.Node, oldDoc, newDoc *dom.Document) 
 	return func() { _, _ = fn(wrapper, oldDocument, newDocument) }
 }
 
-// notifyMovedSubtrees queues adoption and connection reactions by element.
-// A nested attribute mutation can then drain the target element's already
-// pending reactions before the outer element's queue continues.
 func (r *Runtime) notifyMovedSubtrees(nodes []*dom.Node, previous map[*dom.Node]*dom.Document) {
 	batch, owns := r.beginCustomElementReactionBatch()
 	touched := make([]*dom.Node, 0, len(nodes))
@@ -2490,8 +2355,6 @@ func shadowIncludingContains(root, target *dom.Node) bool {
 	return false
 }
 
-// invokeConnectedCallback records delivery so recursive connection traversal
-// cannot invoke the same reaction twice when a callback moves its children.
 func (r *Runtime) invokeConnectedCallback(node *dom.Node) {
 	if node == nil {
 		return
@@ -2522,8 +2385,6 @@ func (r *Runtime) invokeDisconnectedCallback(node *dom.Node) {
 	}
 }
 
-// invokeDisconnectedCallbacks runs disconnected reactions for a removed
-// subtree, including custom elements in shadow trees.
 func (r *Runtime) invokeDisconnectedCallbacks(root *dom.Node) {
 	if root == nil {
 		return
@@ -2531,7 +2392,6 @@ func (r *Runtime) invokeDisconnectedCallbacks(root *dom.Node) {
 	r.notifyDisconnected([]*dom.Node{root}, map[*dom.Node]bool{root: true})
 }
 
-// isInDocument checks if a node is in the document tree.
 func (r *Runtime) isInDocument(n *dom.Node) bool {
 	for p := n.Parent; p != nil; p = p.Parent {
 		if p.Type == dom.NodeDocument {
@@ -2541,7 +2401,6 @@ func (r *Runtime) isInDocument(n *dom.Node) bool {
 	return false
 }
 
-// isValidCustomElementName checks if a name is valid for a custom element.
 func isValidCustomElementName(name string) bool {
 	return dom.IsValidCustomElementName(name)
 }

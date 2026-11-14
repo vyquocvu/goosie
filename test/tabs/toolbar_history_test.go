@@ -47,7 +47,6 @@ func TestHistoryPushAfterBackDiscardsForwardTrail(t *testing.T) {
 	if h.Step(1, base) {
 		t.Fatal("Step(1) committed with a stale cursor after another traversal moved it")
 	}
-	// Return to B, then push a new page. C must disappear from the forward trail.
 	h.Step(1, base-1)
 	h.Push("https://d/")
 	entries, index := h.Entries()

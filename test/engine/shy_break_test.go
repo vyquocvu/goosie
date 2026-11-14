@@ -9,15 +9,9 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// The overflowing SHY/ZWSP fixtures Chromium 1.63 produced in
-// scripts/verify-br087-text-parity.js (and the dedicated
-// scripts/verify-shybreak-geometry.js anchor): 42 a's, the opportunity, 48
-// b's, 16px, 200px box. A Latin word with no opportunity stays one line
-// (TestLongUnbrokenLatinWordKeepsEveryGlyph).
-
 const (
-	shyPrefix = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"       // 42
-	shySuffix = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" // 48
+	shyPrefix = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	shySuffix = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
 func shyBody(t *testing.T, inner string) *engine.Session {
@@ -51,10 +45,6 @@ func hyphenGlyph(glyphs []paint.GlyphRun) (paint.GlyphRun, bool) {
 	return paint.GlyphRun{}, false
 }
 
-// Chromium broke at the soft hyphen and inked U+002D at the end of the
-// overflowing a-run (5.328px in Arial; Goosie's Times hyphen is the same
-// substitution, measured from this engine's face). The b-run starts the next
-// line. The Range-rect artifact of a zero-width extra line is not a line box.
 // qc:BR-087
 func TestSoftHyphenWrapsAndPaintsAHyphen(t *testing.T) {
 	sess := shyBody(t, shyPrefix+"\u00AD"+shySuffix)
@@ -86,8 +76,6 @@ func TestSoftHyphenWrapsAndPaintsAHyphen(t *testing.T) {
 	}
 }
 
-// The same fixture with U+200B is a wrap with no ink: Chromium BREAK-zws
-// lines=2, first line ends with the ZWSP, second carries the b-run.
 // qc:BR-087
 func TestZeroWidthSpaceWrapsWithoutAHyphen(t *testing.T) {
 	sess := shyBody(t, shyPrefix+"\u200B"+shySuffix)
@@ -106,9 +94,6 @@ func TestZeroWidthSpaceWrapsWithoutAHyphen(t *testing.T) {
 	}
 }
 
-// A short word with a SHY in the middle never wraps, so the SHY stays
-// default-ignorable: same width as the letters alone, one fragment, no hyphen
-// glyph. Chromium a+SHY = a = 8.906px on the same anchor.
 // qc:BR-087
 func TestUnusedSoftHyphenStaysInvisibleAndUnsplit(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -125,7 +110,7 @@ func TestUnusedSoftHyphenStaysInvisibleAndUnsplit(t *testing.T) {
 	if strings.Contains(got[0], "-") {
 		t.Errorf("fitting SHY text = %q, want no hyphen: the opportunity was not taken", got[0])
 	}
-	if utf8.RuneCountInString(got[0]) != 5 { // aa + SHY + bb
+	if utf8.RuneCountInString(got[0]) != 5 {
 		t.Errorf("fitting SHY runes = %q (%d), want the original 5 including U+00AD", got[0], utf8.RuneCountInString(got[0]))
 	}
 	if w, n := sessWidth(t, fonts, "aa\u00ADbb"), sessWidth(t, fonts, "aabb"); w != n {
@@ -139,8 +124,6 @@ func TestUnusedSoftHyphenStaysInvisibleAndUnsplit(t *testing.T) {
 	}
 }
 
-// word-break: keep-all removes CJK opportunities and nothing else: the same
-// overflowing Latin+SHY word still wraps at the SHY.
 // qc:BR-087
 func TestKeepAllDoesNotSuppressSoftHyphen(t *testing.T) {
 	inner := `<div style="width: 200px; font-size: 16px; word-break: keep-all">` + shyPrefix + "\u00AD" + shySuffix + `</div>`
@@ -151,7 +134,6 @@ func TestKeepAllDoesNotSuppressSoftHyphen(t *testing.T) {
 	}
 }
 
-// white-space: nowrap / text-wrap: nowrap must not take the opportunity.
 // qc:BR-087
 func TestNowrapSuppressesSoftHyphen(t *testing.T) {
 	inner := `<div style="width: 200px; font-size: 16px; white-space: nowrap">` + shyPrefix + "\u00AD" + shySuffix + `</div>`

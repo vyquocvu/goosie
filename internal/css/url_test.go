@@ -5,11 +5,6 @@ import (
 	"testing"
 )
 
-// TestScanURLPayload pins the payload each url() declaration form yields. These
-// rows are the GOOSIE-CSSURLPAREN-001 discriminator: a ')' inside a quoted
-// payload, balanced '(' ')/' pairs in an unquoted payload, and the malformed
-// forms that must fail closed rather than emit half a URI. Each row maps to a
-// behaviour rule in docs/tasks/TASK-050-CSS-URL-PAREN.md §3.
 // qc:BR-211
 func TestScanURLPayload(t *testing.T) {
 	cases := []struct {
@@ -19,32 +14,22 @@ func TestScanURLPayload(t *testing.T) {
 		wantOK bool
 		wantQ  byte
 	}{
-		// Rule 1: quotes stripped, payload kept whole.
 		{"quoted closing paren", `url("a)b")`, `a)b`, true, '"'},
 		{"single-quoted closing paren", `url('a)b')`, `a)b`, true, '\''},
 		{"quoted open paren", `url("a(b)c")`, `a(b)c`, true, '"'},
 		{"quoted payload with parens semicolon comma", `url("data:image/svg+xml;utf8,<svg fill='rgb(0,0,255)'/></svg>")`, `data:image/svg+xml;utf8,<svg fill='rgb(0,0,255)'/></svg>`, true, '"'},
-		// Rule 2: unquoted with balanced parens.
 		{"unquoted balanced parens", `url(a(b)c)`, `a(b)c`, true, 0},
 		{"unquoted nested balanced parens", `url(a(b(c))d)`, `a(b(c))d`, true, 0},
 		{"unquoted data uri with rgb", `url(data:image/svg+xml,<svg fill='rgb(0,0,255)'/></svg>)`, `data:image/svg+xml,<svg fill='rgb(0,0,255)'/></svg>`, true, 0},
-		// Rule 3: a `\X` pair is one escape of any byte (CSS Syntax L3 4.3.9), so
-		// an escaped quote can neither open nor close the string and an escaped
-		// ')' cannot end an unquoted token. These rows pin the *source spelling*,
-		// which is what Payload carries: URLPayload is what decodes it, and
-		// `url("a\"b")` denotes the URL `a"b` in Chromium (measured 2026-11-12;
-		// the decoded side is pinned by test/css/url_escape_test.go).
 		{"escaped double quote stays in the payload", `url("a\"b")`, `a\"b`, true, '"'},
 		{"escaped single quote stays in the payload", `url('a\'b')`, `a\'b`, true, '\''},
 		{"escaped backslash does not free the next quote", `url("a\\b")`, `a\\b`, true, '"'},
 		{"escaped paren inside a string then a real close", `url("a\")b")`, `a\")b`, true, '"'},
 		{"hex escape stays in the payload", `url("a\41 b")`, `a\41 b`, true, '"'},
 		{"escaped paren keeps one unquoted token", `url(a\)b)`, `a\)b`, true, 0},
-		// Rule 4: fail-closed recovery, never the rest of the declaration.
 		{"unterminated quote fails closed", `url("abc`, "", false, 0},
 		{"unterminated quote with trailing decl", `url("abc;color:red)`, "", false, 0},
 		{"unterminated unquoted fails closed", `url(abc`, "", false, 0},
-		// Rule 5: behaviour that must not change.
 		{"payload free url", `url()`, "", true, 0},
 		{"payload free with spaces", `url(   )`, "", true, 0},
 		{"none keyword", `none`, "", false, 0},
@@ -56,13 +41,8 @@ func TestScanURLPayload(t *testing.T) {
 		{"leading and trailing space quoted", `url( "a b" )`, `a b`, true, '"'},
 		{"leading and trailing space unquoted", `url(  foo.png  )`, `foo.png`, true, 0},
 		{"quoted then layer", `url("a)b.png") , red`, `a)b.png`, true, '"'},
-		// The k0/k1 forms of §1 that painted before the fix and must keep painting.
 		{"quoted pct-encoded hash", `url("data:image/svg+xml,<svg fill='%230000ff'/></svg>")`, `data:image/svg+xml,<svg fill='%230000ff'/></svg>`, true, '"'},
 		{"unquoted pct-encoded hash", `url(data:image/svg+xml,<svg fill='%230000ff'/></svg>)`, `data:image/svg+xml,<svg fill='%230000ff'/></svg>`, true, 0},
-		// Stray quotes inside a single-quoted payload: pre-existing leniency that
-		// test/engine/vector_bg_test.go depends on. The payload is not a valid
-		// §4.3.9 string, so the token is read unquoted and only the matched outer
-		// pair is stripped.
 		{
 			"stray single quotes inside single-quoted payload",
 			`url('data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' height='50%25'%3E%3Crect fill='lime'/%3E%3C/svg%3E')`,
@@ -92,9 +72,6 @@ func TestScanURLPayload(t *testing.T) {
 	}
 }
 
-// TestScanURLOffsets pins the token indices so callers that slice the original
-// declaration (absolutizeCSSURLs re-emits the untouched payload; importRef takes
-// the remainder after the url()) can do it without re-scanning.
 // qc:BR-211
 func TestScanURLOffsets(t *testing.T) {
 	for _, in := range []string{
@@ -118,7 +95,6 @@ func TestScanURLOffsets(t *testing.T) {
 		if tok.End != tok.Close+1 {
 			t.Errorf("End = %d, want Close+1 = %d", tok.End, tok.Close+1)
 		}
-		// The raw inner bytes must round-trip the payload (or its quoted form).
 		raw := in[tok.AfterOpen:tok.Close]
 		if !strings.Contains(raw, tok.Payload) {
 			t.Errorf("raw inner %q does not contain payload %q", raw, tok.Payload)
@@ -126,15 +102,12 @@ func TestScanURLOffsets(t *testing.T) {
 		if tok.Quote != 0 && raw != string(tok.Quote)+tok.Payload+string(tok.Quote) {
 			t.Errorf("raw inner = %q, want quote+payload+quote", raw)
 		}
-		// Slicing at End yields the declaration text after the token.
 		if !strings.HasPrefix(in[tok.End:], " ") {
 			t.Errorf("remainder %q should start after the ')'", in[tok.End:])
 		}
 	}
 }
 
-// TestIndexURL pins the allocation-free occurrence search that
-// absolutizeCSSURLs iterates with.
 // qc:BR-211
 func TestIndexURL(t *testing.T) {
 	cases := []struct {
@@ -156,9 +129,6 @@ func TestIndexURL(t *testing.T) {
 	}
 }
 
-// TestScanURLBigPayload guards the cap rule of §3: the scanner adds no second
-// size limit and returns a huge payload whole rather than truncating or
-// growing work beyond a linear pass.
 // qc:BR-211
 func TestScanURLBigPayload(t *testing.T) {
 	body := strings.Repeat("a", 200_000)
@@ -171,8 +141,6 @@ func TestScanURLBigPayload(t *testing.T) {
 	}
 }
 
-// TestScanURLBalancedParensBigPayload checks a pathological unquoted value with
-// many nested parens still terminates in one pass.
 // qc:BR-211
 func TestScanURLBalancedParensBigPayload(t *testing.T) {
 	var b strings.Builder
@@ -205,9 +173,6 @@ func BenchmarkScanURLDataURI(b *testing.B) {
 	}
 }
 
-// BenchmarkIndexURLSheetOccurrences is the cap-discipline guard for
-// absolutizeCSSURLs' search: a 256 KiB sheet with a url() every 4 KiB must be
-// scanned with zero allocations.
 func BenchmarkIndexURLSheetOccurrences(b *testing.B) {
 	var sb strings.Builder
 	chunk := strings.Repeat("a", 4096)
@@ -230,17 +195,6 @@ func BenchmarkIndexURLSheetOccurrences(b *testing.B) {
 	}
 }
 
-// TestURLPayloadDecodesEscapes pins the two views of one token: Payload is the
-// source spelling a stylesheet can be re-emitted from, URLPayload is the URL it
-// denotes (CSS Syntax L3 4.3.9, measured 2026-11-12 in Chromium against a document
-// holding exactly these forms).
-//
-// The rows are chosen so a wrong decoder cannot pass: an escaped quote and an
-// escaped ')' each survive only when the pair is consumed as one escape, a hex
-// escape proves the up-to-six-digit greedy read (`\2240` is U+2240, not `"` and
-// `40` - the mangled form Chromium itself computes for that spelling), the
-// trailing-space form proves the one optional whitespace is eaten, and a doubled
-// backslash proves the second quote stays escaped rather than closing the string.
 // qc:BR-269
 func TestURLPayloadDecodesEscapes(t *testing.T) {
 	cases := []struct {
@@ -258,10 +212,7 @@ func TestURLPayloadDecodesEscapes(t *testing.T) {
 		{"greedy hex digits", `url("\2240")`, `\2240`, "\u2240"},
 		{"escaped colon in an unquoted token", `url(data\:x)`, `data\:x`, "data:x"},
 		{"escaped paren keeps the tail", `url(a\)b)`, `a\)b`, "a)b"},
-		// No escape at all: the byte-identical case, and the reason every existing
-		// reader could route through URLPayload without moving.
 		{"plain payload passes through", `url(a.png)`, "a.png", "a.png"},
-		// A token that never ends stays a bad token.
 		{"unterminated string yields no token", `url("a\"b`, "", ""},
 	}
 	for _, tc := range cases {
@@ -286,11 +237,6 @@ func TestURLPayloadDecodesEscapes(t *testing.T) {
 	}
 }
 
-// TestURLPayloadKeepsTheSheetTextIntact is the reason decoding lives in
-// URLPayload and not in the scanner: a rewritten sheet must still carry the
-// escapes, because `url("a"b")` is a different - broken - token from
-// `url("a\"b")`. The payload slice out of the declaration has to equal the bytes
-// between the delimiters.
 // qc:BR-269
 func TestURLPayloadKeepsTheSheetTextIntact(t *testing.T) {
 	const decl = `.a{background:url("a\"b.png") no-repeat}`

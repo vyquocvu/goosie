@@ -6,10 +6,6 @@ import (
 	"golang.org/x/text/unicode/bidi"
 )
 
-// Directionality returns the HTML directionality of an element. It follows
-// explicit dir attributes and the first-strong character rule used by dir=auto
-// and bdi, then inherits through the DOM tree. With no declaration the value is
-// ltr, as required by HTML's directionality algorithm.
 func (n *Node) Directionality() string {
 	for current := n; current != nil; current = current.Parent {
 		if !current.Element() {
@@ -29,9 +25,6 @@ func (n *Node) Directionality() string {
 	return "ltr"
 }
 
-// AutoDirectionality computes the direction of a dir=auto element or bdi by
-// finding its first strong directional character. Descendant elements with a
-// dir attribute establish their own direction and are excluded from the scan.
 func (n *Node) AutoDirectionality() string {
 	if n == nil || !n.Element() {
 		return "ltr"
@@ -98,7 +91,6 @@ func (n *Node) slotDirectionality() string {
 	return "ltr"
 }
 
-// ShadowHost returns the host and root containing a slot element.
 func (n *Node) ShadowHost() (*Node, *ShadowRoot) {
 	if n == nil || !n.Element() || n.Data != "slot" {
 		return nil, nil
@@ -120,8 +112,6 @@ func containsShadowNode(root, target *Node) bool {
 	return false
 }
 
-// AssignedNodes returns the slotables assigned to a slot using the host's
-// named or manual slot assignment mode. It does not return fallback children.
 func (n *Node) AssignedNodes() []*Node {
 	host, shadow := n.ShadowHost()
 	if host == nil || shadow == nil {
@@ -147,8 +137,6 @@ func (n *Node) AssignedNodes() []*Node {
 	return assigned
 }
 
-// AssignedSlot returns the slot that receives an element or text node through
-// named or manual slot assignment.
 func (n *Node) AssignedSlot() *Node {
 	if n == nil || n.Parent == nil {
 		return nil

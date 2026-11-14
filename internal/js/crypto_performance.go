@@ -8,9 +8,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Web Crypto API (subset) and Performance API implementation.
-
-// setupCrypto installs the crypto global with getRandomValues.
 func (r *Runtime) setupCrypto() {
 	cryptoObj := r.vm.NewObject()
 
@@ -55,14 +52,11 @@ func (r *Runtime) setupCrypto() {
 	}
 }
 
-// setupPerformance installs the performance global with now().
 func (r *Runtime) setupPerformance() {
 	startTime := time.Now()
 
 	perfObj := r.vm.NewObject()
 	r.initializeGenericEventTarget(perfObj)
-	// Keep the EventTarget surface directly on Performance as this object is
-	// also exposed through the Window global's host object wrapper.
 	_ = perfObj.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
 		r.addGenericEventListener(call)
 		return goja.Undefined()
@@ -77,12 +71,11 @@ func (r *Runtime) setupPerformance() {
 
 	_ = perfObj.Set("now", func(call goja.FunctionCall) goja.Value {
 		elapsed := time.Since(startTime)
-		return r.vm.ToValue(elapsed.Seconds() * 1000) // milliseconds
+		return r.vm.ToValue(elapsed.Seconds() * 1000)
 	})
 
 	_ = perfObj.Set("timeOrigin", startTime.UnixMilli())
 
-	// mark/measure stubs.
 	_ = perfObj.Set("mark", func(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	})

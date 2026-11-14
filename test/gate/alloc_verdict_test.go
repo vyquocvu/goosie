@@ -1,15 +1,5 @@
 package gate
 
-// The warm criterion's rule, tested as the decision it actually makes.
-//
-// allocTotals' measurement cannot be attributed to a goroutine: Mallocs is the whole
-// process's, so the runtime's own bookkeeping is in the total whatever the frame path
-// does. Disabling the collector lowers that rate without removing it, and a measured
-// once-in-twenty stray allocation is not something a test can wait for. So the rule
-// under test is the one that does not depend on timing: one window is evidence about
-// the runtime, two consecutive dirty windows on the same warm path are evidence about
-// the frame path.
-
 import (
 	"strings"
 	"testing"
@@ -81,9 +71,6 @@ func TestZeroAllocVerdict(t *testing.T) {
 	}
 }
 
-// TestZeroAllocVerdictCatchesPerFrameLeak is the criterion's other half: the two-window
-// rule must not become a way to pass a leaking frame path. A closure that allocates once
-// per call is the smallest honest version of that leak, and both windows must report it.
 func TestZeroAllocVerdictCatchesPerFrameLeak(t *testing.T) {
 	const frames = 200
 	leaked := make([][]byte, 0, 2*frames+2)

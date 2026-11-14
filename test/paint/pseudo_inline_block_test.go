@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// A generated ::before/::after box is an anonymous text node in the arena, not
-// an element. The inline pass used to accept only element nodes as atomic
-// inline-level boxes, so an inline-block pseudo-element vanished along with its
-// background. Google's header logo is exactly that construct.
 func TestInlineBlockPseudoElementPaints(t *testing.T) {
 	html := `<!doctype html><html><head><style>
 .logo::before{content:"";display:inline-block;width:74px;height:24px;background-color:rgb(255,0,0)}

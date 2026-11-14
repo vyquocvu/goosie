@@ -6,12 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// The query API is the surface a page actually touches, and it carries a second
-// contract on top of matching: Selectors API 1 makes document.querySelector and
-// Element.matches raise a SyntaxError for a selector the grammar cannot express.
-// Both halves are oracled here for GOOSIE-CSSSELECT-001, and the expected array
-// is Chromium's own output for the same script, measured 2026-11-12.
-
 const attrValueHTML = `<html><body>` +
 	`<div id=q data-x='a"b'></div>` +
 	`<div id=plain data-x='ab'></div>` +
@@ -61,17 +55,6 @@ func TestQueryAPIUnescapesQuotedAttributeValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
 	}
-	// Chromium's answer for this script, entry by entry:
-	//   0-3  the escaped quote, apostrophe, backslash and space each denote one
-	//        string, and each reaches only the element holding it
-	//   4-5  \41 is 'A', and \22 is a lone double quote
-	//   6-7  ']' and ',' are bytes of the value, not condition or list ends
-	//   8    both alternatives of a legal list survive
-	//   9    a quoted value with trailing bytes throws
-	//   10-13 matches() on the same needles, including the negatives: `two` holds
-	//        two backslashes, so `[data-x="a\\b"]` (which denotes one) must not
-	//        reach it, and `[data-x="a\b"]` denotes a backspace, not a backslash
-	//   14   matches() throws where querySelectorAll throws
 	want := `["q","apos","one","space","hex","quoteonly","bracket","comma","q comma",` +
 		`"THROW SyntaxError","T","F","F","F","T"]`
 	if got != want {

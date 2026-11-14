@@ -4,11 +4,6 @@ import (
 	"testing"
 )
 
-// An event a page constructed keeps the cancelable flag it was given, even where
-// the listener cannot use it: Chromium reports cancelable=true to a passive
-// listener on a scroll-blocking type and simply ignores preventDefault(). Only
-// browser-generated scroll-blocking events hide the flag, and that is measured in
-// test/wpt where the engine can synthesize one.
 func TestSyntheticScrollCancelableStaysVisibleToPassiveListeners(t *testing.T) {
 	r := newEventRuntime(t, eventDOM())
 	script := `
@@ -39,8 +34,6 @@ func TestSyntheticScrollCancelableStaysVisibleToPassiveListeners(t *testing.T) {
 	}
 	want := ""
 	for _, typ := range []string{"wheel", "mousewheel", "touchstart", "touchmove"} {
-		// A passive listener sees the flag but cannot use it, so the dispatch was
-		// not canceled and dispatchEvent() returns true.
 		want += "div-passive-" + typ + "=true,false|div-passive-" + typ + "!ret=true|"
 		want += "div-active-" + typ + "=true,true|div-active-" + typ + "!ret=false|"
 		want += "window-default-" + typ + "=true,false|window-default-" + typ + "!ret=true|"

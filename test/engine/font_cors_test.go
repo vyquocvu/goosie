@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// corsFaceSession builds a session whose @font-face src lives on cdnURL
-// while the document sits at docBase, with the fetcher answering the given
-// response headers. Registration is observed through the cascade: index 1
-// means the face loaded, 0 means fallback after a CORS refusal.
 func corsFaceSession(t *testing.T, docBase, cdnURL string, headers map[string]string) *engine.Session {
 	t.Helper()
 	html := `<html><body><p id="p" style="font-family: 'CorsFace'">hi</p></body></html>`
@@ -26,8 +22,6 @@ func corsFaceSession(t *testing.T, docBase, cdnURL string, headers map[string]st
 	return s
 }
 
-// TestFontCORSMissingHeaderRefuses: a cross-origin font without
-// Access-Control-Allow-Origin must not register; text keeps fallback.
 func TestFontCORSMissingHeaderRefuses(t *testing.T) {
 	s := corsFaceSession(t, "https://example.com/", "https://cdn.example.com/face.woff", nil)
 	if got := customIdx(t, s); got != 0 {
@@ -35,7 +29,6 @@ func TestFontCORSMissingHeaderRefuses(t *testing.T) {
 	}
 }
 
-// TestFontCORSWildcardAllows: ACAO * admits the cross-origin face.
 func TestFontCORSWildcardAllows(t *testing.T) {
 	s := corsFaceSession(t, "https://example.com/", "https://cdn.example.com/face.woff",
 		map[string]string{"Access-Control-Allow-Origin": "*"})
@@ -44,7 +37,6 @@ func TestFontCORSWildcardAllows(t *testing.T) {
 	}
 }
 
-// TestFontCORSExactOriginAllows: an explicit matching origin admits the face.
 func TestFontCORSExactOriginAllows(t *testing.T) {
 	s := corsFaceSession(t, "https://example.com/", "https://cdn.example.com/face.woff",
 		map[string]string{"Access-Control-Allow-Origin": "https://example.com"})
@@ -53,7 +45,6 @@ func TestFontCORSExactOriginAllows(t *testing.T) {
 	}
 }
 
-// TestFontCORSMismatchedOriginRefuses: another site's origin admits nothing.
 func TestFontCORSMismatchedOriginRefuses(t *testing.T) {
 	s := corsFaceSession(t, "https://example.com/", "https://cdn.example.com/face.woff",
 		map[string]string{"Access-Control-Allow-Origin": "https://evil.example/"})
@@ -62,7 +53,6 @@ func TestFontCORSMismatchedOriginRefuses(t *testing.T) {
 	}
 }
 
-// TestFontCORSSameOriginNeedsNoHeaders: same-origin faces load freely.
 func TestFontCORSSameOriginNeedsNoHeaders(t *testing.T) {
 	s := corsFaceSession(t, "https://example.com/", "https://example.com/face.woff", nil)
 	if got := customIdx(t, s); got != 1 {

@@ -69,7 +69,6 @@ func TestTransientActivationPropagatesAcrossIframeOrigins(t *testing.T) {
 		t.Fatal("cross-origin child lost its own activation")
 	}
 
-	// Activation-consuming APIs clear transient state across the whole page.
 	crossOrigin.SetTransientUserActivation(false)
 	for name, runtime := range map[string]*Runtime{
 		"parent": parent, "same-origin child": sameOrigin,

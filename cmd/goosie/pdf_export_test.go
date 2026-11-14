@@ -52,17 +52,14 @@ func TestExportSessionToPDF(t *testing.T) {
 		t.Fatalf("failed to read exported PDF: %v", err)
 	}
 
-	// 1. Verify standard PDF 1.4 header
 	if !bytes.HasPrefix(data, []byte("%PDF-1.4")) {
 		t.Fatalf("PDF missing %%PDF-1.4 header: %s", string(data[:20]))
 	}
 
-	// 2. Verify standard trailer and EOF
 	if !strings.HasSuffix(strings.TrimSpace(string(data)), "%%EOF") {
 		t.Fatalf("PDF missing %%%%EOF trailer")
 	}
 
-	// 3. Verify PDF structure elements
 	contentStr := string(data)
 	if !strings.Contains(contentStr, "/Type /Catalog") {
 		t.Fatal("PDF missing Catalog object")
@@ -80,7 +77,6 @@ func TestExportSessionToPDF(t *testing.T) {
 		t.Fatal("PDF missing cross-reference table")
 	}
 
-	// 4. Verify pagination: height of document is > 1400px so it spans at least 2 pages
 	pageMatches := strings.Count(contentStr, "/Type /Page\n")
 	if pageMatches < 2 {
 		t.Fatalf("expected at least 2 pages for 1400px+ document, got %d", pageMatches)

@@ -11,13 +11,8 @@ func lgFill(x0, y0, x1, y1 int32, z uint32) paint.DisplayCmd {
 	return paint.DisplayCmd{Kind: paint.CmdFill, Rect: frame.Rect4(x0, y0, x1, y1), Color: frame.RGB(0, 0, 255), Z: z}
 }
 
-// A clean group recorded over the last two commands survives a z-sort that moves
-// a higher-Z sibling ahead of it: the group's Start/End are recomputed from the
-// sorted list, so they describe where the members actually landed.
 func TestGroupRangeSurvivesSort(t *testing.T) {
 	l := paint.NewList(4)
-	// Append a lifted sibling FIRST so the sort reorders the slab, then the two
-	// group members, then register the group over the trailing two commands.
 	l.Append(lgFill(0, 0, 10, 10, 5))
 	l.Append(lgFill(10, 0, 30, 10, 0))
 	l.Append(lgFill(12, 0, 28, 10, 0))
@@ -44,7 +39,6 @@ func TestGroupRangeSurvivesSort(t *testing.T) {
 	}
 }
 
-// A group is only what AddGroup declared: an opacity-less list has none.
 func TestNoGroupsDeclaredNoneRecorded(t *testing.T) {
 	l := paint.NewList(2)
 	l.Append(lgFill(0, 0, 10, 10, 0))

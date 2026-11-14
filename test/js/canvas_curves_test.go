@@ -80,11 +80,9 @@ func TestCanvasCurveOperations(t *testing.T) {
 		t.Error("missing ellipse in canvas ops")
 	}
 
-	// Replay operations into frame bitmap to ensure rasterizer path works
 	bm := frame.NewBitmap(200, 200)
 	frame.ReplayCanvasOps(bm, frameOps, 200, 200)
 
-	// Verify that non-zero pixels were drawn
 	hasDrawnPixels := false
 	for _, b := range bm.RGBA {
 		if b > 0 {

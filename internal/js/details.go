@@ -11,8 +11,6 @@ type detailsToggleTask struct {
 	timerID  int
 }
 
-// SetDetailsOpen applies the open IDL/default-action transition, including the
-// exclusive name group and the queued toggle event.
 func (r *Runtime) SetDetailsOpen(node *dom.Node, open bool, source *dom.Node) {
 	if r == nil || node == nil || !node.Element() || node.Data != "details" || node.HasAttribute("open") == open {
 		return
@@ -129,10 +127,6 @@ func (r *Runtime) queueDetailsToggle(node *dom.Node, oldState, newState string, 
 		r.detailsToggleTasks = make(map[*dom.Node]*detailsToggleTask)
 	}
 	if pending := r.detailsToggleTasks[node]; pending != nil {
-		// A later state change coalesces the old/new states but queues the
-		// element's toggle notification at the tail of the task source. This
-		// preserves the ordering observed when parser-created open members are
-		// subsequently displaced by a script mutation in the same task.
 		delete(r.timers, pending.timerID)
 		pending = &detailsToggleTask{oldState: pending.oldState, newState: newState, source: source}
 		r.detailsToggleTasks[node] = pending

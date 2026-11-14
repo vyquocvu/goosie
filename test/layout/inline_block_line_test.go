@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// A story byline is the shape that broke this: an inline-block holding block
-// content - a list of tag pills - sitting between two runs of text on one line.
-// Laid out as a row box it started at the content edge again and drew over the
-// title, and the text after it wrapped onto a line of its own.
 const bylineHTML = `<html><body style="margin:0">
 	<article>
 	<span><a>Go nineteen release notes</a></span>
@@ -34,8 +30,6 @@ func TestInlineBlockSharesItsLineWithText(t *testing.T) {
 			title != nil, tags != nil, len(pills), domain != nil, byline != nil)
 	}
 
-	// The pills are inline-level boxes in the list, so they sit side by side and
-	// the list shrink-wraps around them rather than one per line.
 	if pills[1].Y != pills[0].Y {
 		t.Errorf("tag pills stacked: first Y=%g, second Y=%g", pills[0].Y, pills[1].Y)
 	}
@@ -43,10 +37,6 @@ func TestInlineBlockSharesItsLineWithText(t *testing.T) {
 		t.Errorf("second pill X=%g did not clear the first at %g", pills[1].X, pills[0].X+pills[0].W)
 	}
 
-	// Title, pills and domain are one line: the list joins the text flow after
-	// the title instead of restarting at the content edge. An atomic inline-block
-	// sits on the line's bottom edge rather than at the text's top, so the test
-	// asks only that the two boxes share the line's band.
 	if !(tags.Y < title.Y+title.H && tags.Y+tags.H > title.Y) {
 		t.Errorf("tag list band %g..%g missed the title's line at %g..%g",
 			tags.Y, tags.Y+tags.H, title.Y, title.Y+title.H)
@@ -61,14 +51,11 @@ func TestInlineBlockSharesItsLineWithText(t *testing.T) {
 		t.Errorf("domain X=%g did not clear the tag list ending at %g", domain.X, tags.X+tags.W)
 	}
 
-	// The block footer still takes a slot of its own below the line.
 	if byline.Y < tags.Y+tags.H {
 		t.Errorf("byline Y=%g overlaps the tag list ending at %g", byline.Y, tags.Y+tags.H)
 	}
 }
 
-// A container of nothing but inline-blocks keeps flowing as a row: the inline
-// pass owns the line only once there is text to interleave with.
 func TestInlineBlockRowStillFlowsWithoutText(t *testing.T) {
 	arena := session(t, `<html><body style="margin:0">
 		<section><div style="display:inline-block;width:100px">one</div><div style="display:inline-block;width:100px">two</div></section>

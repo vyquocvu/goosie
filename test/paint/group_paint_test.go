@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// gpLayer builds a frozen display list (so groups are visible) from html,
-// mirroring visDisplayList but returning the *LayerDL rather than list.All().
-// The list PaintChecked returns is already SortStable'd (engine/paint.go), so
-// Build reconstructs each clean group in sorted order.
 func gpLayer(t *testing.T, html string) *paint.LayerDL {
 	t.Helper()
 	sess, err := engine.NewSession(html, nil, 800)
@@ -24,9 +20,6 @@ func gpLayer(t *testing.T, html string) *paint.LayerDL {
 	return list.Build(1).Publish()
 }
 
-// A clean faded box emits exactly one group whose own opacity is the declared
-// fraction, and its member commands carry NO opacity of their own: the group
-// fade is withheld from the per-command field and applied once at composite.
 func TestCleanFadedBoxRecordsOneGroup(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -40,10 +33,6 @@ func TestCleanFadedBoxRecordsOneGroup(t *testing.T) {
 	if gs[0].OwnOpacity != 0.5 {
 		t.Errorf("group OwnOpacity = %v, want 0.5", gs[0].OwnOpacity)
 	}
-	// With no faded ancestor the members are opaque (residual 1): the box's own
-	// 0.5 is withheld from every command and applied once to the group buffer. A
-	// member carrying any value strictly in (0,1) here would mean the group fade
-	// leaked back onto the per-command path and would be double-applied.
 	for _, c := range dl.All() {
 		if c.Kind == paint.CmdFill && c.Opacity > 0 && c.Opacity < 1 {
 			t.Errorf("member fill carried a partial per-command opacity %v, want opaque (the group fade is withheld; applied once at composite)", c.Opacity)
@@ -51,9 +40,6 @@ func TestCleanFadedBoxRecordsOneGroup(t *testing.T) {
 	}
 }
 
-// A faded box with a positioned z-index>0 descendant is NOT clean: recording it
-// would break the contiguous-same-Z invariant the group model relies on, so it
-// falls back to today's per-command path (its opacity reaches DisplayCmd.Opacity).
 func TestFadedBoxWithZDescendantIsNotGrouped(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -75,8 +61,6 @@ func TestFadedBoxWithZDescendantIsNotGrouped(t *testing.T) {
 	}
 }
 
-// Two translucent children overlapping inside one clean container: the container
-// is a single group spanning both, and neither child carries its own fade.
 func TestTwoChildrenOneContainerGroup(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}
@@ -91,12 +75,6 @@ func TestTwoChildrenOneContainerGroup(t *testing.T) {
 	}
 }
 
-// A decoration-less faded container whose first content is a faded child shares
-// the group head: the child is not recorded as its own group (ranges must stay
-// contiguous), but its own fade must not be lost - it folds back onto the
-// per-command path and the enclosing group fades the buffer once on top, for
-// 0.5 * 0.5 = 0.25 overall. A lost fade here reads 0.5, which is the regression
-// this guards.
 func TestNestedFadedChildSharingHeadFadesOnce(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 	body{margin:0}

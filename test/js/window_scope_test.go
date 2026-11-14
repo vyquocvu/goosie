@@ -4,11 +4,6 @@ import (
 	"testing"
 )
 
-// In browsers the window object IS the global scope: assigning window.foo
-// makes bare foo visible and vice versa. Goosie installed window as a
-// separate stub object, so every dynamic page that publishes its namespace
-// via window.google / window.app and reads it back bare died with
-// "X is not defined". Google's boot script is exactly that pattern.
 func TestWindowIsGlobalScope(t *testing.T) {
 	r := newRuntime(t, jsOpts())
 	src := `
@@ -54,8 +49,6 @@ func TestMatchMediaUsesDefaultLightColorScheme(t *testing.T) {
 	}
 }
 
-// Google's namespace bootstrap, verbatim shape: publish on window in one
-// breath, read back bare in the next.
 func TestGoogleNamespaceBootstrap(t *testing.T) {
 	r := newRuntime(t, jsOpts())
 	part1 := `(function(){var _g={kEI:'IkfOasPwI-uu4-EPrv3E-QM'};(function(){var a;((a=window.google)==null?0:a.stvsc)?google.kEI=_g.kEI:window.google=_g;}).call(this);})();`

@@ -35,7 +35,6 @@ func TestBookmarksPageDeleteActionPersistsAndRerenders(t *testing.T) {
 		t.Error("surviving bookmark missing after delete")
 	}
 
-	// Persistence: a fresh store loaded from disk lost the deleted entry.
 	reloaded, err := bookmarks.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -47,7 +46,6 @@ func TestBookmarksPageDeleteActionPersistsAndRerenders(t *testing.T) {
 		t.Error("surviving bookmark lost on disk")
 	}
 
-	// Deleting an unknown URL reports an error, not silent success.
 	_, html = buildBookmarksPageHTML(f, "goosie://bookmarks?action=delete&url="+url.QueryEscape("https://never.example"))
 	if !strings.Contains(html, "Bookmark not found") {
 		t.Error("expected not-found feedback for unknown delete target")
@@ -79,12 +77,10 @@ func TestBookmarksPageRenameActionEscapesHostileTitle(t *testing.T) {
 	if strings.Contains(html, `"><img src=x onerror=`) {
 		t.Error("hostile URL broke out of its attribute in rendered HTML")
 	}
-	// A non-navigable scheme must render as inert text, never as an href.
 	if strings.Contains(html, `href="javascript:`) {
 		t.Error("javascript: URL rendered as a clickable link")
 	}
 
-	// Persistence keeps the verbatim (unescaped) title in JSON.
 	reloaded, err := bookmarks.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -102,7 +98,6 @@ func TestBookmarksPageRenameActionEscapesHostileTitle(t *testing.T) {
 		t.Fatal("renamed bookmark missing after reload")
 	}
 
-	// Rename with an empty title is rejected with feedback.
 	_, html = buildBookmarksPageHTML(f, "goosie://bookmarks?action=rename&url="+url.QueryEscape(hostileURL)+"&title=%20%20")
 	if !strings.Contains(html, "Rename failed") {
 		t.Error("expected rejection feedback for empty rename title")
@@ -132,7 +127,6 @@ func TestBookmarksPageSearchFilter(t *testing.T) {
 		t.Error("expected empty-search state")
 	}
 
-	// Search query survives into the delete action link.
 	_, html = buildBookmarksPageHTML(f, "goosie://bookmarks?q=golang")
 	if !strings.Contains(html, "action=delete&url="+url.QueryEscape("https://golang.org/doc")+"&q=golang") {
 		t.Error("delete link should preserve the active search query")
@@ -152,7 +146,6 @@ func TestHistoryPageDeleteEntryAndClearFlow(t *testing.T) {
 
 	f := &framePath{history: store}
 
-	// Per-entry delete via the RFC3339Nano timestamp the UI embeds.
 	action := "goosie://history?action=delete&url=" + url.QueryEscape("https://a.example") + "&at=" + url.QueryEscape(at.Format(time.RFC3339Nano))
 	_, html := buildHistoryPageHTML(f, action)
 	if !strings.Contains(html, "History entry removed and saved") {
@@ -169,7 +162,6 @@ func TestHistoryPageDeleteEntryAndClearFlow(t *testing.T) {
 		t.Fatalf("reloaded entries = %+v, want only b.example", got)
 	}
 
-	// Malformed timestamp is rejected with feedback.
 	_, html = buildHistoryPageHTML(f, "goosie://history?action=delete&url="+url.QueryEscape("https://b.example")+"&at=notatime")
 	if !strings.Contains(html, "missing or malformed") {
 		t.Error("expected malformed-reference feedback")
@@ -178,7 +170,6 @@ func TestHistoryPageDeleteEntryAndClearFlow(t *testing.T) {
 		t.Error("malformed delete must not mutate the store")
 	}
 
-	// Clear requires the confirmation step.
 	_, html = buildHistoryPageHTML(f, "goosie://history?action=clear")
 	if !strings.Contains(html, "Clear all browsing history?") {
 		t.Error("expected confirmation prompt before clearing")
@@ -227,9 +218,6 @@ func TestHistoryPageSearchFilter(t *testing.T) {
 	}
 }
 
-// TestMgmtPagesPrivateSessionNilStores pins privacy isolation: with no
-// profile stores (private session or failed load) the management pages show
-// an explanation, offer no mutation controls, and actions are inert no-ops.
 func TestMgmtPagesPrivateSessionNilStores(t *testing.T) {
 	f := &framePath{}
 
@@ -240,7 +228,6 @@ func TestMgmtPagesPrivateSessionNilStores(t *testing.T) {
 	if strings.Contains(html, "action=delete") || strings.Contains(html, `name="title"`) {
 		t.Error("mutation controls rendered without a store")
 	}
-	// Hostile action against a nil store must not panic.
 	_, html = buildBookmarksPageHTML(f, "goosie://bookmarks?action=delete&url=https%3A%2F%2Fexample.com")
 	if !strings.Contains(html, "Bookmark storage is unavailable") {
 		t.Error("expected inert no-op page for delete action without a store")
@@ -259,8 +246,6 @@ func TestMgmtPagesPrivateSessionNilStores(t *testing.T) {
 	}
 }
 
-// TestMgmtPagesSaveErrorFeedback pins that a persistence failure surfaces in
-// the UI instead of silently pretending the action succeeded.
 func TestMgmtPagesSaveErrorFeedback(t *testing.T) {
 	dir := t.TempDir()
 	badPath := filepath.Join(dir, "occupied")
@@ -277,8 +262,6 @@ func TestMgmtPagesSaveErrorFeedback(t *testing.T) {
 	}
 }
 
-// TestMgmtPagesRoutedThroughInternalPageHTML checks the pages are reachable
-// through the shared goosie:// router with their query strings intact.
 // qc:BR-138
 func TestMgmtPagesRoutedThroughInternalPageHTML(t *testing.T) {
 	dir := t.TempDir()
@@ -311,15 +294,12 @@ func TestMgmtPagesRoutedThroughInternalPageHTML(t *testing.T) {
 	}
 }
 
-// TestNormalizeURLGoosieQueryCasePreserved pins the fix that keeps
-// case-sensitive action parameters intact through navigation.
 func TestNormalizeURLGoosieQueryCasePreserved(t *testing.T) {
 	in := "GOOSIE://Bookmarks?action=rename&url=https%3A%2F%2FExample.COM%2FPath&title=My+Title"
 	want := "goosie://bookmarks?action=rename&url=https%3A%2F%2FExample.COM%2FPath&title=My+Title"
 	if got := normalizeURL(in); got != want {
 		t.Errorf("normalizeURL(%q) = %q, want %q", in, got, want)
 	}
-	// Bare page names still lowercase as before.
 	if got := normalizeURL("GOOSIE://HISTORY"); got != "goosie://history" {
 		t.Errorf("normalizeURL(GOOSIE://HISTORY) = %q, want goosie://history", got)
 	}

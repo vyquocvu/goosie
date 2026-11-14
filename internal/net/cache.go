@@ -8,14 +8,8 @@ import (
 	"time"
 )
 
-// maxCacheBytes bounds the in-memory response cache. It is generous enough to
-// hold a heavy page's stylesheets, fonts and images so a back/forward or a
-// repeat navigation costs nothing, yet small enough that a long browsing
-// session cannot grow it without limit.
 const maxCacheBytes = 64 << 20
 
-// cacheEntry is one stored response plus the wall-clock instant after which it
-// must be revalidated rather than served.
 type cacheEntry struct {
 	resp      *Response
 	expiresAt time.Time
@@ -26,15 +20,10 @@ func (e *cacheEntry) fresh(now time.Time) bool {
 	return now.Before(e.expiresAt)
 }
 
-// responseCache is a small in-memory HTTP cache keyed by the normalized request
-// URL. It stores only what the response's own Cache-Control/Expires headers say
-// is cacheable and public, and it evicts least-recently-used entries once the
-// byte bound is exceeded. It is safe for concurrent use because the engine
-// fetches subresources through a worker pool.
 type responseCache struct {
 	mu      sync.Mutex
 	entries map[string]*cacheEntry
-	order   []string // insertion order, for FIFO eviction
+	order   []string
 	bytes   int
 }
 
@@ -42,8 +31,6 @@ func newResponseCache() *responseCache {
 	return &responseCache{entries: make(map[string]*cacheEntry)}
 }
 
-// get returns a stored response for key if one exists and is still fresh. An
-// expired entry is dropped so the caller falls through to the network.
 func (c *responseCache) get(key string, now time.Time) (*Response, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -58,10 +45,6 @@ func (c *responseCache) get(key string, now time.Time) (*Response, bool) {
 	return e.resp, true
 }
 
-// store caches resp under key when its headers permit. Responses the spec
-// forbids caching (no-store/no-cache/private, a Set-Cookie, a non-200 status,
-// or a zero/absent freshness lifetime) are skipped so correctness wins over
-// hit rate.
 func (c *responseCache) store(key string, resp *Response, now time.Time) {
 	lifetime, ok := freshnessLifetime(resp, now)
 	if !ok {
@@ -109,7 +92,6 @@ func (c *responseCache) dropOrderLocked(key string) {
 	}
 }
 
-// clear drops every entry, including responses that have not expired yet.
 func (c *responseCache) clear() {
 	c.mu.Lock()
 	c.entries = make(map[string]*cacheEntry)
@@ -118,10 +100,6 @@ func (c *responseCache) clear() {
 	c.mu.Unlock()
 }
 
-// freshnessLifetime computes how long a response may be served from cache. It
-// reads Cache-Control first (rejecting anything non-public or explicitly
-// uncacheable) and falls back to the Expires header. ok is false when the
-// response must not be cached.
 func freshnessLifetime(resp *Response, now time.Time) (time.Duration, bool) {
 	if resp.StatusCode != http.StatusOK {
 		return 0, false
@@ -160,9 +138,6 @@ func freshnessLifetime(resp *Response, now time.Time) (time.Duration, bool) {
 	return 0, false
 }
 
-// lookupHeader finds a header value case-insensitively. The Response map keys
-// come from net/http, which canonicalises them, but a cached map is read back
-// verbatim, so the lookup must not depend on exact case.
 func lookupHeader(headers map[string]string, name string) (string, bool) {
 	if v, ok := headers[name]; ok {
 		return v, true

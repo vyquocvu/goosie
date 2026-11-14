@@ -14,19 +14,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// BR-142: the inspector's DOM tree is selectable. Clicking a node's tag name
-// navigates to goosie://inspect?tab=<id>&select=<nodeID>, which outlines that
-// node in the inspected tab without mutating its DOM. The outline is a paint
-// overlay, and the inspected tab is usually a background tab, so its repaint is
-// deferred to the chrome thread rather than run inside the page builder (which
-// would publish a half-built inspector accessibility tree).
-
 const inspectorSubjectHTML = `<!doctype html><html><head><title>Subject</title>` +
 	`<style>html,body{margin:0}#target{position:absolute;left:10px;top:20px;width:100px;height:40px}</style>` +
 	`</head><body><p id="caption">hello</p><div id="target"><span>inner</span></div></body></html>`
 
-// inspectDOMFingerprint records every node's identity and content in tree order
-// so any mutation - an added attribute, edited text, an inserted marker - shows.
 func inspectDOMFingerprint(s *engine.Session) string {
 	var b strings.Builder
 	s.Doc.Node.Walk(func(n *dom.Node) bool {
@@ -70,12 +61,6 @@ func layerHasInspectOverlay(lyr *frame.Layer) bool {
 	return false
 }
 
-// TestInspectorSelectDefersRepaintAndPaintsOverlay drives the page builder
-// directly against a live tab, the way internal_pages_test.go does. It pins the
-// deferral contract: building the inspector page sets the highlight and queues a
-// repaint but does not paint it; draining the queue on the chrome thread paints
-// the overlay into the tab's layer. The DOM never changes.
-//
 // qc:BR-142
 func TestInspectorSelectDefersRepaintAndPaintsOverlay(t *testing.T) {
 	f := newNavTestPath(t)
@@ -98,14 +83,12 @@ func TestInspectorSelectDefersRepaintAndPaintsOverlay(t *testing.T) {
 	beforeCount, beforeDepth := sess.DOMStats()
 
 	_, htmlContent := f.buildInternalPageHTML(fmt.Sprintf("goosie://inspect?tab=%d&select=%d", tab.ID(), target.ID))
-	// The tree row for the target is a link carrying its node id.
 	if !strings.Contains(htmlContent, fmt.Sprintf("goosie://inspect?tab=%d&select=%d", tab.ID(), target.ID)) {
 		t.Error("the DOM tree did not render a select link for the target node")
 	}
 	if got := sess.InspectHighlight(); got != target {
 		t.Fatalf("InspectHighlight() = %v, want the target node %v", got, target)
 	}
-	// The repaint is deferred: nothing painted yet, the tab is queued.
 	if layerHasInspectOverlay(tab.Layer()) {
 		t.Error("the page builder painted the overlay synchronously; it must defer to the chrome thread")
 	}
@@ -136,7 +119,6 @@ func TestInspectorSelectDefersRepaintAndPaintsOverlay(t *testing.T) {
 		t.Errorf("DOMStats changed: (%d,%d) -> (%d,%d)", beforeCount, beforeDepth, afterCount, afterDepth)
 	}
 
-	// Clearing removes the highlight and repaints the overlay away.
 	f.buildInternalPageHTML(fmt.Sprintf("goosie://inspect?tab=%d&select=clear", tab.ID()))
 	if got := sess.InspectHighlight(); got != nil {
 		t.Fatalf("after clear InspectHighlight() = %v, want nil", got)
@@ -147,9 +129,6 @@ func TestInspectorSelectDefersRepaintAndPaintsOverlay(t *testing.T) {
 	}
 }
 
-// TestInspectorSelectIgnoresUnknownNode checks a select id that matches no node
-// in the tree leaves the highlight unset and queues nothing.
-//
 // qc:BR-142
 func TestInspectorSelectIgnoresUnknownNode(t *testing.T) {
 	f := newNavTestPath(t)
@@ -173,12 +152,6 @@ func TestInspectorSelectIgnoresUnknownNode(t *testing.T) {
 	}
 }
 
-// TestJourneyInspectorHighlightsBackgroundTab is the end-to-end chrome path: a
-// page tab, a second inspector tab opened with Cmd+T, and a select navigation
-// that outlines a node in the now-background page tab. The chrome tick drains
-// the deferred repaint without deadlocking, the highlight paints, the DOM is
-// untouched, and select=clear removes it.
-//
 // qc:BR-142
 func TestJourneyInspectorHighlightsBackgroundTab(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -203,8 +176,6 @@ func TestJourneyInspectorHighlightsBackgroundTab(t *testing.T) {
 	beforeFP := inspectDOMFingerprint(sessA)
 	beforeCount, beforeDepth := sessA.DOMStats()
 
-	// Open a second tab through the real chrome shortcut; the subject becomes a
-	// background tab.
 	b.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand})
 	b.inject(t, surface.Event{Kind: surface.EvKey, Key: 't', Mods: surface.ModCommand, KeyAction: surface.KeyRelease})
 	b.waitFor(t, "inspector tab opened", func() bool {

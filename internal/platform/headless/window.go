@@ -1,14 +1,3 @@
-// Package headless is a surface.Window with no display behind it.
-//
-// It exists so that every automated v2 run - the CI gate, a benchmark, a screenshot
-// diff - goes through the same loop, scheduler, composer, and Present path a real
-// window does. That is the reason it implements surface.Window rather than offering a
-// narrower test API: a frame path only proved against a fake would be a frame path only
-// proved against a fake.
-//
-// Two things are deliberately invented here rather than borrowed from a platform: the
-// clock, so pacing is deterministic, and the frame ring, so a run can write the picture
-// it was shown out as a PNG. Everything else is the contract and nothing more.
 package headless
 
 import (
@@ -24,87 +13,41 @@ import (
 )
 
 const (
-	// Name is this backend's name, and the single place the string is spelled. The
-	// platform package's Headless constant is defined from it, so a report that says
-	// "headless" and a selection that asks for "headless" cannot drift apart.
-	Name = "headless"
-	// DefaultVsyncPeriod is 60Hz, so a headless run measures the same cadence the macOS
-	// shim will be held to.
+	Name               = "headless"
 	DefaultVsyncPeriod = 16 * time.Millisecond
-	// DefaultEventBuffer is how many events may be queued before the window starts
-	// shedding vsyncs.
 	DefaultEventBuffer = 128
-	// DefaultHistory is how many presented frames are retained. Two is the minimum
-	// that makes "the frame I am looking at is the one that was drawn" true while the
-	// next frame is being composed.
-	DefaultHistory = 2
+	DefaultHistory     = 2
 )
 
 var (
-	// ErrClosed reports use of a window whose owner has closed it.
-	ErrClosed = errors.New("headless: window is closed")
-	// ErrNoPixels reports a present with nothing to show.
-	ErrNoPixels = errors.New("headless: present with a buffer that has no pixels")
-	// ErrNoFrame reports a screenshot request before anything was presented.
-	ErrNoFrame = errors.New("headless: nothing has been presented yet")
-	// ErrEventsFull reports an injected event that did not fit. Input is never shed: a
-	// lost scroll delta is a wrong document position, so the caller is told instead.
-	ErrEventsFull = errors.New("headless: the event queue is full")
-	// ErrVsyncIsClocks reports an attempt to inject a vsync. Ticks come from the clock,
-	// and a driver that could invent one could make a pacing test pass without waiting.
+	ErrClosed        = errors.New("headless: window is closed")
+	ErrNoPixels      = errors.New("headless: present with a buffer that has no pixels")
+	ErrNoFrame       = errors.New("headless: nothing has been presented yet")
+	ErrEventsFull    = errors.New("headless: the event queue is full")
 	ErrVsyncIsClocks = errors.New("headless: vsync comes from the clock, not from a driver")
 )
 
-// Config is a headless window's setup. The zero value is a 60Hz window with no size,
-// which becomes whatever the first Present shows.
 type Config struct {
-	// Size is the initial surface size, and the size ScaleFactor and EvResize are read
-	// against before the first frame.
-	Size frame.Size
-	// Scale is the device pixel ratio the window reports. Zero means 1.
-	Scale float32
-	// VsyncPeriod is the interval between ticks. Zero means DefaultVsyncPeriod; a value
-	// far longer than any test's patience is how a test gets input with no ticks.
+	Size        frame.Size
+	Scale       float32
 	VsyncPeriod time.Duration
-	// Clock paces the window. Nil means SystemClock.
-	Clock Clock
-	// EventBuffer is the event queue's depth. Zero means DefaultEventBuffer.
+	Clock       Clock
 	EventBuffer int
-	// History is how many presented frames to retain. Zero means DefaultHistory.
-	History int
+	History     int
 }
 
-// Stats is what a headless run did, which is what a gate reports alongside the frame
-// timings so a reader can tell a frame that was dropped from one that was slow.
 type Stats struct {
-	// Presents counts frames the loop handed over.
-	Presents int64
-	// Injected counts events a driver queued, and excludes the clock's own ticks.
-	Injected int64
-	// DroppedVsyncs counts ticks the queue could not hold. It is expected to be
-	// non-zero when a run draws slower than the display asks for, and that is the
-	// number worth reporting rather than a queue that grew.
+	Presents      int64
+	Injected      int64
 	DroppedVsyncs int64
-	// Frames is the serial of the newest retained present, so 0 means nothing shown.
-	Frames int64
-	// DamagedRects is how many rects the last present was told had changed. A frame
-	// path that reports the whole surface every time still displays correctly, and this
-	// is the counter that shows it is doing so.
-	DamagedRects int
+	Frames        int64
+	DamagedRects  int
 }
 
-// Window is a headless surface.Window.
-//
-// One mutex guards everything a driver thread can touch - the closed flag, the scale,
-// the size, the ring, and the counters - so ScaleFactor and Stats may be read while the
-// UI thread runs. It is never held across a blocking operation: every send on the event
-// channel is non-blocking by construction, which is what keeps a test that injects into
-// a queue nobody drains from deadlocking against the window it is testing.
 type Window struct {
 	events chan surface.Event
 	quit   chan struct{}
 	clock  Clock
-	// period is fixed after New, so the vsync loop and VsyncPeriod can read it unlocked.
 	period time.Duration
 
 	wg sync.WaitGroup
@@ -125,8 +68,6 @@ type Window struct {
 	damagedRects int
 }
 
-// New returns a running window: its vsync loop starts here, so Close is required to
-// stop it, and t.Cleanup is enough in a test.
 func New(cfg Config) *Window {
 	if cfg.Clock == nil {
 		cfg.Clock = SystemClock{}
@@ -160,10 +101,6 @@ func New(cfg Config) *Window {
 	return w
 }
 
-// run is the window's only goroutine: it turns clock ticks into events, one per period,
-// and never runs anything else. It does not touch pixels, because a headless backend
-// that rasterized on the way to the queue would hide the one thing these runs exist to
-// measure.
 func (w *Window) run() {
 	defer w.wg.Done()
 	for {
@@ -182,16 +119,8 @@ func (w *Window) run() {
 	}
 }
 
-// Events implements surface.Window.
-//
-// The channel is closed by Close, which is how a loop learns the platform is gone. A
-// driver that wants to stop drawing without that signal cancels its context instead.
 func (w *Window) Events() <-chan surface.Event { return w.events }
 
-// enqueue queues one event. A vsync that does not fit is dropped and counted rather than
-// queued: a tick the UI thread has not taken is a frame it has already decided not to
-// draw, and holding it would turn a slow frame into a growing backlog and every later
-// timing measurement into a measurement of queue depth.
 func (w *Window) enqueue(ev surface.Event) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -199,9 +128,6 @@ func (w *Window) enqueue(ev surface.Event) error {
 		return ErrClosed
 	}
 	if ev.Scale == 0 {
-		// An event built without a ratio is the driver's mistake, and the fix has to
-		// happen before the loop sees it: a scroll read at DPR 1 moves the page half as
-		// far as the finger did.
 		ev.Scale = w.scale
 	}
 	select {
@@ -216,9 +142,6 @@ func (w *Window) enqueue(ev surface.Event) error {
 	return ErrEventsFull
 }
 
-// Inject queues driver-authored input: a scroll, a pointer, a key, a resize. A resize
-// also updates the size and scale the window reports afterwards, because a platform
-// that resized does not keep answering questions with the old geometry.
 func (w *Window) Inject(ev surface.Event) error {
 	if ev.Kind == surface.EvVsync {
 		return ErrVsyncIsClocks
@@ -238,13 +161,6 @@ func (w *Window) Inject(ev surface.Event) error {
 	return nil
 }
 
-// Present records the frame. The headless backend uploads the whole buffer and ignores
-// which rects changed - the honest behaviour for a file-format output - but it counts
-// them, because "damage was reported at all" is a property worth watching.
-//
-// The pixels are copied into a per-serial buffer rather than retained by reference: the
-// loop hands the same backing store to the next frame, so keeping the caller's bitmap
-// would mean every screenshot showed the last frame drawn instead of the one presented.
 func (w *Window) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	if buf == nil || buf.Empty() {
 		return ErrNoPixels
@@ -269,97 +185,70 @@ func (w *Window) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	return nil
 }
 
-// SetCursor implements surface.Window. A headless window has no pointer, so the shape
-// is only remembered, which is exactly enough for a test that asserts the engine asked
-// for a text cursor over an input.
 func (w *Window) SetCursor(c surface.Cursor) {
 	w.mu.Lock()
 	w.cursor = c
 	w.mu.Unlock()
 }
 
-// Cursor returns the shape last requested.
 func (w *Window) Cursor() surface.Cursor {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.cursor
 }
 
-// SetIME implements surface.Window. A headless window has no input method, so
-// the flag is only remembered for tests that assert the focus path toggled it.
 func (w *Window) SetIME(enabled bool) {
 	w.mu.Lock()
 	w.imeEnabled = enabled
 	w.mu.Unlock()
 }
 
-// IMEEnabled reports the flag last set.
 func (w *Window) IMEEnabled() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.imeEnabled
 }
 
-// SetAccessibility implements surface.AccessibilityWindow. A headless window has
-// no assistive client, so the tree is only remembered - which is exactly what the
-// roadmap's headless-vs-native comparison needs: the same publish call a native
-// window takes, with the result readable instead of invisible.
 func (w *Window) SetAccessibility(nodes []ax.Node) {
 	w.mu.Lock()
 	w.axNodes = nodes
 	w.mu.Unlock()
 }
 
-// AccessibilityTree returns the tree last published.
 func (w *Window) AccessibilityTree() []ax.Node {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.axNodes
 }
 
-// ScaleFactor implements surface.Window.
 func (w *Window) ScaleFactor() float32 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.scale
 }
 
-// Size returns the surface size the window last reported, which is the configured one
-// until a present or a resize changes it.
 func (w *Window) Size() frame.Size {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.size
 }
 
-// Name satisfies platform.Namer: the string a report prints for a window that put no
-// pixels on any display, whatever the machine it runs on could have done instead.
 func (w *Window) Name() string { return Name }
 
-// VsyncPeriod returns the interval the clock is driven at. It never changes, so a
-// measurement of a run can name the rate it was paced at.
 func (w *Window) VsyncPeriod() time.Duration { return w.period }
 
-// DroppedVsyncs reports the shed ticks on its own, satisfying platform.DroppedVsyncer
-// for a report that names the pacing without wanting a window's whole summary. It is
-// the same number Stats carries.
 func (w *Window) DroppedVsyncs() int64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.dropped
 }
 
-// Presents satisfies platform.PresentCounter. A headless window refuses nothing and
-// commits synchronously - the copy into its ring is the commit - so all three numbers
-// are the same one. Reporting that apart is what keeps a native run's "committed"
-// honest: a backend that never drops makes the difference visible by not having it.
 func (w *Window) Presents() (queued, dropped, committed int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.presents, 0, w.presents
 }
 
-// Stats returns the counters. Safe to call while the window runs.
 func (w *Window) Stats() Stats {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -372,9 +261,6 @@ func (w *Window) Stats() Stats {
 	}
 }
 
-// Presented returns the retained copy of the newest presented frame. The bitmap belongs
-// to the window: it stays valid for History further presents, after which the ring
-// reuses it.
 func (w *Window) Presented() *frame.Bitmap {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -384,11 +270,6 @@ func (w *Window) Presented() *frame.Bitmap {
 	return w.ring[w.last]
 }
 
-// WritePNG writes the newest presented frame to path as a PNG.
-//
-// The pixels are copied out under the lock and encoded without it: a screenshot of a
-// frame the loop is repainting halfway through would be a screenshot of a torn image,
-// and holding the lock through an encoder would block the loop behind a file.
 func (w *Window) WritePNG(path string) error {
 	w.mu.Lock()
 	if w.serial == 0 {
@@ -411,8 +292,6 @@ func (w *Window) WritePNG(path string) error {
 	return f.Close()
 }
 
-// Close stops the vsync loop and closes the event channel. It is idempotent, and it
-// waits for the loop to exit so a caller can be sure nothing is still sending.
 func (w *Window) Close() error {
 	w.mu.Lock()
 	if w.closed {
@@ -420,8 +299,6 @@ func (w *Window) Close() error {
 		return nil
 	}
 	w.closed = true
-	// Both closes happen under the lock, and every send checks the flag under the same
-	// lock, so no goroutine can be about to send on the channel being closed here.
 	close(w.quit)
 	close(w.events)
 	w.mu.Unlock()

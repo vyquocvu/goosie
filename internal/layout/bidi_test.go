@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// spanOf returns the bidiRun covering the rune span [start, end) of text,
-// or nil when no single run covers it whole.
 func spanOf(runs []bidiRun, start, end int) *bidiRun {
 	for i := range runs {
 		if runs[i].Start <= start && runs[i].End >= end {
@@ -41,12 +39,6 @@ func TestResolveBidiMixedBaseRTL(t *testing.T) {
 	if len(runs) != 2 {
 		t.Fatalf("resolveBidi(hello שלום, 1) = %+v, want 2 runs", runs)
 	}
-	// "hello" is runes 0-4; an LTR run inside an RTL line takes the lowest even
-	// level at or above the base, so it sits at level 2 rather than 0. The space
-	// and "שלום" (runes 5-9) take the RTL base level and merge into one run.
-	// Chromium's own islands are in scripts/verify-br087-bidi.js: the Latin
-	// reads ascending (a=708.438 b=717.328 c=726.234) to the left of the RTL
-	// run, so the two are separate levels.
 	if runs[0].Start != 0 || runs[0].End != 5 || runs[0].Level != 2 {
 		t.Errorf("run 0 = %+v, want [0,5) at level 2", runs[0])
 	}
@@ -57,10 +49,6 @@ func TestResolveBidiMixedBaseRTL(t *testing.T) {
 
 func TestResolveBidiDigitsStayLTR(t *testing.T) {
 	runs := resolveBidi("abc 123 שלום", 1, false)
-	// "123" occupies runes 4-6. It must be inside a level-2 run that stops
-	// before the Hebrew, never merged into the RTL tail or reversed; "abc 123"
-	// share that run because the neutral between two LTR types lifts to level 2.
-	// Chromium measures them as one ascending island: a=708.438 … 3=756.469.
 	digits := spanOf(runs, 4, 7)
 	if digits == nil {
 		t.Fatalf("resolveBidi(abc 123 שלום, 1) = %+v, no run covers the digits", runs)
@@ -74,11 +62,6 @@ func TestResolveBidiDigitsStayLTR(t *testing.T) {
 	}
 }
 
-// A neutral between two islands is the whole difference between "abc 123"
-// reading as one island and "123 ٤٥٦" reading as two: European digits are
-// left-to-right for the neutrals around them while Arabic-Indic digits are
-// right-to-left, even though both display ascending (Chromium measures
-// ٤=708.969 ٥=717.375 ٦=725.797 inside an RTL line).
 func TestBidiLevelsSeparateENFromAN(t *testing.T) {
 	levels := bidiLevels("123 ٤٥٦", 1, false)
 	want := []int{2, 2, 2, 1, 2, 2, 2}
@@ -94,10 +77,6 @@ func TestBidiLevelsSeparateENFromAN(t *testing.T) {
 	}
 }
 
-// TestBidiVisualPermutationMatchesTheReference applies the resolved
-// permutation to the text and compares the string the reference reports as
-// `visual =`. Each case below is Chromium's own output for the same fixture in
-// scripts/verify-br087-bidi.js.
 func TestBidiVisualPermutationMatchesTheReference(t *testing.T) {
 	cases := []struct {
 		text       string
@@ -144,10 +123,10 @@ func TestPlaintextBaseLevel(t *testing.T) {
 		fallback,
 		want int
 	}{
-		{"שלום hello", 0, 1}, // first strong char is Hebrew
-		{"hello שלום", 1, 0}, // first strong char is Latin
-		{"123 שלום", 0, 1},   // digits are skipped, not strong
-		{"  ...  ", 1, 1},    // no strong char at all keeps the fallback
+		{"שלום hello", 0, 1},
+		{"hello שלום", 1, 0},
+		{"123 שלום", 0, 1},
+		{"  ...  ", 1, 1},
 		{"", 0, 0},
 	}
 	for _, c := range cases {

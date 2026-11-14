@@ -8,8 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// --- Checkbox toggle tests ---
-
 func TestCheckboxToggle(t *testing.T) {
 	html := `<html><body><form>` +
 		`<input id="cb" type="checkbox">` +
@@ -18,23 +16,19 @@ func TestCheckboxToggle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	// Find the checkbox node.
 	cb := findNodeByTag(&s.Doc.Node, "input")
 	if cb == nil {
 		t.Fatal("checkbox input not found")
 	}
-	// Initially unchecked.
 	if engine.IsChecked(cb) {
 		t.Fatal("checkbox should start unchecked")
 	}
-	// Toggle on.
 	if !s.ToggleControl(cb) {
 		t.Fatal("ToggleControl should return true")
 	}
 	if !engine.IsChecked(cb) {
 		t.Fatal("checkbox should be checked after toggle")
 	}
-	// Toggle off.
 	if !s.ToggleControl(cb) {
 		t.Fatal("ToggleControl should return true on second toggle")
 	}
@@ -42,8 +36,6 @@ func TestCheckboxToggle(t *testing.T) {
 		t.Fatal("checkbox should be unchecked after second toggle")
 	}
 }
-
-// --- Radio toggle tests ---
 
 func TestRadioToggle(t *testing.T) {
 	html := `<html><body><form>` +
@@ -61,7 +53,6 @@ func TestRadioToggle(t *testing.T) {
 	}
 	r1, r2, r3 := radios[0], radios[1], radios[2]
 
-	// Click r2: it should be checked, others unchecked.
 	if !s.ToggleControl(r2) {
 		t.Fatal("ToggleControl should return true")
 	}
@@ -75,7 +66,6 @@ func TestRadioToggle(t *testing.T) {
 		t.Fatal("r3 should be unchecked")
 	}
 
-	// Click r3: r2 should be unchecked, r3 checked.
 	s.ToggleControl(r3)
 	if !engine.IsChecked(r3) {
 		t.Fatal("r3 should be checked")
@@ -84,8 +74,6 @@ func TestRadioToggle(t *testing.T) {
 		t.Fatal("r2 should be unchecked after r3 clicked")
 	}
 }
-
-// --- IsChecked tests ---
 
 func TestIsChecked(t *testing.T) {
 	doc := dom.NewDocument()
@@ -107,8 +95,6 @@ func TestIsChecked(t *testing.T) {
 		t.Fatal("nil node should report false")
 	}
 }
-
-// --- IsActivatable tests ---
 
 func TestButtonIsActivatable(t *testing.T) {
 	doc := dom.NewDocument()
@@ -154,8 +140,6 @@ func TestTextInputIsNotActivatable(t *testing.T) {
 	}
 }
 
-// --- SelectedOption tests ---
-
 func TestSelectedOption(t *testing.T) {
 	doc := dom.NewDocument()
 	sel := doc.NewElement("select")
@@ -195,8 +179,6 @@ func TestSelectedOptionDefault(t *testing.T) {
 	}
 }
 
-// --- Intrinsic size tests ---
-
 func TestCheckboxIntrinsicSize(t *testing.T) {
 	html := `<html><body><input id="cb" type="checkbox"></body></html>`
 	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
@@ -221,10 +203,6 @@ func TestSelectIntrinsicSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	// The select element should exist in the arena.
-	// With display:inline in the UA stylesheet, the select is an inline element
-	// and doesn't get intrinsic dimensions from block layout's replacedSize path.
-	// We just verify it's present in the arena.
 	obj := findObjByID(t, s, "sel")
 	if obj == nil {
 		t.Fatal("select element not found in arena")
@@ -233,8 +211,6 @@ func TestSelectIntrinsicSize(t *testing.T) {
 		t.Fatal("found object is not a select element")
 	}
 }
-
-// --- Test helpers ---
 
 func findNodeByTag(root *dom.Node, tag string) *dom.Node {
 	if root.Element() && root.Data == tag {

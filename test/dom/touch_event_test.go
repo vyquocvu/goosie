@@ -6,11 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// The touch lists one gesture action produces, measured against Chromium with
-// test/wpt/resources/touch_probe.py: while a contact is held it is in `touches`,
-// and touchend arrives with `touches` empty but one entry in `changedTouches`.
-// The caller owns the held set because removing the released contact is the
-// host's decision, not the event's.
 func TestTrustedTouchEventCarriesItsTouchLists(t *testing.T) {
 	target := &dom.Node{}
 	held := &dom.Touch{Identifier: 1, ClientX: 50, ClientY: 50, Target: target}
@@ -30,8 +25,6 @@ func TestTrustedTouchEventCarriesItsTouchLists(t *testing.T) {
 		t.Errorf("touchstart touch = %+v, want identifier 1 at (50, 50)", te.Touches[0])
 	}
 
-	// A second finger joins the held set for both lists of its own touchstart,
-	// and the first contact keeps its identifier.
 	second := &dom.Touch{Identifier: 2, ClientX: 80, ClientY: 90, Target: target}
 	move := dom.NewTrustedTouchEvent("touchmove", target, []*dom.Touch{held, second}, []*dom.Touch{second})
 	if me := move.AsTouch(); me == nil || len(me.Touches) != 2 || len(me.ChangedTouches) != 1 {
@@ -44,8 +37,6 @@ func TestTrustedTouchEventCarriesItsTouchLists(t *testing.T) {
 	}
 }
 
-// `targetTouches` is the held set limited to contacts whose target is the
-// event target; a touch aimed at a different node leaves it empty.
 func TestTouchEventTargetTouchesFollowsTheTouchTarget(t *testing.T) {
 	other := &dom.Node{}
 	inDoc := &dom.Node{}
@@ -62,9 +53,6 @@ func TestTouchEventTargetTouchesFollowsTheTouchTarget(t *testing.T) {
 	}
 }
 
-// touchstart and touchmove cancel the scroll they cause, so a generated one
-// reports the dispatch-time answer like a wheel gesture does. touchend and
-// touchcancel block no scroll and keep the flag they were built with.
 func TestGeneratedTouchCancelabilityCoversOnlyTheScrollBlockingTypes(t *testing.T) {
 	for _, typ := range []string{"touchstart", "touchmove"} {
 		e := dom.NewTrustedTouchEvent(typ, nil, nil, nil)
@@ -94,8 +82,6 @@ func TestGeneratedTouchCancelabilityCoversOnlyTheScrollBlockingTypes(t *testing.
 	}
 }
 
-// A generated touch event bubbles: the corpus listens on window, document, the
-// root and body while the gesture lands on a div.
 func TestGeneratedTouchEventBubbles(t *testing.T) {
 	for _, typ := range []string{"touchstart", "touchmove", "touchend", "touchcancel"} {
 		e := dom.NewTrustedTouchEvent(typ, nil, nil, nil)

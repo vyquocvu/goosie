@@ -95,20 +95,17 @@ func TestExtensionsPage_ListAndToggle(t *testing.T) {
 		t.Error("expected toggle buttons in HTML")
 	}
 
-	// Toggle s1 to disabled
 	_, _ = buildExtensionsPageHTML(f, "goosie://extensions?action=toggle&id=dark-hn")
 	if s1.Enabled {
 		t.Error("expected s1 to be disabled after toggle action")
 	}
 
-	// Toggle s1 back to enabled
 	_, _ = buildExtensionsPageHTML(f, "goosie://extensions?action=toggle&id=dark-hn")
 	if !s1.Enabled {
 		t.Error("expected s1 to be enabled after second toggle action")
 	}
 }
 
-// TestUserscripts_EndToEndInjection tests that navigating to a web page executes matching user scripts.
 func TestUserscripts_EndToEndInjection(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -124,7 +121,6 @@ func TestUserscripts_EndToEndInjection(t *testing.T) {
 	}
 	f.fonts = fonts
 
-	// Register a script matching our test server
 	script := &userscript.Script{
 		ID:      "modifier",
 		Name:    "Page Modifier",

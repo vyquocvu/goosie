@@ -2,10 +2,6 @@ package js
 
 import "strconv"
 
-// replaceGojaMaxCodePointEscape works around a Goja lexer panic on the valid
-// JavaScript string escape \u{10FFFF}. The equivalent UTF-16 surrogate escapes
-// produce the same string value and avoid changing escaped backslashes or code
-// outside string literals.
 func replaceGojaMaxCodePointEscape(src string) string {
 	var out []byte
 	quote := byte(0)

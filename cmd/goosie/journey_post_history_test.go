@@ -13,11 +13,6 @@ import (
 )
 
 // qc:BR-017
-// TestJourneyPostHistoryAsksBeforeResubmitting follows the browser rule for a
-// POST result: going back to it, forward to it, or reloading it must ask first,
-// because repeating the request can repeat a purchase or a message. Cancel has
-// to leave the page the user was reading untouched, and only a confirmation may
-// put the encoded body back on the wire.
 func TestJourneyPostHistoryAsksBeforeResubmitting(t *testing.T) {
 	var mu sync.Mutex
 	var posts int
@@ -92,22 +87,18 @@ func TestJourneyPostHistoryAsksBeforeResubmitting(t *testing.T) {
 		t.Fatalf("first POST body = %q, want note=hello", got)
 	}
 
-	// Back to the form is a GET and never asks.
 	browser.clickToolbarButton(t, toolbar.ButtonBack)
 	browser.waitFor(t, "back to the form", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "send")
 		return ok && browser.activeURL() == server.URL+"/form"
 	})
 
-	// Forward to the POST result asks first; no request has gone out.
 	browser.clickToolbarButton(t, toolbar.ButtonForward)
 	waitForPrompt("forward to the POST result prompts")
 	if postCount() != 1 {
 		t.Fatalf("the server saw %d POST(s) before confirmation, want 1", postCount())
 	}
 
-	// Cancel puts the form back with its scroll/cursor state and keeps the
-	// cursor behind the POST entry, so Forward can ask again.
 	browser.clickElementByID(t, "resubmit-cancel")
 	browser.waitFor(t, "cancel restores the form", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "send")
@@ -120,7 +111,6 @@ func TestJourneyPostHistoryAsksBeforeResubmitting(t *testing.T) {
 		t.Fatal("cancel moved the history cursor past the POST entry")
 	}
 
-	// Confirming resubmits the encoded body and lands on the result.
 	browser.clickToolbarButton(t, toolbar.ButtonForward)
 	waitForPrompt("forward prompts again after cancel")
 	browser.clickElementByID(t, "resubmit-confirm")
@@ -132,8 +122,6 @@ func TestJourneyPostHistoryAsksBeforeResubmitting(t *testing.T) {
 		t.Fatalf("resubmitted body = %q, want note=hello", got)
 	}
 
-	// Reload on a POST result is the same question, and cancel keeps the
-	// displayed result without touching the wire.
 	browser.clickToolbarButton(t, toolbar.ButtonReload)
 	waitForPrompt("reload of a POST result prompts")
 	browser.clickElementByID(t, "resubmit-cancel")
@@ -152,7 +140,6 @@ func TestJourneyPostHistoryAsksBeforeResubmitting(t *testing.T) {
 		return postCount() == 3
 	})
 
-	// A POST entry behind a GET entry prompts when reached with Back too.
 	browser.navigateViaAddressBar(t, server.URL+"/other")
 	browser.waitFor(t, "other page", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "other")
@@ -178,7 +165,6 @@ func TestJourneyPostHistoryAsksBeforeResubmitting(t *testing.T) {
 		return ok && browser.activeURL() == server.URL+"/submit" && postCount() == 4
 	})
 
-	// The GET entry after it still traverses without a prompt.
 	browser.clickToolbarButton(t, toolbar.ButtonForward)
 	browser.waitFor(t, "forward to the GET entry needs no prompt", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "other")

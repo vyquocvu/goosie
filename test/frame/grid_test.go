@@ -19,9 +19,6 @@ func TestCoordForAtBoundariesAndNegatives(t *testing.T) {
 		{frame.Point{X: 255, Y: 255}, frame.TileCoord{Col: 0, Row: 0}},
 		{frame.Point{X: 256, Y: 0}, frame.TileCoord{Col: 1, Row: 0}},
 		{frame.Point{X: 0, Y: 256}, frame.TileCoord{Col: 0, Row: 1}},
-		// Go's / truncates toward zero, so without floor division x = -1 would
-		// land in tile 0 alongside x = -256, and negative-origin content would
-		// render into the wrong tile.
 		{frame.Point{X: -1, Y: -1}, frame.TileCoord{Col: -1, Row: -1}},
 		{frame.Point{X: -256, Y: -256}, frame.TileCoord{Col: -1, Row: -1}},
 		{frame.Point{X: -257, Y: 512}, frame.TileCoord{Col: -2, Row: 2}},
@@ -47,17 +44,12 @@ func TestTileCoordRectRoundTrips(t *testing.T) {
 }
 
 func TestVisibleCoordsAtRetinaViewport(t *testing.T) {
-	// 3024x1900 device px is a 16-inch MacBook Pro in fullscreen. 12x8 = 96
-	// tiles is the number the design document budgets against, so it is asserted
-	// rather than measured at runtime.
 	g := frame.NewGrid(frame.Rect4(0, 0, 4096, 8192), frame.TileSize, 1<<30, tilePool())
 	vp := frame.Viewport{Size: frame.Size{W: 3024, H: 1900}}
 	coords := g.VisibleCoords(vp, nil)
 	if len(coords) != 96 {
 		t.Fatalf("visible tiles = %d, want 12x8 = 96", len(coords))
 	}
-	// A viewport one device px wider than a whole number of tile columns costs an
-	// extra column: the partial column is still visible and must be rasterized.
 	vp.Size.W = 3073
 	if got := len(g.VisibleCoords(vp, nil)); got != 104 {
 		t.Fatalf("visible tiles at 3073x1900 = %d, want 13x8 = 104", got)
@@ -65,9 +57,6 @@ func TestVisibleCoordsAtRetinaViewport(t *testing.T) {
 }
 
 func TestVisibleCoordsClampedToLayerExtent(t *testing.T) {
-	// A short document must not produce coordinates that no content can fill;
-	// those tiles would be rasterized, billed to the budget, and present forever
-	// as blank.
 	g := frame.NewGrid(frame.Rect4(0, 0, 512, 300), frame.TileSize, 1<<30, tilePool())
 	vp := frame.Viewport{Size: frame.Size{W: 2048, H: 2048}}
 	coords := g.VisibleCoords(vp, nil)
@@ -104,13 +93,7 @@ func warm(t *testing.T, g *frame.Grid, vp frame.Viewport, version uint64) []fram
 }
 
 func TestWarmScrollRasterizesNoTiles(t *testing.T) {
-	// This is the raster half of invariant 1 and the reason the whole design
-	// exists: once the cache holds the content a scroll will reveal, scrolling
-	// must reuse those tiles and do zero rasterization.
 	g := frame.NewGrid(frame.Rect4(0, 0, 1024, 8192), frame.TileSize, 1<<30, tilePool())
-	// Warm a band taller than the viewport used to measure, so the scrolled-to
-	// rows are content the cache has already paid for. This is the prefetch case
-	// the design budgets for, not an artificial one.
 	warm(t, g, frame.Viewport{Size: frame.Size{W: 1024, H: 4096}}, 1)
 	if got := g.Stats().Rasterized; got != 64 {
 		t.Fatalf("initial warm-up rasterized %d tiles, want 4 cols x 16 rows = 64", got)
@@ -138,9 +121,6 @@ func TestWarmScrollRasterizesNoTiles(t *testing.T) {
 		t.Fatalf("Reused = %d, want at least one touch per visible tile", got)
 	}
 
-	// A scroll that straddles the edge of the warmed band asks for exactly the
-	// rows it never warmed: visible rows 8..17, of which 8..15 are warm, so the
-	// two cold rows are 8 tiles rather than the whole viewport's 40.
 	vp.Offset.Y = 2048
 	need := 0
 	for _, c := range g.VisibleCoords(vp, nil) {
@@ -158,7 +138,6 @@ func TestInvalidateMarksOnlyIntersectingTiles(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 1024, H: 1024}}
 	warm(t, g, vp, 1)
 
-	// One dirty band of content one row tall, spanning all four columns.
 	n := g.Invalidate(frame.Rect4(0, 256, 1000, 300))
 	if n != 4 {
 		t.Fatalf("Invalidate marked %d tiles, want the 4 in row 1", n)
@@ -168,8 +147,6 @@ func TestInvalidateMarksOnlyIntersectingTiles(t *testing.T) {
 		if !g.Needs(c, 1) {
 			t.Fatalf("tile %v in the dirty row still reports valid", c)
 		}
-		// Stale pixels survive: presenting a slightly old tile is the mechanism
-		// behind "present now, fix next vsync".
 		if !g.Peek(c).Blittable() {
 			t.Fatalf("tile %v dropped its pixels when invalidated", c)
 		}
@@ -179,7 +156,6 @@ func TestInvalidateMarksOnlyIntersectingTiles(t *testing.T) {
 			t.Fatalf("tile %v outside the dirty rect was invalidated", c)
 		}
 	}
-	// An empty dirty rect stales nothing.
 	if got := g.Invalidate(frame.Rect{}); got != 0 {
 		t.Fatalf("Invalidate(empty) marked %d tiles", got)
 	}
@@ -189,7 +165,6 @@ func TestBudgetEvictsLeastRecentlyUsedAndPlateaus(t *testing.T) {
 	one := frame.TileSizeBytes()
 	g := frame.NewGrid(frame.Rect4(0, 0, 1024, 8192), frame.TileSize, 4*one, tilePool())
 
-	// Four tiles fill the budget exactly.
 	for row := int32(0); row < 4; row++ {
 		c := frame.TileCoord{Col: 0, Row: row}
 		bmp, _ := g.Acquire(c)
@@ -199,7 +174,6 @@ func TestBudgetEvictsLeastRecentlyUsedAndPlateaus(t *testing.T) {
 		t.Fatalf("Bytes = %d, want the budget %d", got, 4*one)
 	}
 
-	// Touch row 3 so row 0 becomes the oldest, then demand a fifth tile.
 	g.Touch(frame.TileCoord{Col: 0, Row: 3})
 	c := frame.TileCoord{Col: 0, Row: 4}
 	bmp, _ := g.Acquire(c)
@@ -219,7 +193,6 @@ func TestBudgetEvictsLeastRecentlyUsedAndPlateaus(t *testing.T) {
 		t.Fatalf("Bytes %d exceeded Budget %d", st.Bytes, st.Budget)
 	}
 
-	// A long scroll must not grow the footprint past the ceiling.
 	for row := int32(5); row < 40; row++ {
 		cc := frame.TileCoord{Col: 0, Row: row}
 		b, _ := g.Acquire(cc)
@@ -248,7 +221,6 @@ func TestPrefetchCoordsAheadOfScroll(t *testing.T) {
 	if got := g.PrefetchCoords(vp, frame.Point{}, 2, nil); got != nil {
 		t.Fatalf("no scroll direction produced %d coordinates", len(got))
 	}
-	// Scrolling up must prefetch above, and never off the top of the document.
 	above := g.PrefetchCoords(vp, frame.Point{Y: -1}, 4, nil)
 	if len(above) != 0 {
 		t.Fatalf("prefetch above the document origin produced %d coordinates", len(above))
@@ -256,12 +228,10 @@ func TestPrefetchCoordsAheadOfScroll(t *testing.T) {
 }
 
 func TestLateWorkerResultIsDropped(t *testing.T) {
-	// A worker that finishes after its tile was evicted must not write into a
-	// buffer the UI thread has handed to someone else.
 	g := frame.NewGrid(frame.Rect4(0, 0, 512, 512), frame.TileSize, 1<<30, tilePool())
 	stale, _ := g.Acquire(frame.TileCoord{Col: 0, Row: 0})
 	g.MarkValid(frame.TileCoord{Col: 0, Row: 0}, 1, stale)
-	g.SetBudget(frame.TileSizeBytes()) // evicts everything but one holder
+	g.SetBudget(frame.TileSizeBytes())
 	fresh, _ := g.Acquire(frame.TileCoord{Col: 1, Row: 1})
 	g.MarkValid(frame.TileCoord{Col: 1, Row: 1}, 1, fresh)
 
@@ -277,7 +247,6 @@ func TestFailedTileRendersBlankAndIsNotRetriedForever(t *testing.T) {
 	g := frame.NewGrid(frame.Rect4(0, 0, 512, 512), frame.TileSize, 1<<30, tilePool())
 	c := frame.TileCoord{Col: 0, Row: 0}
 	for attempt := 0; attempt < frame.MaxTileAttempts; attempt++ {
-		// Acquire and abandon: the worker gave up without publishing.
 		if _, ok := g.Acquire(c); !ok {
 			t.Fatalf("Acquire(%v) refused a coordinate inside the layer", c)
 		}
@@ -294,11 +263,6 @@ func TestFailedTileRendersBlankAndIsNotRetriedForever(t *testing.T) {
 	}
 }
 
-// A tile that failed under an old version is only blank for that version. Once
-// content changes under it, the pixels it could not produce no longer exist, so
-// the retry cap that gave up on it has nothing left to protect and the tile has
-// to be willing to try again - otherwise one transient rasteriser panic costs a
-// blank rectangle for the rest of the document's life.
 func TestVersionBumpRetriesATileThatFailedUnderTheOldOne(t *testing.T) {
 	g := frame.NewGrid(frame.Rect4(0, 0, 512, 512), frame.TileSize, 1<<30, tilePool())
 	dead, live := frame.TileCoord{Col: 0, Row: 0}, frame.TileCoord{Col: 1, Row: 1}
@@ -314,7 +278,6 @@ func TestVersionBumpRetriesATileThatFailedUnderTheOldOne(t *testing.T) {
 		t.Fatal("setup: the tile was not given up on")
 	}
 
-	// The dirty rect covers the failed tile; the other one is outside it.
 	if got := g.Advance(2, dead.Rect(frame.TileSize)); got != 0 {
 		t.Fatalf("Advance staled %d tiles, want 0 - a failed tile holds no pixels to keep showing", got)
 	}
@@ -336,8 +299,6 @@ func TestLayerBumpStalesOnlyDirtyTiles(t *testing.T) {
 	pool := tilePool()
 	l := frame.NewLayer(1, frame.Rect4(0, 0, 1024, 2048), 1<<30, pool)
 	vp := frame.Viewport{Size: frame.Size{W: 1024, H: 512}}
-	// Establish version 1 without staling anything, then warm the visible band at
-	// that version, which is what the first frame does.
 	if got := l.Bump(1, frame.Rect{}); got != 0 {
 		t.Fatalf("first Bump with an empty dirty rect staled %d tiles", got)
 	}
@@ -348,7 +309,6 @@ func TestLayerBumpStalesOnlyDirtyTiles(t *testing.T) {
 	if got := l.Bump(1, frame.Rect4(0, 0, 10, 10)); got != 0 {
 		t.Fatalf("Bump to the current version staled %d tiles, want 0", got)
 	}
-	// A real version bump with a one-row dirty rect.
 	if got := l.Bump(2, frame.Rect4(0, 300, 1000, 320)); got != 4 {
 		t.Fatalf("Bump staled %d tiles, want the 4 in row 1", got)
 	}
@@ -361,8 +321,6 @@ func TestLayerBumpStalesOnlyDirtyTiles(t *testing.T) {
 	if l.Needs(frame.TileCoord{Col: 0, Row: 0}) {
 		t.Fatal("a tile outside the dirty rect was re-rasterized; an image load would cost a full page repaint")
 	}
-	// An empty dirty rect on a version bump means "nothing changed visibly", which
-	// the caller uses when a mutation resolved to no visual difference.
 	l2 := frame.NewLayer(2, frame.Rect4(0, 0, 1024, 1024), 1<<30, pool)
 	if got := l2.Bump(3, frame.Rect{}); got != 0 {
 		t.Fatalf("Bump with empty dirty staled %d tiles", got)
@@ -375,7 +333,7 @@ func TestPlanKeepsOnlyTheNewestAndCountsSuperseded(t *testing.T) {
 	second := frame.FramePlan{Serial: 2, Viewport: frame.Viewport{Size: frame.Size{W: 200, H: 100}}}
 
 	p.Publish(first)
-	p.Publish(second) // supersedes: nobody presented it
+	p.Publish(second)
 	if got := p.Stats().Dropped; got != 1 {
 		t.Fatalf("Dropped = %d, want 1 superseded plan", got)
 	}
@@ -383,8 +341,6 @@ func TestPlanKeepsOnlyTheNewestAndCountsSuperseded(t *testing.T) {
 	if !ok || latest.Serial != 2 {
 		t.Fatalf("Latest = %v (%v), want serial 2", latest.Serial, ok)
 	}
-	// Latest must not consume, or the presenter cannot re-check the plan it is
-	// about to blit.
 	if again, _ := p.Latest(); again.Serial != 2 {
 		t.Fatal("Latest drained the slot")
 	}
@@ -392,14 +348,10 @@ func TestPlanKeepsOnlyTheNewestAndCountsSuperseded(t *testing.T) {
 	if !ok || taken.Serial != 2 {
 		t.Fatalf("Take = %v (%v), want serial 2", taken.Serial, ok)
 	}
-	// A present plan is not a dropped plan: republishing after presentation is
-	// the normal cadence and must not inflate the counter.
 	p.Publish(frame.FramePlan{Serial: 3})
 	if got := p.Stats(); got.Dropped != 1 || got.Published != 3 {
 		t.Fatalf("stats = %+v, want Dropped 1 Published 3", got)
 	}
-	// Re-taking without a publish is idempotent: holding a vsync on an
-	// unchanged plan is normal and cheap.
 	a, _ := p.Take()
 	b, _ := p.Take()
 	if a.Serial != b.Serial {
@@ -443,9 +395,6 @@ func TestGridTickAndStatsSnapshots(t *testing.T) {
 	}
 }
 
-// TestEvictingAnInFlightTileWaitsForItsWorker is the buffer-ownership case the
-// budget exists to create: a tile is re-rasterized, loses its presentable pixels
-// to eviction while a worker is painting the replacement, and only then reports.
 func TestEvictingAnInFlightTileWaitsForItsWorker(t *testing.T) {
 	pool := tilePool()
 	g := frame.NewGrid(frame.Rect4(0, 0, 512, 512), frame.TileSize, 1<<30, pool)
@@ -456,9 +405,6 @@ func TestEvictingAnInFlightTileWaitsForItsWorker(t *testing.T) {
 	if !g.MarkValid(c, 1, first) {
 		t.Fatal("the first raster of a tile was refused")
 	}
-	// A scroll brings the tile back at an older version, so it is re-rasterized.
-	// The replacement must not be the buffer still being presented, or the worker
-	// and the compositor would share bytes.
 	onOrder, _ := g.Acquire(c)
 	if onOrder == first {
 		t.Fatal("Acquire handed back the tile's presentable pixels as its paint target")
@@ -479,16 +425,12 @@ func TestEvictingAnInFlightTileWaitsForItsWorker(t *testing.T) {
 	if got := g.Stats().Bytes; got != frame.TileSizeBytes() {
 		t.Fatalf("Bytes = %d, want only the in-flight tile counted against the budget", got)
 	}
-	// The point of the whole exercise: a buffer a worker owns is not up for reuse.
 	for i := 0; i < 2; i++ {
 		if got := pool.Acquire(); got == onOrder {
 			t.Fatal("an in-flight buffer was recycled to another tile")
 		}
 	}
 
-	// The worker reports late. The tile lost its pixels in the meantime, but the
-	// result is still this grid's own paint target, so it is installed rather than
-	// thrown away.
 	if !g.MarkValid(c, 1, onOrder) {
 		t.Fatal("a result for a tile evicted mid-flight was refused")
 	}
@@ -498,7 +440,6 @@ func TestEvictingAnInFlightTileWaitsForItsWorker(t *testing.T) {
 	if g.Pixels(c) != onOrder {
 		t.Fatal("the late result was not installed")
 	}
-	// A buffer the tile no longer has on order is stale news, whoever holds it.
 	if g.MarkValid(c, 1, first) {
 		t.Fatal("a foreign buffer was accepted as a raster result")
 	}
@@ -514,17 +455,12 @@ func TestReleaseHandsBackOnlyWhatTheGridDoesNotOwn(t *testing.T) {
 	pixels, _ := g.Acquire(c)
 	g.MarkValid(c, 1, pixels)
 
-	// The tile still points at this buffer, so a release would put the pool and the
-	// grid on the same memory.
 	if g.Release(c, pixels) {
 		t.Fatal("Release took back a buffer the tile still owns")
 	}
 	if g.Pixels(c) != pixels {
 		t.Fatal("Release disturbed the tile's pixels")
 	}
-	// A buffer on order is the grid's to take back: a caller whose submit was
-	// refused has nowhere else to put it, and once Release says true no worker owns
-	// it and the tile is free to be re-acquired.
 	onOrder, _ := g.Acquire(c)
 	if !g.Release(c, onOrder) {
 		t.Fatal("Release kept an in-flight buffer claimed")
@@ -535,7 +471,6 @@ func TestReleaseHandsBackOnlyWhatTheGridDoesNotOwn(t *testing.T) {
 	if got := pool.Acquire(); got != onOrder {
 		t.Fatal("the released paint buffer did not go back to the pool")
 	}
-	// A buffer the grid has no claim on is not the grid's to keep.
 	far := frame.TileCoord{Col: 9, Row: 9}
 	if !g.Release(far, pixels) {
 		t.Fatal("Release refused a coordinate outside the grid")
@@ -545,10 +480,6 @@ func TestReleaseHandsBackOnlyWhatTheGridDoesNotOwn(t *testing.T) {
 	}
 }
 
-// TestNewLayerClampsNegativeOrigin pins the tile-space invariant: tile
-// coordinates start at (0,0), so a negative-origin extent (a blurred shadow
-// spilling past the content edge) clamps to zero instead of parking the
-// scroll clamp at a negative offset and shifting every blit.
 func TestNewLayerClampsNegativeOrigin(t *testing.T) {
 	pool := frame.NewBitmapPool(frame.Size{W: 256, H: 256}, 4)
 	l := frame.NewLayer(1, frame.Rect4(-50, -50, 750, 300), 1<<20, pool)

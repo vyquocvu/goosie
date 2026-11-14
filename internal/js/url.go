@@ -16,17 +16,12 @@ const (
 	maxObjectURLBytes = 64 << 20
 )
 
-// URL and URLSearchParams API implementation.
-
-// setupURLAPI installs URL and URLSearchParams constructors.
 func (r *Runtime) setupURLAPI() {
-	// URLSearchParams constructor.
 	spCtor := func(call goja.ConstructorCall) *goja.Object {
 		obj := call.This
-		// Use ordered entries to preserve insertion order and support sort().
 		type entry struct{ key, val string }
 		entries := make([]entry, 0)
-		params := make(map[string][]string) // for fast lookup
+		params := make(map[string][]string)
 
 		rebuild := func() {
 			parts := make([]string, 0, len(entries))
@@ -40,12 +35,8 @@ func (r *Runtime) setupURLAPI() {
 			arg := call.Arguments[0]
 			switch v := arg.Export().(type) {
 			case string:
-				// URLSearchParams string input is form-url-encoded data with one
-				// optional leading question mark removed.
 				v = strings.TrimPrefix(v, "?")
 				if parsed, err := url.ParseQuery(v); err == nil {
-					// ParseQuery returns a map, so we lose original order.
-					// Sort keys for deterministic output.
 					keys := make([]string, 0, len(parsed))
 					for k := range parsed {
 						keys = append(keys, k)
@@ -91,7 +82,6 @@ func (r *Runtime) setupURLAPI() {
 			}
 			key := call.Arguments[0].String()
 			val := call.Arguments[1].String()
-			// Remove existing entries with this key.
 			filtered := make([]entry, 0, len(entries))
 			for _, e := range entries {
 				if e.key != key {
@@ -205,7 +195,6 @@ func (r *Runtime) setupURLAPI() {
 		})
 
 		_ = obj.Set("sort", func(call goja.FunctionCall) goja.Value {
-			// Sort entries by key, preserving relative order for equal keys.
 			sort.SliceStable(entries, func(i, j int) bool {
 				return entries[i].key < entries[j].key
 			})
@@ -224,7 +213,6 @@ func (r *Runtime) setupURLAPI() {
 		}
 	}
 
-	// URL constructor.
 	urlCtor := func(call goja.ConstructorCall) *goja.Object {
 		if len(call.Arguments) < 1 {
 			panic(r.vm.NewTypeError("URL requires a url argument"))
@@ -288,7 +276,6 @@ func (r *Runtime) setupURLAPI() {
 
 		_ = obj.Set("origin", parsed.Scheme+"://"+parsed.Host)
 
-		// searchParams property.
 		spCall := goja.ConstructorCall{This: r.vm.NewObject()}
 		if parsed.RawQuery != "" {
 			spCall.Arguments = []goja.Value{r.vm.ToValue(parsed.RawQuery)}
@@ -296,12 +283,10 @@ func (r *Runtime) setupURLAPI() {
 		spObj := spCtor(spCall)
 		_ = obj.Set("searchParams", spObj)
 
-		// toString method.
 		_ = obj.Set("toString", func(call goja.FunctionCall) goja.Value {
 			return r.vm.ToValue(obj.Get("href").String())
 		})
 
-		// toJSON method.
 		_ = obj.Set("toJSON", func(call goja.FunctionCall) goja.Value {
 			return r.vm.ToValue(obj.Get("href").String())
 		})

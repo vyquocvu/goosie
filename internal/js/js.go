@@ -1,16 +1,3 @@
-// Package js executes a document's classic scripts against a host-provided
-// window and document stub.
-//
-// A Runtime belongs to exactly one document: nothing in this package is
-// process-global, so two tabs cannot read each other's bindings and tearing a
-// document down releases its realm. That ownership rule is the reason the API
-// takes an Options struct per runtime rather than exposing setters.
-//
-// Scope is roadmap gate 6, sub-project 1: <script> elements run in document
-// order, each one blocking the parse until it returns; console output reaches a
-// host writer; window and document are stubs. Tasks, microtasks, DOM mutation
-// and Fetch belong to the later sub-projects, and calling an API outside this
-// scope must fail a script loudly rather than resolve to undefined.
 package js
 
 import (
@@ -29,27 +16,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/media"
 )
 
-// DefaultTimeout bounds one script's execution when Options.Timeout is zero.
-// A script that runs past it is stopped where it stands and reported through
-// ErrInterrupted; the bound exists because a page that spins takes the tab's
-// event loop with it, and the tab shares a process with every other tab.
 const DefaultTimeout = 5 * time.Second
 
-// MaxScriptBytes is the source limit for a single script. The document byte
-// guard already bounds the page; this bounds the compile, so one oversized
-// literal is refused before it is parsed rather than after.
 const MaxScriptBytes = 1 << 20
 
-// MaxMicrotasksPerCheckpoint bounds one microtask drain. A chain that
-// schedules forever without touching the VM would otherwise spin past the
-// timeout interrupt (which only lands on VM calls); the bound ends it with
-// ErrInterrupted like any other runaway, consistent with every other
-// admission limit in the engine.
 const MaxMicrotasksPerCheckpoint = 100000
 
-// timeout returns the bound for one user-code invocation: the configured
-// timeout or the default. Run, Tick and the pump-driven callbacks all share
-// it, so a hung callback wedges its frame rather than its thread.
 func (r *Runtime) timeout() time.Duration {
 	if r.opts.Timeout > 0 {
 		return r.opts.Timeout
@@ -57,9 +29,6 @@ func (r *Runtime) timeout() time.Duration {
 	return DefaultTimeout
 }
 
-// callBounded invokes fn under the runtime timeout, reporting ErrInterrupted
-// when the bound fires. Non-interrupt failures pass through untouched, so
-// callers keep their existing error semantics and only add the stop rule.
 func (r *Runtime) callBounded(fn func() (goja.Value, error)) (goja.Value, error) {
 	var fired atomic.Bool
 	t := time.AfterFunc(r.timeout(), func() {
@@ -79,9 +48,6 @@ func (r *Runtime) callBounded(fn func() (goja.Value, error)) (goja.Value, error)
 	}
 	var ie *goja.InterruptedError
 	if errors.As(err, &ie) {
-		// Only the deadline makes this a timeout. A host Interrupt lands in
-		// the same error type but must not be reported as an unresponsive
-		// script.
 		if fired.Load() {
 			r.timedOut.Store(true)
 		}
@@ -91,163 +57,65 @@ func (r *Runtime) callBounded(fn func() (goja.Value, error)) (goja.Value, error)
 }
 
 var (
-	// ErrInterrupted reports a script stopped by its timeout or by Interrupt.
-	ErrInterrupted = errors.New("js: script execution interrupted")
-	// ErrClosed reports use of a runtime whose document has gone away.
-	ErrClosed = errors.New("js: runtime is closed")
-	// ErrTooLarge reports a script whose source exceeds MaxScriptBytes.
-	ErrTooLarge = errors.New("js: script source exceeds the limit")
-	// ErrNotImplemented is kept for compatibility but no longer returned.
+	ErrInterrupted    = errors.New("js: script execution interrupted")
+	ErrClosed         = errors.New("js: runtime is closed")
+	ErrTooLarge       = errors.New("js: script source exceeds the limit")
 	ErrNotImplemented = errors.New("js: runtime not implemented (roadmap gate 6, sub-project 1)")
 )
 
-// Options configures one Runtime.
 type Options struct {
-	// ScriptingDisabled makes this document's HTML scripting flag disabled.
-	// It is set for sandboxed child documents that do not allow scripts.
 	ScriptingDisabled bool
-	// Timeout bounds a single Run. Zero selects DefaultTimeout; a negative
-	// value is rejected rather than treated as unlimited, because "unlimited"
-	// is not a bound this host is willing to give untrusted code.
-	Timeout time.Duration
-	// Console receives console.log, warn and error. nil discards: a runtime
-	// never writes to a process stream the host did not hand it.
-	Console io.Writer
-	// URL is the document's URL, exposed as window.location.href and used to
-	// attribute a script error to the file that threw.
-	URL string
-	// Title seeds document.title.
-	Title string
-	// DOM is the parsed document tree. When non-nil, document.querySelector,
-	// document.querySelectorAll, document.createElement and element methods
-	// are available to scripts. When nil, those APIs do not exist on the
-	// document object.
-	DOM *dom.Document
+	Timeout           time.Duration
+	Console           io.Writer
+	URL               string
+	Title             string
+	DOM               *dom.Document
 
-	// HTTPClient is the fetch backend. When non-nil, fetch() is available
-	// to scripts. When nil, fetch() is not defined and calling it produces
-	// a ReferenceError.
 	HTTPClient HTTPFetcher
 
-	// Cookies is the cookie jar document.cookie reads and writes. When nil,
-	// the binding keeps a per-document memory jar instead, which round-trips
-	// script-set values for the document's own URL.
-	Cookies CookieStore
-	// ClipboardProvider connects navigator.clipboard text methods to a host
-	// clipboard. When nil, the runtime uses an isolated in-memory clipboard.
-	ClipboardProvider ClipboardProvider
-	// ClipboardPermissionState returns the effective Permissions API state for
-	// clipboard-read or clipboard-write: granted, denied, or prompt. Nil means
-	// an unconfigured per-runtime clipboard with no persistent site decision.
+	Cookies                  CookieStore
+	ClipboardProvider        ClipboardProvider
 	ClipboardPermissionState func(documentURL, name string) string
 
-	// WebSocketDialer is the WebSocket backend. When non-nil, WebSocket is
-	// available to scripts. When nil, WebSocket is not defined.
 	WebSocketDialer WebSocketDialer
 
-	// WorkerDialer is the Web Worker backend. When non-nil, Worker is
-	// available to scripts. When nil, Worker is not defined.
-	WorkerDialer WorkerDialer
-	// WorkerScriptFetcher loads a classic worker script or importScripts()
-	// dependency. The host owns URL policy and must bound the returned source.
+	WorkerDialer        WorkerDialer
 	WorkerScriptFetcher func(scriptURL string) ([]byte, error)
 
-	// CSP is the parsed Content-Security-Policy for this document. When
-	// non-nil, script/style/connect sources are checked against it.
 	CSP *CSPPolicy
 
-	// OnMutation is called when scripts mutate the DOM. The engine uses
-	// this to trigger re-style and re-layout. nil means mutations are
-	// not tracked (e.g., in tests).
-	OnMutation func()
-	// OnFocusChange receives programmatic HTMLElement.focus()/blur() calls.
-	// The engine supplies this after binding the runtime to a Session.
-	OnFocusChange func(*dom.Node, bool)
-	// OnFocusRestore restores focus without scrolling the target into view.
-	// Dialog close uses this hook for the HTML focusing steps.
-	OnFocusRestore func(*dom.Node)
-	// OnUserInput is an internal host hook used by trusted input adapters to
-	// mark a text-control value change as user initiated.
-	OnUserInput func(*dom.Node) bool
-	// OnNumberInputEdit records whether host-simulated number input contains
-	// unrepresentable user text. Script value assignments clear this state.
-	OnNumberInputEdit func(*dom.Node, bool)
-	// OnEmailInputEdit updates the unsanitized editing text displayed for an
-	// email control while its DOM value remains sanitized.
-	OnEmailInputEdit func(*dom.Node, string)
-	// OnActiveState updates the host's :active state while a user activation is
-	// held. It is exposed only to host-installed input adapters.
-	OnActiveState func(*dom.Node, bool)
-	// OnTabNavigation delegates a host-generated Tab action to the browsing
-	// context's sequential focus navigation algorithm.
-	OnTabNavigation func(backwards bool)
-	// OnTabNavigationFrom optionally advances focus from a host input target.
-	OnTabNavigationFrom func(from *dom.Node, backwards bool)
-	// OnTestDriverKeyDefault applies the default action for a WPT testdriver
-	// keyboard key after its key event has been dispatched.
+	OnMutation             func()
+	OnFocusChange          func(*dom.Node, bool)
+	OnFocusRestore         func(*dom.Node)
+	OnUserInput            func(*dom.Node) bool
+	OnNumberInputEdit      func(*dom.Node, bool)
+	OnEmailInputEdit       func(*dom.Node, string)
+	OnActiveState          func(*dom.Node, bool)
+	OnTabNavigation        func(backwards bool)
+	OnTabNavigationFrom    func(from *dom.Node, backwards bool)
 	OnTestDriverKeyDefault func(key string, shift, ctrl, alt, meta bool)
-	// ActiveElement returns the currently focused element for document.activeElement.
-	ActiveElement func() *dom.Node
-	// OnEscapeKey handles the user-agent default action for an unprevented
-	// Escape key generated by a host input adapter.
-	OnEscapeKey func() bool
-	// OnTestDriverPointer feeds WPT adapter pointer actions into the host
-	// interaction model. It is not exposed to page-authored pointer events.
-	OnTestDriverPointer func(action string, x, y float32, button int) bool
-	// OnTestDriverWheel feeds one WPT testdriver scroll gesture into the host
-	// interaction model at a viewport position. Like the pointer hook, page
-	// script cannot reach it; the host owns dispatching the wheel events and the
-	// scroll they produce.
-	OnTestDriverWheel func(x, y float32, deltaX, deltaY float64)
-	// OnTestDriverTouch advances one WPT testdriver touch pointer through a
-	// gesture phase - "down", "move" or "up" - at a viewport position. The host
-	// owns the held-contact set and the trusted touch events each phase raises,
-	// for the same reason it owns the pointer and wheel hooks: page script must not
-	// be able to forge a trusted gesture.
-	OnTestDriverTouch func(id, phase string, x, y float32)
-	// OnViewportScroll notifies the host that the document viewport scroll
-	// offset changed through a CSSOM View write (window.scrollTo, scrollTop on
-	// the scrolling element). The host bridges the value into the raster
-	// scheduler so the painted tiles follow the JS offset.
-	OnViewportScroll func(x, y float64)
+	ActiveElement          func() *dom.Node
+	OnEscapeKey            func() bool
+	OnTestDriverPointer    func(action string, x, y float32, button int) bool
+	OnTestDriverWheel      func(x, y float32, deltaX, deltaY float64)
+	OnTestDriverTouch      func(id, phase string, x, y float32)
+	OnViewportScroll       func(x, y float64)
 
-	// Storage supplies origin-scoped Web Storage (localStorage, sessionStorage).
-	// When nil, ephemeral in-memory storage is created per runtime.
 	Storage *OriginStorageRegistry
 
-	// BroadcastHub connects BroadcastChannel instances across runtimes (tabs).
-	// When nil, a package-level default hub is used so channels within a single
-	// runtime can still exchange messages.
 	BroadcastHub *BroadcastHub
 
-	// SessionID identifies the tab/browsing context for sessionStorage isolation.
 	SessionID string
 
-	// DarkMode indicates whether the host environment prefers a dark color scheme.
 	DarkMode bool
 
-	// HighContrast indicates whether the host environment prefers increased contrast.
 	HighContrast bool
 
-	// ImageLoader resolves the source a script assigned to an
-	// HTMLImageElement (the `Image` constructor path). The engine installs its
-	// own loader so a script-created image passes the same encoded-size,
-	// dimension and decoded-pixel caps a parsed <img> passes. When nil, an
-	// image that is given a source settles as an error instead of decoding:
-	// the binding never decodes bytes itself, because internal/js may not
-	// import internal/image (see internal/archtest/rules.go).
 	ImageLoader ImageLoader
 
-	// ImagePixelSink receives the decoded pixels of a successful script image
-	// load, together with the node that asked and the raw attribute value the
-	// result belongs to. It runs on the JS goroutine before the load event is
-	// dispatched and is never called on a failed load. The value is opaque to
-	// internal/js; only the embedder interprets it (or, as with internal/engine,
-	// converts it into paint state without importing it here).
 	ImagePixelSink func(node *dom.Node, rawSrc string, pixels any)
 }
 
-// Kind is the JS type of a Value read back out of a runtime.
 type Kind uint8
 
 const (
@@ -260,7 +128,6 @@ const (
 	KindFunction
 )
 
-// Value is a global's value as seen from the host side.
 type Value struct {
 	Kind Kind
 	Num  float64
@@ -268,8 +135,6 @@ type Value struct {
 	Bool bool
 }
 
-// Error is an uncaught exception from one script. It names the source and line
-// so a page author sees which file broke; the load itself continues.
 type Error struct {
 	SourceURL string
 	Line      int
@@ -280,22 +145,13 @@ func (e *Error) Error() string {
 	return e.SourceURL + ":" + strconv.Itoa(e.Line) + ": " + e.Message
 }
 
-// timer represents a pending setTimeout or setInterval callback.
 type timer struct {
-	id        int
-	callback  goja.Value
-	interval  time.Duration
-	nextFire  time.Time
-	repeat    bool // true for setInterval, false for setTimeout
-	fromDefer bool
-	// beforeLoad records that the timer was queued while the document still
-	// read something other than "complete", which is the window a page's own
-	// boot code lives in: inline scripts, deferred scripts, DOMContentLoaded
-	// and load handlers. A host deciding whether a frame is worth capturing
-	// needs exactly that distinction, because a startup reveal is work the
-	// page promised before it showed anything, while a timer queued by later
-	// user interaction is not. The flag clears when the timer first fires, so
-	// a repeating timer an animation loop re-arms cannot hold a host waiting.
+	id         int
+	callback   goja.Value
+	interval   time.Duration
+	nextFire   time.Time
+	repeat     bool
+	fromDefer  bool
 	beforeLoad bool
 	nesting    int
 }
@@ -305,7 +161,6 @@ const (
 	nestedTimerMinDelayMS = 4
 )
 
-// Runtime executes scripts for one document.
 type Runtime struct {
 	vm                       *goja.Runtime
 	opts                     Options
@@ -327,147 +182,123 @@ type Runtime struct {
 	inDeferScript            bool
 	timerNesting             int
 	scriptExecutionDepth     int
-	// timedOut records that the host's own deadline stopped user code. It is
-	// separate from Interrupt so a navigation or tab close is not reported to
-	// the user as an unresponsive page. Take clears the flag once the host has
-	// attributed it to one script.
-	timedOut atomic.Bool
+	timedOut                 atomic.Bool
 
-	// broadcastState lives here rather than in the goja global because worker
-	// goroutines read it while the parent runtime may be executing user code.
 	broadcastStateMu sync.Mutex
 	broadcastState   *broadcastState
 
-	// microtasks is the FIFO promise-reaction queue. Producers on any
-	// goroutine only ever append (queueMicrotask); only the Run/Tick
-	// goroutine drains (drainMicrotasks), so user callbacks always run on
-	// the runtime's own thread even when a network event settled.
 	microtasks []func() error
 
-	// DOM bridge state. nil when Options.DOM is nil.
-	domDoc                    *dom.Document
-	selection                 *jsSelection
-	textControlSelections     map[*dom.Node]textControlSelection
-	documentSelections        map[*dom.Document]*jsSelection
-	selectionWrappers         map[*jsSelection]*goja.Object
-	nodeRegistry              map[int]*dom.Node
-	genericEventTargets       map[*goja.Object][]*genericEventListener
-	currentEventStack         []goja.Value
-	legacyWindowEvent         goja.Value
-	popoverToggleTasks        map[*dom.Node][]*popoverToggleTask
-	detailsToggleTasks        map[*dom.Node]*detailsToggleTask
-	detailsInitialToggleDocs  map[*dom.Document]bool
-	detailsInitialToggleNodes map[*dom.Node]bool
-	dialogFocusReturn         map[*dom.Node]*dom.Node
-	popoverTransitions        map[*dom.Node]bool
-	popoverFocusTransitions   map[*dom.Node]bool
-	popoverInvokers           map[*dom.Node]*dom.Node
-	popoverTransitionSources  map[*dom.Node]*dom.Node
-	popoverBeforeToggleDepth  int
-	testDriverPointerDown     map[string]*dom.Node
-	showingPopovers           map[*dom.Node]bool
-	popoverReentrantClose     map[*dom.Node]bool
-	attributeValues           map[*goja.Object]*jsAttribute
-	nextNID                   int
-	documentPositionOrder     map[*dom.Node]uint64
-	nextDocumentPositionOrder uint64
-	// parserWriteBuffer gathers all document.write calls made by one
-	// parser-inserted script so their combined markup is tokenized together
-	// when that script returns.
-	parserWriteBuffer strings.Builder
-	parserWriteDepth  int
-	nodeProto         *goja.Object
-	// eventTargetProto/elementProto/htmlElementProto/documentProto are the
-	// shared WebIDL interfaces every wrapper inherits through [[Prototype]]:
-	// EventTarget > Node > Element > HTMLElement > per-tag interface. tagProtos
-	// caches one prototype per HTML tag lazily; ifaceCtors caches the
-	// constructors that answer `instanceof`. See element_interfaces.go.
-	eventTargetProto                *goja.Object
-	elementProto                    *goja.Object
-	svgElementProto                 *goja.Object
-	htmlElementProto                *goja.Object
-	unknownElementProto             *goja.Object
-	htmlCollectionProto             *goja.Object
-	htmlOptionsCollectionProto      *goja.Object
-	htmlFormControlsCollectionProto *goja.Object
-	radioNodeListProto              *goja.Object
-	documentProto                   *goja.Object
-	xmlDocumentProto                *goja.Object
-	documentTypeProto               *goja.Object
-	documentFragmentProto           *goja.Object
-	shadowRootProto                 *goja.Object
-	cssStyleSheetProto              *goja.Object
-	cssRuleProto                    *goja.Object
-	cssStyleRuleProto               *goja.Object
-	fileListProto                   *goja.Object
-	characterDataProto              *goja.Object
-	textProto                       *goja.Object
-	commentProto                    *goja.Object
-	processingInstructionProto      *goja.Object
-	attrProto                       *goja.Object
-	tagProtos                       map[string]*goja.Object
-	ifaceCtors                      map[string]*goja.Object
-	// tokenListObjects and attributesObjects preserve per-element identity of
-	// the live DOMTokenList and NamedNodeMap, as browsers do.
-	tokenListObjects           map[domTokenListKey]*goja.Object
-	attributesObjects          map[*dom.Node]*goja.Object
-	childNodeLists             map[*dom.Node]goja.Value
-	attributeNodes             map[*dom.Node]map[string]*goja.Object
-	ariaElementReferences      map[*dom.Node]map[string]goja.Value
-	ariaElementListReferences  map[*dom.Node]map[string]goja.Value
-	formElementCollections     map[*dom.Node]*goja.Object
-	documentFormCollections    map[*dom.Node]*goja.Object
-	fieldsetElements           map[*dom.Node]*goja.Object
-	selectOptionsCollections   map[*dom.Node]*goja.Object
-	selectSelectedCollections  map[*dom.Node]*goja.Object
-	formSubmissionInProgress   map[*dom.Node]bool
-	constructingFormEntryList  map[*dom.Node]bool
-	formResetInProgress        map[*dom.Node]bool
-	formValidationInProgress   map[*dom.Node]bool
-	radioGroupsDirty           bool
-	formControlValidities      map[*dom.Node]*goja.Object
-	validityControlNodes       map[*goja.Object]*dom.Node
-	validityProto              *goja.Object
-	imageDataProto             *goja.Object
-	imageDataObjects           map[*goja.Object]struct{}
-	imageBitmapProto           *goja.Object
-	imageBitmapObjects         map[*goja.Object]*imageBitmapData
-	indexedDBDateGetTime       goja.Callable
-	offscreenCanvasProto       *goja.Object
-	offscreenCanvases          map[*goja.Object]*offscreenCanvasData
-	responseProto              *goja.Object
-	blobProto                  *goja.Object
-	fileProto                  *goja.Object
-	fileValues                 map[*goja.Object]*browserFile
-	objectURLMu                sync.Mutex
-	objectURLs                 map[string][]byte
-	objectURLBytes             int64
-	formDataValues             map[*goja.Object]*formDataList
-	activeEventObjects         map[*dom.Event]goja.Value
-	activeSubmitter            *dom.Node
-	activationFormFrames       []*dom.Node
-	fileReaderStates           map[*goja.Object]*fileReaderState
-	fileListValues             map[*goja.Object][]*goja.Object
-	wasmMemories               map[*goja.Object]*wasmMemoryState
-	inputFiles                 map[*dom.Node][]*goja.Object
-	inputFileLists             map[*dom.Node]*goja.Object
-	dataTransferFiles          map[*goja.Object][]*goja.Object
-	dataTransferFilesByStore   map[*dom.DataTransferStore][]*goja.Object
-	dataTransferFileIDs        map[*goja.Object][]uint64
-	dataTransferFileIDsByStore map[*dom.DataTransferStore][]uint64
-	dataTransferFileLists      map[*goja.Object]*goja.Object
-	dataTransferFileModes      map[*goja.Object]dom.DataTransferMode
-	dataTransferItems          map[*goja.Object]map[string]*goja.Object
-	dataTransferItemOrder      map[*dom.DataTransferStore][]dataTransferItemRef
-	dataTransferItemIndexCount map[*goja.Object]int
-	dataTransferItemProto      *goja.Object
-	dataTransferItemListProto  *goja.Object
-	dataTransferItemLists      map[*goja.Object]dataTransferItemListBinding
-	dataTransferTypesCache     map[*goja.Object]dataTransferTypesCacheEntry
-	nextDataTransferItemID     uint64
-	// imageStates holds the load state a script-created HTMLImageElement
-	// reflects (complete/naturalWidth/naturalHeight/currentSrc and the
-	// decode() waiters). parsed <img> elements have no entry.
+	domDoc                             *dom.Document
+	selection                          *jsSelection
+	textControlSelections              map[*dom.Node]textControlSelection
+	documentSelections                 map[*dom.Document]*jsSelection
+	selectionWrappers                  map[*jsSelection]*goja.Object
+	nodeRegistry                       map[int]*dom.Node
+	genericEventTargets                map[*goja.Object][]*genericEventListener
+	currentEventStack                  []goja.Value
+	legacyWindowEvent                  goja.Value
+	popoverToggleTasks                 map[*dom.Node][]*popoverToggleTask
+	detailsToggleTasks                 map[*dom.Node]*detailsToggleTask
+	detailsInitialToggleDocs           map[*dom.Document]bool
+	detailsInitialToggleNodes          map[*dom.Node]bool
+	dialogFocusReturn                  map[*dom.Node]*dom.Node
+	popoverTransitions                 map[*dom.Node]bool
+	popoverFocusTransitions            map[*dom.Node]bool
+	popoverInvokers                    map[*dom.Node]*dom.Node
+	popoverTransitionSources           map[*dom.Node]*dom.Node
+	popoverBeforeToggleDepth           int
+	testDriverPointerDown              map[string]*dom.Node
+	showingPopovers                    map[*dom.Node]bool
+	popoverReentrantClose              map[*dom.Node]bool
+	attributeValues                    map[*goja.Object]*jsAttribute
+	nextNID                            int
+	documentPositionOrder              map[*dom.Node]uint64
+	nextDocumentPositionOrder          uint64
+	parserWriteBuffer                  strings.Builder
+	parserWriteDepth                   int
+	nodeProto                          *goja.Object
+	eventTargetProto                   *goja.Object
+	elementProto                       *goja.Object
+	svgElementProto                    *goja.Object
+	htmlElementProto                   *goja.Object
+	unknownElementProto                *goja.Object
+	htmlCollectionProto                *goja.Object
+	htmlOptionsCollectionProto         *goja.Object
+	htmlFormControlsCollectionProto    *goja.Object
+	radioNodeListProto                 *goja.Object
+	documentProto                      *goja.Object
+	xmlDocumentProto                   *goja.Object
+	documentTypeProto                  *goja.Object
+	documentFragmentProto              *goja.Object
+	shadowRootProto                    *goja.Object
+	cssStyleSheetProto                 *goja.Object
+	cssRuleProto                       *goja.Object
+	cssStyleRuleProto                  *goja.Object
+	fileListProto                      *goja.Object
+	characterDataProto                 *goja.Object
+	textProto                          *goja.Object
+	commentProto                       *goja.Object
+	processingInstructionProto         *goja.Object
+	attrProto                          *goja.Object
+	tagProtos                          map[string]*goja.Object
+	ifaceCtors                         map[string]*goja.Object
+	tokenListObjects                   map[domTokenListKey]*goja.Object
+	attributesObjects                  map[*dom.Node]*goja.Object
+	childNodeLists                     map[*dom.Node]goja.Value
+	attributeNodes                     map[*dom.Node]map[string]*goja.Object
+	ariaElementReferences              map[*dom.Node]map[string]goja.Value
+	ariaElementListReferences          map[*dom.Node]map[string]goja.Value
+	formElementCollections             map[*dom.Node]*goja.Object
+	documentFormCollections            map[*dom.Node]*goja.Object
+	fieldsetElements                   map[*dom.Node]*goja.Object
+	selectOptionsCollections           map[*dom.Node]*goja.Object
+	selectSelectedCollections          map[*dom.Node]*goja.Object
+	formSubmissionInProgress           map[*dom.Node]bool
+	constructingFormEntryList          map[*dom.Node]bool
+	formResetInProgress                map[*dom.Node]bool
+	formValidationInProgress           map[*dom.Node]bool
+	radioGroupsDirty                   bool
+	formControlValidities              map[*dom.Node]*goja.Object
+	validityControlNodes               map[*goja.Object]*dom.Node
+	validityProto                      *goja.Object
+	imageDataProto                     *goja.Object
+	imageDataObjects                   map[*goja.Object]struct{}
+	imageBitmapProto                   *goja.Object
+	imageBitmapObjects                 map[*goja.Object]*imageBitmapData
+	indexedDBDateGetTime               goja.Callable
+	offscreenCanvasProto               *goja.Object
+	offscreenCanvases                  map[*goja.Object]*offscreenCanvasData
+	responseProto                      *goja.Object
+	blobProto                          *goja.Object
+	fileProto                          *goja.Object
+	fileValues                         map[*goja.Object]*browserFile
+	objectURLMu                        sync.Mutex
+	objectURLs                         map[string][]byte
+	objectURLBytes                     int64
+	formDataValues                     map[*goja.Object]*formDataList
+	activeEventObjects                 map[*dom.Event]goja.Value
+	activeSubmitter                    *dom.Node
+	activationFormFrames               []*dom.Node
+	fileReaderStates                   map[*goja.Object]*fileReaderState
+	fileListValues                     map[*goja.Object][]*goja.Object
+	wasmMemories                       map[*goja.Object]*wasmMemoryState
+	inputFiles                         map[*dom.Node][]*goja.Object
+	inputFileLists                     map[*dom.Node]*goja.Object
+	dataTransferFiles                  map[*goja.Object][]*goja.Object
+	dataTransferFilesByStore           map[*dom.DataTransferStore][]*goja.Object
+	dataTransferFileIDs                map[*goja.Object][]uint64
+	dataTransferFileIDsByStore         map[*dom.DataTransferStore][]uint64
+	dataTransferFileLists              map[*goja.Object]*goja.Object
+	dataTransferFileModes              map[*goja.Object]dom.DataTransferMode
+	dataTransferItems                  map[*goja.Object]map[string]*goja.Object
+	dataTransferItemOrder              map[*dom.DataTransferStore][]dataTransferItemRef
+	dataTransferItemIndexCount         map[*goja.Object]int
+	dataTransferItemProto              *goja.Object
+	dataTransferItemListProto          *goja.Object
+	dataTransferItemLists              map[*goja.Object]dataTransferItemListBinding
+	dataTransferTypesCache             map[*goja.Object]dataTransferTypesCacheEntry
+	nextDataTransferItemID             uint64
 	imageStates                        map[*dom.Node]*imageLoadState
 	iframeDocuments                    map[*dom.Node]*dom.Document
 	iframeFormerDocuments              map[*dom.Document]*dom.Node
@@ -529,67 +360,25 @@ type Runtime struct {
 	iframePendingOnMsg                 map[*dom.Node]goja.Value
 	pendingIFrames                     []*dom.Node
 	documentWrites                     map[*dom.Document]*documentWriteState
-	// onHandlers holds the onload/onerror handler registered by assignment,
-	// which is wired as a real DOM listener so dispatch order matches
-	// addEventListener.
-	onHandlers map[*dom.Node]map[string]*jsEventHandler
-	// wrapCache maps a DOM node to its single wrapper nid, so repeated
-	// queries over the same nodes reuse one wrapper instead of compiling
-	// accessors and closures per hit. Wrapping the same node twice used to
-	// cost two RunString compiles plus dozens of sets per hit and leaked a
-	// registry entry per query; it also broke `===` identity the DOM spec
-	// requires. Snapshots (tagName/className/type) refresh on reuse, so a
-	// cached wrapper reads exactly what a fresh one would.
-	wrapCache map[*dom.Node]int
-	// styleObjects preserves the per-element CSSStyleDeclaration identity.
-	styleObjects         map[*dom.Node]*goja.Object
-	cssStyleSheetObjects map[*dom.Node]*goja.Object
-	styleSheetLists      map[*dom.Document]goja.Value
-	// cssRuleLists preserves each sheet's CSSRule wrapper objects, keyed by the
-	// owner node and rebuilt only when the sheet's own text changes. Rebuilding
-	// per read broke `sheet.cssRules[0] === sheet.cssRules.item(0)`.
-	cssRuleLists map[*dom.Node]cachedCSSRules
-	// cssMediaLists preserves the one MediaList a sheet hands out, and
-	// sheetDisabled the disabled flag a page sets on the sheet object itself.
-	// Both are keyed by owner node; neither is measured for constructed sheets.
-	cssMediaLists map[*dom.Node]goja.Value
-	sheetDisabled map[*dom.Node]bool
-	// cssRuleListObjects caches the one CSSRuleList a sheet hands out, keyed by
-	// owner and rebuilt when the sheet's text changes: measured, Chromium answers
-	// `sheet.cssRules === sheet.cssRules` true while a list built per read broke
-	// it.
-	cssRuleListObjects map[*dom.Node]cachedCSSRuleList
-	// cssomCollectionProtos holds the StyleSheetList, CSSRuleList and MediaList
-	// prototypes - one object per interface, shared by every instance, which is
-	// what makes instanceof and isPrototypeOf against the globals hold.
-	cssomCollectionProtos map[string]*goja.Object
-	// cssomCollections is the brand check those prototypes run: Chromium answers
-	// `TypeError: Illegal invocation` for every receiver that is not a list it
-	// handed out, even one wearing the interface's @@toStringTag, so each list
-	// records its interface name against the object the page holds. Entries are
-	// bounded by the per-owner caches that already keep these lists alive.
-	cssomCollections map[*goja.Object]string
-	// selectorPlans caches query selectors compiled from the strings pages
-	// pass to querySelector/querySelectorAll/matches/closest. The general
-	// matcher tests one selector against every candidate node, so parsing it
-	// per node would make the walk O(nodes x selector length); a runtime sees
-	// the same handful of strings over and over, and the plan is a pure
-	// function of the string. Bounded by selectorCacheCap (see selector.go).
-	selectorPlans map[string]*selectorPlan
+	onHandlers                         map[*dom.Node]map[string]*jsEventHandler
+	wrapCache                          map[*dom.Node]int
+	styleObjects                       map[*dom.Node]*goja.Object
+	cssStyleSheetObjects               map[*dom.Node]*goja.Object
+	styleSheetLists                    map[*dom.Document]goja.Value
+	cssRuleLists                       map[*dom.Node]cachedCSSRules
+	cssMediaLists                      map[*dom.Node]goja.Value
+	sheetDisabled                      map[*dom.Node]bool
+	cssRuleListObjects                 map[*dom.Node]cachedCSSRuleList
+	cssomCollectionProtos              map[string]*goja.Object
+	cssomCollections                   map[*goja.Object]string
+	selectorPlans                      map[string]*selectorPlan
 
-	// Canvas contexts keyed by DOM node ID. nil until the first getContext("2d").
 	canvasContexts map[int]*canvasContext2D
 
-	// Media bridge. mediaProvider is installed by the engine before any page
-	// script runs; mediaCtrls caches one controller per element so a repeated
-	// property read does not ask the engine to make another one; pendingPlays
-	// holds the play() promises that are waiting for a backend to say playback
-	// actually started, keyed by the operation id the controller handed out.
 	mediaProvider MediaProvider
 	mediaCtrls    map[*dom.Node]media.Controller
 	pendingPlays  map[uint64]*promiseObj
 
-	// Custom Elements registry. nil until setupCustomElements() is called.
 	customElementRegistry                      *CustomElementRegistry
 	customHTMLElementConstruction              int
 	customConstructionNodes                    []*dom.Node
@@ -620,103 +409,48 @@ type Runtime struct {
 	elementInternals                           map[*dom.Node]*elementInternalsState
 	promiseProto                               *goja.Object
 
-	// nodeWrappers maps DOM node IDs to their JS wrapper objects for lifecycle callbacks.
-	nodeWrappers map[int]*goja.Object
-	// nodeIterators tracks live NodeIterator pointers so pre-remove steps can
-	// retarget references before a referenced subtree is detached.
+	nodeWrappers         map[int]*goja.Object
 	nodeIterators        []*nodeIterator
 	nodeRemovalObservers map[*dom.Document]func()
 
-	// shadowRoots maps host node IDs to their shadow root JS wrappers.
-	shadowRoots map[int]*goja.Object
-	// windowNamedProperties tracks the legacy Window named properties we have
-	// installed. Their getters resolve through the live document by ID.
+	shadowRoots           map[int]*goja.Object
 	windowNamedProperties map[string]bool
 
-	// dtWrappers caches the JS view of each DataTransfer object. Drag events get
-	// distinct views backed by one shared store, and each view is disassociated
-	// when its event dispatch ends. The cache is bounded by
-	// maxDataTransferWrappers to keep a page that constructs many stores
-	// from growing it without limit.
 	dtWrappers map[*dom.DataTransfer]*goja.Object
 	dtProto    *goja.Object
 
-	// clipboardProvider is the platform clipboard (or in-memory fallback).
-	// hasPlatformClipboard controls secure-context/user-activation checks.
 	clipboardProvider    ClipboardProvider
 	hasPlatformClipboard bool
 	clipboardItems       map[*goja.Object]*clipboardItemData
 
-	// Admission budgets injected by the engine before any script runs. nil
-	// leaves the corresponding operations ungated (tests, non-engine hosts).
-	// mutBudget gates every script-driven DOM insertion against the document's
-	// node/depth/attribute caps; subBudget is the shared byte pool fetch and XHR
-	// charge their responses to. See admission.go.
 	mutBudget MutationBudget
 	subBudget SubresourceBudget
 
-	// computedStyle reads the engine's cascade result for one node. Installed
-	// by the engine before any script runs; nil leaves getComputedStyle to the
-	// element's own declarations (see computed_style.go).
 	computedStyle ComputedStyleFunc
-	// pseudoStyle reads resolved pseudo-element declarations for innerText.
-	// The engine installs it alongside computedStyle; nil means no pseudo styles.
-	pseudoStyle PseudoStyleFunc
-	// linkedCSS reads the style sheet text this navigation already fetched for
-	// one absolute URL. The engine installs it alongside computedStyle; nil
-	// means a linked sheet reports no rules (see style_sheets.go).
-	linkedCSS LinkedCSSFunc
+	pseudoStyle   PseudoStyleFunc
+	linkedCSS     LinkedCSSFunc
 
-	// layoutGeometry reads the engine's layout arena for one node's border-box
-	// geometry. Installed by the engine alongside computedStyle; nil means
-	// getBoundingClientRect and offset/scroll properties answer zero.
 	layoutGeometry LayoutGeometryProvider
-	// offsetParent returns the nearest positioned ancestor for one node. nil
-	// means offsetParent always answers null.
-	offsetParent OffsetParentProvider
+	offsetParent   OffsetParentProvider
 
-	// scrollMu guards the per-element and per-window scroll positions below.
 	scrollMu        sync.Mutex
 	scrollPositions map[scrollKey]float64
 	windowScrollX   float64
 	windowScrollY   float64
-	// scrollQueued holds the elements that scrolled during this turn and are
-	// owed a scroll event, and scrollQueue keeps them in first-scrolled order.
-	// One element is owed one event however many axes moved, and an element that
-	// scrolls again before the flush is still owed only one.
-	scrollQueued map[*dom.Node]bool
-	scrollQueue  []*dom.Node
+	scrollQueued    map[*dom.Node]bool
+	scrollQueue     []*dom.Node
 
-	// Window event target. window is not a *dom.Node, so its listeners live on
-	// the runtime instead of internal/dom's node registry; the DOM Standard's
-	// window step of the propagation path is appended around the node dispatch
-	// (see window_events.go).
-	winMu        sync.Mutex
-	winListeners []*windowListener
-	// ready is document.readyState: "loading" while the document's own scripts
-	// run, "interactive" at DOMContentLoaded, "complete" at load.
-	ready string
-	// lifecycle flags make each document lifecycle event fire once. Keeping
-	// DOMContentLoaded separate from load lets the embedding engine finish
-	// iframe loads between the parser and window-load phases.
+	winMu                 sync.Mutex
+	winListeners          []*windowListener
+	ready                 string
 	domContentLoadedFired bool
 	loadFired             bool
-	// mutations counts DOM writes user code made, so FireDocumentLifecycle can
-	// tell its caller "a ready handler changed the tree" without an
-	// invalidation batch being installed.
-	mutations int64
-	// locRaw/locURL are the document's current URL, the state window.location's
-	// accessors read (see location.go). locURL is nil when the host gave a
-	// string Go's parser rejects; href then reads the raw string.
-	locRaw string
-	locURL *url.URL
-	// locObj is the location object the window.location and document.location
-	// accessors both return: one object, two names, as the standard has them.
-	locObj          *goja.Object
-	collectionProto *goja.Object
+	mutations             int64
+	locRaw                string
+	locURL                *url.URL
+	locObj                *goja.Object
+	collectionProto       *goja.Object
 
-	// filePickerRequest is the file control whose picker script asked the host
-	// to open. The host drains it after the turn that ran the script.
 	filePickerMu      sync.Mutex
 	filePickerRequest *dom.Node
 }
@@ -738,13 +472,8 @@ type dataTransferTypesCacheEntry struct {
 	value     *goja.Object
 }
 
-// maxDataTransferWrappers bounds the DataTransfer wrapper cache. Past it the
-// cache resets: identity sharing within one drag operation needs at most a
-// handful of entries, so a reset only costs page-constructed stores their
-// object identity, never correctness.
 const maxDataTransferWrappers = 256
 
-// New builds a runtime for one document.
 func New(opts Options) (*Runtime, error) {
 	if opts.Timeout < 0 {
 		return nil, fmt.Errorf("js: negative timeout %v rejected", opts.Timeout)
@@ -800,9 +529,6 @@ func New(opts Options) (*Runtime, error) {
 	if opts.HTTPClient != nil {
 		r.setupFetch(opts.HTTPClient)
 	}
-	// XHR installs regardless: without a transport the constructor still
-	// exists and send() fails through the error event, so capability
-	// probes never see a missing constructor.
 	r.setupXHR(opts.HTTPClient)
 	r.setupTimers()
 	r.setupPromise()
@@ -846,7 +572,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupDOMParser()
 	r.setupXMLSerializer()
 	r.setupUnsupportedAPIs()
-	_ = timeout // enforced per-Run via vm.SetMaxCallStackSize or interrupt timer
+	_ = timeout
 
 	return r, nil
 }
@@ -883,17 +609,6 @@ func (r *Runtime) setupDocument() {
 	_ = r.vm.Set("document", doc)
 
 	_ = doc.Set("__title__", r.title)
-	// document.nodeType === 9 is the first thing a jQuery/Sizzle boot reads:
-	// Sizzle's setDocument gate is `9 === doc.nodeType && doc.documentElement`,
-	// so an undefined nodeType silently un-configures the whole library and
-	// every `$(document).ready(...)` reveal with it (GOOSIE-LIVE-001, measured
-	// on gov.vn where the entire body sits in a display:none form that only
-	// that reveal opens). This is the DOM Standard ordinal, not Goosie's
-	// internal one - internal/dom numbers its kinds from 0, so the binding
-	// must translate and can never pass the field through. It is the first
-	// gate, not the whole chain: measured after this change gov.vn still paints
-	// blank, because its jQuery bundle now dies one call later on
-	// `createDocumentFragment`, another Node API the binding does not have.
 	_ = doc.Set("nodeType", NodeTypeDocument)
 	_ = doc.Set("nodeName", "#document")
 
@@ -917,18 +632,8 @@ func (r *Runtime) setupDocument() {
 }
 
 func (r *Runtime) setupWindow() {
-	// The window object IS the global scope (HTML spec: Window is the
-	// global object). An earlier stub installed window as a separate
-	// object, so `window.google = ns` followed by bare `google` died with
-	// "google is not defined" - the exact shape every dynamic page's boot
-	// script takes. Aliasing keeps one identity: assignments in either
-	// direction are visible in the other, and the later dual-installs
-	// (global + window) below degenerate to the same store.
 	win := r.vm.GlobalObject()
 	_ = win.Set("event", goja.Undefined())
-	// window.location, with every part pages read, is installed below by
-	// setupLocationParts (see location.go) together with its document.location
-	// alias; this used to be an href-only stub.
 	_ = win.Set("window", win)
 	_ = win.Set("self", win)
 	_ = win.Set("globalThis", win)
@@ -948,10 +653,6 @@ func (r *Runtime) setupWindow() {
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	_ = nav.Set("userActivation", activation)
 	_ = win.Set("navigator", nav)
-	// screen sits next to navigator because both are geometry-free window
-	// singletons: setupWindow runs for every runtime, while the viewport accessors
-	// innerWidth mirrors live in installCSSOMView, which a DOM-less runtime never
-	// installs.
 	r.setupScreen(win)
 
 	_ = win.Set("matchMedia", func(call goja.FunctionCall) goja.Value {
@@ -1011,12 +712,6 @@ func (r *Runtime) setupWindow() {
 		_ = mql.Set("removeEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 		return mql
 	})
-	// window is an EventTarget and the document lifecycle is a real event, not
-	// a page's imagination: four `window.addEventListener('DOMContentLoaded')`
-	// registrations on the saved vnexpress boot each threw "Object has no
-	// member 'addEventListener'", and jQuery's ready path needs both the window
-	// listener and a readyState that still reads "loading" while its own script
-	// runs. See window_events.go.
 	r.setupWindowEvents()
 	if window, ok := r.vm.Get("window").(*goja.Object); ok {
 		_ = window.DefineAccessorProperty("event", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
@@ -1033,13 +728,6 @@ func (r *Runtime) setupWindow() {
 		}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
 	r.setupLocationParts(win)
-	// The window handles a library reaches for on the way to a computed style:
-	// document.defaultView (the window itself, so it carries getComputedStyle
-	// and addEventListener), window.top/parent (=== window in a top-level
-	// browsing context, which is what makes Sizzle's `n.top !== n` test end the
-	// way it does in a browser instead of taking the frame branch), and
-	// window.opener (null, so jQuery's `t && t.opener || (t = C)` falls back to
-	// the window it already has).
 	r.jsDefaultView()
 	_ = win.Set("top", win)
 	_ = win.Set("parent", win)
@@ -1050,9 +738,6 @@ func (r *Runtime) setupWindow() {
 	})
 }
 
-// SetTransientUserActivation updates the document's user-activation state for
-// a host-identified trusted input event. The runtime retains sticky activation
-// after transient activation is consumed or cleared.
 func (r *Runtime) SetTransientUserActivation(active bool) {
 	if r == nil {
 		return
@@ -1073,8 +758,6 @@ func (r *Runtime) SetTransientUserActivation(active bool) {
 			target.hasBeenActive = true
 			target.transientActivationUntil = expires
 		}
-		// Activation reaches every ancestor browsing context and same-origin
-		// descendants of the document that received the trusted input.
 		for ancestor := r.iframeParent; ancestor != nil; ancestor = ancestor.iframeParent {
 			mark(ancestor)
 		}
@@ -1095,8 +778,6 @@ func (r *Runtime) SetTransientUserActivation(active bool) {
 		visit(r)
 		return
 	}
-	// Activation consumption affects every active window in the top-level
-	// traversable, including cross-origin descendants.
 	root := r
 	for root.iframeParent != nil {
 		root = root.iframeParent
@@ -1138,9 +819,6 @@ func runtimeActivationOrigin(r *Runtime) string {
 	return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Hostname()) + ":" + port
 }
 
-// HasTransientUserActivation reports whether the recent trusted input still
-// grants transient activation. The bounded host window expires after five
-// seconds unless an API consumes it or the host clears it explicitly.
 func (r *Runtime) HasTransientUserActivation() bool {
 	if r == nil || !r.transientUserActivation {
 		return false
@@ -1186,9 +864,6 @@ func runtimeOrigin(u *url.URL) string {
 	return scheme + "://" + host + ":" + port
 }
 
-// EnableTestUserActivationHook lets the in-process WPT adapter turn its
-// testdriver-generated click into a transient activation. Production pages do
-// not receive this hook; the native host marks trusted input through Go.
 func (r *Runtime) EnableTestUserActivationHook() {
 	if r == nil {
 		return
@@ -1273,7 +948,6 @@ func (r *Runtime) EnableTestUserActivationHook() {
 	}
 }
 
-// ChainOnEscapeKey appends a host-owned Escape default action.
 func (r *Runtime) ChainOnEscapeKey(fn func() bool) {
 	if r == nil || fn == nil {
 		return
@@ -1285,7 +959,6 @@ func (r *Runtime) ChainOnEscapeKey(fn func() bool) {
 	}
 }
 
-// ChainOnTestDriverPointer installs the headless WPT pointer-action default.
 func (r *Runtime) ChainOnTestDriverPointer(fn func(action string, x, y float32, button int) bool) {
 	if r == nil || fn == nil {
 		return
@@ -1300,7 +973,6 @@ func (r *Runtime) ChainOnTestDriverPointer(fn func(action string, x, y float32, 
 	}
 }
 
-// ChainOnTestDriverWheel installs the headless WPT scroll-action default.
 func (r *Runtime) ChainOnTestDriverWheel(fn func(x, y float32, deltaX, deltaY float64)) {
 	if r == nil || fn == nil {
 		return
@@ -1316,7 +988,6 @@ func (r *Runtime) ChainOnTestDriverWheel(fn func(x, y float32, deltaX, deltaY fl
 	}
 }
 
-// ChainOnTestDriverTouch installs the headless WPT touch-action default.
 func (r *Runtime) ChainOnTestDriverTouch(fn func(id, phase string, x, y float32)) {
 	if r == nil || fn == nil {
 		return
@@ -1358,16 +1029,12 @@ func (r *Runtime) setupDOMException() {
 			name = name === undefined ? 'Error' : String(name);
 			var exception = new Error(message);
 			Object.setPrototypeOf(exception, DOMException.prototype);
-			// Remove the inherited stack property - Chromium's DOMException
-			// does not carry one.
 			delete exception.stack;
 			Object.defineProperties(exception, {
 				name: {value: name, writable: true, configurable: true},
 				message: {value: message, writable: true, configurable: true},
 				code: {value: codes[name] || 0, writable: true, configurable: true}
 			});
-			// Set Symbol.toStringTag so Object.prototype.toString returns
-			// "[object DOMException]" instead of "[object Error]".
 			Object.defineProperty(exception, Symbol.toStringTag, {value: 'DOMException', configurable: true});
 			return exception;
 		}
@@ -1382,15 +1049,8 @@ func (r *Runtime) setupDOMException() {
 }
 
 func (r *Runtime) setupUnsupportedAPIs() {
-	// Wave 2: fetch is now wired by setupFetch when an HTTPClient is
-	// provided. When it is nil, fetch remains undefined and calling it
-	// produces a ReferenceError that names the missing API.
 }
 
-// setupDOM installs DOM API bindings on the document object when a DOM tree
-// was provided via Options.DOM. Without a DOM, none of the query or mutation
-// methods exist, so scripts that call them get a clear undefined-function
-// error rather than a silent no-op.
 func (r *Runtime) setupDOM() {
 	r.observeNodeRemoval(r.opts.DOM)
 	if r.opts.DOM == nil {
@@ -1434,10 +1094,6 @@ func (r *Runtime) setupDOM() {
 	r.onHandlers = make(map[*dom.Node]map[string]*jsEventHandler)
 	r.nextNID = 1
 
-	// Build the shared WebIDL interface chain once: EventTarget > Node >
-	// Element > HTMLElement > per-tag interface. Each wrapper stores a __nid__
-	// (registry key) that inherited accessors use to look up the real
-	// *dom.Node; nothing per-node is installed beyond that key and nodeType.
 	r.setupProtoChain()
 	for tag := range htmlTagInterfaces {
 		r.protoForTag(tag)
@@ -1601,18 +1257,12 @@ func (r *Runtime) setupDOM() {
 	_ = r.elementProto.Set("getContext", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetContext(call)
 	})
-	// ParentNode query roots: jsQuerySelector(All) already resolve the root
-	// from call.This, so the same handlers serve document and elements with
-	// document-order, subtree-scoped results.
 	_ = r.elementProto.Set("querySelector", func(call goja.FunctionCall) goja.Value {
 		return r.jsQuerySelector(call)
 	})
 	_ = r.elementProto.Set("querySelectorAll", func(call goja.FunctionCall) goja.Value {
 		return r.jsQuerySelectorAll(call)
 	})
-	// DocumentFragment participates in the ParentNode mixin too. Template
-	// contents and document.createDocumentFragment() receive this prototype;
-	// text and comment nodes remain plain Node instances without query methods.
 	_ = r.documentFragmentProto.Set("querySelector", func(call goja.FunctionCall) goja.Value {
 		return r.jsQuerySelector(call)
 	})
@@ -1637,10 +1287,6 @@ func (r *Runtime) setupDOM() {
 		}
 		return r.wrapNode(found)
 	})
-	// Element.matches/closest are the other two selector entry points. They
-	// sit on the same prototype as the query roots because all of them share
-	// one compiled-selector path in selector.go: same :scope binding, same
-	// argument coercion, same SyntaxError for an invalid selector.
 	_ = r.elementProto.Set("matches", func(call goja.FunctionCall) goja.Value {
 		return r.jsMatches(call)
 	})
@@ -1670,22 +1316,13 @@ func (r *Runtime) setupDOM() {
 	_ = r.elementProto.Set("append", func(call goja.FunctionCall) goja.Value {
 		return r.jsAppend(call)
 	})
-	// The child-list mutation and traversal API (insertBefore, replaceChild,
-	// cloneNode, contains, hasChildNodes) lives in node_api.go and goes on the
-	// same prototype, so a document fragment created by
-	// document.createDocumentFragment() answers them like any other node.
 	r.installNodeTreeMethods()
-	// textContent (Node) and innerHTML (Element) are inherited accessors, not
-	// per-node copies. See element_interfaces.go.
 	r.installNodeAccessors()
 	r.installElementAccessors()
 	r.installParentNodeAccessors()
 	r.installCSSOMView()
 
 	doc := r.vm.Get("document").(*goja.Object)
-	// The document is a Node and a Document, so it inherits the tree API from
-	// Node.prototype and answers `document instanceof Node`/`Document`. Its own
-	// methods below shadow the inherited ones where the behaviour differs.
 	_ = doc.SetPrototype(r.documentProto)
 
 	_ = doc.Set("querySelector", func(call goja.FunctionCall) goja.Value {
@@ -1742,38 +1379,18 @@ func (r *Runtime) setupDOM() {
 	_ = doc.Set("adoptNode", func(call goja.FunctionCall) goja.Value {
 		return r.jsAdoptNode(call, r.domDoc)
 	})
-	// The document is a Node, so it carries the Node API too. jQuery never
-	// appends to a document directly, but Sizzle's support tests call
-	// `document.contains(node)` and `document.cloneNode`, and a missing method
-	// there reads to the library as "this document is not a DOM document".
 	for _, name := range []string{"appendChild", "insertBefore", "replaceChild", "cloneNode", "contains", "hasChildNodes"} {
 		if v := r.nodeProto.Get(name); v != nil {
 			_ = doc.Set(name, v)
 		}
 	}
 
-	// Register the document node so document.addEventListener / dispatchEvent
-	// operate on the same *dom.Node the engine dispatches events on.
 	docNID := r.nextNID
 	r.nextNID++
 	r.nodeRegistry[docNID] = &r.domDoc.Node
 	_ = doc.Set("__nid__", docNID)
 	r.nodeWrappers[docNID] = doc
-	// The document node is registered here rather than through wrapNode, so the
-	// wrap cache has to be pointed at it by hand. Without this line
-	// wrapNode(&doc.Node) mints a second wrapper for the same node, and then
-	// `el.ownerDocument` is an object that is *not* `document`: Sizzle's
-	// setDocument compares `r != C` against window.document, would adopt the
-	// look-alike as its document cache, and die on the first property only the
-	// real one carries (defaultView, readyState, getElementById). Identity, not
-	// shape, is what the library checks.
 	r.wrapCache[&r.domDoc.Node] = docNID
-	// The document is a Node, so the child-list reads work on it too:
-	// `document.childNodes`, `document.firstChild` (the doctype on a real page)
-	// and `document.ownerDocument`, which is null per the standard. Those are
-	// inherited from Node.prototype through the Document prototype set above.
-	// document.implementation.createHTMLDocument: jQuery's load-time support
-	// probe calls it, so without it the library never finishes installing itself.
 	r.setupDocumentImplementation()
 
 	_ = doc.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
@@ -1786,7 +1403,6 @@ func (r *Runtime) setupDOM() {
 		return r.jsDispatchEvent(call)
 	})
 
-	// Internal helpers the prototype getter/setter calls back into.
 	_ = doc.Set("__getTextContent__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -1831,11 +1447,6 @@ func (r *Runtime) setupDOM() {
 		if node == nil {
 			return goja.Undefined()
 		}
-		// Parse the fragment FIRST, before touching the live tree, so a parse
-		// failure or an admission rejection leaves the existing children intact
-		// instead of cleared. The per-call ParseLimits bound one call; the
-		// mutation budget reserved below bounds the document in aggregate across
-		// repeated innerHTML writes.
 		templateContext := node.IsHTMLTemplate()
 		var newChildren []*dom.Node
 		limits := dom.ParseLimits{
@@ -1852,7 +1463,6 @@ func (r *Runtime) setupDOM() {
 			if node.Doc != nil && node.Doc.IsXML && !forceHTMLFragment {
 				panic(r.domError("SyntaxError", "The XML fragment could not be parsed"))
 			}
-			// Fallback: treat the source as a text node (matches prior behavior).
 			if html != "" {
 				newChildren = append(newChildren, node.Doc.NewText(html))
 			}
@@ -1862,9 +1472,6 @@ func (r *Runtime) setupDOM() {
 				newChildren = append(newChildren, c)
 			}
 		}
-		// The HTML fragment parsing steps for an HTML element context leave an
-		// empty <html> element with its required body child, including when an
-		// innerHTML assignment clears previously present head/body children.
 		if len(newChildren) == 0 && node.Namespace == dom.NSHTML && node.Data == "html" && node.Doc != nil {
 			newChildren = append(newChildren, node.Doc.NewElement("body"))
 		}
@@ -1872,16 +1479,12 @@ func (r *Runtime) setupDOM() {
 		if templateContext {
 			target = node.TemplateContent()
 		}
-		// The old children were charged only if node was live; credit them on
-		// the same condition so a detached host's writes never under-count.
 		parentWasLive := r.nodeIsLive(node)
 		var old []*dom.Node
 		for c := target.FirstChild; c != nil; c = c.NextSibling {
 			old = append(old, c)
 		}
 		r.admitInsert("innerHTML", node, newChildren, func() {
-			// Detach and credit the existing children, then move the parsed ones
-			// in. AppendChild adopts each out of the parse tree's document.
 			for _, c := range old {
 				target.RemoveChild(c)
 			}
@@ -1947,13 +1550,6 @@ func (r *Runtime) setupDOM() {
 		}
 		return r.wrapNode(node.Parent)
 	})
-	// __getParentNode__ is parentNode, which is not parentElement: the DOM
-	// Standard's parentNode reaches the *document* node too, so
-	// `document.documentElement.parentNode === document` and a text node under
-	// <html> has a parent at all. Binding parentNode to parentElement (as this
-	// file used to) silently made the root of the tree look detached, and
-	// jQuery's `while ((elem = elem[dir]) && elem.nodeType === 1)` ancestor
-	// walks stopped one level early.
 	_ = doc.Set("__getParentNode__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -1963,7 +1559,6 @@ func (r *Runtime) setupDOM() {
 		return r.wrapNode(node.Parent)
 	})
 
-	// Form-control helpers for checked/value property accessors.
 	_ = doc.Set("__getChecked__", func(call goja.FunctionCall) goja.Value {
 		nid := int(call.Arguments[0].ToInteger())
 		node := r.nodeRegistry[nid]
@@ -2233,8 +1828,6 @@ func (r *Runtime) setupDOM() {
 			})
 			_ = m.DefineAccessorProperty(key, getter, setter, goja.FLAG_TRUE, goja.FLAG_TRUE)
 		}
-		// The registry key rides along non-enumerably so Object.keys sees
-		// only the data properties, as on a real DOMStringMap.
 		_ = m.DefineDataProperty("__nid__", r.vm.ToValue(nid), goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 		return m
 	})
@@ -2278,8 +1871,6 @@ func (r *Runtime) setupDOM() {
 		}
 		attr, v := call.Arguments[2].String(), call.Arguments[3].String()
 		r.setDatasetAttribute(node, attr, v)
-		// Define the live pair on the map so later reads and Object.keys
-		// see the new attribute exactly like a parsed one.
 		if key, ok := datasetKey(strings.ToLower(attr)); ok {
 			attrName := attr
 			getter := r.vm.ToValue(func(goja.FunctionCall) goja.Value {
@@ -2306,8 +1897,6 @@ func (r *Runtime) setupDOM() {
 		return goja.Undefined()
 	})
 
-	// These HTMLDocument references follow the live Document tree. Cached Go
-	// pointers become stale when script removes or replaces the html/head/body.
 	_ = doc.DefineAccessorProperty("body", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.wrapNode(r.currentDocumentBody())
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
@@ -2364,11 +1953,8 @@ func (r *Runtime) setupDOM() {
 		return r.jsGetShadowRoot(call)
 	})
 
-	// TreeWalker and NodeIterator traversal API, plus NodeFilter constants.
 	r.installTreeWalkerAPI(doc)
 	r.installInitialWindowNamedProperties()
-	// Register parser-created inline handlers before scripts can attach later
-	// listeners. Elements parsed after this point are handled by the parser hook.
 	if r.domDoc != nil {
 		var visit func(*dom.Node)
 		visit = func(n *dom.Node) {
@@ -2389,19 +1975,10 @@ func (r *Runtime) setupDOM() {
 	r.installWindowFrameProperties()
 }
 
-// wrapNode creates a JS wrapper object for a DOM node. The wrapper inherits
-// from nodeProto (which provides appendChild, textContent, addEventListener)
-// and stores a __nid__ registry key so the prototype methods can find the
-// underlying *dom.Node.
 func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	if node == nil {
 		return goja.Null()
 	}
-	// Nodes from an active same-origin child document must use the same
-	// parent-visible wrapper whether they arrive through contentDocument or a
-	// child WindowProxy value (for example, MutationRecord.target). For custom
-	// elements that wrapper is source-backed so its child-realm prototype and
-	// instance state stay observable.
 	if node.Type != dom.NodeDocument && node.Doc != nil {
 		if frame := r.iframeForDocument(node.Doc); frame != nil {
 			if child := r.iframeChildRuntimes[frame]; child != nil && child.domDoc == node.Doc {
@@ -2414,18 +1991,10 @@ func (r *Runtime) wrapNode(node *dom.Node) goja.Value {
 	return r.wrapNodeLocal(node)
 }
 
-// wrapNodeLocal creates a wrapper in this runtime without routing through an
-// active iframe's child realm. It is used by the iframe bridge when it needs a
-// native parent-owned wrapper for nodes whose realm has not been initialized.
 func (r *Runtime) wrapNodeLocal(node *dom.Node) goja.Value {
 	if node == nil {
 		return goja.Null()
 	}
-	// One wrapper per node: a repeat wrap refreshes the snapshot data
-	// properties and returns the same object. This keeps `===` identity
-	// across queries (per DOM spec) and avoids recompiling the
-	// textContent/innerHTML/id accessors plus dozens of sets per hit —
-	// querySelectorAll over thousands of nodes used to spend seconds here.
 	if r.wrapCache == nil {
 		r.wrapCache = make(map[*dom.Node]int)
 	}
@@ -2433,9 +2002,6 @@ func (r *Runtime) wrapNodeLocal(node *dom.Node) goja.Value {
 		if obj := r.nodeWrappers[nid]; obj != nil {
 			if node.Element() && node.Doc != nil && node.Doc != r.domDoc {
 				_, upgraded := r.customElementInstances[node]
-				// Adoption callbacks can wrap the node while its constructor is
-				// running, before markCustomElementInstance records the definition.
-				// The construction stack owns its prototype until that algorithm ends.
 				constructing := false
 				for _, current := range r.customConstructionNodes {
 					if current == node {
@@ -2449,9 +2015,6 @@ func (r *Runtime) wrapNodeLocal(node *dom.Node) goja.Value {
 					}
 				}
 			}
-			// No snapshot refresh: every reflected property is an accessor on
-			// the interface prototype and reads the live node, so a cached
-			// wrapper answers exactly what a fresh one would.
 			return obj
 		}
 	}
@@ -2463,12 +2026,6 @@ func (r *Runtime) wrapNodeLocal(node *dom.Node) goja.Value {
 	obj := r.vm.NewObject()
 	_ = obj.Set("__nid__", nid)
 	r.nodeWrappers[nid] = obj
-	// Every node a page can reach carries its spec ordinal. jQuery tests
-	// `1 === e.nodeType` on each node it walks and `9 === doc.nodeType` on the
-	// document, and reads a missing nodeType as "this is not a node", so one
-	// absent property is enough to make the library do nothing at all. A node's
-	// kind never changes, so this is a data property: no accessor, nothing to
-	// refresh when a cached wrapper is returned.
 	_ = obj.Set("nodeType", domNodeType(node.Type))
 	if node.Type == dom.NodeDoctype {
 		name := node.DoctypeName
@@ -2483,16 +2040,8 @@ func (r *Runtime) wrapNodeLocal(node *dom.Node) goja.Value {
 		_ = obj.Set("systemId", node.SystemID)
 	}
 
-	// The wrapper's [[Prototype]] is the element's interface prototype, so
-	// methods and reflected accessors are inherited once per runtime rather
-	// than copied per node. nodeType stays an own data property because it is
-	// read on every tree walk and never changes.
 	_ = obj.SetPrototype(r.protoForNode(node))
 
-	// Per-instance methods that are not inheritable because they capture the
-	// node (media controllers, dialog state, popover state) still belong to
-	// this wrapper. Input checked/value, video accessors, dialog methods and
-	// popover methods are installed here only for the tags that answer them.
 	if node.Element() {
 		if node.Data == "input" {
 			r.defineCheckedAccessor(obj)
@@ -2724,8 +2273,6 @@ func (r *Runtime) focusDialogInitialTarget(dialog *dom.Node, modal bool) {
 	}
 }
 
-// RestoreDialogFocus returns focus to the element active before showModal. The
-// browser session also calls this when Escape or method=dialog closes a modal.
 func (r *Runtime) RestoreDialogFocus(dialog *dom.Node) {
 	if r == nil || dialog == nil || r.opts.OnFocusChange == nil || !r.hasDialogFocusReturn(dialog) {
 		return
@@ -2748,9 +2295,6 @@ func (r *Runtime) RestoreDialogFocus(dialog *dom.Node) {
 	}
 }
 
-// TakeDialogFocusReturn consumes the focus target saved by showModal. The
-// engine uses it while holding its focus lock, where calling the JS focus hook
-// would re-enter that lock.
 func (r *Runtime) TakeDialogFocusReturn(dialog *dom.Node) (*dom.Node, bool) {
 	if r == nil || dialog == nil {
 		return nil, false
@@ -2782,8 +2326,6 @@ func (r *Runtime) hasDialogFocusReturn(dialog *dom.Node) bool {
 	return exists
 }
 
-// AutofocusDocument runs the document autofocus processing step once the
-// parser-built tree and its focus provider are available.
 func (r *Runtime) AutofocusDocument() bool {
 	if r == nil || r.domDoc == nil || r.opts.OnFocusChange == nil {
 		return false
@@ -3086,8 +2628,6 @@ func (r *Runtime) jsInsertAdjacentHTML(call goja.FunctionCall) goja.Value {
 		children = append(children, c)
 	}
 
-	// Resolve the insertion parent and per-position inserter first, then reserve
-	// the whole fragment once so a rejection inserts nothing.
 	var parent *dom.Node
 	var insertChild func(child *dom.Node)
 	switch position {
@@ -3222,9 +2762,6 @@ func (r *Runtime) jsPrepend(call goja.FunctionCall) goja.Value {
 	if node == nil {
 		return goja.Undefined()
 	}
-	// Resolve the arguments into an insertion plan BEFORE mutating, so the whole
-	// prepend can be reserved atomically. The ref-advance when a node is already
-	// the first child mirrors the original single-pass behavior.
 	type pending struct {
 		kid    *dom.Node
 		before *dom.Node
@@ -3270,8 +2807,6 @@ func (r *Runtime) jsAppend(call goja.FunctionCall) goja.Value {
 	if node == nil {
 		return goja.Undefined()
 	}
-	// Resolve arguments to nodes first so the whole append can be reserved
-	// atomically; strings become text nodes.
 	var kids []*dom.Node
 	for _, arg := range call.Arguments {
 		if kidNode := r.getNode(arg); kidNode != nil {
@@ -3301,9 +2836,6 @@ func (r *Runtime) jsAppend(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// datasetKey converts a data-* attribute name to its dataset property key:
-// data-foo-bar becomes fooBar. Only lowercase-dashed names convert; anything
-// else is not exposed on the map.
 func datasetKey(attr string) (string, bool) {
 	if !strings.HasPrefix(attr, "data-") || len(attr) < 5 {
 		return "", false
@@ -3314,8 +2846,6 @@ func datasetKey(attr string) (string, bool) {
 		c := rest[i]
 		switch {
 		case c >= 'A' && c <= 'Z':
-			// Uppercase in the attribute name never appears from the HTML
-			// parser (it lowercases); reject defensively.
 			return "", false
 		case c == '-' && i+1 < len(rest) && rest[i+1] >= 'a' && rest[i+1] <= 'z':
 			i++
@@ -3327,8 +2857,6 @@ func datasetKey(attr string) (string, bool) {
 	return sb.String(), true
 }
 
-// datasetAttr converts a dataset property key back to its data-* attribute
-// name: fooBar becomes data-foo-bar.
 func datasetAttr(key string) string {
 	var sb strings.Builder
 	sb.WriteString("data-")
@@ -3343,7 +2871,6 @@ func datasetAttr(key string) string {
 	return sb.String()
 }
 
-// getNode extracts the *dom.Node from a JS wrapper object via its __nid__.
 func (r *Runtime) getNode(v goja.Value) *dom.Node {
 	if v == nil || goja.IsNull(v) || goja.IsUndefined(v) {
 		return nil
@@ -3355,11 +2882,6 @@ func (r *Runtime) getNode(v goja.Value) *dom.Node {
 	if node := r.iframeImportedChildNodes[obj]; node != nil {
 		return node
 	}
-	// A parent-visible iframe wrapper may be passed back into the child realm
-	// (for example, MutationObserver.observe(target)). Its __nid__ belongs to
-	// the wrapper's original runtime, so resolve the bridge source before using
-	// this runtime's nodeRegistry, where the same integer may identify another
-	// node.
 	if source := r.iframeImportedParentValues[obj]; source != nil {
 		if source != obj {
 			if node := r.iframeImportedChildNodes[source]; node != nil {
@@ -3381,7 +2903,6 @@ func (r *Runtime) getNode(v goja.Value) *dom.Node {
 	return node
 }
 
-// jsAppendChild implements element.appendChild(child).
 func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 	parentNode := r.getNode(call.This)
 	if parentNode == nil {
@@ -3460,12 +2981,6 @@ func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 	oldDocuments := captureOwnerDocuments(connectedNodes)
 	wasConnected := captureConnectedState(connectedNodes)
 	removals := snapshotChildRemovals(insertedNodes)
-	// Gate the insertion through the document's mutation budget: a child that
-	// would breach the node/depth/attribute caps throws a catchable
-	// QuotaExceededError and leaves the tree unchanged. A DocumentFragment is
-	// charged as its children, because those are what actually land, and
-	// InsertNode moves them and empties the fragment - the step every
-	// `parent.appendChild(buildFragment(...))` in the wild depends on.
 	r.admitInsert("appendChild", parentNode, insertedNodes, func() {
 		parentNode.InsertNode(childNode, nil)
 	})
@@ -3474,14 +2989,12 @@ func (r *Runtime) jsAppendChild(call goja.FunctionCall) goja.Value {
 	r.notifyMutation()
 	r.notifyDisconnected(connectedNodes, wasConnected)
 	r.notifyMovedSubtrees(connectedNodes, oldDocuments)
-	// Invoke connectedCallback for each node that landed.
 	for _, inserted := range connectedNodes {
 		r.activateDOMInsertedSubtree(inserted)
 	}
 	if childNode.Element() && childNode.Data == "iframe" {
 		r.queueIFrameLoad(childNode)
 	}
-	// Return the child, matching the DOM spec.
 	return call.Arguments[0]
 }
 
@@ -3492,7 +3005,6 @@ func (r *Runtime) requireContainerNode(node *dom.Node, operation string) {
 	panic(r.domError("HierarchyRequestError", "This node type cannot have children"))
 }
 
-// jsRemoveChild implements parent.removeChild(child).
 func (r *Runtime) jsRemoveChild(call goja.FunctionCall) goja.Value {
 	parent := r.getNode(call.This)
 	if parent == nil || len(call.Arguments) == 0 {
@@ -3505,8 +3017,6 @@ func (r *Runtime) jsRemoveChild(call goja.FunctionCall) goja.Value {
 	if child.Parent != parent {
 		panic(r.domError("NotFoundError", "Failed to execute 'removeChild' on 'Node': the node to be removed is not a child of this node."))
 	}
-	// Credit the budget only if child was live before detaching; a child under
-	// a detached parent was never charged, and crediting it would under-count.
 	wasLive := r.nodeIsLive(child)
 	wasConnected := child.IsConnected()
 	removal := snapshotChildRemovals([]*dom.Node{child})
@@ -3526,7 +3036,6 @@ func (r *Runtime) jsRemoveChild(call goja.FunctionCall) goja.Value {
 	return r.wrapNode(child)
 }
 
-// newJSArray builds a JS Array from a slice of goja values.
 func newJSArray(vm *goja.Runtime, vals []goja.Value) *goja.Object {
 	arr := vm.NewArray()
 	for i, v := range vals {
@@ -3535,10 +3044,6 @@ func newJSArray(vm *goja.Runtime, vals []goja.Value) *goja.Object {
 	return arr
 }
 
-// setupTimers installs setTimeout, setInterval, clearTimeout, and clearInterval
-// on both the global scope and the window object, matching the browser model
-// where these are properties of the Window interface and also available as bare
-// globals.
 func (r *Runtime) setupTimers() {
 	setTimeout := func(callback goja.Value, delay goja.Value) int {
 		ms := int64(0)
@@ -3573,7 +3078,7 @@ func (r *Runtime) setupTimers() {
 			ms = delay.ToInteger()
 		}
 		if ms < 1 {
-			ms = 1 // setInterval with 0 would spin; clamp to 1ms
+			ms = 1
 		}
 		nesting := r.timerNesting + 1
 		if nesting > maxTimerNestingLevel && ms < nestedTimerMinDelayMS {
@@ -3602,13 +3107,11 @@ func (r *Runtime) setupTimers() {
 		delete(r.timers, id)
 	}
 
-	// Install on the global scope (bare names).
 	_ = r.vm.Set("setTimeout", setTimeout)
 	_ = r.vm.Set("setInterval", setInterval)
 	_ = r.vm.Set("clearTimeout", clearTimeout)
 	_ = r.vm.Set("clearInterval", clearInterval)
 
-	// Also install on the window object, matching the browser spec.
 	win := r.vm.Get("window").(*goja.Object)
 	_ = win.Set("setTimeout", setTimeout)
 	_ = win.Set("setInterval", setInterval)
@@ -3616,12 +3119,6 @@ func (r *Runtime) setupTimers() {
 	_ = win.Set("clearInterval", clearInterval)
 }
 
-// TickDeferredTimer runs one ready timer queued while a deferred script was
-// executing. The document parser uses this task boundary before queuing
-// DOMContentLoaded; timers queued by this callback remain for a later Tick.
-// QueueTask queues a host callback on the runtime's task queue. Host callbacks
-// run with the next timer task, after the current operation and microtask
-// checkpoint have finished.
 func (r *Runtime) QueueTask(callback func()) int {
 	if r == nil || callback == nil {
 		return 0
@@ -3636,8 +3133,6 @@ func (r *Runtime) QueueTask(callback func()) int {
 	return id
 }
 
-// runTimerCallback invokes one timer callback with its nesting level set, so
-// timers scheduled inside it inherit the next level (FR-JS-04).
 func (r *Runtime) runTimerCallback(next *timer) error {
 	previous := r.timerNesting
 	r.timerNesting = next.nesting
@@ -3677,11 +3172,6 @@ func (r *Runtime) TickDeferredTimer() bool {
 	return true
 }
 
-// Tick processes one ready timer task in the goja runtime, after draining
-// ready I/O callbacks. A timer callback is a task; timers it schedules belong
-// to later event-loop turns even when their delay is zero. One-shot timers are
-// removed after firing, while repeating timers are rescheduled for a later
-// turn. A closed runtime is a no-op.
 func (r *Runtime) Tick() bool {
 	r.mu.Lock()
 	closed := r.closed
@@ -3695,14 +3185,9 @@ func (r *Runtime) Tick() bool {
 	r.DrainServiceWorkerEvents()
 	r.DrainBroadcastEvents()
 	r.DrainMessagePortEvents()
-	// Checkpoint after the I/O callbacks: a fetch resolving promises queues
-	// reactions that must run before the next timer task, not after Tick.
 	if err := r.drainMicrotasks(); err != nil {
 		return false
 	}
-	// Promise and I/O callbacks can append iframes after the last direct Run.
-	// Deliver their queued load tasks at this event-loop checkpoint so async
-	// scripts observe the same frame lifecycle as parser-time insertion.
 	r.flushIFrameLoads()
 	if r.tickDynamicScripts() {
 		return true
@@ -3733,7 +3218,6 @@ func (r *Runtime) Tick() bool {
 	if err := r.runTimerCallback(next); err != nil {
 		return true
 	}
-	// A microtask checkpoint follows each task before the next event-loop turn.
 	if err := r.drainMicrotasks(); err != nil {
 		return true
 	}
@@ -3741,23 +3225,6 @@ func (r *Runtime) Tick() bool {
 	return true
 }
 
-// PendingLoadTimerDelay reports how soon this document still owes a timer it
-// queued before its own load step: negative means one is already due, and the
-// second result is false when no startup timer is waiting. Child browsing
-// contexts are included because the engine pumps them from the same turn, so
-// a reveal inside a frame is the same kind of work.
-//
-// The question a host really has to answer is "is this frame worth writing?",
-// and neither the tile counts nor the repaint stamp can see a page that has
-// promised to show itself shortly: every tile is drawn, the loop is quiet, and
-// a setTimeout that has not run yet leaves no trace at all. Measured on
-// https://www.gov.vn, https://vnexpress.net and https://tuoitre.vn
-// (2026-11-13, Chromium 131.0.6778.33, viewport 1280x800), those pages queue
-// 81, 938 and 327 timers before their load events, and their visible layout
-// area stops moving 200 to 300ms after navigation start - so the useful signal
-// is a startup timer due soon, not any pending timer at all: gov.vn boots a
-// 24-hour timer that changes nothing on screen, and waiting for it would delay
-// every screenshot of the page by 24 hours.
 func (r *Runtime) PendingLoadTimerDelay() (time.Duration, bool) {
 	if r == nil {
 		return 0, false
@@ -3787,10 +3254,6 @@ func (r *Runtime) PendingLoadTimerDelay() (time.Duration, bool) {
 	return best, found
 }
 
-// eachIFrameChild walks every child browsing context attached to this
-// document, nested frames included, in document order. The visit reports
-// whether the walk may stop, which is what lets tickIFrameChildren abandon a
-// turn as soon as one context did work instead of ticking the rest of them.
 func (r *Runtime) eachIFrameChild(visit func(*Runtime) bool) {
 	var walk func(*dom.Node) bool
 	walk = func(node *dom.Node) bool {
@@ -3814,9 +3277,6 @@ func (r *Runtime) eachIFrameChild(visit func(*Runtime) bool) {
 	}
 }
 
-// tickIFrameChildren gives child browsing contexts an event-loop turn when
-// the embedding engine pumps the top-level document. Each child Runtime keeps
-// its own task queue and realm.
 func (r *Runtime) tickIFrameChildren() bool {
 	work := false
 	r.eachIFrameChild(func(child *Runtime) bool {
@@ -3829,9 +3289,6 @@ func (r *Runtime) tickIFrameChildren() bool {
 	return work
 }
 
-// Run evaluates one classic script to completion, returning an *Error for an
-// uncaught exception, ErrInterrupted if the bound fired, or ErrClosed after
-// Close.
 func (r *Runtime) Run(src, sourceURL string) error {
 	r.mu.Lock()
 	if r.closed {
@@ -3849,31 +3306,23 @@ func (r *Runtime) Run(src, sourceURL string) error {
 		timeout = DefaultTimeout
 	}
 
-	// Arm the timeout interrupt. It stays armed across the microtask
-	// checkpoint below so a self-perpetuating reaction chain ends in
-	// ErrInterrupted rather than a hang.
 	var fired atomic.Bool
 	timer := time.AfterFunc(timeout, func() {
 		fired.Store(true)
 		r.vm.Interrupt(ErrInterrupted)
 	})
 
-	// Compile first to catch syntax errors before execution.
 	prog, err := goja.Compile(sourceURL, replaceGojaMaxCodePointEscape(src), false)
 	if err != nil {
 		timer.Stop()
 		return r.mapError(err, sourceURL)
 	}
 
-	// Run the compiled program.
 	outermostScript := r.scriptExecutionDepth == 0
 	r.scriptExecutionDepth++
 	_, runErr := r.vm.RunProgram(prog)
 	r.scriptExecutionDepth--
 
-	// Microtask checkpoint: reactions queued during the task drain before
-	// Run returns, even when the program threw. A checkpoint failure
-	// (interrupt) is reported unless the program already failed first.
 	var drainErr error
 	if outermostScript {
 		drainErr = r.drainMicrotasks()
@@ -3898,7 +3347,6 @@ func (r *Runtime) Run(src, sourceURL string) error {
 	return nil
 }
 
-// Evaluate executes a JavaScript expression, returning its string representation or an error.
 func (r *Runtime) Evaluate(expr string) (string, error) {
 	r.mu.Lock()
 	if r.closed {
@@ -3950,13 +3398,11 @@ func (r *Runtime) mapError(err error, sourceURL string) error {
 		return nil
 	}
 
-	// Check for interrupt (timeout or manual).
 	var gojaErr *goja.InterruptedError
 	if errors.As(err, &gojaErr) {
 		return ErrInterrupted
 	}
 
-	// Check if it's a goja Exception (uncaught JS exception).
 	var exc *goja.Exception
 	if errors.As(err, &exc) {
 		msg := exc.String()
@@ -3968,7 +3414,6 @@ func (r *Runtime) mapError(err error, sourceURL string) error {
 		}
 	}
 
-	// Syntax or other compile error.
 	line := extractLine(err.Error())
 	return &Error{
 		SourceURL: sourceURL,
@@ -3978,8 +3423,6 @@ func (r *Runtime) mapError(err error, sourceURL string) error {
 }
 
 func extractLine(errMsg string) int {
-	// goja error messages often contain line information.
-	// Try to extract it from patterns like "line N" or "(line N)".
 	for i := 0; i < len(errMsg); i++ {
 		if i+5 < len(errMsg) && errMsg[i:i+5] == "line " {
 			j := i + 5
@@ -3996,7 +3439,6 @@ func extractLine(errMsg string) int {
 	return 1
 }
 
-// Global reads a top-level binding created by a script.
 func (r *Runtime) Global(name string) (Value, bool) {
 	v := r.vm.Get(name)
 	if v == nil || goja.IsUndefined(v) {
@@ -4027,7 +3469,6 @@ func exportValue(v goja.Value) Value {
 	}
 }
 
-// Title returns what the scripts left document.title at.
 func (r *Runtime) Title() string {
 	v := r.vm.Get("document")
 	if v != nil {
@@ -4042,25 +3483,18 @@ func (r *Runtime) Title() string {
 	return r.title
 }
 
-// Interrupt stops a Run in progress, from any goroutine.
 func (r *Runtime) Interrupt() {
 	r.vm.Interrupt(ErrInterrupted)
 }
 
-// TimedOut reports whether the runtime's own deadline stopped user code since
-// the last TakeTimedOut. A host Interrupt does not set it, so a navigation or
-// tab close cannot be mistaken for a runaway page.
 func (r *Runtime) TimedOut() bool {
 	return r != nil && r.timedOut.Load()
 }
 
-// TakeTimedOut reports and clears the timeout flag, so one runaway script is
-// attributed once even when several call paths observe the interrupt.
 func (r *Runtime) TakeTimedOut() bool {
 	return r != nil && r.timedOut.Swap(false)
 }
 
-// Close releases the realm. Run after Close reports ErrClosed.
 func (r *Runtime) Close() error {
 	r.mu.Lock()
 	if r.closed {
@@ -4115,9 +3549,6 @@ func (r *Runtime) Close() error {
 	return nil
 }
 
-// SetDOM updates the DOM document reference. The engine calls this after
-// parsing HTML so the runtime's document methods (getElementById, etc.)
-// operate on the same nodes the engine's arena references.
 func (r *Runtime) SetDOM(doc *dom.Document) {
 	r.mu.Lock()
 	r.opts.DOM = doc
@@ -4134,37 +3565,16 @@ func (r *Runtime) SetDOM(doc *dom.Document) {
 		r.nextNID = 1
 	}
 	r.mu.Unlock()
-	// A runtime may be created before the parser has built its document. Scan
-	// the document when it is bound so parser-created customelementregistry
-	// associations exist before page script can mutate the attribute.
 	r.associateNullRegistryAttributesInDocument(doc)
-	// Add document methods (getElementById, querySelector, etc.) now that
-	// the DOM reference is set. setupDOM checks r.opts.DOM internally.
 	r.setupDOM()
-	// setupAnimations runs during Runtime construction, before the engine has
-	// parsed HTML. Rebind Element.animate after setupDOM creates Element.prototype.
 	r.installAnimationElementAPI(getAnimRegistry(r))
-	// CSSOM initially installs before the parser supplies a document, so its
-	// Document.prototype accessors must be rebound after setupDOM constructs
-	// the live prototype chain.
 	r.setupStyleSheetInterfaces()
-	// The engine creates a script runtime before the document has been
-	// parsed; install DOM-backed element APIs again once SetDOM supplies the
-	// live document and HTMLElement prototype chain.
 	r.setupElementInternals()
-	// Install Range and Selection APIs now that a DOM is available.
 	r.setupRange()
 	r.setupSelection()
-	// Upgrade document.write/writeln from no-op stubs to real implementations
-	// now that a DOM is available.
 	r.setupDocumentWrite()
 	r.queueExistingIFrames()
-	// Runtime may be created before the HTML parser supplies its Document.
-	// Install the parsed document's Window named properties now, before any
-	// author script runs against the bound DOM.
 	r.installInitialWindowNamedProperties()
-	// Parser-created inline event-handler attributes must be registered before
-	// any later script adds listeners to the same target.
 	if doc != nil {
 		var visit func(*dom.Node)
 		visit = func(n *dom.Node) {
@@ -4185,11 +3595,6 @@ func (r *Runtime) SetDOM(doc *dom.Document) {
 	r.queueInitialDetailsToggleEventsForDocument(doc)
 }
 
-// ---------------------------------------------------------------------------
-// JS bridge: event methods
-// ---------------------------------------------------------------------------
-
-// jsAddEventListener implements element.addEventListener(type, callback).
 func (r *Runtime) jsAddEventListener(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 2 {
@@ -4269,7 +3674,6 @@ func (r *Runtime) jsAddEventListener(call goja.FunctionCall) goja.Value {
 	}
 	thisValue := call.This
 
-	// Wrap the goja listener as a Go callback that creates a JS Event object.
 	callback := func(e *dom.Event) {
 		if listenerRealm != nil && !listenerRealm.isFullyActiveBrowsingContext() {
 			return
@@ -4310,17 +3714,11 @@ func (r *Runtime) jsAddEventListener(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// withCurrentEvent exposes the event currently being dispatched as the
-// legacy Window.event global while running an event listener. Older pages
-// (and several engines' compatibility behavior) rely on this even when their
-// listener does not declare an event parameter.
 func (r *Runtime) withCurrentEvent(event goja.Value, run func()) {
 	previous := r.legacyWindowEvent
 	if previous == nil {
 		previous = goja.Undefined()
 	}
-	// Window.event is a replaceable legacy property. Respect an author value,
-	// while still allowing a nested dispatch to temporarily expose its event.
 	if previous != nil && !goja.IsUndefined(previous) && !goja.IsNull(previous) {
 		isCurrent := false
 		for _, current := range r.currentEventStack {
@@ -4338,7 +3736,6 @@ func (r *Runtime) withCurrentEvent(event goja.Value, run func()) {
 	r.currentEventStack = append(r.currentEventStack, event)
 	defer func() {
 		r.currentEventStack = r.currentEventStack[:len(r.currentEventStack)-1]
-		// Preserve a replacement made by script during the callback.
 		if r.legacyWindowEvent != nil && r.legacyWindowEvent.StrictEquals(event) {
 			r.legacyWindowEvent = previous
 		}
@@ -4354,9 +3751,6 @@ func (r *Runtime) withCurrentEventOnNode(event goja.Value, node *dom.Node, run f
 	r.withCurrentEvent(event, run)
 }
 
-// jsRemoveEventListener implements element.removeEventListener(type, callback, capture).
-// It uses the original goja function value as the dedup key to match the
-// listener that was stored by jsAddEventListener via AddEventListenerWithKey.
 func (r *Runtime) jsRemoveEventListener(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 2 {
@@ -4378,7 +3772,6 @@ func (r *Runtime) jsRemoveEventListener(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// jsDispatchEvent implements element.dispatchEvent(event).
 func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 1 {
@@ -4532,15 +3925,9 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 	if preImmediateStopped {
 		event.StopImmediatePropagation()
 	}
-	// The window step is part of the path, not an extra: an event a page
-	// dispatches on an element still reaches window listeners when it bubbles,
-	// and one dispatched on the document reaches them last.
 	if r.activeEventObjects == nil {
 		r.activeEventObjects = make(map[*dom.Event]goja.Value)
 	}
-	// Event listeners must observe the exact object passed to dispatchEvent().
-	// Bind this dispatch's Go event state onto that object before the listener
-	// wrappers reuse it.
 	_ = object.Set("target", r.wrapNode(node))
 	_ = object.Set("srcElement", r.wrapNode(node))
 	_ = object.Set("currentTarget", goja.Null())
@@ -4560,9 +3947,6 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 	}
 	_ = object.Set("__propagationStopped", false)
 	_ = object.Set("__immediateStopped", false)
-	// Restore the Event object's script-facing methods after the dispatch-local
-	// Go closures are no longer valid. Pages can call stopPropagation() between
-	// dispatches and expect that flag to affect the next dispatch.
 	_ = object.Set("stopPropagation", func() { _ = object.Set("__propagationStopped", true) })
 	_ = object.Set("stopImmediatePropagation", func() {
 		_ = object.Set("__propagationStopped", true)
@@ -4576,9 +3960,6 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 		}
 		return goja.Undefined()
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
-	// The JS Event object is the caller-visible event object. Listener wrappers
-	// use a Go-backed view while dispatching, so reflect the dispatch result
-	// back onto the original object before returning from dispatchEvent().
 	_ = object.Set("defaultPrevented", event.DefaultPrevented())
 	_ = object.Set("currentTarget", goja.Null())
 	_ = object.Set("eventPhase", 0)
@@ -4598,9 +3979,6 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 	return r.vm.ToValue(result)
 }
 
-// wrapEvent creates a JS Event object from a *dom.Event. It exposes the
-// standard Event properties and, for MouseEvent and KeyboardEvent subtypes,
-// their additional fields.
 func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 	if wrapped := r.activeEventObjects[e]; wrapped != nil {
 		if object, ok := wrapped.(*goja.Object); ok {
@@ -4641,9 +4019,6 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 	}
 	_ = obj.Set("type", e.Type)
 	_ = obj.Set("bubbles", e.Bubbles())
-	// cancelable is read per listener invocation: the scroll-blocking types
-	// report false while a passive listener runs. The wrapper object is reused
-	// across listeners for one dispatch, so a snapshot taken here would be stale.
 	_ = obj.DefineAccessorProperty("cancelable", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(e.Cancelable())
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
@@ -4755,9 +4130,6 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		return goja.Undefined()
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 
-	// defaultPrevented must be read dynamically: the callback may call
-	// preventDefault() before reading this property. We expose a helper
-	// method and define a JS getter that calls it.
 	_ = obj.Set("__getDP__", func() bool { return e.DefaultPrevented() })
 	_ = r.vm.Set("__goosieWrappedEvent__", obj)
 	_ = r.vm.Set("__goosieEventInterfaceName__", e.InterfaceName())
@@ -4787,8 +4159,6 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("currentTarget", r.wrapNode(e.CurrentTarget()))
 	}
 
-	// MouseEvent fields (only populated for a dispatched *MouseEvent, recovered
-	// through the payload back-pointer since listeners receive a *Event).
 	if me := e.AsMouse(); me != nil {
 		_ = obj.Set("clientX", me.ClientX)
 		_ = obj.Set("clientY", me.ClientY)
@@ -4806,16 +4176,12 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("metaKey", me.MetaKey)
 	}
 
-	// WheelEvent deltas. The mouse coordinates above arrive through the embedded
-	// MouseEvent, which AsMouse resolves for every interface deriving from it.
 	if we := e.AsWheel(); we != nil {
 		_ = obj.Set("deltaX", we.DeltaX)
 		_ = obj.Set("deltaY", we.DeltaY)
 		_ = obj.Set("deltaZ", we.DeltaZ)
 	}
 
-	// TouchEvent lists. A generated gesture owns its held and changed contacts,
-	// so the page reads the same three lists off it as off one it constructed.
 	if te := e.AsTouch(); te != nil {
 		_ = obj.Set("touches", r.newTouchList(te.Touches))
 		_ = obj.Set("targetTouches", r.newTouchList(te.TargetTouches))
@@ -4826,7 +4192,6 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("metaKey", false)
 	}
 
-	// KeyboardEvent fields.
 	if ke := e.AsKeyboard(); ke != nil {
 		_ = obj.Set("key", ke.Key)
 		_ = obj.Set("code", ke.Code)
@@ -4891,8 +4256,6 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 		_ = obj.Set("data", composition.Data)
 	}
 
-	// DragEvent fields. AsMouse does not see a DragEvent payload, so the
-	// inherited mouse fields are read from the DragEvent itself.
 	if de := e.AsDrag(); de != nil {
 		_ = obj.Set("clientX", de.ClientX)
 		_ = obj.Set("clientY", de.ClientY)
@@ -4993,8 +4356,6 @@ func (r *Runtime) replaceDataTransferStringOrder(dt *dom.DataTransfer, typeValue
 	}
 }
 
-// An empty type removes all string items. File entries remain until items.clear
-// or their individual list index is removed.
 func (r *Runtime) removeDataTransferStringOrder(dt *dom.DataTransfer, typeValue string, removeAll ...bool) {
 	if dt == nil || dt.StoreIdentity() == nil {
 		return
@@ -5139,15 +4500,10 @@ func (r *Runtime) wrapDataTransfer(dt *dom.DataTransfer) *goja.Object {
 		r.refreshDataTransferItemIndices(dt, items)
 		return goja.Undefined()
 	})
-	// setDragImage is accepted for compatibility; the headless engine draws no
-	// drag image, so the call is a no-op and never throws.
 	_ = obj.Set("setDragImage", func(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	})
 
-	// Internal store readers the accessors below call back into. __getTypes__
-	// builds a native JS array: Object.freeze cannot freeze a host-backed
-	// goja array, and the types getter returns a frozen array.
 	_ = obj.Set("__getTypes__", func() goja.Value { return r.dataTransferTypesValue(dt, obj) })
 	_ = obj.Set("__getDropEffect__", func() string { return dt.DropEffect() })
 	_ = obj.Set("__setDropEffect__", func(v string) { dt.SetDropEffect(v) })
@@ -5160,9 +4516,6 @@ func (r *Runtime) wrapDataTransfer(dt *dom.DataTransfer) *goja.Object {
 		return len(r.ensureDataTransferItemOrder(dt))
 	})
 
-	// Accessor properties must be re-defined per wrapper: a plain Set would
-	// snapshot the value, while dropEffect/effectAllowed/types have to read
-	// and write the live Go store.
 	_ = r.vm.Set("__dtTarget__", obj)
 	_ = r.vm.Set("__dtItems__", items)
 	_, _ = r.vm.RunString(`
@@ -5474,11 +4827,6 @@ func (r *Runtime) dataTransferItemListClear(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// ---------------------------------------------------------------------------
-// JS bridge: attribute methods
-// ---------------------------------------------------------------------------
-
-// jsGetAttribute implements element.getAttribute(name).
 func (r *Runtime) jsGetAttribute(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 1 {
@@ -5516,7 +4864,6 @@ func domAttributeLocalName(name string) string {
 	return name
 }
 
-// jsSetAttribute implements element.setAttribute(name, value).
 func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 2 {
@@ -5569,11 +4916,6 @@ func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// jsSetAttributeNS implements element.setAttributeNS(ns, name, value). A null
-// namespace behaves exactly like setAttribute. The XML namespace stores the
-// qualified name marked NSXML, which is the only xml:lang :lang() honors -
-// the HTML parser never creates namespaced attributes, so static xml:lang
-// stays invisible to language matching exactly like the reference engine.
 func (r *Runtime) jsSetAttributeNS(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 3 {
@@ -5623,7 +4965,6 @@ func (r *Runtime) jsSetAttributeNS(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// jsRemoveAttribute implements element.removeAttribute(name).
 func (r *Runtime) jsRemoveAttribute(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 1 {
@@ -5742,7 +5083,6 @@ func (r *Runtime) jsToggleAttribute(call goja.FunctionCall) goja.Value {
 	return r.vm.ToValue(forcePresent)
 }
 
-// jsHasAttribute implements element.hasAttribute(name).
 func (r *Runtime) jsHasAttribute(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 1 {
@@ -5751,7 +5091,6 @@ func (r *Runtime) jsHasAttribute(call goja.FunctionCall) goja.Value {
 	return r.vm.ToValue(node.HasAttribute(call.Arguments[0].String()))
 }
 
-// jsHasAttributeNS implements element.hasAttributeNS(namespace, localName).
 func (r *Runtime) jsHasAttributeNS(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 2 {
@@ -5786,18 +5125,11 @@ func (r *Runtime) currentDocumentDoctype() *dom.Node {
 	return documentDoctypeOf(r.domDoc)
 }
 
-// ---------------------------------------------------------------------------
-// JS bridge: mutation methods
-// ---------------------------------------------------------------------------
-
-// jsRemove implements element.remove(), detaching the node from its parent.
 func (r *Runtime) jsRemove(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || node.Parent == nil {
 		return goja.Undefined()
 	}
-	// Credit only if node was live before detaching; a node under a detached
-	// parent was never charged, and crediting it would under-count the budget.
 	wasLive := r.nodeIsLive(node)
 	parent := node.Parent
 	r.preserveCustomElementRegistryForDetachedNode(node)
@@ -5814,7 +5146,6 @@ func (r *Runtime) jsRemove(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// jsGetElementByID implements document.getElementById(id).
 func (r *Runtime) jsGetElementByID(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil || len(call.Arguments) < 1 {
 		return goja.Null()
@@ -5827,7 +5158,6 @@ func (r *Runtime) jsGetElementByID(call goja.FunctionCall) goja.Value {
 	return r.wrapNode(node)
 }
 
-// jsGetElementsByClassName implements document.getElementsByClassName(class).
 func (r *Runtime) jsGetElementsByClassName(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil || len(call.Arguments) < 1 {
 		return r.newLiveHTMLCollection(nil, "", "")
@@ -5835,7 +5165,6 @@ func (r *Runtime) jsGetElementsByClassName(call goja.FunctionCall) goja.Value {
 	return r.newLiveHTMLCollection(&r.domDoc.Node, "", call.Arguments[0].String())
 }
 
-// jsGetElementsByTagName implements document.getElementsByTagName(tag).
 func (r *Runtime) jsGetElementsByTagName(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil || len(call.Arguments) < 1 {
 		return r.newLiveHTMLCollection(nil, "", "")
@@ -5843,7 +5172,6 @@ func (r *Runtime) jsGetElementsByTagName(call goja.FunctionCall) goja.Value {
 	return r.newLiveHTMLCollection(&r.domDoc.Node, call.Arguments[0].String(), "")
 }
 
-// jsCreateElement implements document.createElement(tag).
 func (r *Runtime) jsCreateElement(call goja.FunctionCall) goja.Value {
 	return r.jsCreateElementInDocument(call, r.domDoc, r.customElementRegistryForDocument(r.domDoc))
 }
@@ -5963,12 +5291,6 @@ func (r *Runtime) jsCreateElementNSInDocument(call goja.FunctionCall, doc *dom.D
 	if node.Namespace == dom.NSHTML && dom.IsValidCustomElementName(localName) {
 		node.CustomElementUndefined = true
 	}
-	// createElementNS preserves the requested qualified name, including case,
-	// even when the document itself uses HTML's createElement lowercasing rule.
-	// For an autonomous custom element in the HTML namespace, however, the DOM
-	// algorithm runs its constructor before assigning the namespace prefix.
-	// Keep the unprefixed local name observable throughout construction, then
-	// install the qualified name once upgrade has returned.
 	var customDefinition *customElementDefinition
 	if namespace == "http://www.w3.org/1999/xhtml" {
 		customDefinition = r.customElementDefinition(localName)
@@ -6041,7 +5363,6 @@ func (r *Runtime) jsCreateElementNSInDocument(call goja.FunctionCall, doc *dom.D
 	return r.wrapNode(node)
 }
 
-// jsCreateTextNode implements document.createTextNode(text).
 func (r *Runtime) jsCreateTextNode(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil || len(call.Arguments) < 1 {
 		return goja.Null()
@@ -6051,7 +5372,6 @@ func (r *Runtime) jsCreateTextNode(call goja.FunctionCall) goja.Value {
 	return r.wrapNode(node)
 }
 
-// jsCreateComment implements document.createComment(data).
 func (r *Runtime) jsCreateComment(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil {
 		return goja.Null()
@@ -6077,11 +5397,6 @@ func (r *Runtime) jsCreateProcessingInstruction(call goja.FunctionCall) goja.Val
 	return r.wrapNode(r.domDoc.NewProcessingInstruction(target, data))
 }
 
-// ---------------------------------------------------------------------------
-// HTML serialization (for innerHTML getter)
-// ---------------------------------------------------------------------------
-
-// voidElements lists the HTML elements that have no closing tag.
 var voidElements = map[string]bool{
 	"br": true, "hr": true, "img": true, "input": true,
 	"meta": true, "link": true, "area": true, "base": true,
@@ -6089,7 +5404,6 @@ var voidElements = map[string]bool{
 	"track": true, "wbr": true,
 }
 
-// serializeChildren returns the HTML serialization of node's children.
 func (r *Runtime) serializeChildren(node *dom.Node) string {
 	var sb strings.Builder
 	r.serializeChildrenSeen(&sb, node, make(map[*dom.Node]struct{}))
@@ -6134,7 +5448,6 @@ func insideTemplateContents(node *dom.Node) bool {
 	return false
 }
 
-// serializeNode writes the HTML serialization of a single node to sb.
 func (r *Runtime) serializeNode(sb *strings.Builder, n *dom.Node) {
 	r.serializeNodeSeen(sb, n, make(map[*dom.Node]struct{}))
 }
@@ -6188,7 +5501,6 @@ func (r *Runtime) serializeNodeSeen(sb *strings.Builder, n *dom.Node, seen map[*
 	}
 }
 
-// escapeHTML escapes special HTML characters in text content.
 func escapeHTML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
@@ -6197,7 +5509,6 @@ func escapeHTML(s string) string {
 	return s
 }
 
-// escapeAttr escapes special characters in attribute values.
 func escapeAttr(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, `"`, "&quot;")
@@ -6206,18 +5517,8 @@ func escapeAttr(s string) string {
 	return s
 }
 
-// ---------------------------------------------------------------------------
-// Mutation notification
-// ---------------------------------------------------------------------------
-
-// notifyMutation calls the OnMutation callback if one was provided. It is
-// invoked after every DOM mutation from JS so the engine can re-style and
-// re-layout.
 func (r *Runtime) notifyMutation() {
 	r.reconcileDirtyRadioGroups()
-	// DOM mutation primitives synchronize clean textarea values before they
-	// notify the runtime. Clamp any script-observed selections now so live
-	// offsets stay valid across child-text and CharacterData changes too.
 	r.clampTrackedTextControlSelections()
 	r.mu.Lock()
 	r.mutations++
@@ -6227,10 +5528,6 @@ func (r *Runtime) notifyMutation() {
 	}
 }
 
-// ChainOnMutation appends fn to the mutation callback chain instead of
-// replacing it: the engine uses this to observe DOM writes on a runtime the
-// caller constructed (and may have given its own OnMutation). A nil fn is
-// ignored. Safe for concurrent use; callbacks fire on the mutating thread.
 func (r *Runtime) ChainOnMutation(fn func()) {
 	if fn == nil {
 		return
@@ -6244,9 +5541,6 @@ func (r *Runtime) ChainOnMutation(fn func()) {
 	}
 }
 
-// ChainOnFocusChange appends fn to the focus callback chain. The engine
-// installs its Session binding after parsing the document but before scripts
-// run, while callers can still supply their own observer in Options.
 func (r *Runtime) ChainOnFocusChange(fn func(*dom.Node, bool)) {
 	if r == nil || fn == nil {
 		return
@@ -6261,9 +5555,6 @@ func (r *Runtime) ChainOnFocusChange(fn func(*dom.Node, bool)) {
 	}
 }
 
-// ChainOnViewportScroll appends fn to the viewport scroll callback chain. The
-// engine installs its scheduler bridge here so CSSOM View writes propagate to
-// the raster viewport.
 func (r *Runtime) ChainOnViewportScroll(fn func(x, y float64)) {
 	if r == nil || fn == nil {
 		return
@@ -6278,8 +5569,6 @@ func (r *Runtime) ChainOnViewportScroll(fn func(x, y float64)) {
 	}
 }
 
-// ChainOnTestDriverKeyDefault installs the host keyboard default used by
-// testdriver actions after their key events have been dispatched.
 func (r *Runtime) ChainOnTestDriverKeyDefault(fn func(key string, shift, ctrl, alt, meta bool)) {
 	if r == nil || fn == nil {
 		return
@@ -6295,8 +5584,6 @@ func (r *Runtime) ChainOnTestDriverKeyDefault(fn func(key string, shift, ctrl, a
 	}
 }
 
-// ChainOnFocusRestore appends fn to the callback chain used when a dialog
-// restores focus. The host callback must preserve the current scroll offset.
 func (r *Runtime) ChainOnFocusRestore(fn func(*dom.Node)) {
 	if r == nil || fn == nil {
 		return
@@ -6312,8 +5599,6 @@ func (r *Runtime) ChainOnFocusRestore(fn func(*dom.Node)) {
 	}
 }
 
-// ChainOnUserInput appends fn to the host callback chain for an input adapter
-// that simulates a user edit. A nil callback is ignored.
 func (r *Runtime) ChainOnUserInput(fn func(*dom.Node) bool) {
 	if r == nil || fn == nil {
 		return
@@ -6329,8 +5614,6 @@ func (r *Runtime) ChainOnUserInput(fn func(*dom.Node) bool) {
 	}
 }
 
-// ChainActiveElementProvider installs a host-owned source of truth for
-// document.activeElement while retaining any caller provider as a fallback.
 func (r *Runtime) ChainActiveElementProvider(fn func() *dom.Node) {
 	if r == nil || fn == nil {
 		return

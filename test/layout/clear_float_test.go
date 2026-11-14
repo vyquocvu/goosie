@@ -3,9 +3,6 @@ package layout_test
 import "testing"
 
 // qc:BR-259
-// clear:left on a float drops its top below the bottom of every left float
-// already placed in the same block formatting context. Chromium 1280x1024 on
-// this fixture puts "two" at (0,100): beside the first float would be X=100.
 func TestClearedFloatStacksBelowEarlierFloat(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">
@@ -31,9 +28,6 @@ func TestClearedFloatStacksBelowEarlierFloat(t *testing.T) {
 }
 
 // qc:BR-259
-// A float's clearance reaches floats held by an earlier sibling's subtree: the
-// two wrappers are plain blocks in the same formatting context, so the second
-// wrapper's float must sit below both floats of the first.
 func TestClearedFloatSeesFloatsInAnEarlierSiblingSubtree(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">
@@ -57,11 +51,6 @@ func TestClearedFloatSeesFloatsInAnEarlierSiblingSubtree(t *testing.T) {
 }
 
 // qc:BR-260
-// A cleared float also advances the line later floats sit on: CSS 2.1 §9.5.1
-// forbids a float's outer top from being higher than an earlier float's, so the
-// uncleared float after one must not jump back to Y=0. Chromium puts it at
-// (100,100), beside the cleared float rather than under the first one, and the
-// constraint crosses the sibling wrappers.
 func TestFloatAfterAClearedFloatStartsNoHigher(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">
@@ -80,16 +69,9 @@ func TestFloatAfterAClearedFloatStartsNoHigher(t *testing.T) {
 	if !almostEqual(three.Y, 100) {
 		t.Errorf("float after a cleared float Y = %v, want 100: it may not rise above the earlier float", three.Y)
 	}
-	// X is deliberately not asserted: the width a float reserves on its line is
-	// not merged across sibling subtrees, so this box starts at the left edge
-	// rather than beside the cleared float. Chromium puts it at (100,100).
 }
 
 // qc:BR-259
-// An inline element holding block content is split into anonymous block boxes
-// that stay in the parent's formatting context, so a cleared float inside it
-// sees a float held by an earlier sibling. The span is display:inline until the
-// block child forces the split.
 func TestClearedFloatInsideBlockifiedInlineSeesSiblingFloat(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">

@@ -5,19 +5,6 @@ import (
 	"strconv"
 )
 
-// Static-SVG <path> support: the workhorse element of real-world icons and
-// logos (the subset previously skipped <path> entirely, decoding every
-// path-based SVG to a blank tile).
-//
-// What this covers: M/m L/l H/h V/v Z/z C/c S/s Q/q T/t A/a with implicit
-// command repetition, per the SVG path microsyntax. Curves flatten to line
-// segments (fixed subdivision, exact endpoints); arcs use endpoint
-// parametrization. Fill uses the polygon even-odd rule below rather than
-// nonzero: identical except on self-intersecting windings, which icons avoid.
-// An unparseable segment ends the path instead of failing the document.
-
-// pathSubpath is one moveto-delimited run of points plus whether a closepath
-// joined its end back to its start.
 type pathSubpath struct {
 	pts    [][2]float64
 	closed bool
@@ -30,7 +17,6 @@ func svgPath(d string) []pathSubpath {
 	var start [2]float64
 	var pts [][2]float64
 	haveSub := false
-	// last cubic/quadratic control points for smooth commands.
 	var lastC, lastQ [2]float64
 	haveC, haveQ := false, false
 	flush := func(closed bool) {
@@ -80,7 +66,6 @@ func svgPath(d string) []pathSubpath {
 			start = cur
 			pts = append(pts, cur)
 			haveSub = true
-			// Implicit linetos after the first pair, keeping the case.
 			cmd = 'L'
 			if rel {
 				cmd = 'l'
@@ -277,9 +262,6 @@ func isPathCmd(c byte) bool {
 	return false
 }
 
-// pathParser scans path data: separators are whitespace and commas, and a
-// sign or decimal point can start a new number without any separator
-// ("M1-2.5.3" is three numbers after the command).
 type pathParser struct {
 	s string
 	i int
@@ -313,7 +295,6 @@ func (p *pathParser) number() (float64, bool) {
 		digits = true
 	}
 	if p.i < len(p.s) && p.s[p.i] == '.' {
-		// A second dot starts the next number ("1.5.25" is 1.5 then .25).
 		p.i++
 		for p.i < len(p.s) && p.s[p.i] >= '0' && p.s[p.i] <= '9' {
 			p.i++
@@ -343,7 +324,6 @@ func (p *pathParser) number() (float64, bool) {
 	return v, true
 }
 
-// flattenCubic subdivides a cubic Bézier into line segments, endpoints exact.
 func flattenCubic(p0, p1, p2, p3 [2]float64) [][2]float64 {
 	const n = 12
 	out := make([][2]float64, 0, n)
@@ -358,7 +338,6 @@ func flattenCubic(p0, p1, p2, p3 [2]float64) [][2]float64 {
 	return out
 }
 
-// flattenQuad subdivides a quadratic Bézier into line segments.
 func flattenQuad(p0, p1, p2 [2]float64) [][2]float64 {
 	const n = 10
 	out := make([][2]float64, 0, n)
@@ -373,8 +352,6 @@ func flattenQuad(p0, p1, p2 [2]float64) [][2]float64 {
 	return out
 }
 
-// flattenArc converts an endpoint-parameterized elliptical arc to line
-// segments via center parametrization (SVG 1.1 §8.5, F.6.5 correction).
 func flattenArc(p0 [2]float64, rx, ry, rot float64, large, sweep bool, p1 [2]float64) [][2]float64 {
 	rx = math.Abs(rx)
 	ry = math.Abs(ry)

@@ -9,20 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// These are the cascade oracles for GOOSIE-CSSSELECT-001: the rule was always in
-// the stylesheet, so the style layer is where the loss becomes a missing band of
-// colour - the defect measured Chromium computing a 760x24 rgb(142,68,173) band
-// where Goosie painted none.
-//
-// Every sheet declares one rule per attribute value in the fixture, so the cases
-// pin three things at once: the string a quoted value denotes, the value that
-// spelling must not reach, and the comma and hex-escape shapes the selector-list
-// split used to break.
-
-// attrValueColors resolves the fixture cascade and returns each element class's
-// computed background, so a case can name the value it expects to be matched.
-// The values are written in HTML, where a backslash is an ordinary character, so
-// each one is what the DOM really holds.
 func attrValueColors(t *testing.T, sheet string) map[string]css.Color {
 	t.Helper()
 	const html = `<html><body>` +
@@ -69,23 +55,18 @@ func TestCascadeAppliesRuleWhoseAttributeValueHoldsAnEscapedQuote(t *testing.T) 
 			`.onebackslash[data-x="a\\b"]{background:#0f0}`+
 			`.twobackslashes[data-x="a\\\\b"]{background:#00ffff}`)
 
-	// The rule the defect measured: the escape denotes `"`, so this is rgb(142,68,173).
 	if !attrValueIs(colors["quote"], 142, 68, 173) {
 		t.Errorf(`.quote with [data-x="a\"b"] computed rgba(%s), Chromium computes rgb(142,68,173)`, attrValueOf(colors["quote"]))
 	}
 	if !attrValueIs(colors["apostrophe"], 255, 0, 255) {
 		t.Errorf(`.apostrophe with [data-x='a\\'b'] computed rgba(%s), Chromium computes rgb(255,0,255)`, attrValueOf(colors["apostrophe"]))
 	}
-	// An escaped backslash denotes one backslash, and two of them denote two -
-	// the same selector text must not answer for both values.
 	if !attrValueIs(colors["onebackslash"], 0, 255, 0) {
 		t.Errorf(`.onebackslash with [data-x="a\\b"] computed rgba(%s), want rgb(0,255,0)`, attrValueOf(colors["onebackslash"]))
 	}
 	if !attrValueIs(colors["twobackslashes"], 0, 255, 255) {
 		t.Errorf(`.twobackslashes with [data-x="a\\\\b"] computed rgba(%s), want rgb(0,255,255)`, attrValueOf(colors["twobackslashes"]))
 	}
-	// Nothing else gets styled: a match that ignored the escape, or ignored the
-	// attribute entirely, would paint these bands too.
 	for _, cls := range []string{"plainquote", "space", "comma"} {
 		if colors[cls].A != 0 {
 			t.Errorf(".%s computed rgba(%s), want no background at all", cls, attrValueOf(colors[cls]))
@@ -100,22 +81,15 @@ func TestCascadeAppliesRuleWithHexEscapeAndCommaInAttributeValue(t *testing.T) {
 			`.space[data-x="a\ b"]{background:#00ff00}`+
 			`.comma[data-x="a,b"]{background:#0000ff}`)
 
-	// \41 is 'A' and the single space after it terminates the escape, so this
-	// rule denotes `aAb` - the value the fixture holds.
 	if !attrValueIs(colors["hexescape"], 255, 127, 0) {
 		t.Errorf(`.hexescape with [data-x="a\41 b"] computed rgba(%s), Chromium computes rgb(255,127,0)`, attrValueOf(colors["hexescape"]))
 	}
-	// An escaped space is a space, not the end of the selector.
 	if !attrValueIs(colors["space"], 0, 255, 0) {
 		t.Errorf(`.space with [data-x="a\ b"] computed rgba(%s), Chromium computes rgb(0,255,0)`, attrValueOf(colors["space"]))
 	}
-	// The comma inside the quotes is one byte of the value, not a selector-list
-	// separator: before the fix this sheet arrived as two broken selectors and
-	// the element kept no colour at all.
 	if !attrValueIs(colors["comma"], 0, 0, 255) {
 		t.Errorf(`.comma with [data-x="a,b"] computed rgba(%s), Chromium computes rgb(0,0,255)`, attrValueOf(colors["comma"]))
 	}
-	// The spelling, not the string: nothing here may reach `ab`.
 	if colors["plainquote"].A != 0 {
 		t.Errorf(".plainquote computed rgba(%s), want no background at all", attrValueOf(colors["plainquote"]))
 	}

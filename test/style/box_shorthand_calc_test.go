@@ -6,16 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// A `calc()` is one length written with spaces in it, and the box shorthands are a
-// space-separated list of lengths, so the two only coexist if the shorthand splits on
-// whitespace it can see rather than whitespace it happens to hit. `padding: calc(10vh -
-// 4px) 3px` is two values; splitting it as four means every side of the box, including
-// the parseable `3px` beside the function, resolves from text that is a fragment of an
-// expression.
-//
-// The document is 1440x900 with a 16px root, so `10vh` is 90 and the arithmetic below
-// is checkable by hand.
-
 const shorthandDoc = "<html><body><div>x</div></body></html>"
 
 type boxSides struct{ top, right, bottom, left float32 }
@@ -40,12 +30,10 @@ func TestBoxShorthandKeepsAFunctionArgumentTogether(t *testing.T) {
 		sides func(*style.ComputedStyle) boxSides
 		want  boxSides
 	}{
-		// Pins first: the arithmetic this round must not disturb.
 		{"padding: 5px 3px", paddingOf, boxSites(5, 3, 5, 3)},
 		{"padding: 1em 2rem", paddingOf, boxSites(16, 32, 16, 32)},
 		{"margin: 0 auto", marginOf, boxSites(0, style.MarginAuto, 0, style.MarginAuto)},
 		{"padding-inline: 4px 8px", paddingOf, boxSites(0, 8, 0, 4)},
-		// The defect: a function argument in any position of the list.
 		{"padding: calc(10vh - 4px)", paddingOf, boxSites(86, 86, 86, 86)},
 		{"padding: calc(10vh - 4px) 3px", paddingOf, boxSites(86, 3, 86, 3)},
 		{"padding: 0 0 0 calc(10vh - 4px)", paddingOf, boxSites(0, 0, 0, 86)},
@@ -71,9 +59,6 @@ func TestBoxShorthandKeepsAFunctionArgumentTogether(t *testing.T) {
 	}
 }
 
-// §D asks the parsers to be tested against malformed input, and an unclosed function is
-// the shape this round's splitter has to survive: the whole declaration is one argument
-// that never ends, so it resolves to nothing rather than to a side of a fragment.
 func TestBoxShorthandWithAnUnclosedFunctionSetsNoSide(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 	for _, decl := range []string{
@@ -95,11 +80,6 @@ func TestBoxShorthandWithAnUnclosedFunctionSetsNoSide(t *testing.T) {
 	}
 }
 
-// The same malformed shape through the two shorthands this round widened. Only the
-// argument that cannot be parsed is left unset: `flex: 1 1 calc(10vh -` still says
-// grow 1 and shrink 1, and asserting the whole declaration changed nothing would be
-// a claim about the wrong thing. Basis and radius are compared against an undeclared
-// div rather than a literal, so the test cannot be satisfied by the fragment `4px`.
 func TestFlexAndRadiusWithAnUnclosedFunctionChangeNothing(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 	baseline := styleAtViewport(t, shorthandDoc, "", "div", vp)
@@ -138,10 +118,6 @@ func TestFlexAndRadiusWithAnUnclosedFunctionChangeNothing(t *testing.T) {
 	}
 }
 
-// The same defect in the two remaining shorthands whose arguments are lengths, and
-// where it is the common case rather than the exotic one: `flex: 0 0 calc(100% - 2rem)`
-// is how a real page sizes a sidebar, and `border-radius` takes a horizontal and a
-// vertical radius per corner.
 func TestFlexAndRadiusShorthandsKeepAFunctionArgumentTogether(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 	t.Run("flex-basis", func(t *testing.T) {
@@ -162,8 +138,6 @@ func TestFlexAndRadiusShorthandsKeepAFunctionArgumentTogether(t *testing.T) {
 		}
 	})
 	t.Run("border-radius", func(t *testing.T) {
-		// Corners in the shorthand's own order: top-left, top-right, bottom-right,
-		// bottom-left, with the second value of each pair the vertical radius.
 		for _, c := range []struct {
 			decl       string
 			horizontal [4]float32
@@ -184,8 +158,6 @@ func TestFlexAndRadiusShorthandsKeepAFunctionArgumentTogether(t *testing.T) {
 			}
 		}
 	})
-	// The four corner longhands take the same "horizontal vertical" list, and are
-	// the form a page reaches for when it rounds one corner of a card.
 	t.Run("border-radius-longhand", func(t *testing.T) {
 		for _, c := range []struct {
 			decl        string
@@ -215,10 +187,6 @@ func TestFlexAndRadiusShorthandsKeepAFunctionArgumentTogether(t *testing.T) {
 	})
 }
 
-// CSS whitespace is space, tab, newline, form feed and carriage return, and a
-// stylesheet saved with CRLF line endings can put a `\r` between two arguments of
-// a shorthand that wraps. `strings.Fields` cut on all five; the parenthesis-aware
-// splitter must not quietly narrow that set.
 func TestBoxShorthandSplitsOnEveryCSSWhitespace(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 	for _, c := range []struct {

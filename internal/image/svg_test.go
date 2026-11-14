@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// TestSVGRectFill guards the static-SVG path end to end: dimensions resolve
-// from width/height and a flat rect paints its color. This is the shape the
-// aside-figure parity fixture's data-URI placeholders are built from.
 func TestSVGRectFill(t *testing.T) {
 	data := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect fill="#3498db" width="600" height="400"/></svg>`)
 	cfg, err := Probe(data)
@@ -30,8 +27,6 @@ func TestSVGRectFill(t *testing.T) {
 	}
 }
 
-// TestSVGViewBoxScalesContent guards viewBox mapping: a 100-unit square in a
-// 200-unit viewBox rasterized at 200x200 fills the whole output.
 func TestSVGViewBoxScalesContent(t *testing.T) {
 	data := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 100 100"><rect fill="red" width="100" height="100"/></svg>`)
 	img, err := Decode(data)
@@ -44,8 +39,6 @@ func TestSVGViewBoxScalesContent(t *testing.T) {
 	}
 }
 
-// TestSVGShapesPaintInOrder guards circle+line+polygon coverage and
-// painter's-order compositing: the last shape wins its pixels.
 func TestSVGShapesPaintInOrder(t *testing.T) {
 	data := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">` +
 		`<rect fill="white" width="100" height="100"/>` +
@@ -71,9 +64,6 @@ func TestSVGShapesPaintInOrder(t *testing.T) {
 	}
 }
 
-// TestSVGSkipsUnsupportedSubtrees guards graceful degradation: text, paths,
-// scripts and gradients never paint and never fail the document. Script in
-// particular must be inert - there is no JS here by construction.
 func TestSVGSkipsUnsupportedSubtrees(t *testing.T) {
 	data := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50">` +
 		`<rect fill="white" width="50" height="50"/>` +
@@ -93,8 +83,6 @@ func TestSVGSkipsUnsupportedSubtrees(t *testing.T) {
 	}
 }
 
-// TestSVGRefusesEntityAttackSurface guards the billion-laughs shape: any
-// DOCTYPE or ENTITY declaration fails before parsing.
 func TestSVGRefusesEntityAttackSurface(t *testing.T) {
 	for _, doc := range []string{
 		`<!DOCTYPE svg [<!ENTITY x "y">]><svg width="10" height="10"></svg>`,
@@ -109,8 +97,6 @@ func TestSVGRefusesEntityAttackSurface(t *testing.T) {
 	}
 }
 
-// TestSVGElementCap guards decompression-style bombs: thousands of elements
-// fail closed instead of rasterizing for minutes.
 func TestSVGElementCap(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">`)
@@ -123,7 +109,6 @@ func TestSVGElementCap(t *testing.T) {
 	}
 }
 
-// TestNonSVGDataUntouched guards the sniff: PNG bytes never route to SVG.
 func TestNonSVGDataUntouched(t *testing.T) {
 	if isSVGData(smallPNG(t)) {
 		t.Error("PNG bytes sniffed as SVG")

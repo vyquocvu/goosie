@@ -6,29 +6,16 @@ import (
 	"testing"
 )
 
-// TestWPTPilot runs a small set of locally-authored WPT-style reftests against
-// goosie's headless renderer. This is the pilot: it validates the harness
-// end-to-end without requiring a full WPT checkout download.
-//
-// The pilot fixtures live in testdata/wpt-pilot/ and follow the WPT reftest
-// format: each test HTML file has a <link rel="match" href="..."> pointing to
-// its reference file.
-//
-// This test requires the goosie binary to be built. Set WPT_GOOSIE_BINARY to
-// point at it, or it defaults to ./goosie in the project root.
 func TestWPTPilot(t *testing.T) {
-	// Find the pilot directory.
 	pilotDir := findPilotDir(t)
 
-	// Find the goosie binary.
 	binary := findGoosieBinary(t)
 
-	// Build configuration for the pilot.
 	cfg := DefaultConfig()
 	cfg.WPTDir = pilotDir
 	cfg.GoosieBinary = binary
 	cfg.OutputDir = t.TempDir()
-	cfg.PassThreshold = 90.0 // Slightly relaxed for the pilot.
+	cfg.PassThreshold = 90.0
 	cfg.Directories = []string{
 		"css/css-color",
 		"css/css-backgrounds",
@@ -38,7 +25,6 @@ func TestWPTPilot(t *testing.T) {
 		"html/semantics",
 	}
 
-	// Discover tests in the pilot directory.
 	var allTests []DiscoveredTest
 	for _, dir := range cfg.Directories {
 		tests, err := DiscoverTests(pilotDir, dir, nil)
@@ -58,7 +44,6 @@ func TestWPTPilot(t *testing.T) {
 
 	t.Logf("pilot: discovered %d tests in %s", len(allTests), pilotDir)
 
-	// Start the server.
 	srv := NewServer(pilotDir)
 	if err := srv.Start(); err != nil {
 		t.Fatalf("pilot: start server: %v", err)
@@ -68,7 +53,6 @@ func TestWPTPilot(t *testing.T) {
 	runner := NewRunner(cfg)
 	runner.server = srv
 
-	// Run each test.
 	var passed, failed, skipped, errored int
 	for _, dt := range allTests {
 		tr := runner.runOne(dt)
@@ -104,8 +88,6 @@ func TestWPTPilot(t *testing.T) {
 	}
 }
 
-// TestWPTPilotDiscovery verifies that the pilot test discovery finds the
-// expected tests without running them.
 func TestWPTPilotDiscovery(t *testing.T) {
 	pilotDir := findPilotDir(t)
 
@@ -145,7 +127,6 @@ func TestWPTPilotDiscovery(t *testing.T) {
 	t.Logf("pilot discovery: %d total tests", totalTests)
 }
 
-// findPilotDir locates the wpt-pilot directory.
 func findPilotDir(t *testing.T) string {
 	t.Helper()
 
@@ -167,7 +148,6 @@ func findPilotDir(t *testing.T) string {
 	return ""
 }
 
-// findGoosieBinary locates the goosie binary.
 func findGoosieBinary(t *testing.T) string {
 	t.Helper()
 

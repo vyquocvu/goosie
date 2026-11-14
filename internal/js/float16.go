@@ -1,9 +1,5 @@
 package js
 
-// setupFloat16Array provides the Float16Array typed-array constructor where
-// the embedded JS runtime does not yet expose the standard constructor. It
-// stores IEEE 754 binary16 values in a Uint16Array backing store, so it remains
-// an ArrayBuffer view and Blob/structured byte consumers see the right bytes.
 func (r *Runtime) setupFloat16Array() {
 	_, _ = r.vm.RunString(`(function(global) {
 	if (typeof global.Float16Array === "function") return;

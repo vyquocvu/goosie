@@ -37,7 +37,6 @@ func TestExpandCSSImportsSplicesUnconditionedSheetsInPlace(t *testing.T) {
 func TestExpandCSSImportsSkipsConditionedAndCyclicStatements(t *testing.T) {
 	linker := func(base, href string) (string, error) {
 		if href == "https://e/a.css" {
-			// a.css imports itself: the cycle must break on the first repeat.
 			return `@import url("a.css"); b { color: green }`, nil
 		}
 		return "", errors.New("missing")

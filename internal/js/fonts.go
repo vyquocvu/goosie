@@ -6,15 +6,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// setupFonts installs document.fonts, the FontFaceSet subset pages use to
-// probe and trigger webfont loads. The engine loads @font-face natively, so
-// load() resolves once the (already handled) document faces are in: from a
-// script's point of view every declared face is available.
-//
-// Only the settled shape is implemented, never a synchronous throw. Boot
-// scripts chain .catch() off load() instead of try/catching it, so a sync
-// TypeError/SyntaxError would kill the page where a rejection is handled.
-// check() likewise answers false for an unparseable spec instead of throwing.
 func (r *Runtime) setupFonts() {
 	docVal := r.vm.Get("document")
 	doc, ok := docVal.(*goja.Object)
@@ -40,8 +31,6 @@ func (r *Runtime) setupFonts() {
 			r.rejectPromise(p, namedError(r, "SyntaxError", "FontFaceSet.load: could not parse font shorthand"))
 			return p.obj
 		}
-		// Faces load through the engine's @font-face path; nothing further
-		// to wait on, so settle with the (empty) loaded-face list.
 		r.resolvePromise(p, r.vm.NewArray())
 		return p.obj
 	})
@@ -102,9 +91,6 @@ func (r *Runtime) setupFonts() {
 	_ = doc.Set("fonts", fonts)
 }
 
-// namedError builds a plain error object carrying the spec exception name,
-// the same shape quotaExceededError uses: callers assert on .name and there
-// is no DOMException hierarchy yet.
 func namedError(r *Runtime, name, message string) goja.Value {
 	e := r.vm.NewObject()
 	_ = e.Set("name", name)
@@ -120,11 +106,6 @@ func isStringValue(v goja.Value) bool {
 	return ok
 }
 
-// hasFontSizeToken reports whether spec contains a plausible CSS font-size
-// token: a number with an optional length unit. This is intentionally
-// lenient - "400 10pt X", "italic bold 16px/1.5 Y" and "small-caps 700 2em Z"
-// all pass - and exists only to reject obvious garbage ("not-a-font") with a
-// SyntaxError the way the CSS parser would.
 func hasFontSizeToken(spec string) bool {
 	for i := 0; i < len(spec); i++ {
 		if spec[i] < '0' || spec[i] > '9' {
@@ -143,8 +124,6 @@ func hasFontSizeToken(spec string) bool {
 				j = k
 			}
 		}
-		// A bare number only counts as a size when a length unit follows
-		// (otherwise it is a weight like 400, which alone is not a font).
 		k := j
 		for k < len(spec) && ((spec[k] >= 'a' && spec[k] <= 'z') || (spec[k] >= 'A' && spec[k] <= 'Z') || spec[k] == '%') {
 			k++

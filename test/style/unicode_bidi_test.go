@@ -49,9 +49,6 @@ func TestUnicodeBidiRoundTrip(t *testing.T) {
 		{d3, "bidi-override"},
 		{d4, "plaintext"},
 		{d5, "normal"},
-		// An unrecognized keyword leaves the declaration ineffective and the
-		// computed value at its initial empty form, as does no declaration
-		// at all (d7).
 		{d6, ""},
 		{d7, ""},
 	}

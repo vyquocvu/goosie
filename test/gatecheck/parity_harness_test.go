@@ -14,15 +14,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/archtest"
 )
 
-// Parity harness guard for GOOSIE-PARITYGATE-001.  The render-parity oracle
-// (testdata/parity.py) is the evidence every other PARITY task leans on, so it
-// must be impossible to fool.  These tests drive the pure-Python selftest
-// (testdata/parity_selftest.py, which builds synthetic images in a throwaway
-// temp corpus and needs no browser and no network), pin the corpus floor
-// against the real fixture count, and prove the --no-strict escape hatch is
-// dead rather than merely hidden.  They skip only when python3 / numpy / PIL are
-// absent (CI installs them: .github/workflows/ci.yml).
-
 func parityRepoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -36,9 +27,6 @@ func parityRepoRoot(t *testing.T) string {
 	return root
 }
 
-// parityPython returns a python3 that can import numpy and PIL, or skips the
-// test.  The selftest and the parity CLI both need those two modules, so a
-// machine without them cannot exercise the oracle.
 func parityPython(t *testing.T) string {
 	t.Helper()
 	py, err := exec.LookPath("python3")
@@ -59,10 +47,6 @@ func paritySelftestScript(root string) string {
 	return filepath.Join(root, "testdata", "parity_selftest.py")
 }
 
-// TestParitySelftestIsGreen runs the oracle's own fail-closed self-tests and
-// requires a clean exit.  This is the primary gate for this task: it proves the
-// harness reports a missing render, rejects an inflated known-gaps baseline, and
-// trips the corpus floor — all without a browser.
 // qc:BR-177
 func TestParitySelftestIsGreen(t *testing.T) {
 	py := parityPython(t)
@@ -78,20 +62,13 @@ func TestParitySelftestIsGreen(t *testing.T) {
 	}
 }
 
-// TestParityWorkdirIsAccepted guards the CLI half of GOOSIE-PARITYTMP-001:
-// --workdir must exist, must be published as the run's render roots, and must
-// be announced so an operator can find the evidence afterwards.  It runs from
-// an empty directory, where the relative testdata/render corpus is absent, so
-// the only thing this proves is the contract - the harness accepts the flag,
-// names the per-run root, and still refuses to report success.  The in-process
-// cases 6-8 of testdata/parity_selftest.py carry the measurement.
 // qc:BR-264
 func TestParityWorkdirIsAccepted(t *testing.T) {
 	py := parityPython(t)
 	root := parityRepoRoot(t)
 	work := filepath.Join(t.TempDir(), "corpus")
 	cmd := exec.Command(py, parityScript(root), "--workdir", work)
-	cmd.Dir = t.TempDir() // no testdata/render here, so nothing can be scored
+	cmd.Dir = t.TempDir()
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("parity.py --workdir reported success on an empty corpus:\n%s", out)
@@ -104,18 +81,6 @@ func TestParityWorkdirIsAccepted(t *testing.T) {
 	}
 }
 
-// TestParityBaselineRecordsItsHost guards the host half of GOOSIE-CIPARITY-001.
-// The known-gaps baseline is an equality ratchet over blank text bands, and a
-// band is partly a font-rasterisation fact of the machine that measured it, so
-// the file has to record which machine that was - and parity.py has to read the
-// same key the file carries.  Both halves are checked here against the REAL
-// committed file, because the in-process selftest (case 9) drives synthetic
-// baselines and would stay green if render-known-gaps.json forgot the field.
-//
-// What this test deliberately does NOT assert: that measured_on equals the
-// runtime GOOS.  The declared bands were measured on darwin and ubuntu-latest
-// scores them, which is the mismatch parity.py prints a NOTE about; pinning
-// equality here would turn that honest NOTE into a red gate.
 // qc:BR-265
 func TestParityBaselineRecordsItsHost(t *testing.T) {
 	root := parityRepoRoot(t)
@@ -142,7 +107,7 @@ spec = importlib.util.spec_from_file_location("parity_under_test", sys.argv[1])
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 sys.stdout.write(str(mod.known_gap_provenance()))`, parityScript(root))
-	cmd.Dir = root // KNOWN_GAPS is repo-relative
+	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("parity.py known_gap_provenance(): %v\n%s", err, out)
@@ -154,14 +119,6 @@ sys.stdout.write(str(mod.known_gap_provenance()))`, parityScript(root))
 	}
 }
 
-// TestParityDriftMetricIsGreen guards GOOSIE-BLANKMETRIC-001.  score_regions
-// calls a band blank on Chromium's exact rows with no vertical tolerance, so a
-// line painted a few rows away is reported as missing content.  The new
-// score_regions_drift adds a drift-adjusted second signal WITHOUT redefining
-// the old one.  This drives the synthetic drift cases
-// (testdata/parity_selftest.py --drift): exact match, off-by-one-line (must be
-// shifted while the old signal still calls it blank), off-by-more-than-the-window
-// and element-deleted (both must stay truly blank).  No browser, no network.
 // qc:BR-187
 func TestParityDriftMetricIsGreen(t *testing.T) {
 	py := parityPython(t)
@@ -177,13 +134,6 @@ func TestParityDriftMetricIsGreen(t *testing.T) {
 	}
 }
 
-// TestParityFixtureFloorMatchesCorpus reads MIN_SCORED_FIXTURES straight out of
-// testdata/parity.py and asserts the real count of HTML fixtures is at least
-// that floor. Neither number may be hard-coded twice, so shrinking the corpus
-// (deleting fixtures so the denominator falls) is caught here the same way
-// parity.py's main() catches it at runtime. The floor only polices downward
-// movement: adding a fixture must not fail this test, and locking the gain is
-// done by raising MIN_SCORED_FIXTURES to the new count in the same change.
 // qc:BR-176
 func TestParityFixtureFloorMatchesCorpus(t *testing.T) {
 	root := parityRepoRoot(t)
@@ -226,9 +176,6 @@ func TestParityFixtureFloorMatchesCorpus(t *testing.T) {
 	}
 }
 
-// TestParityRejectsNoStrictFlag proves the --no-strict escape hatch is gone: the
-// flag is no longer recognised at all, so parity.py exits non-zero with an
-// "unrecognized" argparse error instead of silently skipping missing renders.
 // qc:BR-177
 func TestParityRejectsNoStrictFlag(t *testing.T) {
 	py := parityPython(t)

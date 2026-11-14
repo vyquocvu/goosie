@@ -10,8 +10,6 @@ import "C"
 
 import "unsafe"
 
-// Clipboard implements toolbar.Clipboard using NSPasteboard via the shim's
-// C API. All calls are thread-safe; the shim dispatches to the main queue.
 type Clipboard struct{}
 
 func NewClipboard() *Clipboard { return &Clipboard{} }

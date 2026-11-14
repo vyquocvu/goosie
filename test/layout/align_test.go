@@ -14,7 +14,6 @@ func TestAlignDivInputs(t *testing.T) {
 	if inp == nil {
 		t.Fatal("input not found")
 	}
-	// Total inputs width: 200 + 100 = 300. In 1000px wide centered div, expected X around (1000-300)/2 = 350.
 	if inp.X < 300 || inp.X > 400 {
 		t.Fatalf("expected inp.X around 350, got %v", inp.X)
 	}

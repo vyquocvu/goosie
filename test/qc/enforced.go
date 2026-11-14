@@ -1,7 +1,5 @@
 package qc
 
-// enforcedCases is the transition allowlist. Add IDs here as their coverage
-// and catalog status are brought into agreement.
 var enforcedCases = []string{
 	"BR-001",
 	"BR-002",

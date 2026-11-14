@@ -16,15 +16,12 @@ import (
 	"time"
 )
 
-// Runner executes WPT tests against Goosie's document engine or headless
-// renderer and collects assertion or pixel-comparison results.
 type Runner struct {
 	cfg     Config
 	server  *Server
 	support FeatureSupport
 }
 
-// NewRunner creates a Runner with the given configuration.
 func NewRunner(cfg Config) *Runner {
 	return &Runner{
 		cfg:     cfg,
@@ -32,8 +29,6 @@ func NewRunner(cfg Config) *Runner {
 	}
 }
 
-// Run executes the configured WPT directories, or the default curated set
-// when no explicit directory list is supplied, and returns aggregate results.
 func (r *Runner) Run() (*SuiteResult, error) {
 	startTime := time.Now()
 	result := &SuiteResult{
@@ -41,12 +36,10 @@ func (r *Runner) Run() (*SuiteResult, error) {
 		Timestamp: startTime.Format(time.RFC3339),
 	}
 
-	// Ensure output directories exist.
 	if err := os.MkdirAll(r.cfg.OutputDir, 0o755); err != nil {
 		return nil, fmt.Errorf("wpt: create output dir: %w", err)
 	}
 
-	// Start the WPT HTTP server.
 	wptDir := r.cfg.WPTCheckoutDir()
 	r.server = NewServer(wptDir)
 	if err := r.server.Start(); err != nil {
@@ -54,9 +47,6 @@ func (r *Runner) Run() (*SuiteResult, error) {
 	}
 	defer r.server.Stop()
 
-	// Discover tests across the selected directories. An explicit directory
-	// list is an override, so full-suite runs can name WPT roots that are not
-	// part of the default curated catalog (for example, html and dom).
 	curation, err := selectedWPTDirectories(r.cfg.Directories, r.support)
 	if err != nil {
 		return nil, err
@@ -71,7 +61,6 @@ func (r *Runner) Run() (*SuiteResult, error) {
 
 	result.Total = len(allTests)
 
-	// Run each test.
 	for _, dt := range allTests {
 		tr := r.runOne(dt)
 		result.Results = append(result.Results, tr)
@@ -90,7 +79,6 @@ func (r *Runner) Run() (*SuiteResult, error) {
 
 	result.Duration = time.Since(startTime).Seconds()
 
-	// Calculate pass rate over non-skipped tests.
 	runnable := result.Total - result.Skipped
 	if runnable > 0 {
 		result.PassRate = float64(result.Passed) / float64(runnable) * 100
@@ -99,9 +87,6 @@ func (r *Runner) Run() (*SuiteResult, error) {
 	return result, nil
 }
 
-// includedTest reports whether a discovered WPT path matches one of the
-// configured allowlist patterns. Patterns may match the full WPT-relative path
-// or just the file name, which keeps focused runs concise.
 func includedTest(path string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return true
@@ -121,14 +106,12 @@ func includedTest(path string, patterns []string) bool {
 	return false
 }
 
-// runOne executes a single WPT test and returns its result.
 func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 	tr := TestResult{
 		Path: dt.Path,
 		Type: dt.Type,
 	}
 
-	// Check if this test should be skipped.
 	if skip, reason := ShouldSkip(dt, r.support); skip {
 		tr.Status = "skip"
 		tr.Message = reason
@@ -142,7 +125,6 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 		return r.runSmokeTest(dt)
 	}
 
-	// Only reftests are runnable.
 	if dt.Type != RefTest {
 		tr.Status = "skip"
 		tr.Message = fmt.Sprintf("unsupported test type: %s", dt.Type)
@@ -155,10 +137,8 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 		return tr
 	}
 
-	// Build the test URL.
 	testURL := r.server.URL() + "/" + strings.ReplaceAll(dt.Path, string(os.PathSeparator), "/")
 
-	// Render the test page.
 	testPNG := filepath.Join(r.cfg.OutputDir, "test", dt.Path+".png")
 	testPNG = strings.TrimSuffix(testPNG, ".html.png")
 	testPNG = strings.TrimSuffix(testPNG, ".htm.png")
@@ -180,10 +160,7 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 		return tr
 	}
 
-	// Render the reference page.
 	refURL := r.server.URL() + "/" + strings.ReplaceAll(dt.RefPath, string(os.PathSeparator), "/")
-	// The ref path might be outside the WPT root if it was relative and weird;
-	// check that it resolves within the root.
 	absRef, _ := filepath.Abs(dt.RefPath)
 	absRoot, _ := filepath.Abs(r.cfg.WPTCheckoutDir())
 	if !strings.HasPrefix(absRef, absRoot) {
@@ -212,7 +189,6 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 		return tr
 	}
 
-	// Compare the two renders.
 	score, err := compareImages(testPNG, refPNG)
 	if err != nil {
 		tr.Status = "error"
@@ -224,9 +200,6 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 	tr.RefPath = dt.RefPath
 	tr.RefRelation = dt.RefRelation
 
-	// A match relation uses the configured similarity threshold. A mismatch
-	// relation only requires that the two images differ after per-pixel
-	// tolerance; the match threshold is not a minimum-difference requirement.
 	if reftestRelationPasses(score, dt.RefRelation, r.cfg.PassThreshold) {
 		tr.Status = "pass"
 	} else if dt.RefRelation == "mismatch" {
@@ -243,9 +216,6 @@ func (r *Runner) runOne(dt DiscoveredTest) TestResult {
 	return tr
 }
 
-// runSmokeTest executes a WPT crash regression through the configured headless
-// renderer. These pages do not contain an assertion harness; process exit from
-// the bounded render is the documented no-crash oracle.
 func (r *Runner) runSmokeTest(dt DiscoveredTest) TestResult {
 	tr := TestResult{Path: dt.Path, Type: dt.Type}
 	if r.server == nil {
@@ -280,7 +250,6 @@ func reftestRelationPasses(score float64, relation string, threshold float64) bo
 	return score >= threshold
 }
 
-// renderPage uses the goosie binary in screenshot mode to render a URL to PNG.
 func (r *Runner) renderPage(url, outPath string) error {
 	binary := r.cfg.GoosieBinary
 	if binary == "" {
@@ -301,7 +270,6 @@ func (r *Runner) renderPage(url, outPath string) error {
 	)
 	output, err := cmd.CombinedOutput()
 
-	// Check if the output file was created.
 	if _, statErr := os.Stat(outPath); os.IsNotExist(statErr) {
 		if ctx.Err() == context.DeadlineExceeded {
 			return fmt.Errorf("render timed out after %ds", r.cfg.Timeout)
@@ -311,9 +279,6 @@ func (r *Runner) renderPage(url, outPath string) error {
 	return nil
 }
 
-// compareImages computes the pixel-match percentage between two PNG images.
-// The algorithm matches testdata/parity.py: every RGB channel must differ by
-// at most 30 for a pixel to count as matching.
 func compareImages(pathA, pathB string) (float64, error) {
 	imgA, err := loadPNG(pathA)
 	if err != nil {
@@ -327,7 +292,6 @@ func compareImages(pathA, pathB string) (float64, error) {
 	boundsA := imgA.Bounds()
 	boundsB := imgB.Bounds()
 
-	// If sizes differ, compare the overlapping region.
 	w := min(boundsA.Dx(), boundsB.Dx())
 	h := min(boundsA.Dy(), boundsB.Dy())
 	if w == 0 || h == 0 {
@@ -343,7 +307,6 @@ func compareImages(pathA, pathB string) (float64, error) {
 			r1, g1, b1, _ := imgA.At(boundsA.Min.X+x, boundsA.Min.Y+y).RGBA()
 			r2, g2, b2, _ := imgB.At(boundsB.Min.X+x, boundsB.Min.Y+y).RGBA()
 
-			// RGBA() returns 16-bit values; scale threshold to match.
 			dr := absDiff(int(r1>>8), int(r2>>8))
 			dg := absDiff(int(g1>>8), int(g2>>8))
 			db := absDiff(int(b1>>8), int(b2>>8))
@@ -357,7 +320,6 @@ func compareImages(pathA, pathB string) (float64, error) {
 	return float64(matched) / float64(total) * 100, nil
 }
 
-// loadPNG reads a PNG file and returns the image.
 func loadPNG(path string) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -375,18 +337,11 @@ func absDiff(a, b int) int {
 	return d
 }
 
-// readFuzzyMeta parses the test's `<meta name="fuzzy">` allowance, e.g.
-// `content="maxDifference=0-96;totalPixels=0-400"`. Multiple metas combine
-// by taking the most lenient allowance of each kind. ok is false when the
-// file declares nothing parseable.
 func readFuzzyMeta(testPath string) (maxDiff, totalAllowed int, ok bool) {
 	data, err := os.ReadFile(testPath)
 	if err != nil {
 		return 0, 0, false
 	}
-	// Find meta tags naming fuzzy (quoted or not), then read the content
-	// value of each. RE2 has no backreferences, so the name check compares
-	// the unquoted value instead.
 	tagRe := regexp.MustCompile(`(?i)<meta[^>]*>`)
 	attrRe := regexp.MustCompile(`(?i)\b(name|content)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))`)
 	for _, tag := range tagRe.FindAllString(string(data), -1) {
@@ -439,10 +394,6 @@ func readFuzzyMeta(testPath string) (maxDiff, totalAllowed int, ok bool) {
 	return maxDiff, totalAllowed, ok
 }
 
-// fuzzyPasses recounts the comparison with the test's own tolerance: at
-// most totalAllowed pixels may differ by more than maxDiff in any channel.
-// This is the WPT reftest rule for anti-aliasing and rounding slop, applied
-// only when the strict threshold already failed.
 func fuzzyPasses(pathA, pathB string, maxDiff, totalAllowed int) bool {
 	imgA, err := loadPNG(pathA)
 	if err != nil {
@@ -531,18 +482,14 @@ func discoverWPTTests(wptRoot string, directories []CuratedDir, excludes, includ
 	return allTests, nil
 }
 
-// RenderPage is the exported wrapper for rendering a single page. It is used
-// by the reference generation mode and by tests.
 func (r *Runner) RenderPage(url, outPath string) error {
 	return r.renderPage(url, outPath)
 }
 
-// CompareImages is the exported wrapper for image comparison.
 func CompareImages(pathA, pathB string) (float64, error) {
 	return compareImages(pathA, pathB)
 }
 
-// PixelScore computes the match percentage and returns it rounded to one decimal.
 func PixelScore(score float64) float64 {
 	return math.Round(score*10) / 10
 }

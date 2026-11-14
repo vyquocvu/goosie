@@ -24,7 +24,6 @@ func TestStyle_LightDark_DefaultLight(t *testing.T) {
 	el := doc.ElementByID("target")
 	cs := styles[el.ID]
 
-	// Light mode: color is #111111 (17, 17, 17), background is #ffffff (255, 255, 255)
 	if cs.Color.R != 17 || cs.Color.G != 17 || cs.Color.B != 17 {
 		t.Errorf("expected light color (17, 17, 17), got %+v", cs.Color)
 	}
@@ -49,7 +48,6 @@ func TestStyle_LightDark_ViewportDarkMode(t *testing.T) {
 	el := doc.ElementByID("target")
 	cs := styles[el.ID]
 
-	// Dark mode: color is #eeeeee (238, 238, 238), background is #000000 (0, 0, 0)
 	if cs.Color.R != 238 || cs.Color.G != 238 || cs.Color.B != 238 {
 		t.Errorf("expected dark color (238, 238, 238), got %+v", cs.Color)
 	}
@@ -82,7 +80,6 @@ func TestStyle_LightDark_ElementColorSchemeOverride(t *testing.T) {
     }
 	`
 	sheet := css.Parse(cssText)
-	// Viewport is light, but container specifies dark
 	vp := style.Viewport{W: 800, H: 600, DarkMode: false}
 	styles := style.ResolveViewport(doc, []*css.Stylesheet{sheet}, vp, nil)
 

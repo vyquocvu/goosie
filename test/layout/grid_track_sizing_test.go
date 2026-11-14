@@ -4,12 +4,6 @@ import (
 	"testing"
 )
 
-// TestGridMinMaxFlexTrackTakesItsShare guards the fr distribution of CSS Grid
-// §12.6.1. A `minmax(<length>, <Nfr>)` track's minimum used to be subtracted
-// from the space the fractional tracks share *and* applied again as a floor on
-// that track's own share, so it was billed twice: `minmax(100px,1fr)` across
-// 720px resolved to 620px, and a three-column auto-fill card grid came out 62px
-// per column narrower than Chromium with dead space to the right of the row.
 func TestGridMinMaxFlexTrackTakesItsShare(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="display: grid; width: 720px; grid-template-columns: minmax(100px, 1fr);"><div>a</div></section>
@@ -32,10 +26,6 @@ func TestGridMinMaxFlexTrackTakesItsShare(t *testing.T) {
 	}
 }
 
-// An `auto` column is minmax(min-content, max-content): it takes the width its
-// items ask for before §12.6 hands what is left to the flexible tracks. Billing
-// the whole container to the fr track instead left a Wikipedia-style sidebar
-// column at nothing and moved the article body into its place.
 func TestGridAutoColumnSizesBeforeTheFlexTrack(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="display: grid; width: 1000px; gap: 24px; grid-template-columns: auto 1fr;">
@@ -62,13 +52,6 @@ func TestGridAutoColumnSizesBeforeTheFlexTrack(t *testing.T) {
 	}
 }
 
-// `grid-template` is the shorthand for all three longhands, and the track list
-// after the slash is the column template. Wikipedia's page shell declares its
-// grid that way, so an unexpanded value left grid-template-columns empty and the
-// container fell through to two auto tracks that split the page down the middle.
-// The rem column is the other half of the same rule: 12.25rem is the 196px
-// sidebar Chromium gives that column, and a track list that only understood px
-// sized it as auto.
 func TestGridTemplateShorthandSetsColumnsAndRemTracks(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="display: grid; width: 1192px; gap: 24px; grid-template: auto auto / 12.25rem minmax(0, 1fr);">
@@ -92,9 +75,6 @@ func TestGridTemplateShorthandSetsColumnsAndRemTracks(t *testing.T) {
 	}
 }
 
-// A percentage track is a share of the grid's own content box, which the cascade
-// has no way to know, so it resolves in layout. A page that lays a card row out
-// in percentages otherwise got nothing but auto tracks.
 func TestGridPercentageTracksResolveAgainstTheContainer(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="display: grid; width: 800px; grid-template-columns: 25% 50%;">
@@ -114,9 +94,6 @@ func TestGridPercentageTracksResolveAgainstTheContainer(t *testing.T) {
 	}
 }
 
-// `column-gap` spaces only the columns. A page that declares the axes separately
-// - Wikipedia's shell sets column-gap and never row-gap - must not have the same
-// value spent down the rows too, which moved every row of the page down.
 func TestGridColumnGapLeavesTheRowAxisAlone(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="display: grid; width: 1192px; column-gap: 24px; grid-template-columns: 12.25rem minmax(0, 1fr); grid-template-rows: 40px 40px;">

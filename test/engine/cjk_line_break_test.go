@@ -13,11 +13,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// BR-087 text surfaces. Every expectation below is the number Chromium 1.63
-// produced for the same fixture in scripts/verify-br087-text-parity.js
-// (2026-11-04), quoted in docs/roadmap-v2.md.
-
-const cjkIdeographs = "中文文本需要换行并且继续写入更多字符以填满这个宽度" // 25 ideographs
+const cjkIdeographs = "中文文本需要换行并且继续写入更多字符以填满这个宽度"
 
 func cjkFonts(t *testing.T) *raster.Fonts {
 	t.Helper()
@@ -39,8 +35,6 @@ func cjkSession(t *testing.T, fonts *raster.Fonts, body string) *engine.Session 
 	return sess
 }
 
-// cjkLines groups the laid-out text fragments by line box (their Y) and orders
-// each line by X, so an assertion reads as "the text Chromium put on line n".
 func cjkLines(t *testing.T, sess *engine.Session) [][]string {
 	t.Helper()
 	type frag struct {
@@ -93,9 +87,6 @@ func lineCounts(lines [][]string) []int {
 	return out
 }
 
-// Chromium 1.63, 200px box, 16px: the 25 ideographs broke into lines of 12,
-// 12, 1 - a break opportunity exists after every ideograph. Goosie laid the
-// same paragraph out as one unbroken 400px fragment.
 // qc:BR-087
 func TestCjkIdeographsBreakAfterEachRune(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -112,8 +103,6 @@ func TestCjkIdeographsBreakAfterEachRune(t *testing.T) {
 	}
 }
 
-// Chromium: the same paragraph with word-break: keep-all is one line 408.016px
-// wide - keep-all removes every CJK break opportunity, it does not add any.
 // qc:BR-087
 func TestCjkKeepAllSuppressesBreakOpportunities(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -127,8 +116,6 @@ func TestCjkKeepAllSuppressesBreakOpportunities(t *testing.T) {
 	}
 }
 
-// Chromium broke the ideograph away from the following Latin word: line 0 is
-// "中" (16.328px) and the 57-letter run sits on line 1, 507.219px wide.
 // qc:BR-087
 func TestBreakAfterIdeographBeforeLatinWord(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -146,9 +133,6 @@ func TestBreakAfterIdeographBeforeLatinWord(t *testing.T) {
 	}
 }
 
-// The mirror case measures the absence of a rule: Chromium kept 57 letters and
-// a trailing ideograph on one overflowing line (507.219px), because the break
-// opportunity sits after a CJK rune, not before one.
 // qc:BR-087
 func TestNoBreakBeforeIdeographFromLatinSide(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -160,9 +144,6 @@ func TestNoBreakBeforeIdeographFromLatinSide(t *testing.T) {
 	}
 }
 
-// A combining mark is part of the character it decorates, and a lone mark
-// advances 0 (Chromium measured 0px for one on its own), so a fragment that
-// begins with a mark would draw an accent over nothing.
 // qc:BR-087
 func TestCombiningMarkNeverLeadsABreakFragment(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -187,19 +168,13 @@ func TestCombiningMarkNeverLeadsABreakFragment(t *testing.T) {
 	}
 }
 
-// Chromium broke the 27-kana sentence into 12, 12, 3 and the Hangul paragraph
-// into two lines: kana and Hangul syllables carry the same break opportunity
-// as ideographs.
 // qc:BR-087
 func TestKanaAndHangulBreakBetweenRunes(t *testing.T) {
 	fonts := cjkFonts(t)
 	t.Run("kana", func(t *testing.T) {
-		const kana = "カタカナの文章がここで折り返されるかどうかを確かめます" // 27 runes
+		const kana = "カタカナの文章がここで折り返されるかどうかを確かめます"
 		sess := cjkSession(t, fonts, `<div style="width: 200px; font-size: 16px">`+kana+`</div>`)
 		lines := cjkLines(t, sess)
-		// Chromium filled 12, 12, 3 characters; Goosie's face measures the same
-		// runes a little narrower, so it fits 13 per line. The owned contract is
-		// that breaks exist between kana at all, and that none are lost.
 		if len(lines) != 3 {
 			t.Fatalf("kana line count = %d, want 3 (Chromium: 12, 12, 3 in a 200px box)", len(lines))
 		}
@@ -215,7 +190,7 @@ func TestKanaAndHangulBreakBetweenRunes(t *testing.T) {
 		}
 	})
 	t.Run("hangul", func(t *testing.T) {
-		const hangul = "한국어텍스트가이 상자안에서 줄바꿈되는지 확인합니다" // 24 syllables + 3 spaces
+		const hangul = "한국어텍스트가이 상자안에서 줄바꿈되는지 확인합니다"
 		sess := cjkSession(t, fonts, `<div style="width: 200px; font-size: 16px">`+hangul+`</div>`)
 		lines := cjkLines(t, sess)
 		if len(lines) < 2 {
@@ -245,9 +220,6 @@ func TestKanaAndHangulBreakBetweenRunes(t *testing.T) {
 	})
 }
 
-// Chromium laid 200 letters in a 200px box as one unbroken 1779.688px line with
-// every character inked - no overflow-wrap: break-word, nothing dropped. This
-// pins that Goosie agrees rather than "fixes" anything.
 // qc:BR-087
 func TestLongUnbrokenLatinWordKeepsEveryGlyph(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -261,9 +233,6 @@ func TestLongUnbrokenLatinWordKeepsEveryGlyph(t *testing.T) {
 	}
 }
 
-// Chromium: ế and e+U+0302+U+0301 are both 8.906px, and a lone combining mark
-// advances 0. Goosie agrees (marks measure zero and still get accent ink), so
-// this pins the composition contract the wrapping change must not disturb.
 // qc:BR-087
 func TestCombiningMarksAddNoAdvanceButKeepInk(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -284,10 +253,6 @@ func TestCombiningMarksAddNoAdvanceButKeepInk(t *testing.T) {
 	}
 }
 
-// Chromium 1.63, 200px box, 16px: the fixture `文本文本文本文本文本文本。文本`
-// (12 ideographs + full stop + 2 ideographs) broke into line 0 = 11
-// ideographs (w=179.531) and line 1 = `本。文本` (w=65.281). The 12th
-// ideograph moved down with the stop so the stop never led the line.
 // qc:BR-087
 func TestKinsokuFullStopDoesNotLeadLine(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -313,7 +278,6 @@ func TestKinsokuFullStopDoesNotLeadLine(t *testing.T) {
 	}
 }
 
-// Same shape as the full-stop case but with the CJK comma 、 instead.
 // qc:BR-087
 func TestKinsokuCommaDoesNotLeadLine(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -330,7 +294,6 @@ func TestKinsokuCommaDoesNotLeadLine(t *testing.T) {
 	}
 }
 
-// Katakana prolonged-sound mark ー (U+30FC) must not lead a line either.
 // qc:BR-087
 func TestKinsokuProlongedSoundDoesNotLeadLine(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -347,8 +310,6 @@ func TestKinsokuProlongedSoundDoesNotLeadLine(t *testing.T) {
 	}
 }
 
-// Kinsoku must not suppress ordinary CJK break opportunities: the same 25
-// ideographs without a trailing stop still break 12, 12, 1.
 // qc:BR-087
 func TestKinsokuDoesNotSuppressOrdinaryBreaks(t *testing.T) {
 	fonts := cjkFonts(t)
@@ -359,8 +320,6 @@ func TestKinsokuDoesNotSuppressOrdinaryBreaks(t *testing.T) {
 	}
 }
 
-// No kinsoku character may lead any line in a mixed paragraph that exercises
-// several of them in sequence.
 // qc:BR-087
 func TestKinsokuNoForbiddenCharacterLeadsAnyLine(t *testing.T) {
 	fonts := cjkFonts(t)

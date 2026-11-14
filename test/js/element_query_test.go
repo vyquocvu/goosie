@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// Elements are query roots too (DOM ParentNode): el.querySelector(All)
-// searches the element's subtree, never outside it. Dynamic pages scope
-// every lookup this way (Google: g.querySelector("div")).
 func TestElementQuerySelector(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="outer"><p class="x">1</p><div id="inner"><p class="x">2</p></div></div><p class="x">3</p></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})

@@ -7,21 +7,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// These oracles pin the rule the zoom badge and its accessibility node share.
-// State.ZoomBadge hands back the label and rect that zoomBadgeRect - the same
-// predicate drawAddressBar reads - so the tree cannot advertise an indicator the
-// pixels do not show, nor hide one they do. Each case below therefore checks both
-// sides: what the API reports, and what a real Draw of the toolbar paints.
-
-// badgeColor names the colour the address bar fills the badge pill with
-// (internal/toolbar/toolbar.go drawAddressBar). It is spelled out here instead of
-// read back from the code under test so a mutation of the paint path shows up as a
-// disagreement rather than a self-confirming expectation. Nothing else in the
-// toolbar row uses it.
 func badgeColor() frame.Color { return frame.RGB(232, 240, 254) }
 
-// badgeInk counts the pixels painted in the badge colour and returns their
-// device-space bounding box as a half-open rect.
 func badgeInk(buf *frame.Bitmap) (int, frame.Rect) {
 	bg := badgeColor()
 	count := 0
@@ -53,8 +40,6 @@ func badgeInk(buf *frame.Bitmap) (int, frame.Rect) {
 	return count, box
 }
 
-// drawRow paints the toolbar at sc device pixels per logical pixel over a logical
-// width, the way the window does: the backing is wider than the row it draws.
 func drawRow(tb *toolbar.State, sc, logicalW int32) *frame.Bitmap {
 	buf := frame.NewBitmap(int(logicalW*sc), int(toolbar.ToolbarHeight*sc))
 	tb.Draw(buf, 0)
@@ -87,10 +72,6 @@ func TestZoomBadgeExposesTheBadgeTheToolbarPaints(t *testing.T) {
 		if count == 0 {
 			t.Fatalf("sc=%d: the toolbar painted no badge pixels while ZoomBadge reported %+v shown", sc, rect)
 		}
-		// The box the node advertises is the box that gets painted, in device
-		// pixels: measured at sc=1 the ink spans exactly the 40x24 pill at
-		// (712,8), and at sc=2 exactly twice that. Any drift between the rect the
-		// accessibility tree publishes and the rect the paint path fills fails here.
 		want := frame.Rect4(rect.X0*sc, rect.Y0*sc, rect.X1*sc, rect.Y1*sc)
 		if ink != want {
 			t.Fatalf("sc=%d: painted badge bbox %+v != the advertised rect scaled to device pixels %+v", sc, ink, want)
@@ -105,9 +86,6 @@ func TestZoomBadgeExposesTheBadgeTheToolbarPaints(t *testing.T) {
 func TestZoomBadgeHiddenExactlyWhenTheBadgeIsNotPainted(t *testing.T) {
 	const logicalW = 800
 
-	// 100% with the grace spent: ResetZoom is the product's hide-now path (it
-	// clears ZoomBadgeUntil), which is what the badge click and the expired grace
-	// both leave behind.
 	done := toolbar.NewState(logicalW, nil)
 	done.SetZoom(1.5)
 	done.ResetZoom()
@@ -118,8 +96,6 @@ func TestZoomBadgeHiddenExactlyWhenTheBadgeIsNotPainted(t *testing.T) {
 		t.Fatalf("toolbar painted %d badge pixels at 100%% after the grace, bbox %+v, want none", count, ink)
 	}
 
-	// 100% while the grace is still running is the other half of the rule: the
-	// badge is painted, so it must be exposed.
 	grace := toolbar.NewState(logicalW, nil)
 	grace.SetZoom(1.0)
 	if label, _, shown := grace.ZoomBadge(logicalW); !shown {
@@ -129,8 +105,6 @@ func TestZoomBadgeHiddenExactlyWhenTheBadgeIsNotPainted(t *testing.T) {
 		t.Fatal("toolbar painted no badge pixels at 100% inside the grace, want the exposed badge")
 	}
 
-	// Find mode owns the right edge of the address bar, so the badge - and with it
-	// the node - is hidden even at a zoomed level.
 	find := toolbar.NewState(logicalW, nil)
 	find.SetZoom(1.25)
 	find.OpenFind()
@@ -141,7 +115,6 @@ func TestZoomBadgeHiddenExactlyWhenTheBadgeIsNotPainted(t *testing.T) {
 		t.Fatalf("toolbar painted %d badge pixels while find was active, bbox %+v, want none", count, ink)
 	}
 
-	// A non-positive zoom factor is not a zoom level and is never painted.
 	broken := toolbar.NewState(logicalW, nil)
 	broken.SetZoom(1.25)
 	broken.Zoom = 0

@@ -5,23 +5,16 @@ import (
 	"math"
 )
 
-// CanvasOp is one recorded canvas drawing operation.
 type CanvasOp struct {
 	Method string
 	Args   []interface{}
 }
 
-// ReplayCanvasOps renders a sequence of canvas operations into a bitmap.
-// The bitmap is cleared to transparent black first, then each op is applied
-// in order. This implements a subset of the Canvas 2D API sufficient for
-// basic drawing: fillRect, strokeRect, clearRect, fillText, and simple
-// path operations (beginPath, moveTo, lineTo, arc, rect, fill, stroke).
 func ReplayCanvasOps(b *Bitmap, ops []CanvasOp, width, height int) {
 	if b == nil || len(ops) == 0 {
 		return
 	}
 
-	// Clear to transparent
 	for y := 0; y < height; y++ {
 		if y < 0 || y >= b.H {
 			continue
@@ -204,7 +197,6 @@ func ReplayCanvasOps(b *Bitmap, ops []CanvasOp, width, height int) {
 			if len(op.Args) < 3 {
 				continue
 			}
-			// Text rendering is complex; skip for now
 			_ = op.Args[0].(string)
 			_ = toFloat(op.Args[1])
 			_ = toFloat(op.Args[2])
@@ -254,8 +246,6 @@ func toFloat(v interface{}) float64 {
 func fillRect(b *Bitmap, x, y, w, h float64, c color.RGBA) {
 	x0, y0 := int(math.Floor(x)), int(math.Floor(y))
 	x1, y1 := int(math.Ceil(x+w)), int(math.Ceil(y+h))
-	// Clip once instead of bounds-checking every pixel: pixels outside were
-	// ignored by Set, so skipping them writes the same bitmap.
 	if x0 < 0 {
 		x0 = 0
 	}
@@ -291,13 +281,9 @@ func fillRect(b *Bitmap, x, y, w, h float64, c color.RGBA) {
 
 func strokeRect(b *Bitmap, x, y, w, h float64, lineWidth float64, c color.RGBA) {
 	half := lineWidth / 2
-	// Top
 	fillRect(b, x-half, y-half, w+lineWidth, lineWidth, c)
-	// Bottom
 	fillRect(b, x-half, y+h-half, w+lineWidth, lineWidth, c)
-	// Left
 	fillRect(b, x-half, y-half, lineWidth, h+lineWidth, c)
-	// Right
 	fillRect(b, x+w-half, y-half, lineWidth, h+lineWidth, c)
 }
 
@@ -329,7 +315,6 @@ func fillPath(b *Bitmap, path []pathOp, c color.RGBA) {
 		return
 	}
 	col := packColor(c)
-	// Simple scanline fill for convex polygons
 	yMin, yMax := math.MaxFloat64, -math.MaxFloat64
 	for _, p := range path {
 		if p.y < yMin {
@@ -339,8 +324,6 @@ func fillPath(b *Bitmap, path []pathOp, c color.RGBA) {
 			yMax = p.y
 		}
 	}
-	// Simple scanline fill for convex polygons. The intersection buffer is
-	// reused across scanlines; only its length, not its contents, carries over.
 	var intersections []float64
 	for py := int(math.Floor(yMin)); py <= int(math.Ceil(yMax)); py++ {
 		yp := float64(py)
@@ -354,22 +337,17 @@ func fillPath(b *Bitmap, path []pathOp, c color.RGBA) {
 				intersections = append(intersections, x)
 			}
 		}
-		// Insertion sort: the edge count per scanline is small, and it sorts
-		// the same values the bubble sort did, so the fill pairs are unchanged.
 		for i := 1; i < len(intersections); i++ {
 			for j := i; j > 0 && intersections[j-1] > intersections[j]; j-- {
 				intersections[j-1], intersections[j] = intersections[j], intersections[j-1]
 			}
 		}
-		// Fill between pairs
 		if py < 0 || py >= b.H {
 			continue
 		}
 		for i := 0; i+1 < len(intersections); i += 2 {
 			x0 := int(math.Ceil(intersections[i]))
 			x1 := int(math.Floor(intersections[i+1]))
-			// Clip once instead of bounds-checking every pixel: out-of-range
-			// pixels were ignored by Set, so skipping them is identical.
 			if x0 < 0 {
 				x0 = 0
 			}
@@ -474,7 +452,6 @@ func strokeLine(b *Bitmap, x0, y0, x1, y1 float64, lineWidth float64, c color.RG
 }
 
 func packColor(c color.RGBA) Color {
-	// Premultiply
 	r := uint32(c.R) * uint32(c.A) / 255
 	g := uint32(c.G) * uint32(c.A) / 255
 	b := uint32(c.B) * uint32(c.A) / 255

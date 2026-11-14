@@ -9,9 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
-// soakDocs is a representative rotation: prose, tables, flex, forms, scripts
-// and styled text. Small on purpose: the gate counts cycles and resource
-// growth, not page weight (heavy documents have their own budget tests).
 var soakDocs = []string{
 	`<html><body><p>Hello soak world, hello again.</p></body></html>`,
 	`<html><body><table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table></body></html>`,
@@ -21,17 +18,7 @@ var soakDocs = []string{
 	`<html><head><style>p{color:green}div{margin:4px}</style></head><body><div><p>styled</p></div></body></html>`,
 }
 
-// TestLifecycleSoak runs 1000 representative document lifecycles — build,
-// paint, find, reflow, teardown — plus tab-strip churn, asserting the Gate 7
-// stability contract: no crash or deadlock, goroutines back to baseline (no
-// loader/painter leaks), and heap growth within a predeclared budget.
-//
-// Budgets: goroutine delta 0 after warmup; heap growth under 64 MiB for the
-// run (GC'd before measuring; generous because allocator arenas are sticky).
-// No sleeps or network: ordering is by construction, so -race findings here
-// are real races rather than timing artifacts.
 func TestLifecycleSoak(t *testing.T) {
-	// Warmup settles one-time pools/registries outside the measurement.
 	for i := 0; i < 10; i++ {
 		soakOne(t, soakDocs[i%len(soakDocs)], 800)
 	}
@@ -66,8 +53,6 @@ func TestLifecycleSoak(t *testing.T) {
 		t.Fatalf("goroutines = %d, baseline %d (leaked %d per %d cycles)",
 			got, baseGoroutines, got-baseGoroutines, cycles)
 	}
-	// Unsigned counters wrap when the second run reuses the first run's
-	// arenas: saturate instead of comparing raw differences.
 	var growth uint64
 	if after.HeapAlloc > before.HeapAlloc {
 		growth = after.HeapAlloc - before.HeapAlloc

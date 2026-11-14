@@ -21,8 +21,6 @@ func alphaMask(w, h int, at func(x, y int) uint8) *image.Alpha {
 func TestBlitMaskAppliesCoverage(t *testing.T) {
 	b := frame.NewBitmap(4, 2)
 	black := frame.RGB(0, 0, 0)
-	// Half coverage has to produce half the alpha and none of the color: a
-	// premultiplied source at 50% is (0,0,0,128), not (0,0,0,255) at 50% blend.
 	m := alphaMask(2, 2, func(x, y int) uint8 {
 		if x == 0 {
 			return 128
@@ -99,8 +97,6 @@ func TestScaleOverStaysInsideDestination(t *testing.T) {
 }
 
 func TestScaleOverReadsSubImageByItsOwnOrigin(t *testing.T) {
-	// A sub-image has a nonzero Rect.Min over a shared buffer. Sampling it as if
-	// the origin were (0,0) reads the wrong texels, so this pins the offset math.
 	full := image.NewRGBA(image.Rect(0, 0, 8, 8))
 	for i := range full.Pix {
 		full.Pix[i] = 0
@@ -130,8 +126,6 @@ func TestScaleOverHonoursCoverageAndClip(t *testing.T) {
 	}
 	b := frame.NewBitmap(8, 8)
 	b.FillRect(b.Bounds(), frame.RGB(0, 0, 0), nil)
-	// Half coverage over black leaves half-white pixels, and a clip smaller than
-	// the destination rect leaves the rest black.
 	b.ScaleOver(src, frame.Rect4(0, 0, 2, 2), frame.Rect4(0, 0, 8, 8), frame.Rect4(0, 0, 4, 8), 128, nil)
 	if got := b.At(1, 1); got.R() < 120 || got.R() > 135 {
 		t.Fatalf("half-covered pixel = %v, want roughly half white", got)
@@ -162,13 +156,7 @@ func TestBlitMaskIsAllocationFree(t *testing.T) {
 	}
 }
 
-// TestScaleOverSamplesCorrectSliceWhenClipped pins that a scaled image spanning
-// several raster tiles shows its matching slice in each tile, not the whole
-// image rescaled into every tile. A background wider than one tile used to
-// repeat across every tile it spanned because the source step was derived from
-// the clipped rect rather than the full destination box.
 func TestScaleOverSamplesCorrectSliceWhenClipped(t *testing.T) {
-	// 8x4 source: left half red, right half green.
 	src := image.NewRGBA(image.Rect(0, 0, 8, 4))
 	for y := 0; y < 4; y++ {
 		for x := 0; x < 8; x++ {
@@ -180,18 +168,12 @@ func TestScaleOverSamplesCorrectSliceWhenClipped(t *testing.T) {
 		}
 	}
 
-	// Draw into an 8-wide destination but clip to the LEFT 4 columns, as the
-	// tile rasterizer does for the tile holding the left half. The correct slice
-	// is red throughout; the old bug would rescale the whole source into the 4px
-	// window and bleed green in at the right edge.
 	left := frame.NewBitmap(8, 4)
 	left.ScaleOver(src, frame.Rect4(0, 0, 8, 4), frame.Rect4(0, 0, 8, 4), frame.Rect4(0, 0, 4, 4), 255, nil)
 	if got := left.At(1, 2); got.G() > 40 || got.R() < 200 {
 		t.Fatalf("left tile at x=1 = %v, want red (source slice [0,4)), not a rescaled whole image", got)
 	}
 
-	// The RIGHT 4 columns must sample the green half, proving the offset tracks
-	// the tile's position within the full destination box.
 	right := frame.NewBitmap(8, 4)
 	right.ScaleOver(src, frame.Rect4(0, 0, 8, 4), frame.Rect4(0, 0, 8, 4), frame.Rect4(4, 0, 8, 4), 255, nil)
 	if got := right.At(6, 2); got.R() > 40 || got.G() < 200 {
@@ -200,7 +182,6 @@ func TestScaleOverSamplesCorrectSliceWhenClipped(t *testing.T) {
 }
 
 func TestScaleAlphaProportional(t *testing.T) {
-	// Opaque red (255, 0, 0, 255) scaled by 50% (128/255)
 	c := frame.RGBA(255, 0, 0, 255)
 	scaled := frame.ScaleAlpha(c, 128)
 	if scaled.A() < 126 || scaled.A() > 130 {
@@ -210,8 +191,6 @@ func TestScaleAlphaProportional(t *testing.T) {
 		t.Errorf("scaled opaque red = %d, want ~128", scaled.R())
 	}
 
-	// Translucent blue (0, 0, 200, 200) scaled by 50% (128/255)
-	// Alpha should scale proportionally: 200 * 128 / 255 ≈ 100
 	cTrans := frame.RGBA(0, 0, 255, 200)
 	scaledTrans := frame.ScaleAlpha(cTrans, 128)
 	if scaledTrans.A() < 98 || scaledTrans.A() > 103 {
@@ -226,17 +205,14 @@ func TestBlendOverCoverageDirectFormula(t *testing.T) {
 	white := frame.RGB(255, 255, 255)
 	black := frame.RGB(0, 0, 0)
 
-	// Coverage 0 -> untouched destination (white)
 	if got := frame.BlendOverCoverage(white, black, 0); got != white {
 		t.Errorf("cov 0 got %v, want white", got)
 	}
 
-	// Coverage 255 -> full source (black)
 	if got := frame.BlendOverCoverage(white, black, 255); got != black {
 		t.Errorf("cov 255 got %v, want black", got)
 	}
 
-	// Coverage 128 -> midpoint gray (~128)
 	mid := frame.BlendOverCoverage(white, black, 128)
 	if mid.R() < 125 || mid.R() > 130 {
 		t.Errorf("cov 128 gray level = %d, want ~127", mid.R())
@@ -254,17 +230,14 @@ func TestFillRoundedFastSpanCoverage(t *testing.T) {
 	}
 	b.FillRounded(frame.Rect4(0, 0, 20, 10), rad, red, nil)
 
-	// Center pixel (10, 5) must be solid red
 	if got := b.At(10, 5); got != red {
 		t.Errorf("center pixel (10, 5) = %v, want solid red", got)
 	}
 
-	// Outer top-left corner (0, 0) should be outside radius (transparent black or very faint)
 	if got := b.At(0, 0); got == red {
 		t.Errorf("corner (0, 0) should be cut by radius, got solid red")
 	}
 
-	// Middle row (5) across all columns [0, 20) should be solid red because middle rows are outside corner bands
 	for x := 0; x < 20; x++ {
 		if got := b.At(x, 5); got != red {
 			t.Errorf("middle row pixel (%d, 5) = %v, want solid red", x, got)

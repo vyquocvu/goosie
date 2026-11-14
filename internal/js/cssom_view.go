@@ -7,53 +7,32 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// LayoutBoxInfo carries the geometry the CSSOM View APIs need for one DOM
-// node. The engine fills it from the layout arena; the JS package cannot
-// import internal/layout (archtest rules), so the struct is plain numbers.
 type LayoutBoxInfo struct {
-	// Border-box position in viewport (CSS pixel) coordinates.
-	X, Y float64
-	// Border-box dimensions (CSS pixels).
-	Width, Height float64
-	// Border thicknesses (CSS pixels).
-	BorderTop, BorderRight, BorderBottom, BorderLeft float64
-	// Padding thicknesses (CSS pixels).
+	X, Y                                                 float64
+	Width, Height                                        float64
+	BorderTop, BorderRight, BorderBottom, BorderLeft     float64
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float64
-	// Margin thicknesses (CSS pixels).
-	MarginTop, MarginRight, MarginBottom, MarginLeft float64
-	// Scrollable content size (CSS pixels). Zero means "same as border box".
-	ScrollWidth, ScrollHeight float64
-	// ScrollContainer reports that the box clips or scrolls its content, which
-	// is what decides whether a scrollTop/scrollLeft write takes effect at all.
-	ScrollContainer bool
+	MarginTop, MarginRight, MarginBottom, MarginLeft     float64
+	ScrollWidth, ScrollHeight                            float64
+	ScrollContainer                                      bool
 }
 
-// LayoutGeometryProvider returns the layout box info for one DOM node. It
-// returns ok=false when the node has no box (no layout run, display:none,
-// text node, etc.). The engine installs a closure over its arena.
 type LayoutGeometryProvider func(node *dom.Node) (info LayoutBoxInfo, ok bool)
 
-// OffsetParentProvider returns the offset parent for one DOM node (the nearest
-// positioned ancestor), or nil when none exists.
 type OffsetParentProvider func(node *dom.Node) *dom.Node
 
-// SetLayoutGeometryProvider installs the engine's layout reader. The engine
-// calls it before any script runs, alongside SetComputedStyleProvider.
 func (r *Runtime) SetLayoutGeometryProvider(fn LayoutGeometryProvider) {
 	r.mu.Lock()
 	r.layoutGeometry = fn
 	r.mu.Unlock()
 }
 
-// SetOffsetParentProvider installs the engine's offset-parent reader.
 func (r *Runtime) SetOffsetParentProvider(fn OffsetParentProvider) {
 	r.mu.Lock()
 	r.offsetParent = fn
 	r.mu.Unlock()
 }
 
-// WindowScrollY reports the current document viewport's vertical scroll
-// offset. The engine uses it when moving focus to an off-screen control.
 func (r *Runtime) WindowScrollY() float64 {
 	if r == nil {
 		return 0
@@ -64,7 +43,6 @@ func (r *Runtime) WindowScrollY() float64 {
 	return y
 }
 
-// SetWindowScrollX updates the document viewport's horizontal scroll offset.
 func (r *Runtime) SetWindowScrollX(x float64) {
 	if r == nil {
 		return
@@ -85,7 +63,6 @@ func (r *Runtime) SetWindowScrollX(x float64) {
 	}
 }
 
-// SetWindowScrollY updates the document viewport's vertical scroll offset.
 func (r *Runtime) SetWindowScrollY(y float64) {
 	if r == nil {
 		return
@@ -106,9 +83,6 @@ func (r *Runtime) SetWindowScrollY(y float64) {
 	}
 }
 
-// QueueViewportScroll records that the document viewport moved during this turn.
-// The event is delivered by FlushScrollEvents, where it is targeted at the
-// document and bubbles to the window.
 func (r *Runtime) QueueViewportScroll() {
 	if r == nil || r.domDoc == nil {
 		return
@@ -118,8 +92,6 @@ func (r *Runtime) QueueViewportScroll() {
 	r.queueScrollTarget(&r.domDoc.Node)
 }
 
-// queueScrollTarget adds one node to the pending scroll queue, once per turn
-// however many writes reach it. The caller holds scrollMu.
 func (r *Runtime) queueScrollTarget(node *dom.Node) {
 	if node == nil {
 		return
@@ -133,8 +105,6 @@ func (r *Runtime) queueScrollTarget(node *dom.Node) {
 	}
 }
 
-// setWindowScrollX commits the horizontal viewport offset and queues the scroll
-// event when it moved, the way a vertical scroll does.
 func (r *Runtime) setWindowScrollX(x float64) {
 	if r == nil {
 		return
@@ -162,9 +132,6 @@ func (r *Runtime) isDocumentScrollingElement(node *dom.Node) bool {
 	return node == documentElementOf(r.domDoc)
 }
 
-// ancestorScrollOffset returns the cumulative scroll offset applied by ancestor
-// scroll containers. getBoundingClientRect must subtract this from the layout
-// position to return the visually-correct viewport-relative rect.
 func (r *Runtime) ancestorScrollOffset(node *dom.Node) (float64, float64) {
 	if r == nil || node == nil {
 		return 0, 0
@@ -203,9 +170,6 @@ func (r *Runtime) offsetParentProvider() OffsetParentProvider {
 	return r.offsetParent
 }
 
-// installCSSOMView installs the CSSOM View layout measurement APIs on
-// Element.prototype and HTMLElement.prototype: getBoundingClientRect,
-// getClientRects, offset properties, scroll properties, and scrollIntoView.
 func (r *Runtime) installCSSOMView() {
 	r.installDOMRectConstructor()
 	r.installElementGeometryMethods()
@@ -213,10 +177,7 @@ func (r *Runtime) installCSSOMView() {
 	r.installWindowScrollMethods()
 }
 
-// installDOMRectConstructor publishes window.DOMRect and window.DOMRectList.
 func (r *Runtime) installDOMRectConstructor() {
-	// DOMRect is a simple data class. Pages construct it via new DOMRect(x,y,w,h)
-	// or receive one from getBoundingClientRect().
 	_ = r.vm.Set("__makeDOMRect__", func(x, y, w, h float64) *goja.Object {
 		return r.newDOMRect(x, y, w, h)
 	})
@@ -249,7 +210,6 @@ func (r *Runtime) installDOMRectConstructor() {
 	_ = r.vm.Set("__makeDOMRect__", nil)
 }
 
-// newDOMRect creates a DOMRect JS object with all eight properties.
 func (r *Runtime) newDOMRect(x, y, w, h float64) *goja.Object {
 	rect := r.vm.NewObject()
 	_ = rect.Set("x", x)
@@ -263,12 +223,9 @@ func (r *Runtime) newDOMRect(x, y, w, h float64) *goja.Object {
 	return rect
 }
 
-// installElementGeometryMethods installs getBoundingClientRect, getClientRects,
-// and the offset properties on Element.prototype.
 func (r *Runtime) installElementGeometryMethods() {
 	p := r.elementProto
 
-	// getBoundingClientRect()
 	_ = p.Set("getBoundingClientRect", func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
 		if node == nil {
@@ -286,7 +243,6 @@ func (r *Runtime) installElementGeometryMethods() {
 		return r.newDOMRect(info.X-adjX, info.Y-adjY, info.Width, info.Height)
 	})
 
-	// getClientRects()
 	_ = p.Set("getClientRects", func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
 		if node == nil {
@@ -305,7 +261,6 @@ func (r *Runtime) installElementGeometryMethods() {
 		return r.newDOMRectList([]*goja.Object{rect})
 	})
 
-	// Offset properties: offsetParent, offsetTop, offsetLeft, offsetWidth, offsetHeight
 	_ = r.htmlElementProto.DefineAccessorProperty("offsetParent", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
 		if node == nil {
@@ -337,10 +292,6 @@ func (r *Runtime) installElementGeometryMethods() {
 			if !ok {
 				return r.vm.ToValue(0)
 			}
-			// offsetTop/offsetLeft are relative to the offsetParent.
-			// Without an offsetParent provider that gives geometry, we
-			// return the absolute position (which is correct when
-			// offsetParent is the viewport / null).
 			opProvider := r.offsetParentProvider()
 			if opProvider != nil {
 				parent := opProvider(node)
@@ -383,16 +334,6 @@ func (r *Runtime) installElementGeometryMethods() {
 	}
 }
 
-// setElementScrollOffset applies one scrollTop or scrollLeft write. A box that
-// neither clips nor scrolls has nothing to scroll, so the write is ignored; an
-// offset may not travel past the scrollable area minus the client box, so 1000
-// on a 200-into-100 container lands on 100. Only a write that moves the offset
-// queues a scroll event, and it queues one per element per turn rather than one
-// per axis.
-//
-// The bounds are omitted when layout has no box for the node: a runtime that
-// cannot see an extent cannot bound the write, so the offset is taken on trust
-// and the event still queues.
 func (r *Runtime) setElementScrollOffset(node *dom.Node, prop string, value float64) {
 	max, scrollable, bounded := r.elementScrollBounds(node, prop)
 	if bounded && !scrollable {
@@ -417,8 +358,6 @@ func (r *Runtime) setElementScrollOffset(node *dom.Node, prop string, value floa
 	r.scrollMu.Unlock()
 }
 
-// ElementScrollOffset returns the current scroll offset for node along prop
-// ("scrollTop" or "scrollLeft"). Thread-safe; returns 0 when no offset is stored.
 func (r *Runtime) ElementScrollOffset(node *dom.Node, prop string) float64 {
 	if r == nil || node == nil {
 		return 0
@@ -429,9 +368,6 @@ func (r *Runtime) ElementScrollOffset(node *dom.Node, prop string) float64 {
 	return v
 }
 
-// elementScrollBounds reports how far one element may be scrolled along prop and
-// whether it is the kind of box that scrolls at all: the extent minus the client
-// box, and a scroll container only when its computed overflow is not visible.
 func (r *Runtime) elementScrollBounds(node *dom.Node, prop string) (max float64, scrollable, bounded bool) {
 	provider := r.layoutGeometryProvider()
 	if provider == nil {
@@ -461,10 +397,6 @@ func (r *Runtime) elementScrollBounds(node *dom.Node, prop string) (max float64,
 	return max, info.ScrollContainer, true
 }
 
-// FlushScrollEvents delivers the scroll events the turns since the last flush
-// queued. The engine calls it once per frame, before animation frame callbacks,
-// which is where a page that set an offset and then asked for a frame sees the
-// event; a write made by a listener here is owed an event on the next frame.
 func (r *Runtime) FlushScrollEvents() {
 	if r == nil {
 		return
@@ -478,24 +410,15 @@ func (r *Runtime) FlushScrollEvents() {
 		if node == nil {
 			continue
 		}
-		// A viewport scroll is targeted at the document and bubbles from there
-		// to the window; an element scroll bubbles to nothing.
 		viewport := r.domDoc != nil && node == &r.domDoc.Node
 		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("scroll", viewport, false))
-		// scrollend fires after the scroll settles. Since goosie treats all
-		// scrolls as instant, it fires immediately after scroll.
 		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("scrollend", viewport, false))
 	}
 }
 
-// installElementScrollMethods installs scrollTop, scrollLeft, scrollWidth,
-// scrollHeight, and scrollIntoView on HTMLElement.prototype.
 func (r *Runtime) installElementScrollMethods() {
 	p := r.htmlElementProto
 
-	// scrollTop and scrollLeft are get/set. They store per-element scroll
-	// positions. Without a real scroll implementation, they are stored in a
-	// per-node map on the runtime.
 	for _, prop := range []string{"scrollTop", "scrollLeft"} {
 		prop := prop
 		_ = p.DefineAccessorProperty(prop, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -538,7 +461,6 @@ func (r *Runtime) installElementScrollMethods() {
 		}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
 
-	// scrollWidth and scrollHeight are read-only.
 	for _, prop := range []string{"scrollWidth", "scrollHeight"} {
 		prop := prop
 		_ = p.DefineAccessorProperty(prop, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -569,7 +491,6 @@ func (r *Runtime) installElementScrollMethods() {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
-	// clientWidth and clientHeight: content area size (border-box minus borders).
 	for _, prop := range []string{"clientWidth", "clientHeight"} {
 		prop := prop
 		_ = p.DefineAccessorProperty(prop, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -600,8 +521,6 @@ func (r *Runtime) installElementScrollMethods() {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
-	// scrollIntoView() — scroll the element into the visible area of the
-	// viewport and any scrollable ancestors.
 	_ = p.Set("scrollIntoView", func(call goja.FunctionCall) goja.Value {
 		node := r.getNode(call.This)
 		if node == nil {
@@ -611,7 +530,6 @@ func (r *Runtime) installElementScrollMethods() {
 		return goja.Undefined()
 	})
 
-	// scrollTo / scrollBy / scroll on the element itself.
 	for _, method := range []string{"scrollTo", "scrollBy", "scroll"} {
 		method := method
 		_ = p.Set(method, func(call goja.FunctionCall) goja.Value {
@@ -625,12 +543,6 @@ func (r *Runtime) installElementScrollMethods() {
 	}
 }
 
-// handleElementScroll processes element.scroll(), element.scrollTo(), and
-// element.scrollBy() calls. Both forms end in the same scroll as the property
-// setters, so they run through setElementScrollOffset and inherit its bounds and
-// its queued event. A `behavior: 'smooth'` option is taken as an instant scroll:
-// goosie has no scroll animation, and an offset that lands where the page asked
-// is closer than one that crawls there over frames.
 func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.FunctionCall) {
 	var dx, dy float64
 	if len(call.Arguments) > 0 {
@@ -638,7 +550,6 @@ func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.F
 		if arg != nil && !goja.IsUndefined(arg) && !goja.IsNull(arg) {
 			obj, isObj := arg.(*goja.Object)
 			if isObj {
-				// Options object: { top, left, behavior }
 				if v := obj.Get("top"); v != nil && !goja.IsUndefined(v) {
 					dy = v.ToFloat()
 				}
@@ -646,7 +557,6 @@ func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.F
 					dx = v.ToFloat()
 				}
 			} else {
-				// Numeric arguments: scroll(left, top)
 				dx = arg.ToFloat()
 				if len(call.Arguments) > 1 {
 					dy = call.Arguments[1].ToFloat()
@@ -674,9 +584,6 @@ func (r *Runtime) handleElementScroll(node *dom.Node, method string, call goja.F
 	r.setElementScrollOffset(node, "scrollTop", dy)
 }
 
-// scrollElementIntoView implements element.scrollIntoView(). It walks up the
-// ancestor chain, scrolling each scrollable container that clips the element,
-// then adjusts the viewport scroll as a final step.
 func (r *Runtime) scrollElementIntoView(node *dom.Node, call goja.FunctionCall) {
 	block, inline := "start", "nearest"
 	if len(call.Arguments) > 0 {
@@ -704,7 +611,6 @@ func (r *Runtime) scrollElementIntoView(node *dom.Node, call goja.FunctionCall) 
 		return
 	}
 
-	// Scroll each scrollable ancestor that clips the target.
 	for ancestor := node.Parent; ancestor != nil; ancestor = ancestor.Parent {
 		info, ok := provider(ancestor)
 		if !ok || !info.ScrollContainer {
@@ -713,12 +619,9 @@ func (r *Runtime) scrollElementIntoView(node *dom.Node, call goja.FunctionCall) 
 		r.scrollAncestorToReveal(ancestor, node, provider, block, inline)
 	}
 
-	// Finally, scroll the viewport.
 	r.scrollViewportToReveal(node, provider, block, inline)
 }
 
-// scrollAncestorToReveal adjusts one scrollable ancestor's scrollTop/scrollLeft
-// so that the target element's box falls within the ancestor's content area.
 func (r *Runtime) scrollAncestorToReveal(ancestor, target *dom.Node, provider LayoutGeometryProvider, block, inline string) {
 	aInfo, ok := provider(ancestor)
 	if !ok {
@@ -751,8 +654,6 @@ func (r *Runtime) scrollAncestorToReveal(ancestor, target *dom.Node, provider La
 	}
 }
 
-// scrollViewportToReveal adjusts the document viewport scroll so the target
-// element is visible.
 func (r *Runtime) scrollViewportToReveal(target *dom.Node, provider LayoutGeometryProvider, block, inline string) {
 	tInfo, ok := provider(target)
 	if !ok {
@@ -778,9 +679,6 @@ func (r *Runtime) scrollViewportToReveal(target *dom.Node, provider LayoutGeomet
 	}
 }
 
-// scrollAxisOffset computes the scroll position needed to bring an element
-// into a viewport along one axis, given the element's position relative to
-// the scroll content origin, its size, the content offset, and the client size.
 func scrollAxisOffset(elPos, elSize, contentOffset, clientSize float64, alignment string) float64 {
 	viewStart := contentOffset
 	viewEnd := contentOffset + clientSize
@@ -794,7 +692,7 @@ func scrollAxisOffset(elPos, elSize, contentOffset, clientSize float64, alignmen
 		return elStart - viewStart - (clientSize-elSize)/2
 	case "end":
 		return elEnd - viewEnd
-	default: // "nearest"
+	default:
 		if elStart >= viewStart && elEnd <= viewEnd {
 			return 0
 		}
@@ -805,16 +703,12 @@ func scrollAxisOffset(elPos, elSize, contentOffset, clientSize float64, alignmen
 	}
 }
 
-// elementScrollOffset reads one stored element scroll offset without applying any
-// bounds; the setter path clamps what this returns.
 func (r *Runtime) elementScrollOffset(node *dom.Node, prop string) float64 {
 	r.scrollMu.Lock()
 	defer r.scrollMu.Unlock()
 	return r.scrollPositions[scrollKey{node: node, prop: prop}]
 }
 
-// installWindowScrollMethods installs window.scroll(), window.scrollBy(),
-// window.scrollTo(), and window.scrollX/scrollY/pageXOffset/pageYOffset.
 func (r *Runtime) installWindowScrollMethods() {
 	win := r.vm.GlobalObject()
 	for prop, index := range map[string]int{"innerWidth": 0, "innerHeight": 1} {
@@ -828,7 +722,6 @@ func (r *Runtime) installWindowScrollMethods() {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
-	// window.scrollX / window.scrollY (and aliases pageXOffset / pageYOffset)
 	for _, prop := range []string{"scrollX", "pageXOffset"} {
 		prop := prop
 		_ = win.DefineAccessorProperty(prop, r.vm.ToValue(func(goja.FunctionCall) goja.Value {
@@ -848,7 +741,6 @@ func (r *Runtime) installWindowScrollMethods() {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
-	// window.scrollTo, window.scroll, window.scrollBy
 	for _, method := range []string{"scrollTo", "scroll", "scrollBy"} {
 		method := method
 		_ = win.Set(method, func(call goja.FunctionCall) goja.Value {
@@ -858,8 +750,6 @@ func (r *Runtime) installWindowScrollMethods() {
 	}
 }
 
-// handleWindowScroll processes window.scroll(), window.scrollTo(), and
-// window.scrollBy() calls.
 func (r *Runtime) handleWindowScroll(method string, call goja.FunctionCall) {
 	var dx, dy float64
 	if len(call.Arguments) > 0 {
@@ -885,8 +775,6 @@ func (r *Runtime) handleWindowScroll(method string, call goja.FunctionCall) {
 	r.setWindowScroll(dx, dy, method == "scrollBy")
 }
 
-// setWindowScroll commits a document viewport position, either absolute or
-// relative to the current offset, and queues the scroll event only when it moved.
 func (r *Runtime) setWindowScroll(x, y float64, relative bool) {
 	if r == nil {
 		return
@@ -914,16 +802,10 @@ func (r *Runtime) setWindowScroll(x, y float64, relative bool) {
 	}
 }
 
-// ScrollWindowBy moves the document viewport by a wheel gesture's deltas. This is
-// the default action a wheel event carries: the host calls it only when the page
-// did not cancel the gesture. Clamping and the scroll event match the script-facing
-// window.scrollBy(), which shares this path.
 func (r *Runtime) ScrollWindowBy(dx, dy float64) {
 	r.setWindowScroll(dx, dy, true)
 }
 
-// newDOMRectList builds a DOMRectList-shaped array-like object from a slice of
-// DOMRect objects.
 func (r *Runtime) newDOMRectList(rects []*goja.Object) *goja.Object {
 	list := r.vm.NewObject()
 	if rects == nil {
@@ -943,10 +825,9 @@ func (r *Runtime) newDOMRectList(rects []*goja.Object) *goja.Object {
 	return list
 }
 
-// scrollKey identifies one per-element scroll position.
 type scrollKey struct {
 	node *dom.Node
-	prop string // "scrollTop" or "scrollLeft"
+	prop string
 }
 
 func min64(a, b float64) float64 {

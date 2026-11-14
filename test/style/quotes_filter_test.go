@@ -67,25 +67,21 @@ func TestEvaluateContentQuotes(t *testing.T) {
 	depth := 0
 	quotes := []string{"«", "»", "“", "”"}
 
-	// Depth 0: open-quote -> «, depth becomes 1
 	got1 := style.EvaluateContentWithQuotes(partsOpen, nil, quotes, &depth)
 	if got1 != "«" || depth != 1 {
 		t.Fatalf("got1=%q depth=%d, want « and 1", got1, depth)
 	}
 
-	// Depth 1: open-quote -> “, depth becomes 2
 	got2 := style.EvaluateContentWithQuotes(partsOpen, nil, quotes, &depth)
 	if got2 != "“" || depth != 2 {
 		t.Fatalf("got2=%q depth=%d, want “ and 2", got2, depth)
 	}
 
-	// Depth 2: close-quote -> ”, depth becomes 1
 	got3 := style.EvaluateContentWithQuotes(partsClose, nil, quotes, &depth)
 	if got3 != "”" || depth != 1 {
 		t.Fatalf("got3=%q depth=%d, want ” and 1", got3, depth)
 	}
 
-	// Depth 1: close-quote -> », depth becomes 0
 	got4 := style.EvaluateContentWithQuotes(partsClose, nil, quotes, &depth)
 	if got4 != "»" || depth != 0 {
 		t.Fatalf("got4=%q depth=%d, want » and 0", got4, depth)
@@ -132,7 +128,6 @@ func TestFilterAndBackdropFilter(t *testing.T) {
 		t.Fatalf("unexpected backdrop-filter: %+v", s.BackdropFilter[0])
 	}
 
-	// Verify paint list emits DisplayCmd with Filter and BackdropFilter set via Session
 	htmlStr := `<!DOCTYPE html>
 <html>
 <head>
@@ -205,7 +200,6 @@ body { quotes: "«" "»" "‹" "›"; }
 		t.Fatal("expected non-nil display list")
 	}
 
-	// Verify that the rendered glyphs contain « and ‹ and › and »
 	var textRunes []rune
 	for _, cmd := range list.All() {
 		for _, g := range cmd.Text.Glyphs {

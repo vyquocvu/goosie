@@ -1,21 +1,3 @@
-// Command wpt-runner runs curated Web Platform Tests against goosie.
-//
-// Usage:
-//
-//	go run ./cmd/wpt-runner [flags]
-//
-// Flags:
-//
-//	-config string     path to wpt-config.json (default "testdata/wpt-config.json")
-//	-dirs string       comma-separated WPT directories to test (overrides config)
-//	-wpt-dir string    path to WPT checkout (overrides config)
-//	-binary string     path to goosie binary (overrides config)
-//	-output string     output directory for results (overrides config)
-//	-download          download WPT checkout before running
-//	-threshold float   pixel-match pass threshold (overrides config)
-//	-json              write JSON report
-//	-html              write HTML dashboard
-//	-verbose           print per-test results as they run
 package main
 
 import (
@@ -42,10 +24,8 @@ func main() {
 	)
 	flag.Parse()
 
-	// Load configuration.
 	cfg, err := wpt.LoadConfig(*configPath)
 	if err != nil {
-		// If the config file doesn't exist, use defaults.
 		if os.IsNotExist(err) {
 			cfg = wpt.DefaultConfig()
 		} else {
@@ -54,7 +34,6 @@ func main() {
 		}
 	}
 
-	// Apply flag overrides.
 	if *dirs != "" {
 		cfg.Directories = splitTrim(*dirs)
 	}
@@ -71,7 +50,6 @@ func main() {
 		cfg.PassThreshold = *threshold
 	}
 
-	// Download WPT if requested.
 	if *download {
 		checkout := wpt.NewCheckout(cfg)
 		dir, err := checkout.Ensure()
@@ -82,7 +60,6 @@ func main() {
 		cfg.WPTDir = dir
 	}
 
-	// Run the suite.
 	runner := wpt.NewRunner(cfg)
 	result, err := runner.Run()
 	if err != nil {
@@ -90,7 +67,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Print results.
 	reporter := wpt.NewReporter(result)
 	reporter.PrintSummary(os.Stdout)
 
@@ -110,7 +86,6 @@ func main() {
 		}
 	}
 
-	// Write reports.
 	if *writeJSON {
 		jsonPath := cfg.OutputDir + "/results.json"
 		if err := reporter.WriteJSONFile(jsonPath); err != nil {
@@ -128,7 +103,6 @@ func main() {
 		}
 	}
 
-	// Exit with non-zero if there were failures.
 	if result.Total == 0 {
 		fmt.Fprintln(os.Stderr, "wpt-runner: no tests discovered; check -wpt-dir or pass -download")
 		os.Exit(1)

@@ -10,15 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// ---------------------------------------------------------------------------
-// Layer 2: integration tests through the real headless.Window + ManualClock.
-//
-// These prove that events injected via headless.Window.Inject flow through the
-// surface loop correctly when paced by a deterministic clock. Unlike the
-// fakeWindow tests above, these exercise the real event channel, the real
-// vsync goroutine, and the real scale-stamping logic.
-// ---------------------------------------------------------------------------
-
 type headlessHarness struct {
 	w     *headless.Window
 	clk   *headless.ManualClock
@@ -64,12 +55,10 @@ func newHeadlessHarness(t *testing.T, vp frame.Viewport) *headlessHarness {
 			}
 		},
 	}
-	// Wait for the vsync goroutine to arm its first timer.
 	waitPending(t, clk)
 	return h
 }
 
-// waitPending blocks until the clock has at least one armed timer.
 func waitPending(t *testing.T, clk *headless.ManualClock) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -82,8 +71,6 @@ func waitPending(t *testing.T, clk *headless.ManualClock) {
 	t.Fatal("clock has no pending timers: the vsync loop did not arm")
 }
 
-// tick advances the clock by one vsync period and waits for the loop to
-// process the frame and re-arm the next timer.
 func (h *headlessHarness) tick(t *testing.T) {
 	t.Helper()
 	h.clk.Advance(16 * time.Millisecond)

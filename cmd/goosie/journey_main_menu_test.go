@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// TestJourneyMainMenuOpensManagers drives the chrome menu through the real
-// window wiring: press the menu button, click Bookmarks, then History, and
-// assert the active tab navigates to the internal managers (BR-052).
-//
 // qc:BR-052
 func TestJourneyMainMenuOpensManagers(t *testing.T) {
 	srvURL := findJourneyPage(t, "<p>main menu journey</p>", "")
@@ -22,8 +18,6 @@ func TestJourneyMainMenuOpensManagers(t *testing.T) {
 		t.Fatalf("window type = %T, want *chromeWindow", b.f.window)
 	}
 
-	// The pump goroutine owns the menu, so observe it through a locked Snapshot
-	// captured in the wait predicate; reuse that same copy to locate the row.
 	var menu *ContextMenu
 	b.clickToolbarButton(t, toolbar.ButtonMenu)
 	b.waitFor(t, "main menu visible", func() bool {

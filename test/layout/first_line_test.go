@@ -10,8 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// TestFirstLineFontWeight verifies that ::first-line { font-weight: bold }
-// changes the font weight of runs on the first line.
 func TestFirstLineFontWeight(t *testing.T) {
 	html := `<html><head><style>
 	p { font-size: 16px; line-height: 20px; width: 400px; }
@@ -26,17 +24,14 @@ func TestFirstLineFontWeight(t *testing.T) {
 		t.Fatal("target element not found")
 	}
 
-	// Run inline layout.
 	layout.Inline(arena, layout.ObjectID(1))
 
-	// Find word objects that are children of the <p> element.
 	pObjID, ok := arena.ForNode(target.ID)
 	if !ok {
 		t.Fatal("target layout object not found")
 	}
 	_ = pObjID
 
-	// Find the first word object in the arena. It should have bold weight.
 	firstWord := findWordObject(arena, "Hello")
 	if firstWord == nil {
 		t.Fatal("word 'Hello' not found in arena")
@@ -50,8 +45,6 @@ func TestFirstLineFontWeight(t *testing.T) {
 	}
 }
 
-// TestFirstLineSecondLineUnaffected verifies that only the first line is
-// styled; words on the second line keep the original style.
 func TestFirstLineSecondLineUnaffected(t *testing.T) {
 	html := `<html><head><style>
 	p { font-size: 16px; line-height: 20px; width: 100px; }
@@ -68,11 +61,8 @@ func TestFirstLineSecondLineUnaffected(t *testing.T) {
 
 	layout.Inline(arena, layout.ObjectID(1))
 
-	// Find a word that should be on the second line (narrow width forces wrap).
 	secondLineWord := findWordObject(arena, "second")
 	if secondLineWord == nil {
-		// If "second" is not found, the text all fits on one line.
-		// That's fine for this test - just verify the first word is bold.
 		firstWord := findWordObject(arena, "First")
 		if firstWord != nil && firstWord.Style != nil && firstWord.Style.FontWeight != style.WeightBold {
 			t.Errorf("first-line word font-weight = %v, want bold", firstWord.Style.FontWeight)
@@ -85,8 +75,6 @@ func TestFirstLineSecondLineUnaffected(t *testing.T) {
 	}
 }
 
-// TestFirstLineNoRules verifies that without ::first-line rules, the first
-// line keeps the original style.
 func TestFirstLineNoRules(t *testing.T) {
 	html := `<html><head><style>
 	p { font-size: 16px; font-weight: normal; width: 400px; }
@@ -111,8 +99,6 @@ func TestFirstLineNoRules(t *testing.T) {
 	}
 }
 
-// TestFirstLineStoredInArena verifies that the arena carries first-line
-// styles from the pseudo-style map.
 func TestFirstLineStoredInArena(t *testing.T) {
 	html := `<html><body><p id="target">Hello</p></body></html>`
 	cssText := `p::first-line { font-weight: bold; }`
@@ -140,7 +126,6 @@ func TestFirstLineStoredInArena(t *testing.T) {
 	}
 }
 
-// TestFirstLineColor verifies that color is applied on the first line.
 func TestFirstLineColor(t *testing.T) {
 	html := `<html><head><style>
 	p { font-size: 16px; width: 400px; color: black; }
@@ -164,14 +149,11 @@ func TestFirstLineColor(t *testing.T) {
 	if firstWord.Style == nil {
 		t.Fatal("word has nil style")
 	}
-	// Red is css.Color{R:255, G:0, B:0, A:255}
 	if firstWord.Style.Color.R != 255 || firstWord.Style.Color.G != 0 || firstWord.Style.Color.B != 0 {
 		t.Errorf("first-line color = %v, want red", firstWord.Style.Color)
 	}
 }
 
-// sessionWithSheetsForFirstLine is a helper that builds the arena and runs
-// block layout. It is the same as sessionWithSheets in first_letter_test.go.
 func sessionWithSheetsForFirstLine(t *testing.T, html string, viewportW float32) (*layout.Arena, *dom.Document) {
 	t.Helper()
 	doc := domtest.Parse(html)

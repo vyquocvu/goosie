@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-// TestPumpJSCloseIsSerialized pins the lifecycle contract between one pump turn
-// and teardown. A navigation drain closes the document it replaced on its own
-// goroutine, while the chrome pump may be inside a JS callback on the same
-// session. Close must wait for that turn instead of tearing the realm down
-// underneath it.
 func TestPumpJSCloseIsSerialized(t *testing.T) {
 	html := `<html><body><script>
 	var n = 0;
@@ -38,18 +33,12 @@ func TestPumpJSCloseIsSerialized(t *testing.T) {
 		}
 	}()
 
-	// Let the pump enter a timer callback before teardown starts.
 	time.Sleep(5 * time.Millisecond)
 	sess.Close()
 	close(stop)
 	wg.Wait()
 }
 
-// TestAccessibilityTreeSerializesSelectNormalization pins that the AX tree and
-// a keyboard/automation read of the focused select cannot normalize the same
-// option nodes at once. Both walk and rewrite current selectedness, and the AX
-// tree is built on the pump goroutine while host queries may arrive from
-// another.
 func TestAccessibilityTreeSerializesSelectNormalization(t *testing.T) {
 	html := `<html><body>
 <select id="s">

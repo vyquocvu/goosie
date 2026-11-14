@@ -7,11 +7,6 @@ import (
 	"testing"
 )
 
-// The live sweep is a report, not a gate, but the report decides what the team
-// believes about 100 real sites.  Its own selftest is where the fail-closed
-// properties live: a 4xx row must be named as not-a-measurement instead of
-// reading as an engine failure, and the disclosure must not swallow clean rows.
-// GOOSIE-LIVE-005 is the defect that made the section necessary.
 // qc:BR-258
 func TestLiveParitySelftestIsGreen(t *testing.T) {
 	py := parityPython(t)

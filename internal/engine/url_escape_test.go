@@ -8,18 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestExtractFontURLDecodesEscapes is the per-site oracle for extractFontURL:
-// the src list is scanned for the first url() and the fetched URL is the one the
-// escapes denote, while an unterminated token still yields no URL at all.
-//
-// The measured rows come from driving Chromium over a local HTTP server on
-// 2026-11-12 and reading the requests it made for a sheet at /sub.css:
-// `url("i\63 on.png")` fetched /icon.png, `url("ic\6fn.png")` fetched /icon.png
-// as well (a hex escape stops at the first non-hex digit, so no terminator is
-// needed), `url("br\"dr.png")` fetched /br"dr.png, `url(no\2dsuch.png)` fetched
-// /no-such.png, `url("a\ b.png")` fetched /a b.png, `@import url("b\42 .css")`
-// fetched /bB.css, and an escaped `fo\6f.ttf` in @font-face fetched /foo.ttf.
-// Every reader below pins the same expectation one layer inside this engine.
 // qc:BR-269
 func TestExtractFontURLDecodesEscapes(t *testing.T) {
 	cases := []struct{ name, in, want string }{
@@ -43,11 +31,6 @@ func TestExtractFontURLDecodesEscapes(t *testing.T) {
 	}
 }
 
-// TestCollectFontJobsResolvesAnEscapedSrc drives the same site through its real
-// entry: an @font-face parsed from a sheet, collected and resolved against the
-// sheet base. The URL that leaves here is the one a font fetch is asked for, so
-// a payload that kept its backslashes would be a 404 for a file whose name
-// contains them.
 // qc:BR-269
 func TestCollectFontJobsResolvesAnEscapedSrc(t *testing.T) {
 	sheet := css.Parse(`@font-face{font-family:"Esc";src:url("fo\6f.woff2") format("woff2");}`)
@@ -66,9 +49,6 @@ func TestCollectFontJobsResolvesAnEscapedSrc(t *testing.T) {
 	}
 }
 
-// TestImportRefDecodesEscapes is the per-site oracle for importRef, including
-// the leading-string form, which never passes through ScanURL and decodes
-// through unquote instead.
 // qc:BR-269
 func TestImportRefDecodesEscapes(t *testing.T) {
 	cases := []struct {
@@ -103,13 +83,6 @@ func TestImportRefDecodesEscapes(t *testing.T) {
 	}
 }
 
-// TestAbsolutizeCSSURLsResolvesEscapedRefs is the one place that must do both
-// halves at once: resolve the URL the escapes denote, and re-emit sheet text
-// that a second pass reads back identically. Each row asserts the round trip on
-// the output token rather than on the output bytes, because the bytes are the
-// same URL either way and only the rescan can show an emission that cuts early.
-// Chromium's own resolution of these payloads is the want column (measured
-// 2026-11-12: /icon.png, /no-such.png, /a b.png for the same three forms).
 // qc:BR-269
 func TestAbsolutizeCSSURLsResolvesEscapedRefs(t *testing.T) {
 	const sheetURL = "https://e/x/s.css"
@@ -139,10 +112,6 @@ func TestAbsolutizeCSSURLsResolvesEscapedRefs(t *testing.T) {
 	}
 }
 
-// TestAbsolutizeCSSURLsKeepsEscapedDataURIBytes pins the other half of the same
-// function: a reference that is not rewritten is re-emitted exactly as written,
-// escapes and all. Decoding here would turn `url("a\"b")` into `url("a"b")` and
-// break the token the scanner had just matched, which is why Payload stays raw.
 // qc:BR-269
 func TestAbsolutizeCSSURLsKeepsEscapedDataURIBytes(t *testing.T) {
 	const sheetURL = "https://e/x/s.css"
@@ -167,11 +136,6 @@ func TestAbsolutizeCSSURLsKeepsEscapedDataURIBytes(t *testing.T) {
 	}
 }
 
-// TestExpandCSSImportsEscapedInnerRef is the end-to-end INT: a page sheet that
-// @imports an inner sheet whose escaped relative reference must resolve against
-// the INNER sheet's URL, the way Chromium fetched /icon.png from /sub.css
-// rather than from the page. Both the import ref and the inner ref are escaped,
-// so a single wrong layer would show up as a missing or misnamed fetch.
 // qc:BR-269
 func TestExpandCSSImportsEscapedInnerRef(t *testing.T) {
 	const innerURL = "https://e/p/inner.css"

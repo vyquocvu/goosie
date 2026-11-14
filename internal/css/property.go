@@ -7,18 +7,14 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// CleanSyntax strips enclosing quotes from a syntax string, e.g. "'<color>'" -> "<color>".
 func CleanSyntax(syntax string) string {
 	return dom.CleanSyntax(syntax)
 }
 
-// ValidatePropertySyntax checks whether a syntax descriptor conforms to the
-// CSS Properties and Values API Level 1 grammar.
 func ValidatePropertySyntax(syntax string) error {
 	return dom.ValidatePropertySyntax(syntax)
 }
 
-// MatchesPropertySyntax returns true if value conforms to the registered syntax.
 func MatchesPropertySyntax(syntax, val string) bool {
 	syntax = CleanSyntax(syntax)
 	val = strings.TrimSpace(val)
@@ -29,9 +25,8 @@ func MatchesPropertySyntax(syntax, val string) bool {
 	return dom.MatchesPropertySyntax(syntax, val)
 }
 
-// parsePropertyRule parses an @property --name { ... } at-rule.
 func (p *parser) parsePropertyRule(sheet *Stylesheet) {
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' {
 		p.pos++
 	}
@@ -44,7 +39,7 @@ func (p *parser) parsePropertyRule(sheet *Stylesheet) {
 		return
 	}
 	name := strings.TrimSpace(p.input[preludeStart:p.pos])
-	p.pos++ // '{'
+	p.pos++
 
 	bodyStart := p.pos
 	depth := 1
@@ -63,7 +58,6 @@ func (p *parser) parsePropertyRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:bodyEnd]
 
-	// CSS Property name MUST start with '--'
 	if !strings.HasPrefix(name, "--") || len(name) <= 2 {
 		return
 	}
@@ -105,7 +99,6 @@ func (p *parser) parsePropertyRule(sheet *Stylesheet) {
 		}
 	}
 
-	// Check required descriptors
 	if !hasSyntax || !hasInherits {
 		return
 	}
@@ -126,9 +119,8 @@ func (p *parser) parsePropertyRule(sheet *Stylesheet) {
 	})
 }
 
-// parseStartingStyleRule parses top-level @starting-style { ... }.
 func (p *parser) parseStartingStyleRule(sheet *Stylesheet) {
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' {
 		p.pos++
 	}
@@ -136,7 +128,7 @@ func (p *parser) parseStartingStyleRule(sheet *Stylesheet) {
 	if p.pos >= len(p.input) || p.input[p.pos] != '{' {
 		return
 	}
-	p.pos++ // '{'
+	p.pos++
 
 	bodyStart := p.pos
 	depth := 1
@@ -175,9 +167,8 @@ func (p *parser) parseStartingStyleRule(sheet *Stylesheet) {
 	sheet.Properties = append(sheet.Properties, innerSheet.Properties...)
 }
 
-// parseFontPaletteValuesRule parses an @font-palette-values --name { ... } at-rule.
 func (p *parser) parseFontPaletteValuesRule(sheet *Stylesheet) {
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' {
 		p.pos++
 	}
@@ -190,7 +181,7 @@ func (p *parser) parseFontPaletteValuesRule(sheet *Stylesheet) {
 		return
 	}
 	name := strings.TrimSpace(p.input[preludeStart:p.pos])
-	p.pos++ // '{'
+	p.pos++
 
 	bodyStart := p.pos
 	depth := 1

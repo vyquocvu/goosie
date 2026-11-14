@@ -9,9 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/session"
 )
 
-// FR-DAT-04: the crash journal is refreshed on a fixed cadence, so an abrupt
-// kill loses at most one interval of tab state rather than everything since
-// the last navigation.
 func TestSessionSnapshotterJournalsOnInterval(t *testing.T) {
 	b := newBrowserE2E(t)
 	tab := b.f.tabMgr.Active()
@@ -53,13 +50,11 @@ func TestSessionSnapshotterJournalsOnInterval(t *testing.T) {
 	}
 }
 
-// Private runs must never write the journal.
 func TestSessionSnapshotterSkipsPrivateRuns(t *testing.T) {
 	b := newBrowserE2E(t)
 	b.f.config.private = true
 	b.f.sessionSnapshotEvery = time.Millisecond
 	path := b.f.config.sessionActiveFile
-	// Setup may have journaled before private mode was forced on.
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}

@@ -4,7 +4,6 @@ import (
 	"testing"
 )
 
-// TestGridSpanPlacements verifies line / span N, span N / line, and bare span N.
 func TestGridSpanPlacements(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; width: 600px; grid-template-columns: repeat(3, 200px);">
@@ -26,7 +25,6 @@ func TestGridSpanPlacements(t *testing.T) {
 	if itemB == nil {
 		t.Fatal("itemB not found")
 	}
-	// span 2 / line 4 ends at line 4 (3rd column right edge = 600), starts at line 2 (200), width = 400
 	if !almostEqual(itemB.X, 200) || !almostEqual(itemB.W, 400) {
 		t.Errorf("itemB = {X:%v, W:%v}, want {200, 400}", itemB.X, itemB.W)
 	}
@@ -35,13 +33,11 @@ func TestGridSpanPlacements(t *testing.T) {
 	if itemC == nil {
 		t.Fatal("itemC not found")
 	}
-	// 1 / span 3 spans all 3 columns: X=0, W=600
 	if !almostEqual(itemC.X, 0) || !almostEqual(itemC.W, 600) {
 		t.Errorf("itemC = {X:%v, W:%v}, want {0, 600}", itemC.X, itemC.W)
 	}
 }
 
-// TestGridNegativeLinePlacement verifies that -1 refers to the end of the explicit grid.
 func TestGridNegativeLinePlacement(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; width: 800px; grid-template-columns: repeat(4, 200px);">
@@ -67,7 +63,6 @@ func TestGridNegativeLinePlacement(t *testing.T) {
 	}
 }
 
-// TestGridFitContent verifies fit-content(length) track sizing.
 func TestGridFitContent(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; width: 600px; grid-template-columns: fit-content(150px) 1fr;">
@@ -85,7 +80,6 @@ func TestGridFitContent(t *testing.T) {
 	}
 }
 
-// TestGridWithLogicalProperties verifies that inline-size, block-size, and logical margins/paddings work in grid.
 func TestGridWithLogicalProperties(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; inline-size: 600px; block-size: 200px; grid-template-columns: 1fr 1fr;">
@@ -98,7 +92,6 @@ func TestGridWithLogicalProperties(t *testing.T) {
 	if boxA == nil {
 		t.Fatal("boxA not found")
 	}
-	// Column 0 is width 300, boxA has margin-left: 10, so X = 10
 	if !almostEqual(boxA.X, 10) {
 		t.Errorf("boxA.X = %v, want 10", boxA.X)
 	}

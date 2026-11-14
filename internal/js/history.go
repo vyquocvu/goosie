@@ -7,16 +7,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// History API implementation for client-side routing.
-
-// historyEntry represents one entry in the session history.
 type historyEntry struct {
 	state goja.Value
 	title string
 	url   string
 }
 
-// historyObj holds the internal state of the History object.
 type historyObj struct {
 	r       *Runtime
 	mu      sync.Mutex
@@ -26,7 +22,6 @@ type historyObj struct {
 	obj     *goja.Object
 }
 
-// setupHistory installs the History API on the global scope.
 func (r *Runtime) setupHistory() {
 	hist := &historyObj{
 		r:       r,
@@ -35,7 +30,6 @@ func (r *Runtime) setupHistory() {
 		doc:     r.domDoc,
 	}
 
-	// Add initial entry for the current page.
 	if r.opts.URL != "" {
 		hist.entries = append(hist.entries, historyEntry{
 			state: goja.Null(),
@@ -47,7 +41,6 @@ func (r *Runtime) setupHistory() {
 
 	obj := r.vm.NewObject()
 
-	// pushState(state, title, url) - adds a new entry to the history.
 	_ = obj.Set("pushState", func(call goja.FunctionCall) goja.Value {
 		var state goja.Value
 		if len(call.Arguments) >= 1 {
@@ -67,23 +60,19 @@ func (r *Runtime) setupHistory() {
 		}
 
 		hist.mu.Lock()
-		// Remove any forward history.
 		if hist.index < len(hist.entries)-1 {
 			hist.entries = hist.entries[:hist.index+1]
 		}
-		// Add new entry.
 		hist.entries = append(hist.entries, historyEntry{
 			state: state,
 			title: title,
 			url:   url,
 		})
 		hist.index = len(hist.entries) - 1
-		// Update state property on the JS object.
 		_ = hist.obj.Set("state", state)
 		_ = hist.obj.Set("length", len(hist.entries))
 		hist.mu.Unlock()
 
-		// Update window.location.href if url was provided.
 		if url != "" {
 			r.updateLocation(url)
 		}
@@ -91,7 +80,6 @@ func (r *Runtime) setupHistory() {
 		return goja.Undefined()
 	})
 
-	// replaceState(state, title, url) - replaces the current entry.
 	_ = obj.Set("replaceState", func(call goja.FunctionCall) goja.Value {
 		var state goja.Value
 		if len(call.Arguments) >= 1 {
@@ -118,11 +106,9 @@ func (r *Runtime) setupHistory() {
 				url:   url,
 			}
 		}
-		// Update state property on the JS object.
 		_ = hist.obj.Set("state", state)
 		hist.mu.Unlock()
 
-		// Update window.location.href if url was provided.
 		if url != "" {
 			r.updateLocation(url)
 		}
@@ -130,19 +116,16 @@ func (r *Runtime) setupHistory() {
 		return goja.Undefined()
 	})
 
-	// back() - goes back one entry.
 	_ = obj.Set("back", func(call goja.FunctionCall) goja.Value {
 		hist.goTo(-1)
 		return goja.Undefined()
 	})
 
-	// forward() - goes forward one entry.
 	_ = obj.Set("forward", func(call goja.FunctionCall) goja.Value {
 		hist.goTo(1)
 		return goja.Undefined()
 	})
 
-	// go(delta) - goes to a specific entry.
 	_ = obj.Set("go", func(call goja.FunctionCall) goja.Value {
 		var delta int
 		if len(call.Arguments) >= 1 {
@@ -154,27 +137,21 @@ func (r *Runtime) setupHistory() {
 		return goja.Undefined()
 	})
 
-	// length property - updated by pushState.
 	_ = obj.Set("length", len(hist.entries))
 
-	// state property - initially null, updated by pushState/replaceState/goTo.
 	_ = obj.Set("state", goja.Null())
 
-	// Install on global scope.
 	_ = r.vm.Set("history", obj)
 
-	// Also install on window object.
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set("history", obj)
 		}
 	}
 
-	// Store reference to the history object so we can update state.
 	hist.obj = obj
 }
 
-// goTo navigates by the given delta in the history.
 func (h *historyObj) goTo(delta int) {
 	h.mu.Lock()
 	newIndex := h.index + delta
@@ -186,26 +163,19 @@ func (h *historyObj) goTo(delta int) {
 	oldIndex := h.index
 	h.index = newIndex
 	entry := h.entries[newIndex]
-	// Update state property on the JS object.
 	_ = h.obj.Set("state", entry.state)
 	h.mu.Unlock()
 
-	// Update window.location.href.
 	if entry.url != "" {
 		h.r.updateLocation(entry.url)
 	}
 
-	// Fire popstate event if we actually moved.
 	if newIndex != oldIndex && h.doc != nil {
 		ev := dom.NewTrustedEvent("popstate", false, false)
 		dom.DispatchEvent(&h.doc.Node, ev)
 	}
 }
 
-// updateLocation moves the document's URL after a history walk. location's
-// parts are accessors over one parsed URL (see location.go), so updating the
-// runtime state is the whole job - and the only way to keep pathname, search and
-// hostname consistent with the href a page reads next.
 func (r *Runtime) updateLocation(url string) {
 	r.setLocation(url)
 }

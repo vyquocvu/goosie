@@ -28,7 +28,6 @@ func TestCookieJarInspection(t *testing.T) {
 		t.Fatalf("expected 3 active cookies, got %d", len(all))
 	}
 
-	// Test host filtering
 	exampleCookies := jar.CookiesForHost("example.com")
 	if len(exampleCookies) != 2 {
 		t.Fatalf("expected 2 cookies for example.com, got %d", len(exampleCookies))
@@ -47,7 +46,6 @@ func TestCookieJarInspection(t *testing.T) {
 		t.Fatalf("expected 0 cookies for nomatch.com, got %d", len(unmatchedCookies))
 	}
 
-	// Test Clear
 	jar.Clear()
 	if len(jar.AllCookies()) != 0 {
 		t.Fatalf("expected 0 cookies after Clear(), got %d", len(jar.AllCookies()))
@@ -55,9 +53,6 @@ func TestCookieJarInspection(t *testing.T) {
 }
 
 // qc:BR-058
-//
-// Deleting one site's cookies must not take a subdomain's own cookies with it:
-// the settings page lists exact domains, so the jar removes by exact domain.
 func TestCookieJarRemoveForDomainDeletesOnlyThatSite(t *testing.T) {
 	jar := transport.NewCookieJar()
 	example, _ := url.Parse("https://example.com/")

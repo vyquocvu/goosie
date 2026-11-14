@@ -6,8 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// counterDoc is the generated half of the css-lists counters-003 WPT test:
-// nested scopes with resets at 48/388/3488 must join ancestor levels.
 const counterDoc = `<html><head><style>
 body, #test span:first-child { counter-reset: c; }
 p, #test span { counter-increment: c; }
@@ -30,9 +28,6 @@ func counterSession(t *testing.T, html string) *engine.Session {
 	return sess
 }
 
-// TestCountersJoinNestedScopes pins css-lists counter scoping end to end:
-// the first span joins body and own levels (I.I), plain siblings advance the
-// body counter (II..XII), and resets fork nested levels (XII.XLIX for 12.49).
 func TestCountersJoinNestedScopes(t *testing.T) {
 	sess := counterSession(t, counterDoc)
 	defer sess.Close()
@@ -43,8 +38,6 @@ func TestCountersJoinNestedScopes(t *testing.T) {
 	}
 }
 
-// TestCounterFunctionTextNeverLeaks pins the old failure mode: the raw
-// `counters(...)` source must never render as literal text.
 func TestCounterFunctionTextNeverLeaks(t *testing.T) {
 	sess := counterSession(t, counterDoc)
 	defer sess.Close()
@@ -53,9 +46,6 @@ func TestCounterFunctionTextNeverLeaks(t *testing.T) {
 	}
 }
 
-// TestGeorgianCounters pins the predefined Georgian style against the
-// css-lists reference values, including the archaic 8 (ჱ), 60 (ჲ) and the
-// 19999 maximum (ჵჰშჟთ).
 func TestGeorgianCounters(t *testing.T) {
 	html := `<html><head><style>
 div span { counter-increment: c; }
@@ -68,7 +58,6 @@ div span::before { content: counter(c, georgian); }
 		`</div></body></html>`
 	sess := counterSession(t, html)
 	defer sess.Close()
-	// Resets establish 19/59/999/19998; increments land on 20/60/1000/19999.
 	for _, want := range []string{"კ", "ჲ", "ჩ", "ჵჰშჟთ"} {
 		if got := sess.Find(want); len(got) == 0 {
 			t.Errorf("Find(%q) found nothing", want)
@@ -76,8 +65,6 @@ div span::before { content: counter(c, georgian); }
 	}
 }
 
-// TestCounterScopesAreIndependent: sibling subtrees resetting the same name
-// must not observe each other.
 func TestCounterScopesAreIndependent(t *testing.T) {
 	html := `<html><head><style>
 div.a, div.b { counter-reset: c; }
@@ -94,7 +81,6 @@ div span::before { content: counter(c); }
 	}
 }
 
-// TestMissingCounterRendersZero: counter() with no instance anywhere renders 0.
 func TestMissingCounterRendersZero(t *testing.T) {
 	html := `<html><head><style>span::before { content: counter(zzz); }</style></head><body><span>q</span></body></html>`
 	sess := counterSession(t, html)

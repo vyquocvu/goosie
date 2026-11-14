@@ -59,9 +59,6 @@ func (r *Runtime) newLiveNodeList(node *dom.Node) goja.Value {
 	return list
 }
 
-// newLiveNodeListMatching returns a live NodeList backed by an arbitrary
-// DOM relationship. Numeric properties are own indexed properties so that
-// Web IDL array-like checks, including hasOwnProperty(), observe the list.
 func (r *Runtime) newLiveNodeListMatching(matches func() []*dom.Node) goja.Value {
 	proto := r.ensureCollectionProto()
 	target := r.newLiveCollectionMatching(matches, proto).(*goja.Object)
@@ -141,8 +138,6 @@ func (r *Runtime) newLiveHTMLCollection(root *dom.Node, tag, class string) goja.
 	return r.newLiveHTMLCollectionMatching(matches)
 }
 
-// newLiveHTMLCollectionMatching creates a live indexed collection for a
-// standards-defined element relationship such as table.rows or row.cells.
 func (r *Runtime) newLiveHTMLCollectionMatching(matches func() []*dom.Node) goja.Value {
 	proto := r.htmlCollectionProto
 	if proto == nil {
@@ -246,18 +241,11 @@ func (r *Runtime) newLiveHTMLCollectionMatching(matches func() []*dom.Node) goja
 		Set: func(target *goja.Object, property string, value, receiver goja.Value) bool {
 			ownDescriptor := r.ownPropertyDescriptor(target, property)
 			if ownDescriptor.Empty() && findNamedCollectionItem(matches(), property) != nil {
-				// Named properties act as inherited properties when the collection
-				// is a prototype. Define the expando on the actual receiver rather
-				// than re-entering this proxy's Set trap.
 				if object, ok := receiver.(*goja.Object); ok {
 					return object.DefineDataProperty(property, value, goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_TRUE) == nil
 				}
 				return false
 			}
-			// goja passes its internal proxy receiver in a representation that is
-			// not StrictEquals to the public proxy value. Re-entering Set on that
-			// receiver therefore invokes this trap again. The collection target is
-			// the ordinary object that owns expandos, so write there directly.
 			return target.Set(property, value) == nil
 		},
 		SetIdx: func(_ *goja.Object, _ int, _ goja.Value, _ goja.Value) bool { return false },

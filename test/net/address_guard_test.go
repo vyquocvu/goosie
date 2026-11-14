@@ -17,28 +17,10 @@ import (
 	transport "github.com/vyquocvu/goosie/internal/net"
 )
 
-// The tests here are about *where a connection goes*, not about what a URL says.
-//
-// internal/engine refuses a public page's subresource when the href *names* a
-// local address (see test/engine/private_network_test.go). That check can only
-// read the name. A host that reads as public and resolves as private - the
-// attacker registering rebinding.example with an A record of 127.0.0.1, or one
-// that simply changes its record between the check and the connect - walks past
-// it and reaches the viewer's machine, which is where cloud metadata services
-// answer. The only place that can see the difference is the dial itself.
-//
-// So the client takes a guard on the request context: a predicate over resolved
-// addresses plus, because a test cannot otherwise name an address without
-// touching DNS, the lookup to run it against.
-
-// rebindServer is the private endpoint a public-looking name points at: a real
-// HTTP server on loopback, counted, plus the URL to ask for it by name.
 type rebindServer struct {
-	srv   *httptest.Server
-	hits  atomic.Int64
-	hosts atomic.Value // string: the Host header of the last request
-	// target is the same endpoint addressed by a name no local-address rule
-	// would refuse: http://rebind.example:<port>.
+	srv    *httptest.Server
+	hits   atomic.Int64
+	hosts  atomic.Value
 	target string
 }
 
@@ -68,11 +50,6 @@ func (r *rebindServer) loopbackNames() []net.IP {
 	return []net.IP{net.ParseIP("127.0.0.1")}
 }
 
-// lookupFor returns the addresses for every name the tests ask for, and counts
-// how many times the guard resolved anything at all. The count is the point:
-// validating one answer and dialing a second, separately resolved one is the
-// time-of-check gap this is meant to close, so a guard that resolves twice has
-// not closed it however correctly it refuses.
 func lookupFor(hosts map[string][]net.IP) (transport.AddressLookup, *atomic.Int64) {
 	var lookups atomic.Int64
 	return func(ctx context.Context, host string) ([]net.IP, error) {
@@ -108,10 +85,6 @@ func TestAddressGuardRefusesAHostThatResolvesToABlockedAddress(t *testing.T) {
 	}
 }
 
-// TestAddressGuardDialsTheAddressItValidated is the non-vacuity half: the same
-// machinery with a predicate that refuses nothing has to keep working, and do it
-// in one resolution. A guard that only ever refuses proves nothing about the
-// connect, and one that resolves twice describes an address it then ignores.
 func TestAddressGuardDialsTheAddressItValidated(t *testing.T) {
 	r := newRebindServer(t, "private")
 	lookup, lookups := lookupFor(map[string][]net.IP{"rebind.example": r.loopbackNames()})
@@ -132,9 +105,6 @@ func TestAddressGuardDialsTheAddressItValidated(t *testing.T) {
 	if got := lookups.Load(); got != 1 {
 		t.Errorf("resolved %d times, want 1: the address checked has to be the address dialed", got)
 	}
-	// The name has to survive the pinning, or virtual hosts and TLS server names
-	// would break: the request goes to 127.0.0.1 while still asking for
-	// rebind.example.
 	host, _, err := net.SplitHostPort(r.hosts.Load().(string))
 	if err != nil || host != "rebind.example" {
 		t.Errorf("the server saw Host %q, want rebind.example: pinning the address must not rewrite the name (%v)", r.hosts.Load(), err)
@@ -147,8 +117,6 @@ func TestAddressGuardSkipsABlockedAddressAndDialsTheNextOne(t *testing.T) {
 		"rebind.example": {net.ParseIP("::1"), net.ParseIP("127.0.0.1")},
 	})
 	ctx := transport.WithAddressGuard(context.Background(), transport.AddressGuard{
-		// Every IPv6 address is refused, so the only way this request can
-		// succeed is by going on to the second answer.
 		Blocked: func(ip net.IP) bool { return ip.To4() == nil },
 		Lookup:  lookup,
 	})
@@ -170,9 +138,6 @@ func TestAddressGuardSkipsABlockedAddressAndDialsTheNextOne(t *testing.T) {
 	}
 }
 
-// TestAddressGuardChecksALiteralAddressWithoutResolving: 127.0.0.1 written into
-// the URL needs no lookup, and a guard that performed one anyway would be
-// reporting a resolution error for a name that is already an address.
 // qc:BR-161
 func TestAddressGuardChecksALiteralAddressWithoutResolving(t *testing.T) {
 	r := newRebindServer(t, "private")
@@ -196,14 +161,6 @@ func TestAddressGuardChecksALiteralAddressWithoutResolving(t *testing.T) {
 	}
 }
 
-// TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4 covers the spellings of a
-// destination, not just its canonical form. The same loopback endpoint can be
-// written [::1], [::ffff:127.0.0.1], 127.1, 2130706433, 0x7f000001 or
-// 0x7f.0.0.1, and a guard that parsed the URL text itself would have to
-// reimplement every form. This one judges resolved addresses instead, so the
-// spelling never reaches the policy: literals are classified in place, and
-// numeric forms the standard library does not parse as IP literals are resolved
-// (the resolver understands them) and then judged like any other answer.
 // qc:BR-161
 func TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4(t *testing.T) {
 	r := newRebindServer(t, "private")
@@ -252,9 +209,6 @@ func TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4(t *testing.T) {
 		})
 	}
 
-	// These are not IP literals to net.ParseIP, but the resolver accepts them as
-	// numeric IPv4 spellings. The guard must judge what resolution returned, not
-	// the characters in the URL, or each new spelling would be a new hole.
 	for _, host := range []string{"2130706433", "0x7f000001", "0x7f.0.0.1", "017700000001"} {
 		t.Run("encoded "+host, func(t *testing.T) {
 			r.hits.Store(0)
@@ -283,9 +237,6 @@ func TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4(t *testing.T) {
 		})
 	}
 
-	// 127.1 is the legacy two-part spelling. This client refuses it during URL
-	// validation instead of handing it to the resolver, which is a different
-	// layer answering but the same outcome: no resolution and no connection.
 	t.Run("dotted shorthand rejected before dial", func(t *testing.T) {
 		r.hits.Store(0)
 		lookup, lookups := lookupFor(map[string][]net.IP{})
@@ -312,9 +263,6 @@ func TestAddressGuardRefusesIPv6LiteralsAndEncodedIPv4(t *testing.T) {
 	})
 }
 
-// TestAddressGuardWithoutAGuardDialsNormally is the control for every case
-// above: the refusals have to be the guard's doing and not something the client
-// already did to a loopback address.
 func TestAddressGuardWithoutAGuardDialsNormally(t *testing.T) {
 	r := newRebindServer(t, "control")
 	client := transport.DefaultClient()
@@ -332,11 +280,6 @@ func TestAddressGuardWithoutAGuardDialsNormally(t *testing.T) {
 	}
 }
 
-// TestAddressGuardRefusesANameThatResolvesToNothing: an empty answer must not
-// fall through to an unvalidated dial of the name, which is the one path on
-// which the guard would be bypassed rather than merely unused. It is also not a
-// blocked address, because nothing was refused on policy grounds and a log that
-// conflates the two reports a NXDOMAIN as an attack.
 func TestAddressGuardRefusesANameThatResolvesToNothing(t *testing.T) {
 	r := newRebindServer(t, "private")
 	lookup, lookups := lookupFor(map[string][]net.IP{"rebind.example": {}})
@@ -362,12 +305,6 @@ func TestAddressGuardRefusesANameThatResolvesToNothing(t *testing.T) {
 	}
 }
 
-// TestAddressGuardChecksTheRedirectDestination is the redirect half of the
-// public-page rule. The first hop is allowed, so anything that refuses the
-// destination is judging the hop that the user never typed: a public server
-// answering "go to 10.0.0.5" must not become a way to reach it. The control
-// proves the refusal is the destination's doing, not a guard that rejects
-// every redirect.
 // qc:BR-160
 func TestAddressGuardChecksTheRedirectDestination(t *testing.T) {
 	guard := transport.AddressGuard{
@@ -451,13 +388,6 @@ func TestAddressGuardChecksTheRedirectDestination(t *testing.T) {
 	})
 }
 
-// TestAddressGuardKeepsTheNameForTLS: pinning the validated address moves the
-// connection, and it must move nothing else. HTTPS needs the name twice - as the
-// server name indication and as the certificate's expected identity - so a guard
-// that handed the dialed IP to TLS instead would make every guarded subresource
-// behind a name-verifying host fail. InsecureSkipVerify here is only about not
-// bundling httptest's CA; the thing under test is the name the server was
-// introduced to, not the trust decision.
 func TestAddressGuardKeepsTheNameForTLS(t *testing.T) {
 	var sni atomic.Value
 	sni.Store("")

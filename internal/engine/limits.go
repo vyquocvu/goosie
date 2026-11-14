@@ -20,53 +20,35 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// Phase 1 resource caps apply per document, including all author/embedded/inline
-// CSS. Geometry is CSS pixels; viewport device limits apply after scaling.
 const (
-	MaxDocumentBytes   = 16 << 20
-	MaxDocumentNodes   = 1000000
-	MaxDocumentDepth   = 128
-	MaxAttributes      = 64
-	MaxAttributeBytes  = 1 << 20
-	MaxCSSBytes        = 4 << 20
-	MaxCSSTokens       = 1 << 20
-	MaxCSSRules        = 32768
-	MaxCSSSelectors    = 65536
-	MaxCSSDeclarations = 1 << 18
-	MaxCSSNesting      = 8
-	// A selector's parts and conditions are counted recursively through :not()
-	// arguments, so these bound the whole tree a selector compiles to rather than
-	// its visible compound count. Real stylesheets need the headroom: a MediaWiki
-	// rule such as `html.x body.y:not(.z) .w table:not(.a):not(.b)` is already at
-	// the old limit of 8 parts. Runaway matching is caught by MaxStyleWork, which
-	// prices each selector against the elements carrying its key.
+	MaxDocumentBytes      = 16 << 20
+	MaxDocumentNodes      = 1000000
+	MaxDocumentDepth      = 128
+	MaxAttributes         = 64
+	MaxAttributeBytes     = 1 << 20
+	MaxCSSBytes           = 4 << 20
+	MaxCSSTokens          = 1 << 20
+	MaxCSSRules           = 32768
+	MaxCSSSelectors       = 65536
+	MaxCSSDeclarations    = 1 << 18
+	MaxCSSNesting         = 8
 	MaxSelectorParts      = 64
 	MaxSelectorConditions = 64
-	// Descendant/general-sibling combinators increase matching cost linearly;
-	// the old limit of 1 rejected any selector with more than one combinator.
-	MaxSelectorSearches = 16
-	// Matching + declaration-byte work estimate, before Resolve, priced the way the
-	// matcher actually runs: each selector against the elements carrying its key.
-	// Rules past it are clipped rather than failing the document.
-	MaxStyleWork       = 1 << 28
-	MaxFontSize        = 512
-	MaxGeometry        = 2 << 20
-	MaxLayoutObjects   = 4 << 20
-	MaxTextRunes       = 8 << 20
-	MaxDPR             = 8
-	MaxDeviceDimension = 16384
-	MaxDevicePixels    = 16 * 1024 * 1024
-	// Canvas backing stores reuse the device bounds: width/height come from
-	// page-controlled attributes, and the replay allocates one bitmap of that
-	// size before paint.
-	MaxCanvasDimension = MaxDeviceDimension
-	MaxCanvasPixels    = MaxDevicePixels
-	MaxDocumentTiles   = 524288
-	MaxTileCacheBytes  = 64 << 20
+	MaxSelectorSearches   = 16
+	MaxStyleWork          = 1 << 28
+	MaxFontSize           = 512
+	MaxGeometry           = 2 << 20
+	MaxLayoutObjects      = 4 << 20
+	MaxTextRunes          = 8 << 20
+	MaxDPR                = 8
+	MaxDeviceDimension    = 16384
+	MaxDevicePixels       = 16 * 1024 * 1024
+	MaxCanvasDimension    = MaxDeviceDimension
+	MaxCanvasPixels       = MaxDevicePixels
+	MaxDocumentTiles      = 524288
+	MaxTileCacheBytes     = 64 << 20
 )
 
-// canvasBitmapFits reports whether a canvas may be rasterized within the device
-// bounds. A declared size outside them is left unpainted rather than allocated.
 func canvasBitmapFits(w, h int) bool {
 	if w <= 0 || h <= 0 || w > MaxCanvasDimension || h > MaxCanvasDimension {
 		return false
@@ -90,8 +72,6 @@ func validateWidth(w float32) error {
 	return nil
 }
 
-// ValidateViewport must precede conversion to device int32 dimensions and any
-// surface allocation. Subpixel sizes rounding to zero are not renderable.
 func ValidateViewport(width, height int, dpr float64) error {
 	if width <= 0 || height <= 0 || width > MaxGeometry || height > MaxGeometry {
 		return fmt.Errorf("viewport CSS dimensions must be in (0, %d]", MaxGeometry)
@@ -113,9 +93,6 @@ func ValidateViewport(width, height int, dpr float64) error {
 	return nil
 }
 
-// documentTiles returns the signed tile span of a document extent, including
-// the origin. It uses floor division via frame.CoordFor so negative coordinates
-// land in the tile that actually covers them.
 func documentTiles(r frame.Rect) (int64, error) {
 	const edge = MaxGeometry * MaxDPR
 	if r.X0 < -edge || r.Y0 < -edge || r.X1 > edge || r.Y1 > edge || r.X1 < r.X0 || r.Y1 < r.Y0 {
@@ -134,17 +111,11 @@ func documentTiles(r frame.Rect) (int64, error) {
 	return cols * rows, nil
 }
 
-// ValidateExtent checks a device-pixel document extent before tile-grid
-// allocation. Unlike a viewport, a scrolling document can exceed 16384 pixels.
 func ValidateExtent(r frame.Rect) error {
 	_, err := documentTiles(r)
 	return err
 }
 
-// TileCacheBudget returns the tile count and byte capacity for a document's
-// tile cache. It adds 8 tiles of headroom to the document's tile count, capped
-// at MaxTileCacheBytes. Empty content gets a positive cap (8 tiles). Invalid
-// extents return an error with zero usable capacity.
 func TileCacheBudget(r frame.Rect) (tiles int, bytes int64, err error) {
 	docTiles, err := documentTiles(r)
 	if err != nil {
@@ -159,10 +130,6 @@ func TileCacheBudget(r frame.Rect) (tiles int, bytes int64, err error) {
 
 type cssBudget struct{ bytes, tokens, rules, selectors, declarations int }
 
-// check scans actual CSS tokens before the recursive value/selector parsers.
-// Raw delimiters are also capped because the current stylesheet parser treats
-// delimiters inside strings/comments as structural. These are upper bounds,
-// not an alternative CSS parser, and do not change cascade semantics.
 func (b *cssBudget) check(src string, inline bool) error {
 	if len(src) > MaxCSSBytes-b.bytes {
 		return fmt.Errorf("CSS byte limit exceeded (%d)", MaxCSSBytes)
@@ -203,13 +170,6 @@ func (b *cssBudget) check(src string, inline bool) error {
 		if b.tokens > MaxCSSTokens {
 			return fmt.Errorf("CSS token limit exceeded (%d)", MaxCSSTokens)
 		}
-		// A url() body is an address, not a value: cache-busting query
-		// strings (sort_both.svg?0e440, as served by MediaWiki) lex as
-		// number tokens with NaN values. Policing them as geometry would
-		// refuse the whole sheet over an address that can never become a
-		// box size, so the range check skips the function body while the
-		// token count above still bounds it. Quoted urls never reach here
-		// as numbers (the tokenizer folds them into one string token).
 		if t.Type == css.TokenFunction && strings.EqualFold(t.Value, "url") {
 			urlDepth++
 			continue
@@ -226,19 +186,12 @@ func (b *cssBudget) check(src string, inline bool) error {
 		switch t.Type {
 		case css.TokenNumber, css.TokenDimension, css.TokenPercentage:
 			property := cssPropertyAt(src, tok.Offset())
-			// Unicode-range is a font glyph selector (for example U+1E80), not
-			// a geometry value. The tokenizer sees its hexadecimal digits as a
-			// number, so don't apply float or layout bounds to this declaration.
 			if property == "unicode-range" {
 				continue
 			}
 			n, err := strconv.ParseFloat(t.Value, 64)
 			if err != nil {
-				// Check if this is an overflow error (value too large for float64).
-				// Other parse errors are skipped and left to the CSS parser.
 				if strings.Contains(err.Error(), "out of range") {
-					// No parsed value exists to report; NaN says that instead of
-					// inventing a zero the token never held.
 					return geometryRefusal(geometryBranchFloatOverflow, property, t.Value, t.Unit, math.NaN(), t.NumVal)
 				}
 				continue
@@ -246,12 +199,6 @@ func (b *cssBudget) check(src string, inline bool) error {
 			if !finite(n) || !finite(t.NumVal) {
 				return geometryRefusal(geometryBranchNonFinite, property, t.Value, t.Unit, n, t.NumVal)
 			}
-			// The magnitude cap is geometry protection, so it applies to
-			// dimensions and percentages - the things that become box sizes -
-			// not to plain numbers. Counters, z-index, order, flex factors
-			// and the like are legally huge (a 2-billion counter reset is a
-			// conformance test), and refusing the whole document over one
-			// blanked the entire page.
 			if t.Type != css.TokenNumber && !isBorderRadiusProperty(property) &&
 				(math.Abs(n) > MaxGeometry || math.Abs(t.NumVal) > MaxGeometry) {
 				return geometryRefusal(geometryBranchMagnitude, property, t.Value, t.Unit, n, t.NumVal)
@@ -267,36 +214,19 @@ func (b *cssBudget) check(src string, inline bool) error {
 	return nil
 }
 
-// The three geometry branches of the CSS admission guard used to answer with
-// one identical, content-free sentence, so a refusal reported from a live page
-// named neither the declaration blamed, nor the value that tripped, nor the
-// bound, nor which check fired - unlike "CSS declaration limit exceeded (%d)"
-// just below. geometryRefusal is the one place that states all four, and the
-// branch names are what a future bug report gets sorted by.
 const (
 	geometryBranchMagnitude     = "magnitude"
 	geometryBranchFloatOverflow = "float64-overflow"
 	geometryBranchNonFinite     = "non-finite"
-	// geometryMessageTokenLen bounds the raw token text the message quotes. The
-	// token comes from untrusted CSS, and the overflow branch fires precisely on
-	// the longest ones, so an unbounded quote would let a 4 MiB stylesheet put a
-	// 4 MiB line on stderr. %q keeps it on one line: control characters, escapes
-	// included, come back quoted rather than raw.
-	geometryMessageTokenLen = 64
+	geometryMessageTokenLen     = 64
 )
 
-// geometryRefusal explains a CSS numeric admission refusal. The leading phrase
-// is load-bearing and stays verbatim: testdata/live-parity.py classifies
-// ADMISSION_CAPPED by matching it.
 func geometryRefusal(branch, property, value, unit string, parsed, numVal float64) error {
 	return fmt.Errorf("CSS numeric value outside safe geometry range: property %q, value %q, unit %q, parsed %g, numval %g, limit %d CSS pixels, branch %s",
 		clipGeometryToken(property), clipGeometryToken(value), clipGeometryToken(unit),
 		parsed, numVal, MaxGeometry, branch)
 }
 
-// clipGeometryToken bounds one quoted fragment of a refusal message. It cuts on
-// bytes, which can split a multi-byte rune; %q then escapes the remainder rather
-// than emitting raw invalid UTF-8, so the line stays a single printable line.
 func clipGeometryToken(s string) string {
 	if len(s) <= geometryMessageTokenLen {
 		return s
@@ -324,8 +254,6 @@ func isBorderRadiusProperty(property string) bool {
 		(strings.HasPrefix(property, "border-") && strings.HasSuffix(property, "-radius"))
 }
 
-// selectorCost includes recursively evaluated :not arguments. Search combinators
-// are counted even when today's matcher would short-circuit them.
 func selectorCost(sel css.Selector, depth, siblings int) (int64, error) {
 	parts, conditions, searches := 0, 0, 0
 	cost := int64(0)
@@ -364,21 +292,11 @@ func selectorCost(sel css.Selector, depth, siblings int) (int64, error) {
 		return 0, fmt.Errorf("CSS selector search limit exceeded (%d)", MaxSelectorSearches)
 	}
 	if searches > 0 {
-		// Each search combinator walks the ancestor chain once the key part
-		// matches; the walk is bounded by depth, not by total node count.
 		cost += int64(max(depth, 1)) * int64(searches)
 	}
 	return max(cost, 1), nil
 }
 
-// selectorFanOut counts the elements style resolution can test a selector
-// against. The matcher buckets every selector on the id, classes and tag its key
-// (rightmost) compound demands and only tries it on elements carrying one of
-// those keys, so a selector's cost is set by how common its key is rather than by
-// the size of the document. Summing the populations bounds the union of the
-// buckets the selector is filed under, and the document's element count bounds it
-// from above; a selector with no key at all, such as `*` or `[disabled]`, is tried
-// against every element.
 func selectorFanOut(sel css.Selector, stats documentStats) int64 {
 	if len(sel.Parts) == 0 {
 		return 1
@@ -403,23 +321,16 @@ func selectorFanOut(sel css.Selector, stats documentStats) int64 {
 
 type documentStats struct {
 	nodes, depth, siblings int
-	// elements is the count style resolution actually visits; keyCount records how
-	// many elements carry each id, class and tag, prefixed to keep the three
-	// namespaces apart. The style matcher buckets selectors on their key compound,
-	// so these are what a selector's matching can cost.
-	elements int
-	keyCount map[string]int
+	elements               int
+	keyCount               map[string]int
 }
 
-// keyID, keyClass and keyTag namespace the key counts so an id called "div"
-// cannot be confused with the element of the same name.
 const (
 	keyID    = "i:"
 	keyClass = "c:"
 	keyTag   = "t:"
 )
 
-// walkDocument validates public retained DOMs iteratively before recursive work.
 func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats, error) {
 	var stats documentStats
 	stats.keyCount = make(map[string]int)
@@ -477,9 +388,6 @@ func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats
 				return stats, fmt.Errorf("invalid document node links")
 			}
 		}
-		// Push last-child-first so the stack pops in document order: callers
-		// rely on it — linked-sheet cascade order and image fetch priority both
-		// read "in document order" and a reversed walk inverts the cascade.
 		for c := e.n.LastChild; c != nil; c = c.PrevSibling {
 			stack = append(stack, entry{c, e.depth + 1})
 		}
@@ -489,10 +397,6 @@ func walkDocument(doc *dom.Document, visit func(*dom.Node) error) (documentStats
 }
 
 func safeGeometry(values ...float32) bool {
-	// NaN-idiom instead of finite(float64(v)): v != v is true only for NaN,
-	// and infinities fail the range test, so one expression covers finiteness
-	// and range with no conversion or call per value. This runs per style per
-	// object on every validation pass, so the constant matters.
 	for _, v := range values {
 		if v != v || v > MaxGeometry || v < -MaxGeometry {
 			return false
@@ -538,7 +442,6 @@ func validateArena(a *layout.Arena) error {
 	return nil
 }
 
-// Bound word/run expansion before Inline allocates one object per word or space.
 func (s *Session) validateLayoutInput() error {
 	for id, st := range s.Styles {
 		if err := validateStyle(st); err != nil {
@@ -546,10 +449,6 @@ func (s *Session) validateLayoutInput() error {
 		}
 	}
 	objects, runes := 1, 0
-	// hidden memoizes "inside display:none" per node. walkDocument visits in
-	// document order (parents before children), so the parent's entry is
-	// always computed before the child reads it: each text node resolves in
-	// O(1) amortized instead of walking to the root, turning O(N*D) into O(N).
 	hidden := make(map[dom.NodeID]bool)
 	var isHidden func(n *dom.Node) bool
 	isHidden = func(n *dom.Node) bool {
@@ -568,7 +467,6 @@ func (s *Session) validateLayoutInput() error {
 	_, err := walkDocument(s.Doc, func(n *dom.Node) error {
 		objects++
 		if n.Type == dom.NodeText {
-			// Hidden subtrees never enter inline layout.
 			if isHidden(n) {
 				return nil
 			}
@@ -595,41 +493,16 @@ func (s *Session) validateLayoutInput() error {
 	return err
 }
 
-// cssSource is one style sheet text and where it came from. Remote sheets are
-// treated leniently - one bloated or adversarial sheet from the network skips
-// itself rather than killing the document - while sheets the caller supplied
-// keep the hard-fail contract the bounds tests pin down.
 type cssSource struct {
 	text   string
 	remote bool
 }
 
-// cssTextCache is one navigation's memo of style sheet text, keyed by the
-// absolute URL it came from. Linked sheets are re-collected on every pass that
-// needs a cascade - once per parser-blocking script, and again for a CSSOM read
-// against another document - and without a memo each pass asks for every sheet
-// afresh. Measured on https://www.gov.vn (2026-11-13, viewport 1280, the same
-// subresource wiring the browser uses): 33 distinct stylesheet URLs cost 927 to
-// 1,059 requests and 9.6s to 29.8s of fetch work across the eight workers,
-// while Chromium issues 36 requests for 36 distinct URLs on the same page. A
-// pass whose 6s CSSFetchBudget ran out simply did not request the links past
-// that point, so the sheet set only became complete through later passes
-// asking for them again - the cost was requests and wall time, not a missing
-// cascade (four getComputedStyle probes on the live page answer identically
-// before and after this memo). Text the memo holds is neither requested nor
-// charged again, so one navigation pays for one copy of each sheet: measured
-// 33 requests and 1.5s to 4.5s of fetch work in five runs.
-//
-// Failed fetches are not memoised: only bytes the budget has taken are worth
-// remembering, and a host that answers later should be able to answer.
 type cssTextCache struct {
 	mu    sync.Mutex
 	texts map[string]string
 }
 
-// lookup returns the text this navigation already fetched and charged for url.
-// A nil cache is a caller that collects sheets outside any session and every
-// URL is then a miss, which is the behaviour before the memo existed.
 func (c *cssTextCache) lookup(url string) (string, bool) {
 	if c == nil {
 		return "", false
@@ -640,10 +513,6 @@ func (c *cssTextCache) lookup(url string) (string, bool) {
 	return text, ok
 }
 
-// store keeps url's text. The lock never spans a fetch, because workers fetch
-// concurrently; two passes racing on one URL then both request it and store the
-// same text twice, which costs the request the memo exists to save only in that
-// race and keeps the map single-entry either way.
 func (c *cssTextCache) store(url, text string) {
 	if c == nil {
 		return
@@ -656,11 +525,6 @@ func (c *cssTextCache) store(url, text string) {
 	c.texts[url] = text
 }
 
-// cssSheetText resolves one absolute style sheet URL to its text: the memo's
-// copy when this navigation already fetched it, otherwise a fresh request that
-// charges the shared subresource budget before being memoised. ok is false when
-// the request failed or its bytes did not fit, the same two outcomes the
-// callers already treated as "this sheet contributes nothing".
 func cssSheetText(linker CSSLinker, base, abs string, sub *subBudget, cache *cssTextCache) (string, bool) {
 	if text, ok := cache.lookup(abs); ok {
 		return text, true
@@ -682,31 +546,12 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 	for _, src := range sources {
 		all = append(all, cssSource{text: src})
 	}
-	// A linked sheet is fetched against its own URL and its text spliced into a
-	// reserved slot so the cascade sees sources in document order. One URL is
-	// requested once per pass: measured over http on a page linking s.css
-	// twice, Chromium issues one request while document.styleSheets still
-	// holds two entries.
-	//
-	// slot is -1 for a sheet the cascade must not see: a media query that does
-	// not match this viewport still has to be fetched and memoised, because
-	// document.styleSheets lists it and Chromium reports its rules (measured on
-	// one fixture served over http: /print.css is requested and its sheet holds
-	// one rule at a screen viewport, where this engine requested nothing and the
-	// sheet read 0 rules). When the same URL turns up again with media that does
-	// match, the fetch already scheduled picks up that slot rather than asking
-	// for the URL twice - measured on s.css linked print-first then screen,
-	// where Chromium reads rgb(11, 22, 33) for the class s.css colours behind
-	// one request. One map cannot serve both jobs: deduplicating the fetch by
-	// URL alone answers rgb(0, 0, 0), because the screen link never gets a slot.
-	// A disabled link is not fetched at all: Chromium requests it, but nothing
-	// here can ever read its text, since document.styleSheets leaves it out.
 	type pendingLink struct {
 		slot int
 		abs  string
 	}
-	linked := map[string]bool{}   // URLs that already own a cascade slot
-	scheduled := map[string]int{} // URLs already queued for one fetch
+	linked := map[string]bool{}
+	scheduled := map[string]int{}
 	var pending []pendingLink
 	linksLeft := maxLinkedSheets
 	stats, err := walkDocument(doc, func(n *dom.Node) error {
@@ -715,12 +560,6 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				all = append(all, cssSource{text: n.TextContent()})
 			}
 		}
-		// A disabled link contributes no rules and no request. Measured on the
-		// same fixture: `p.dis`, coloured only by the disabled L10's dis.css,
-		// reads rgb(0, 0, 0) in Chromium where this engine answered rgb(6, 6, 6),
-		// and document.styleSheets leaves that link out. The attribute is
-		// presence-only, so disabled="false" still disables, which is exactly
-		// what HTMLLinkElement.disabled reflection writes and removes.
 		if n.Element() && n.Data == "link" && linker != nil && linksLeft > 0 && !n.HasAttribute("disabled") {
 			if href := stylesheetHref(n); href != "" {
 				abs, resolved := resolveSubresourceURL(base, href)
@@ -759,11 +598,6 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 		}
 		return nil
 	})
-	// Linked sheets are fetched through a bounded pool, the same shape as
-	// loadImages and loadFonts: a page can link a dozen stylesheets, and a
-	// sequential walk spends the whole wall-clock budget on the first slow host
-	// while the rest never load. @import expansion stays on this goroutine so
-	// the shared `linked` set needs no lock.
 	if len(pending) > 0 {
 		texts := make([]*string, len(pending))
 		deadline := time.Now().Add(CSSFetchBudget)
@@ -825,8 +659,6 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 				}
 				return nil, fmt.Errorf("CSS declaration limit exceeded (%d)", MaxCSSDeclarations)
 			}
-			// Declarations are parsed once per sheet and applied only when the
-			// rule matches, so their byte cost is not charged per node.
 			declCost := int64(0)
 			for _, d := range rule.Declarations {
 				declCost += int64(1 + len(d.Property) + len(d.Value))
@@ -842,15 +674,11 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 					}
 					return nil, err
 				}
-				// A selector is tried against the elements carrying its key, not
-				// against the whole document.
 				work += cost * selectorFanOut(sel, stats)
 			}
 			if bad {
 				continue
 			}
-			// The work estimate is heuristic, so it ends the sheet where it
-			// lands instead of ending the document.
 			if work > MaxStyleWork {
 				break
 			}
@@ -865,19 +693,10 @@ func checkedSheets(doc *dom.Document, sources []string, base string, linker CSSL
 	return sheets, nil
 }
 
-// maxSubresourceBytes caps total raw bytes fetched for one document across
-// linked sheets, @import expansion, fonts and images. Per-class caps bound
-// each family, but a page could otherwise spend every maximum at once; the
-// shared budget prices each payload once, whatever its family.
 const maxSubresourceBytes = 128 << 20
 
-// maxCSSImports caps how many distinct @import targets one document may pull
-// in. Depth is already bounded; this bounds breadth: a sheet naming a
-// thousand imports would otherwise fetch them all one deadline at a time.
 const maxCSSImports = 64
 
-// subBudget is a shared byte total with fail-closed accounting: take reports
-// whether n bytes fit, charging them only on success.
 type subBudget struct {
 	mu   sync.Mutex
 	used int64
@@ -899,28 +718,14 @@ func (b *subBudget) take(n int) bool {
 	return true
 }
 
-// Take charges n bytes against the shared subresource budget, reporting false
-// when they do not fit. It satisfies js.SubresourceBudget so fetch and XHR draw
-// on the same pool as CSS, fonts and images, keeping one source of truth for
-// per-document subresource bytes without internal/js importing internal/engine.
 func (b *subBudget) Take(n int) bool {
 	return b.take(n)
 }
 
-// maxLinkedSheets bounds how many <link rel=stylesheet> fetches one document
-// may trigger. Real pages rarely link more than a dozen.
 const maxLinkedSheets = 32
 
-// CSSFetchBudget is the wall-clock deadline for all linked-stylesheet fetches.
-// CSS is render-blocking, so unlike images and fonts it is worth waiting for —
-// but a dead host must not hold the document behind the client's own timeout.
-//
-// Like the image and font budgets it bounds spawn scheduling; hosts cancel
-// in-flight work with it around their stylesheet fetcher for the same reason.
 const CSSFetchBudget = 6 * time.Second
 
-// stylesheetHref returns the href of a link element whose rel token list
-// includes stylesheet, or "" for anything else.
 func stylesheetHref(n *dom.Node) string {
 	isCSS := false
 	for _, tok := range strings.Fields(n.GetAttribute("rel")) {
@@ -934,12 +739,6 @@ func stylesheetHref(n *dom.Node) string {
 	return strings.TrimSpace(n.GetAttribute("href"))
 }
 
-// resolveSubresourceURL turns a subresource reference into an absolute http(s)
-// URL against the document's final URL. Anything the fetcher cannot dial is
-// rejected here, so a linker, an image loader, a script loader and a media
-// loader all see absolute web URLs and none of them gets its own copy of the
-// rules: no non-web scheme, no downgrade out of a secure document, and no
-// public page reaching a private address.
 func resolveSubresourceURL(base, href string) (string, bool) {
 	b, err := url.Parse(base)
 	if err != nil {
@@ -962,22 +761,10 @@ func resolveSubresourceURL(base, href string) (string, bool) {
 	return u.String(), true
 }
 
-// initiatorIsLocal reports whether the document or sheet that asked for a
-// subresource is itself on the viewer's machine or private network. The rule is
-// about who is asking, not about the address: refusing loopback outright would
-// break local development, which is the main thing a browser is pointed at on
-// 127.0.0.1. A file:// document counts as local because the viewer opened it.
 func initiatorIsLocal(b *url.URL) bool {
 	return b.Scheme == "file" || isLocalAuthority(b.Hostname())
 }
 
-// InitiatorIsLocal reports whether a document or sheet identified by a URL
-// string is on the viewer's machine or private network, so that the wiring in
-// cmd/goosie can decide whether a subresource fetch from it needs a dial-time
-// address guard at all. A URL that does not parse is reported as not local,
-// which is the safe direction: the guard it would have skipped is a refusal, and
-// resolveSubresourceURL already rejects the malformed hrefs before a fetch is
-// asked for one.
 func InitiatorIsLocal(raw string) bool {
 	b, err := url.Parse(raw)
 	if err != nil {
@@ -986,15 +773,8 @@ func InitiatorIsLocal(raw string) bool {
 	return initiatorIsLocal(b)
 }
 
-// localOnlyPrefixes are the IPv4 ranges that mean "not the public internet"
-// beyond what net.IP's own predicates cover: 0.0.0.0/8 names this host (RFC 1122)
-// and 100.64.0.0/10 is carrier-grade NAT, behind which some providers put their
-// metadata endpoints.
 var localOnlyPrefixes = []*stdnet.IPNet{mustCIDR("0.0.0.0/8"), mustCIDR("100.64.0.0/10")}
 
-// mustCIDR is the regexp.MustCompile convention. A literal that failed to parse
-// would otherwise leave the range it names reachable from a public page, and a
-// silently missing guard in a security rule is the one failure worth aborting on.
 func mustCIDR(cidr string) *stdnet.IPNet {
 	_, n, err := stdnet.ParseCIDR(cidr)
 	if err != nil {
@@ -1003,17 +783,6 @@ func mustCIDR(cidr string) *stdnet.IPNet {
 	return n
 }
 
-// isLocalAuthority reports whether a URL host names an address that only exists
-// on the viewer's machine or local network: loopback, RFC 1918 and 4193 private
-// space, link-local (the /16 that cloud metadata services answer on at
-// 169.254.169.254), multicast scoped to the link or the node, the unspecified
-// address, or one of the special-use names that are never meant to leave a
-// machine (RFC 6761: localhost, .local, .internal, .home.arpa).
-//
-// A hostname that is not special-use is reported as public even if DNS sends it
-// to a private address, because resolution-time code has no address to look at.
-// That other half lives in the transport: internal/net dials through a guard
-// carrying AddressBlocked below, so the address a name resolved to is judged too.
 func isLocalAuthority(host string) bool {
 	if host == "" {
 		return false
@@ -1033,16 +802,6 @@ func isLocalAuthority(host string) bool {
 	return false
 }
 
-// AddressBlocked reports whether an address is one the private-network rule
-// confines: it is the address half of isLocalAuthority, exported so the dial-time
-// guard in internal/net can judge what a name resolved to with the same list
-// that judges what an author wrote. The two rules must not drift. A page refused
-// for naming 169.254.169.254 and served for naming a host that resolves to it
-// would be a guard that reads like one and works like nothing.
-//
-// It deliberately knows nothing about who is asking. InitiatorIsLocal is that
-// question, and the caller deciding whether to install a guard at all owns the
-// answer.
 func AddressBlocked(ip stdnet.IP) bool {
 	if ip == nil {
 		return false
@@ -1059,12 +818,6 @@ func AddressBlocked(ip stdnet.IP) bool {
 	return false
 }
 
-// decodeDataImageURL decodes a data: image URL to raw bytes without touching
-// the network. data: payloads are document-inline content, not subresource
-// policy, so the engine answers them directly under the same encoded-size cap
-// every other image passes; Probe/Decode still enforce dimensions and pixels
-// afterwards. Only image/* (or mediatype-less, which the decoder sniffs)
-// payloads decode: anything else is another subsystem's business.
 func decodeDataImageURL(u string) ([]byte, error) {
 	rest := strings.TrimPrefix(u, "data:")
 	comma := strings.IndexByte(rest, ',')
@@ -1084,7 +837,6 @@ func decodeDataImageURL(u string) ([]byte, error) {
 	var data []byte
 	if isB64 {
 		payload = strings.TrimSpace(payload)
-		// Base64 expands by 4/3: bound the encoded form before allocating.
 		if len(payload) > imgdec.MaxEncodedImageBytes*4/3+8 {
 			return nil, fmt.Errorf("engine: data URI payload exceeds image byte limit")
 		}
@@ -1097,9 +849,6 @@ func decodeDataImageURL(u string) ([]byte, error) {
 			return nil, fmt.Errorf("engine: data URI base64: %w", err)
 		}
 	} else {
-		// Percent-encoding expands by at most 3x. PathUnescape (not
-		// QueryUnescape): "+" is a literal plus in data URIs, and base64
-		// payloads and SVG path data both use it.
 		if len(payload) > imgdec.MaxEncodedImageBytes*3 {
 			return nil, fmt.Errorf("engine: data URI payload exceeds image byte limit")
 		}
@@ -1115,17 +864,6 @@ func decodeDataImageURL(u string) ([]byte, error) {
 	return data, nil
 }
 
-// absolutizeCSSURLs rewrites every relative url() reference in a fetched style
-// sheet against the sheet's own absolute URL. CSS resolves subresource URLs
-// against the stylesheet, not the document, so an icon declared as
-// `url(icon_nav.png)` in /rAF/arcticFox.css must load from /rAF/, even though
-// the page lives at a different path. data: URIs, fragments and already-
-// absolute references are left untouched.
-//
-// A rewritten reference resolves the URL its escapes denote (`url("a\41 .png")`
-// is aA .png), while anything left alone is re-emitted byte for byte: there the
-// escapes are exactly what makes the payload valid sheet text, and decoding
-// them would rewrite `url("a\"b")` into the broken `url("a"b")`.
 func absolutizeCSSURLs(sheet, sheetURL string) string {
 	var b strings.Builder
 	i := 0
@@ -1137,8 +875,6 @@ func absolutizeCSSURLs(sheet, sheetURL string) string {
 		}
 		t, ok := css.ScanURLAt(sheet, i+j)
 		if !ok {
-			// Malformed token: everything from here on is emitted verbatim, as
-			// before, and no further reference is rewritten.
 			b.WriteString(sheet[i:])
 			return b.String()
 		}
@@ -1147,9 +883,6 @@ func absolutizeCSSURLs(sheet, sheetURL string) string {
 		if out, ok := rewriteURLRef(sheetURL, css.URLPayload(t)); ok {
 			b.WriteString(emitURLRef(out, t.Quote))
 		} else {
-			// data: URIs, fragments and already-absolute references are left
-			// alone: re-emit the raw inner bytes, quotes included, so a quoted
-			// payload containing ')' round-trips byte for byte.
 			b.WriteString(inner)
 		}
 		b.WriteByte(')')
@@ -1158,14 +891,6 @@ func absolutizeCSSURLs(sheet, sheetURL string) string {
 	return b.String()
 }
 
-// emitURLRef renders one rewritten absolute reference as the inner text of a
-// url() token, wrapped in the quote the source used so a sheet round-trips in
-// the style it was written in. An unquoted source keeps its bare form unless
-// the resolved URL carries a byte an unquoted url() token cannot hold; then it
-// is quoted rather than re-escaped, because a quoted payload needs no second
-// pass to read back. `url(a\)b.png)` is the case that forces this: it denotes
-// `a)b.png`, net/url leaves ')' raw in a path, and emitting that bare inside
-// `url(…)` would hand the next scan a token cut at the parenthesis.
 func emitURLRef(out string, quote byte) string {
 	if quote != 0 {
 		return string(quote) + out + string(quote)
@@ -1176,10 +901,6 @@ func emitURLRef(out string, quote byte) string {
 	return out
 }
 
-// needsURLQuote reports whether s has to be quoted to survive a url() token:
-// whitespace, a quote, a parenthesis, a backslash or a non-printable byte
-// (CSS Syntax L3 4.3.9). net/url already percent-encodes the first two and the
-// backslash, so in practice this fires on parentheses.
 func needsURLQuote(s string) bool {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
@@ -1194,8 +915,6 @@ func needsURLQuote(s string) bool {
 	return false
 }
 
-// rewriteURLRef resolves one url() target against the sheet URL, leaving data
-// URIs, fragments, empty and already-absolute references unchanged.
 func rewriteURLRef(sheetURL, ref string) (string, bool) {
 	if ref == "" || strings.HasPrefix(ref, "data:") || strings.HasPrefix(ref, "#") {
 		return "", false

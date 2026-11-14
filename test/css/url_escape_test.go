@@ -7,11 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// The three SVG data URIs below are one document written three ways: plain
-// quotes, double quotes escaped `\"` inside a double-quoted url(), and single
-// quotes escaped `\'` inside a single-quoted url(). All three denote the
-// parenthesis-free URI in svgPlain, and border-image-source is parsed by the
-// same scanner that used to fail every escaped form closed (GOOSIE-CSSURLESCAPE-001).
 const svgPlain = `data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="rgb(0,0,255)"/></svg>`
 
 var (
@@ -24,13 +19,6 @@ func escAll(s, from, to string) string {
 	return strings.ReplaceAll(s, from, to)
 }
 
-// TestBorderImageSourceURLDecodesEscapes is the per-site oracle for
-// internal/css/border_image.go's borderImageURL: the declaration carries
-// escapes, the source must carry the URL they denote.
-// Every row was measured against Chromium's computed border-image-source on
-// 2026-11-12; Chromium re-escapes the quote on the way out, which is why its
-// serialisation shows `url("a\"b.png")` for the URL `a"b.png` rather than a
-// broken unescaped pair.
 // qc:BR-269
 func TestBorderImageSourceURLDecodesEscapes(t *testing.T) {
 	cases := []struct {
@@ -64,14 +52,6 @@ func TestBorderImageSourceURLDecodesEscapes(t *testing.T) {
 	}
 }
 
-// TestBorderImageShorthandKeepsEscapedSource pins the shorthand splitter: it
-// splits on whitespace before it knows where the url() token ends, so an escape
-// inside the payload used to leak the tail of the URI into the slice section.
-// Chromium's computed `border-image` for the first row is
-// `url("a\"b.png") 7 fill / 1 / 0 stretch` (measured 2026-11-12), i.e. the
-// payload and the slice keywords stay on their own sides of the token. The
-// shorthand returns the source section as text, so the URL is read from it the
-// way internal/style/style.go's applyBorderImageShorthand does.
 // qc:BR-269
 func TestBorderImageShorthandKeepsEscapedSource(t *testing.T) {
 	cases := []struct {
@@ -101,11 +81,6 @@ func TestBorderImageShorthandKeepsEscapedSource(t *testing.T) {
 	}
 }
 
-// TestBorderImageEscapedSVGReachesTheParsedStruct keeps the two properties the
-// paint path reads together, through the same two calls internal/style makes:
-// the decoded source and the explicit slice, from one declaration. A payload
-// that survived with its backslashes would be fetched as a URI containing
-// literal backslashes, with the slice keywords read out of its tail.
 // qc:BR-269
 func TestBorderImageEscapedSVGReachesTheParsedStruct(t *testing.T) {
 	sourceText, sliceText, _, _, _, ok := css.ParseBorderImageShorthand(svgEscapedDQ + ` 7 fill stretch`)

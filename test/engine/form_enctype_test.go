@@ -17,8 +17,6 @@ func TestEncodeFormPlainText(t *testing.T) {
 		{Name: "empty", Value: ""},
 	}
 	got := engine.EncodeFormPlainText(data)
-	// text/plain performs no escaping: '=' and '&' pass through verbatim and
-	// every entry ends in CRLF, with lone line feeds normalized to CRLF.
 	want := "who=Ada Lovelace\r\nnote=line1\r\nline2\r\nraw=a=b&c\r\nempty=\r\n"
 	if got != want {
 		t.Fatalf("text/plain body = %q, want %q", got, want)
@@ -52,8 +50,6 @@ func TestFormEnctypeForSubmitter(t *testing.T) {
 		t.Fatalf("formenctype multipart = %q, want multipart/form-data", got)
 	}
 
-	// An unknown formenctype falls back to the form's enctype, as does a
-	// button that is not a submitter.
 	bogus := doc.NewElement("button")
 	bogus.SetAttribute("type", "submit")
 	bogus.SetAttribute("formenctype", "application/json")

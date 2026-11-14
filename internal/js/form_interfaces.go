@@ -9,14 +9,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// setupHTMLFormCollectionInterfaces installs the collection interfaces used
-// by HTMLFormElement.elements and Document.forms.
 func (r *Runtime) setupHTMLFormCollectionInterfaces() {
 	if r.htmlFormControlsCollectionProto != nil {
 		return
 	}
-	// HTMLCollection is iterable, but unlike NodeList it does not expose
-	// Array-style values(), entries(), or forEach() methods.
 	r.htmlCollectionProto = r.vm.NewObject()
 	_ = r.vm.Set("__htmlCollectionProto__", r.htmlCollectionProto)
 	_, _ = r.vm.RunString(`Object.defineProperty(__htmlCollectionProto__, Symbol.iterator, {value: Array.prototype[Symbol.iterator], configurable: true, writable: true})`)
@@ -216,16 +212,10 @@ func (r *Runtime) installFieldsetInterface(proto *goja.Object) {
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 }
 
-// resetForm runs the reset event gate before applying the reset algorithms for
-// the built-in controls whose live state is modeled by this runtime.
 func (r *Runtime) resetForm(form *dom.Node) {
 	r.resetFormWithCallbackTiming(form, false)
 }
 
-// resetFormWithCallbackTiming applies the reset algorithm and delivers
-// form-associated custom element reactions either before returning (the
-// form.reset() method) or at the next microtask checkpoint (reset-button
-// activation).
 func (r *Runtime) resetFormWithCallbackTiming(form *dom.Node, deferCallbacks bool) {
 	if form == nil || form.Data != "form" || r.formResetInProgress[form] {
 		return
@@ -332,11 +322,6 @@ func (r *Runtime) navigateFormTarget(form, submitter *dom.Node) {
 	r.navigateFormTargetWithTarget(form, submitter, "", false)
 }
 
-// NavigateFormTargetToFrame submits form into the named iframe it targets and
-// reports whether that browsing context exists. The host calls this after its
-// own validation and submit event, so the frame owns the navigation instead of
-// the host navigating the top-level tab. Targets that do not name a connected
-// iframe in the form's document, including _self and _blank, stay with the host.
 func (r *Runtime) NavigateFormTargetToFrame(form, submitter *dom.Node) bool {
 	if form == nil || form.Doc == nil || (r.domDoc != nil && r.domDoc != form.Doc) {
 		return false
@@ -385,9 +370,6 @@ func (r *Runtime) navigateFormTargetWithTarget(form, submitter *dom.Node, target
 			ownerFrame = r.iframeFrameForDocument(&form.Doc.Node)
 		}
 		if ownerFrame != nil {
-			// Parent-realm wrappers can call methods on controls in a child
-			// document. In that case this Runtime owns the iframe mapping, so
-			// navigate the frame containing the form itself.
 			destination = r
 			frame = ownerFrame
 		} else if r.iframeParent != nil && r.iframeParentFrame != nil {
@@ -453,9 +435,6 @@ func (r *Runtime) navigateFormTargetWithTarget(form, submitter *dom.Node, target
 	if method != "get" && method != "post" {
 		return
 	}
-	// Navigation tasks are superseded per browsing context. Two submissions
-	// from the same form to different named frames are independent; repeated
-	// submissions to one frame replace that frame's planned URL.
 	navigationID := destination.nextIFrameNavigationID(frame)
 	if destination.formNavigationFrames == nil {
 		destination.formNavigationFrames = make(map[*dom.Node]*dom.Node)
@@ -468,10 +447,6 @@ func (r *Runtime) navigateFormTargetWithTarget(form, submitter *dom.Node, target
 		}
 		parsed.RawQuery = strings.Join(encodedData, "&")
 		parsed.ForceQuery = true
-		// Form GET navigation is a planned navigation. Queue it after the
-		// current script task so callers can install load handlers immediately
-		// after requestSubmit() returns. A later GET to the same frame replaces
-		// the planned destination without dispatching an intermediate load.
 		if destination.plannedIFrameGETURLs == nil {
 			destination.plannedIFrameGETURLs = make(map[*dom.Node]string)
 		}
@@ -616,11 +591,6 @@ func (r *Runtime) clickHTMLElement(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}
 	if dom.IsDisableableFormControl(node) && dom.IsFormControlDisabled(node) {
-		// Only a disabled form control swallows the simulated click. A stray
-		// `disabled` attribute elsewhere still dispatches: measured in
-		// Chromium 131.0.6778.33, `<div disabled>.click()` delivers
-		// `click:ddiv` while every disabled control in the same document
-		// logs nothing at all (/tmp/v2/run5.py, 2026-11-13).
 		return goja.Undefined()
 	}
 	owner := r.formOwner(node)
@@ -783,8 +753,6 @@ func (r *Runtime) activatePopoverTarget(invoker *dom.Node, targetID, action stri
 	}
 }
 
-// popoverTargetForInvoker resolves popovertarget in the invoker's tree scope.
-// Shadow-tree IDs are intentionally separate from the document's ID index.
 func (r *Runtime) popoverTargetForInvoker(invoker *dom.Node, id string) *dom.Node {
 	if invoker == nil || id == "" {
 		return r.domDoc.ElementByID(id)
@@ -1108,9 +1076,6 @@ func (r *Runtime) revealFragmentTarget(fragment string) {
 	}
 }
 
-// testDriverClick dispatches the user input sequence used by the in-process
-// WPT testdriver adapter. Script-visible HTMLElement.click() remains a
-// synthetic, untrusted click.
 func (r *Runtime) testDriverClick(target goja.Value) {
 	node := r.getNode(target)
 	if node == nil || !node.Element() || dom.IsFormControlDisabled(node) {
@@ -1163,8 +1128,6 @@ func (r *Runtime) dispatchClickActivation(node *dom.Node, event *dom.Event) bool
 		typ := strings.ToLower(strings.TrimSpace(node.GetAttribute("type")))
 		switch typ {
 		case "color", "date", "datetime-local", "file", "month", "time", "week":
-			// Activating a control with a picker consumes the current transient
-			// activation, even when this runtime has no native picker UI to open.
 			r.SetTransientUserActivation(false)
 		}
 		if typ == "file" {
@@ -1182,9 +1145,6 @@ func (r *Runtime) dispatchClickActivation(node *dom.Node, event *dom.Event) bool
 			}
 		}
 	}
-	// Checkbox and radio activation still changes checkedness while detached,
-	// but the HTML activation algorithm only fires the input/change events for
-	// a control that remains connected after click dispatch.
 	if changed && allowed && node.IsConnected() {
 		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("input", true, false))
 		r.dispatchWithWindowStep(node, dom.NewTrustedEvent("change", true, false))
@@ -1351,10 +1311,6 @@ func (r *Runtime) checkFormValidityWithReport(form *dom.Node, report bool) bool 
 			case "checkbox":
 				invalid = !wrapper.Get("checked").ToBoolean()
 			case "radio":
-				// Required radio validity is group-scoped, not limited to the
-				// controls currently enumerated for this form. The shared helper
-				// applies the radio-button-group rules for tree scope, name, and
-				// form owner, matching the individual ValidityState path.
 				invalid = !r.radioGroupHasChecked(control)
 			default:
 				if typ != "button" && typ != "reset" && typ != "submit" && typ != "image" && typ != "hidden" {
@@ -1789,9 +1745,6 @@ func (r *Runtime) walkRadioGroupTreeScope(control *dom.Node, visit func(*dom.Nod
 	root.Walk(visit)
 }
 
-// setInputCheckedness applies the checked IDL setter and radio-group behavior.
-// The checked attribute remains the defaultChecked state and is only consulted
-// for reset while the live checkedness is dirty.
 func (r *Runtime) setInputCheckedness(control *dom.Node, checked bool) bool {
 	if control == nil || control.Data != "input" {
 		return false
@@ -1891,9 +1844,6 @@ func clearParserFormOwners(nodes []*dom.Node) {
 	})
 }
 
-// walkParserFormOwnerTree visits each node at most once. Parser-driven DOM
-// mutations can temporarily produce cyclic child/parent links, so invalidation
-// walks must not assume the graph is a tree.
 func walkParserFormOwnerTree(nodes []*dom.Node, visit func(*dom.Node)) {
 	pending := append([]*dom.Node(nil), nodes...)
 	seen := make(map[*dom.Node]struct{})
@@ -1934,11 +1884,6 @@ func (r *Runtime) reconcileRadioGroupsForTree(control *dom.Node) {
 			return true
 		}
 		form := r.formOwner(node)
-		// Inserting already-checked radios into a detached tree does not run
-		// checkedness normalization for radios with no form owner. Their tree
-		// root still matters for validity and for later checked IDL writes, but
-		// insertion alone must not clear another radio's checkedness. A
-		// detached form does have a form owner and retains group normalization.
 		if form == nil {
 			return true
 		}

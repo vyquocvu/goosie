@@ -16,8 +16,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 )
 
-// capture requests echo back the Cookie header they received, so tests assert
-// on what the client actually sent.
 func captureServer(t *testing.T, setCookies ...string) (*httptest.Server, *[]string) {
 	t.Helper()
 	got := &[]string{}
@@ -59,9 +57,6 @@ func TestCookieStoredAndSentOnNextRequest(t *testing.T) {
 }
 
 func TestCookieDomainAttributeMustMatchHost(t *testing.T) {
-	// A host claiming a Domain it does not own (or a bare TLD) must not have
-	// that cookie stored; requests to any path on the same host then carry no
-	// cookie at all.
 	srv, got := captureServer(t, "bad=tossed; Domain=example.org; Path=/", "tld=wild; Domain=com; Path=/")
 	ctx := context.Background()
 	client := net.DefaultClient()
@@ -96,7 +91,6 @@ func TestSecureCookieNotSentOverHTTP(t *testing.T) {
 }
 
 func TestHostOnlyCookieNotSentToSubdomain(t *testing.T) {
-	// The jar is queried directly: no test server can easily serve two hosts.
 	jar := net.NewCookieJar()
 	u, _ := url.Parse("https://example.com/")
 	jar.Store(u, []string{"a=1"})
@@ -175,7 +169,6 @@ func TestPerHostCookieLimit(t *testing.T) {
 	if count > net.MaxCookiesPerHost {
 		t.Fatalf("jar holds %d cookies for one host, cap is %d", count, net.MaxCookiesPerHost)
 	}
-	// The oldest cookies are the ones evicted; the newest set must survive.
 	if !strings.Contains(got, fmt.Sprintf("k%03d=%d", net.MaxCookiesPerHost+19, net.MaxCookiesPerHost+19)) {
 		t.Fatalf("most recently set cookie was evicted: %q", got)
 	}
@@ -191,7 +184,6 @@ func TestPrivateClientIsolatesAndClears(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A separate default client never sees the private session's cookie.
 	otherSrv, otherGot := captureServer(t)
 	otherClient := net.DefaultClient()
 	defer otherClient.Close()
@@ -205,7 +197,6 @@ func TestPrivateClientIsolatesAndClears(t *testing.T) {
 	if err := private.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// After Close the private jar is empty: a fresh request carries no cookie.
 	srv2, got2 := captureServer(t)
 	if _, err := private.Get(ctx, srv2.URL+"/"); err != nil {
 		t.Fatal(err)
@@ -215,10 +206,6 @@ func TestPrivateClientIsolatesAndClears(t *testing.T) {
 	}
 }
 
-// TestCookieIsScopedToItsOriginForSendingAndScriptReads pins both halves of
-// "outside its scope": the network header and the string document.cookie is
-// built from. A host-only cookie belongs to the exact host that received it,
-// so neither a sibling domain nor a lookalike suffix may see it.
 // qc:BR-158
 func TestCookieIsScopedToItsOriginForSendingAndScriptReads(t *testing.T) {
 	jar := net.NewCookieJar()
@@ -241,7 +228,6 @@ func TestCookieIsScopedToItsOriginForSendingAndScriptReads(t *testing.T) {
 		})
 	}
 
-	// The control: the origin itself still receives and reads what it set.
 	if got := jar.HeaderFor(mustURL(t, "https://example.test/page")); got != "session=abc" {
 		t.Errorf("cookie missing on its own origin: %q", got)
 	}
@@ -259,9 +245,6 @@ func mustURL(t *testing.T, raw string) *url.URL {
 	return u
 }
 
-// TestLoadEnforcesJarLimits pins migration safety: a hostile or legacy
-// cookie file past the jar invariants must load bounded exactly as if the
-// cookies had arrived live (per-host and total eviction), never unbounded.
 func TestLoadEnforcesJarLimits(t *testing.T) {
 	type persisted struct {
 		Name    string    `json:"name"`
@@ -293,8 +276,6 @@ func TestLoadEnforcesJarLimits(t *testing.T) {
 	if err := jar.Load(in); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	// Count through a Save round-trip: session cookies persist here (future
-	// expiry), so the saved file reflects exactly what the jar holds.
 	out := filepath.Join(dir, "out.json")
 	if err := jar.Save(out); err != nil {
 		t.Fatalf("Save: %v", err)

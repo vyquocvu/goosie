@@ -16,7 +16,6 @@ func TestCSSPrefersColorSchemeResolution(t *testing.T) {
 		}
 	`
 
-	// 1. Light Mode (default)
 	lightSheet := css.ParseWithOptions(sheetText, css.MediaOptions{ViewportWidth: 800, DarkMode: false})
 	if len(lightSheet.Rules) != 1 {
 		t.Fatalf("expected 1 rule in light mode, got %d", len(lightSheet.Rules))
@@ -25,7 +24,6 @@ func TestCSSPrefersColorSchemeResolution(t *testing.T) {
 		t.Errorf("light mode body background = %q, want #ffffff", lightSheet.Rules[0].Declarations[0].Value)
 	}
 
-	// 2. Dark Mode
 	darkSheet := css.ParseWithOptions(sheetText, css.MediaOptions{ViewportWidth: 800, DarkMode: true})
 	if len(darkSheet.Rules) != 2 {
 		t.Fatalf("expected 2 rules in dark mode, got %d", len(darkSheet.Rules))
@@ -44,13 +42,11 @@ func TestCSSPrefersContrastResolution(t *testing.T) {
 		}
 	`
 
-	// Normal contrast
 	normalSheet := css.ParseWithOptions(sheetText, css.MediaOptions{ViewportWidth: 800, HighContrast: false})
 	if len(normalSheet.Rules) != 1 {
 		t.Fatalf("expected 1 rule in normal contrast mode, got %d", len(normalSheet.Rules))
 	}
 
-	// High contrast
 	hcSheet := css.ParseWithOptions(sheetText, css.MediaOptions{ViewportWidth: 800, HighContrast: true})
 	if len(hcSheet.Rules) != 2 {
 		t.Fatalf("expected 2 rules in high contrast mode, got %d", len(hcSheet.Rules))
@@ -58,7 +54,6 @@ func TestCSSPrefersContrastResolution(t *testing.T) {
 }
 
 func TestJSMatchMediaColorScheme(t *testing.T) {
-	// Light mode runtime
 	rtLight, err := js.New(js.Options{
 		DarkMode: false,
 	})
@@ -76,7 +71,6 @@ func TestJSMatchMediaColorScheme(t *testing.T) {
 		t.Errorf("light runtime prefers-color-scheme: light = %v (err: %v), want true", resLight, err)
 	}
 
-	// Dark mode runtime
 	rtDark, err := js.New(js.Options{
 		DarkMode: true,
 	})
@@ -102,7 +96,6 @@ body { background-color: #ffffff; color: #111111; }
 </style>
 </head><body><p>Hello Theme</p></body></html>`
 
-	// 1. Session with Light Mode
 	sessLight, err := engine.NewSession(html, nil, 800, engine.WithDarkMode(false))
 	if err != nil {
 		t.Fatalf("NewSession light failed: %v", err)
@@ -119,7 +112,6 @@ body { background-color: #ffffff; color: #111111; }
 		t.Errorf("light session body background = %v, want #ffffff", bodyStyleLight.BackgroundColor)
 	}
 
-	// 2. Session with Dark Mode
 	sessDark, err := engine.NewSession(html, nil, 800, engine.WithDarkMode(true))
 	if err != nil {
 		t.Fatalf("NewSession dark failed: %v", err)

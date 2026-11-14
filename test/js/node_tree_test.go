@@ -8,37 +8,12 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// The Node child-list API: createDocumentFragment, insertBefore, appendChild of
-// a fragment, replaceChild, cloneNode, and the tree reads.
-//
-// These are not "APIs that look standard". Each one is pinned to a call a
-// measured page makes. On the saved vnexpress home page (201,234-byte copy) the
-// inline boot has 9 `parentNode.insertBefore(...)` sites and the pre-change
-// engine threw `Object has no member 'insertBefore'` at 2 of them; none passes a
-// literal null, but two pass `x.nextSibling` (offsets 113,261, 195,744), which is
-// null when the reference is the last child. jQuery makes the append form
-// unconditional: `prepend` passes `t.firstChild` (50,065), `after` passes
-// `this.nextSibling` (50,297) and `wrapAll` omits the argument (80,979). On
-// www.gov.vn the release sweep's own row quotes the library's first DOM
-// statement - `E.createDocumentFragment().appendChild(E.createElement("div"))`,
-// offset 37,880 of the 89,501-byte jquery-3.6.0.min.js - as
-// `.../scripts/jquery-3.6.0.min.js?v=1:1: TypeError: Object has no member
-// 'createDocumentFragment'`, 21 uncaught errors, doc_height 0. The assertions
-// below are the shapes those call patterns need, and every one of them fails
-// when the mechanism is deleted (the mutation table in
-// docs/tasks/TASK-047-DOM-JQUERY-APIS.md carries the captured output).
-
 func nodeTreeRuntime(t *testing.T, html string) *js.Runtime {
 	t.Helper()
 	doc := domtest.Parse(html)
 	return newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})
 }
 
-// A document fragment is a Node: nodeType 11, it takes children, and
-// appendChild hands the child back. jQuery's whole boot starts on that last
-// detail - `var ce = E.createDocumentFragment().appendChild(E.createElement("div"))`
-// - so an appendChild that returned undefined would leave `ce` undefined and
-// the next statement would throw inside the library's own setup.
 // qc:BR-203
 func TestCreateDocumentFragmentIsANodeThatTakesChildren(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><p>hi</p></body></html>`)
@@ -59,12 +34,6 @@ func TestCreateDocumentFragmentIsANodeThatTakesChildren(t *testing.T) {
 	}
 }
 
-// Appending a fragment moves its children and empties it. This is the step that
-// makes jQuery's buildFragment usable: it fills one fragment, hands it to
-// appendChild/insertBefore, and the fragment must then be reusable and empty.
-// The alternative - inserting the fragment node itself - would put a
-// #document-fragment into the body, where no selector can reach it and paint
-// cannot see any of its content.
 // qc:BR-203
 func TestAppendChildMovesFragmentChildrenAndEmptiesFragment(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"></div></body></html>`)
@@ -138,10 +107,6 @@ func TestNodeIsEqualNodeUsesAttributeLocalNamesAndDocumentTree(t *testing.T) {
 	}
 }
 
-// `insertBefore(node, null)` appends. Both vnexpress call sites pass the second
-// argument as a variable that is null on a fresh page, so a binding that read
-// null as "no reference given, do nothing" would silently drop the injected
-// markup instead of appending it.
 // qc:BR-203
 func TestInsertBeforeWithNullReferenceAppends(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><span>a</span></div></body></html>`)
@@ -174,10 +139,6 @@ func TestInsertBeforeRequiresSecondArgumentAndValidatesDocumentHierarchy(t *test
 	}
 }
 
-// insertBefore positions the node before the reference, and a reference that is
-// not a child of this node throws NotFoundError like a browser does. The throw
-// matters: silently appending would put the node at the end of the wrong parent
-// and the page would render content in the wrong order with no signal at all.
 // qc:BR-203
 func TestInsertBeforePositionsAndRejectsForeignReference(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="a"><b></b><i></i></div><div id="b"><em></em></div></body></html>`)
@@ -196,10 +157,6 @@ func TestInsertBeforePositionsAndRejectsForeignReference(t *testing.T) {
 	}
 }
 
-// A fragment argument to insertBefore contributes its children, in order, at
-// the reference position. jQuery's `before`/`after` helpers call
-// `target.insertBefore(node, target.firstChild)` with whatever buildFragment
-// produced.
 // qc:BR-203
 func TestInsertBeforeMovesFragmentChildrenToPosition(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><span>keep</span></div></body></html>`)
@@ -272,14 +229,6 @@ func TestChildNodeBeforeAndReplaceWithMutateInOrder(t *testing.T) {
 	}
 }
 
-// cloneNode(false) copies the node alone; cloneNode(true) copies the subtree.
-// Both are needed by the same jQuery support test, run twice in a row:
-//
-//	ce.cloneNode(!0).cloneNode(!0).lastChild.checked
-//
-// - so a deep clone must carry children, and the clone's own children must be
-// clones rather than the same nodes moved out of the original (which would
-// empty `ce` and break every later statement that reads it).
 // qc:BR-203
 func TestChildNodeReplaceWithNoArgumentsRemovesReceiver(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"></div></body></html>`)
@@ -443,11 +392,6 @@ func TestNodeNormalizeDoesNotTreatEmptyNonTextNodesAsText(t *testing.T) {
 	}
 }
 
-// The exact clone chain jQuery 3.6 runs while it decides whether this engine
-// can be trusted with a form control: a deep clone of a deep clone, then a read
-// of the last child's `checked`. If any link in that chain is missing, the
-// library's checkClone flag comes out false and it takes a different code path
-// for every node it ever clones.
 // qc:BR-203
 func TestClonedFormControlKeepsCheckedState(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body></body></html>`)
@@ -464,8 +408,6 @@ func TestClonedFormControlKeepsCheckedState(t *testing.T) {
 	}
 }
 
-// replaceChild puts the new node exactly where the old one was and detaches the
-// old one. jQuery's replaceWith is `t.replaceChild(e, this)`.
 // qc:BR-203
 func TestReplaceChildSwapsInPlace(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><b>1</b><i>2</i></div></body></html>`)
@@ -513,9 +455,6 @@ func TestReplaceChildChecksAncestorAndDocumentHierarchyAtomically(t *testing.T) 
 	}
 }
 
-// childNodes is every node (text and comments included) while children stays
-// element-only, and the position reads agree with the tree. jQuery reads
-// childNodes 11 times and firstChild 12, and its `.text()` walks nodeValue.
 // qc:BR-203
 func TestChildListReadsCoverEveryNodeType(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box">a<b>B</b><!--c-->d</div></body></html>`)
@@ -539,12 +478,6 @@ func TestChildListReadsCoverEveryNodeType(t *testing.T) {
 	}
 }
 
-// ownerDocument and parentNode are the document object itself, not look-alike
-// wrappers. Sizzle's setDocument compares `r != C` against window.document and
-// re-binds its internal document cache to whatever comes back, so a second
-// wrapper for the same node would be adopted as "the document" and then fail on
-// the first property only the real one has. That is an identity check, which no
-// amount of extra properties on the wrapper can satisfy.
 // qc:BR-203
 func TestOwnerDocumentAndParentNodeAreTheDocumentObject(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<!doctype html><html><head></head><body><p id="p">t</p></body></html>`)
@@ -578,8 +511,6 @@ func TestElementSiblingAccessorsSkipNonElementsAndStayLive(t *testing.T) {
 	}
 }
 
-// isConnected separates a node still in the document from one a script removed,
-// which is how a page decides whether to measure a box at all.
 // qc:BR-203
 func TestIsConnectedFollowsRemoval(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box"><span>x</span></div></body></html>`)
@@ -602,9 +533,6 @@ func TestIsConnectedFollowsRemoval(t *testing.T) {
 	}
 }
 
-// nodeValue is the leaf data for text and comment nodes and null for the types
-// that have none, and writing it only changes the leaf types. jQuery's `.text()`
-// is a nodeValue read on every text node it walks.
 // qc:BR-203
 func TestNodeValueIsOnlyForLeaves(t *testing.T) {
 	rt := nodeTreeRuntime(t, `<html><head></head><body><div id="box">keep</div></body></html>`)
@@ -670,9 +598,6 @@ func TestOuterHTMLReadsSerializesAndRecoversMalformedFragments(t *testing.T) {
 	var thrown = "no-throw";
 	try { d.outerHTML = "<p><b>unclosed"; } catch (error) { thrown = error.name; }
 	[before, thrown, d.parentNode === null, document.body.innerHTML].join("|");`)
-	// Chromium parses the replacement fragment with HTML error recovery rather
-	// than rejecting it; the node is detached and the recovered subtree lands
-	// where the old node was.
 	if out != `<div id="d" class="c">x</div>|no-throw|true|<p><b>unclosed</b></p>` {
 		t.Fatalf("outerHTML read/write round trip = %q", out)
 	}

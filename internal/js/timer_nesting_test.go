@@ -26,9 +26,6 @@ func onlyTimer(t *testing.T, r *Runtime) *timer {
 	return nil
 }
 
-// TestNestedTimersClampZeroDelayTo4ms pins FR-JS-04: once a timer chain passes
-// five levels of nesting, a zero-delay timer is promoted to the 4ms minimum
-// event-loop resolution.
 func TestNestedTimersClampZeroDelayTo4ms(t *testing.T) {
 	r := newTimerTestRuntime(t)
 	r.timerNesting = maxTimerNestingLevel + 1
@@ -42,8 +39,6 @@ func TestNestedTimersClampZeroDelayTo4ms(t *testing.T) {
 	}
 }
 
-// TestShallowNestedTimersKeepZeroDelay: below the nesting threshold the delay
-// is untouched, so ordinary nested scheduling stays instantaneous.
 func TestShallowNestedTimersKeepZeroDelay(t *testing.T) {
 	r := newTimerTestRuntime(t)
 	r.timerNesting = maxTimerNestingLevel - 1
@@ -57,8 +52,6 @@ func TestShallowNestedTimersKeepZeroDelay(t *testing.T) {
 	}
 }
 
-// TestNestedIntervalClampsTo4ms applies the same floor to setInterval, whose
-// zero-delay clamp was previously 1ms.
 func TestNestedIntervalClampsTo4ms(t *testing.T) {
 	r := newTimerTestRuntime(t)
 	r.timerNesting = maxTimerNestingLevel + 1
@@ -72,9 +65,6 @@ func TestNestedIntervalClampsTo4ms(t *testing.T) {
 	}
 }
 
-// TestTimerCallbackPropagatesNestingLevel proves the level advances through
-// the event loop: a timer scheduled by another timer's callback is one level
-// deeper than the callback that created it.
 func TestTimerCallbackPropagatesNestingLevel(t *testing.T) {
 	r := newTimerTestRuntime(t)
 

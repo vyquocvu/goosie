@@ -10,12 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/userscript"
 )
 
-// GOOSIE-LIVE-001 is nine real pages that paint nothing and say nothing: rc 0,
-// empty stderr, no field anywhere naming a reason. The reason existed - www.gov.vn
-// throws 21 uncaught exceptions on load, the first one naming the page's
-// jQuery bundle - and the engine discarded every one of
-// them. Isolation is the behaviour under test first (a broken script must still
-// not take the page down); recording is the new half.
 // qc:BR-189 BR-091
 func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
@@ -25,9 +19,6 @@ func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	defer rt.Close()
 
 	fetcher := func(base, src string) ([]byte, error) {
-		// The shape measured on www.gov.vn: jQuery's saved document handle
-		// stayed undefined past its setup gate, so the library's own line
-		// threw "TypeError: Cannot read property 'createElement' of undefined".
 		return []byte("var ce; ce.createElement(\"fieldset\");"), nil
 	}
 	html := `<html><body>
@@ -42,7 +33,6 @@ func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	}
 	defer sess.Close()
 
-	// Isolation, unchanged: the last script still ran.
 	if v, ok := rt.Global("survived"); !ok || v.Num != 1 {
 		t.Fatalf("scripts after a throwing one did not run (survived=%+v): recording must not change control flow", v)
 	}
@@ -53,8 +43,6 @@ func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	if len(errs) != 2 {
 		t.Fatalf("ScriptErrors() = %d entries, want 2", len(errs))
 	}
-	// The source names the file, which is the whole point of recording: an
-	// operator reading the line can go find it.
 	if errs[0].Source != "https://example.test/jquery-3.6.0.min.js" {
 		t.Errorf("first error source = %q, want the bundle URL it came from", errs[0].Source)
 	}
@@ -67,9 +55,6 @@ func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	if line := errs[0].String(); !strings.HasPrefix(line, errs[0].Source+":") {
 		t.Errorf("String() = %q, want it to lead with the source", line)
 	}
-	// goja appends a stack trace to these messages and the text is the page's
-	// own. One error must stay one line, or a document writes extra report
-	// lines and can forge the shape of the browser's own diagnostics.
 	for i, e := range errs {
 		if strings.ContainsAny(e.Message, "\n\r") {
 			t.Fatalf("error %d message carries a newline (%q): a page must not be able to add report lines", i, e.Message)
@@ -77,9 +62,6 @@ func TestUncaughtScriptErrorsAreRecordedAndIsolated(t *testing.T) {
 	}
 }
 
-// A page controls how often it throws and how long each message is, so neither
-// may grow the session or the report line. This is the cap that keeps the new
-// reporting safe against the input it reports on.
 // qc:BR-189
 func TestScriptErrorWindowAndMessageAreBounded(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
@@ -119,9 +101,6 @@ func TestScriptErrorWindowAndMessageAreBounded(t *testing.T) {
 	}
 }
 
-// Silence means silence: a document that does not throw must record nothing and
-// free the caller from printing anything. This is the case that keeps the new
-// line off the stderr of every page that already works.
 // qc:BR-189
 func TestCleanDocumentRecordsNoScriptErrors(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
@@ -145,11 +124,6 @@ func TestCleanDocumentRecordsNoScriptErrors(t *testing.T) {
 	}
 }
 
-// The second call site of the recorder is the userscript stage, and it is the
-// one an extension author sees: a broken userscript must name itself the same
-// way a broken page script does, and must still not stop the userscripts after
-// it. Without this test the userscript half of the recording is unobserved and
-// can be removed without anything failing.
 // qc:BR-189
 func TestUserScriptErrorsAreRecordedAndLaterScriptsStillRun(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
@@ -190,9 +164,6 @@ func TestUserScriptErrorsAreRecordedAndLaterScriptsStillRun(t *testing.T) {
 	}
 }
 
-// An invalid DOM call on a node the page already removed must be confined to
-// the throwing script: the error is recorded, later scripts load, and the
-// event loop still runs timers that mutate the live document.
 // qc:BR-092
 func TestScriptErrorFromRemovedNodeKeepsTheRuntimeAlive(t *testing.T) {
 	html := `<html><body>

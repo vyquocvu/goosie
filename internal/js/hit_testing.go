@@ -28,8 +28,6 @@ func (r *Runtime) jsElementsFromPoint(call goja.FunctionCall) goja.Value {
 		if n.Element() && n.HasAttribute("inert") {
 			return
 		}
-		// Closed popovers and their contents are not rendered hit-test targets,
-		// even if a stale or simplified layout provider still returns boxes.
 		if n.Element() && n.HasAttribute("popover") && !n.IsPopoverOpen {
 			return
 		}

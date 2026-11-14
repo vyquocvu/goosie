@@ -6,13 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// TestCanvasResizeDropsOldFrameFromLayout is the BR-116 engine oracle: after a
-// page draws at the declared size and then resizes the canvas, the replayed
-// bitmap and the layout box must both follow the new width/height, and the
-// previous frame must not survive. The script fills the whole 320x200 canvas,
-// resizes to 200x120, then paints one small rect, so any surviving old ops are
-// visible as an opaque pixel far from the new rect.
-//
 // qc:BR-116
 func TestCanvasResizeDropsOldFrameFromLayout(t *testing.T) {
 	html := `<html><body>

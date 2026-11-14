@@ -9,34 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// These oracles pin the *value* an aborted fetch settles with, not only that
-// it rejects. Every expectation below is copied from a measured Chromium 153
-// run of scripts/verify-br123-fetch-abort.js against a gated same-origin
-// server, section by section:
-//
-//	abort() mid-flight   -> {typeof:"object", ctor:"DOMException", name:"AbortError",
-//	                          message:"signal is aborted without reason", code:20,
-//	                          isDOMException:true, isError:true,
-//	                          str:"AbortError: signal is aborted without reason"}
-//	abort('stopped')     -> {typeof:"string", str:"stopped", ctor:"String"}
-//	abort({code:7})      -> {typeof:"object", json:"{\"code\":7}", code:7}, identity:true
-//	abort(new Error(..)) -> {typeof:"object", ctor:"Error", name:"Error", message:"boom",
-//	                          isError:true, str:"Error: boom"}
-//	abort(0)             -> {typeof:"number", str:"0"}
-//	abort(null)          -> {typeof:"object", str:"null", json:"null"}
-//	abort(undefined)     -> the same default DOMException as abort()
-//	signal.reason before abort() -> {typeof:"undefined"}
-//	{signal:'abc'} / {signal:{}} -> rejected (never thrown synchronously) with
-//	                          TypeError "Failed to execute 'fetch' on 'Window':
-//	                          Failed to read the 'signal' property from
-//	                          'RequestInit': Failed to convert value to
-//	                          'AbortSignal'." and the server saw no request;
-//	                          {signal:null} fetches normally.
-//
-// Not asserted here, recorded as GOOSIE-DOMEXCSHAPE-001: Chromium's DOMException
-// carries no own enumerable keys ({ownKeys:""}), no stack ({hasStack:
-// "undefined"}) and a [object DOMException] tag, while Goosie's Error-based one
-// still has an enumerable code, a stack, and the [object Error] tag.
 const abortShape = `
 var F = function (x) {
   return x === undefined ? 'undefined' : (x === null ? 'null' : String(x));
@@ -56,9 +28,6 @@ var SHAPE = function (v) {
 };
 `
 
-// abortMidFlight runs one fetch through a gated client, aborts while the
-// request is still in flight, and returns SHAPE of the value the rejection
-// handler received - the same path the Chromium anchor measured.
 func abortMidFlight(t *testing.T, abortArgs string) string {
 	t.Helper()
 	gf := &gatedFetcher{
@@ -98,12 +67,6 @@ func abortMidFlight(t *testing.T, abortArgs string) string {
 }
 
 // qc:BR-123
-//
-// A default abort() rejects with a DOMException, not with a string. The clause
-// pages actually branch on is err.name === 'AbortError': measured Chromium
-// delivered {ctor:"DOMException", name:"AbortError", message:"signal is aborted
-// without reason", code:20, isError:true}, so a rejection that stringifies to
-// the same words is still not the same value.
 func TestFetchAbortDefaultRejectsAsADOMException(t *testing.T) {
 	want := "object|true|true|false|AbortError|signal is aborted without reason|20|AbortError: signal is aborted without reason"
 	if got := abortMidFlight(t, ""); got != want {
@@ -112,12 +75,6 @@ func TestFetchAbortDefaultRejectsAsADOMException(t *testing.T) {
 }
 
 // qc:BR-123
-//
-// A custom reason arrives by identity, in its own type. Chromium reported
-// {typeof:"object", json:"{\"code\":7}", code:7} for abort({code:7}) and
-// identity:true - the rejected value is the very object handed to abort(). A
-// stringified reason would read "[object Object]" and drop code, so a page
-// inspecting its own abort payload would lose it.
 func TestFetchAbortObjectReasonRejectsWithTheSameValue(t *testing.T) {
 	got := abortMidFlight(t, "({code: 7})")
 	want := "object|false|false|false|undefined|undefined|7|[object Object]"
@@ -130,9 +87,6 @@ func TestFetchAbortObjectReasonRejectsWithTheSameValue(t *testing.T) {
 }
 
 // qc:BR-123
-//
-// An Error reason stays an Error: Chromium delivered {ctor:"Error",
-// name:"Error", message:"boom", isError:true, str:"Error: boom"}.
 func TestFetchAbortErrorReasonStaysAnError(t *testing.T) {
 	got := abortMidFlight(t, "new Error('boom')")
 	want := "object|false|true|false|Error|boom|undefined|Error: boom"
@@ -142,11 +96,6 @@ func TestFetchAbortErrorReasonStaysAnError(t *testing.T) {
 }
 
 // qc:BR-123
-//
-// Primitive and null reasons keep their type. Chromium measured abort('stopped')
-// as {typeof:"string", str:"stopped"}, abort(0) as {typeof:"number", str:"0"}
-// and abort(null) as {typeof:"object", str:"null"} - so a null reason must not
-// be replaced by the default AbortError.
 func TestFetchAbortPrimitiveAndNullReasonsKeepTheirType(t *testing.T) {
 	cases := []struct {
 		args string
@@ -165,10 +114,6 @@ func TestFetchAbortPrimitiveAndNullReasonsKeepTheirType(t *testing.T) {
 }
 
 // qc:BR-123
-//
-// abort(undefined) is the same as abort(): Chromium reported the default
-// DOMException for both, so an explicitly undefined reason must fall back to
-// the AbortError rather than reaching the page as undefined.
 func TestFetchAbortUndefinedReasonFallsBackToTheDefault(t *testing.T) {
 	want := "object|true|true|false|AbortError|signal is aborted without reason|20|AbortError: signal is aborted without reason"
 	if got := abortMidFlight(t, "undefined"); got != want {
@@ -177,12 +122,6 @@ func TestFetchAbortUndefinedReasonFallsBackToTheDefault(t *testing.T) {
 }
 
 // qc:BR-123
-//
-// A `signal` that is not an AbortSignal is a TypeError, delivered as a
-// rejection, and the request is never issued. Chromium measured exactly that
-// message for {signal:'abc'} and {signal:{}}, counted no server hit, and
-// returned a Promise rather than throwing synchronously; {signal:null} still
-// fetches normally.
 func TestFetchNonSignalValueRejectsWithTypeErrorAndNeverRequests(t *testing.T) {
 	const wantMessage = "Failed to execute 'fetch' on 'Window': Failed to read the 'signal' " +
 		"property from 'RequestInit': Failed to convert value to 'AbortSignal'."
@@ -216,8 +155,6 @@ func TestFetchNonSignalValueRejectsWithTypeErrorAndNeverRequests(t *testing.T) {
 		}
 	}
 
-	// Chromium returns a promise that then rejects; it does not throw from the
-	// call itself, so a page's try/catch around fetch() cannot see this error.
 	m := &mockFetcher{responses: map[string]*js.FetchResponse{}}
 	r := newFetchRuntime(t, m)
 	if err := r.Run(`
@@ -233,8 +170,6 @@ func TestFetchNonSignalValueRejectsWithTypeErrorAndNeverRequests(t *testing.T) {
 		t.Errorf("fetch({signal:'abc'}) %q, want %q (a rejection, not a sync throw)", v.Str, "returns-thenable")
 	}
 
-	// The same init object with a usable signal value must still work, so the
-	// guard cannot be widened to "reject any init we do not understand".
 	ok := &js.FetchResponse{Status: 200, OK: true, Body: []byte("plain"), URL: "https://example.test/plain"}
 	m2 := &mockFetcher{responses: map[string]*js.FetchResponse{"https://example.test/plain": ok}}
 	r2 := newFetchRuntime(t, m2)
@@ -257,12 +192,6 @@ func TestFetchNonSignalValueRejectsWithTypeErrorAndNeverRequests(t *testing.T) {
 }
 
 // qc:BR-123
-//
-// The reason itself is a DOMException on the signal, which is where Chromium
-// puts it: {typeof:"object", ctor:"DOMException", name:"AbortError", message:
-// "signal is aborted without reason", code:20} after abort(), and undefined
-// before it. fetch then rejects with that same object, so the two clauses have
-// to agree.
 func TestAbortSignalReasonIsADOMException(t *testing.T) {
 	r := newFetchRuntime(t, &mockFetcher{})
 	if err := r.Run(abortShape+`

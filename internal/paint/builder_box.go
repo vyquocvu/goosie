@@ -19,16 +19,6 @@ type boxPaintContext struct {
 	hidden         bool
 }
 
-// boxDeclaresOpacity reports whether a box brings an opacity of its own into the
-// group-opacity walk. Layout also hands out boxes that own no element and fills
-// them with a verbatim copy of the generating element's style: anonymous blocks
-// and table wrappers (style.AnonymousBlockStyle: `s = *parent`) and every text
-// run (style.inheritStyle: `cs := *parent`). That element has already
-// contributed, so counting its copy again would fade one declaration once per
-// generated box rather than once per element, which is what Chromium does.
-// Generated content is the exception: a ::before/::after/::first-letter box's
-// style is its own cascade result, and the synthetic text node standing in for it
-// is attached to no parent element.
 func boxDeclaresOpacity(obj *layout.Object) bool {
 	if obj.Style == nil || obj.Node == nil {
 		return false
@@ -36,42 +26,6 @@ func boxDeclaresOpacity(obj *layout.Object) bool {
 	return obj.Node.Element() || obj.Node.Parent == nil
 }
 
-// fragmentOwnsDecorations reports whether a box may emit the background and the
-// box-shadow its computed style carries.
-//
-// The same verbatim style copies that made group opacity double-count own this
-// defect (GOOSIE-INLINEBG-001). Layout splices a box per word for every text
-// node and fills it with the generating element's computed style, background
-// included (style.inheritStyle: `cs := *parent`). When that element is inline the
-// copy is the whole story: the element's own box paints no background at all -
-// paintBoxDecoration's paintsInlineFragments test leaves it to the fragments -
-// and each fragment carries one piece of it, which is how an inline background is
-// meant to fragment across lines.
-//
-// When the generating element is not inline, its own box already fills that
-// background across the whole padding area, so a fragment that fills it again
-// composites the element's alpha a second time wherever a word sits: measured on
-// a 300x60 block with `background:rgba(200,0,0,.5)` holding `one two three four`,
-// the run fills rendered (213,63,63) against the block's own (227,127,127), where
-// Chromium renders (227,127,127) uniformly.
-//
-// A run duplicates a box-shadow the same way, and there the spill is inside the
-// generating box rather than only on top of it (GOOSIE-SHADOWRUN-001): a ring is
-// the box minus itself, so a run's ring lands on the interior the element has
-// already filled. Measured on an 800x160 render at DPR 1 of a 300x76 block with
-// `background:#ffffff` and `box-shadow:0 0 10px 6px rgba(200,0,0,.5)`, Chromium
-// puts red-dominant ink on 0 px of that interior; the run emissions put it on
-// 1,197 for raw text, 2,573 when the words sit in spans (the whitespace between
-// them is still the block's own text) and 2,019 when a spacer sibling splits the
-// text into two anonymous bands.
-//
-// The generating element is looked up by node rather than by walking up the arena
-// parents, because layout reparents runs into the anonymous blocks and line boxes
-// it splices: the box a run hangs off is frequently anonymous, while the element
-// that owns the copied style is the text node's DOM parent. Generated content is
-// the exception, exactly as it is for group opacity above: a
-// ::before/::after/::first-letter box's synthetic text node has no parent
-// element, that box *is* the pseudo-element's box, and it owns its decorations.
 func (b *Builder) fragmentOwnsDecorations(obj *layout.Object) bool {
 	if obj.Node == nil || !obj.Node.Text() || obj.Node.Parent == nil {
 		return true
@@ -90,15 +44,6 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 		return
 	}
 
-	// Group opacity: an element's own opacity multiplies the accumulated opacity
-	// of every ancestor. When this box is a *clean* faded group we withhold its
-	// own fraction from the threaded value and record it instead, so the group is
-	// faded once offscreen at composite time rather than per command (which would
-	// double-darken overlapping children). A non-clean faded box keeps threading
-	// own × inherited into every command exactly as before. A fully transparent
-	// box (effective 0) still paints nothing and hides its subtree, so the walk
-	// stops rather than emit a command, since DisplayCmd.Opacity 0 is reserved to
-	// mean "opaque/unset".
 	effective := inheritedOpacity
 	groupOpacity := float32(0)
 	if boxDeclaresOpacity(obj) {
@@ -118,25 +63,12 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 		return
 	}
 
-	// visibility:hidden removes only the box's own paint; the box still occupies
-	// layout space (unlike display:none) and a descendant may set visibility
-	// back to visible, so children are walked regardless. "collapse" is treated
-	// as hidden here; table-part collapse is out of scope.
 	visibilityHidden := obj.Style != nil && obj.Style.Visibility != "visible"
 
 	childClip := inheritedClip
 	commandStart := b.list.Len()
-	// A nested group that would open on the same command as an enclosing
-	// recorded group is not recorded: its fade threads per-command inside the
-	// outer buffer instead. Safe (never loses a fade); the only case it touches
-	// is a decoration-less faded container whose first command is an already-
-	// grouped faded child.
 	headConflict := len(b.groupHeadStack) > 0 && b.groupHeadStack[len(b.groupHeadStack)-1] == int32(commandStart)
 	recordThis := groupOpacity > 0 && !headConflict
-	// A clean faded box we decide not to record must still fade: its own fraction
-	// was withheld from effective above, so fold it back in here. It then paints
-	// per-command inside the enclosing group's buffer rather than vanishing (the
-	// enclosing group fades the whole buffer once by its own opacity on top).
 	if groupOpacity > 0 && headConflict {
 		effective *= groupOpacity
 	}
@@ -171,10 +103,6 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 	}
 }
 
-// zIndexOf maps a positioned box's non-negative z-index onto the display list's
-// ordering field. The engine publishes stacking support for positioned boxes
-// only: a positive value lifts the box and its subtree above the Z=0 flow, and
-// later commands at the same value keep document order through the stable sort.
 func zIndexOf(s *style.ComputedStyle) (uint32, bool) {
 	if s == nil || !s.HasZIndex || s.ZIndex <= 0 || s.Position == style.PositionStatic {
 		return 0, false
@@ -182,13 +110,6 @@ func zIndexOf(s *style.ComputedStyle) (uint32, bool) {
 	return uint32(s.ZIndex), true
 }
 
-// isCleanFadedGroup reports whether obj's subtree contains no descendant with a
-// lifting z-index. It is the precondition for recording a faded group: a clean
-// group's every command carries the box's single Z, so List.SortStable keeps the
-// whole range contiguous and the rasterizer can render [Start,End) as one buffer.
-// The walk is bounded by the same arena depth the paint walk already allows, so
-// it adds no unbounded recursion. A false read is always safe — the box simply
-// falls back to the per-command path.
 func (b *Builder) isCleanFadedGroup(obj *layout.Object) bool {
 	for kid := obj.FirstKid; kid != 0; kid = b.arena.Get(kid).NextSibling {
 		k := b.arena.Get(kid)
@@ -202,10 +123,6 @@ func (b *Builder) isCleanFadedGroup(obj *layout.Object) bool {
 	return true
 }
 
-// clipCommands intersects an ancestor's overflow clip into every command a box
-// emitted. Only text and media consulted the inherited clip before, so a
-// descendant's background and borders escaped an overflow:hidden scrollport
-// even though the text inside it was cut.
 func clipCommands(list *List, start int, clip frame.Rect) {
 	commands := list.All()
 	for i := start; i < len(commands); i++ {
@@ -244,34 +161,17 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 	computed := obj.Style
 	paintsInlineFragments := computed.Display != style.DisplayInline || (obj.Node != nil && obj.Node.Text())
 	if paintsInlineFragments {
-		// Inline boxes span multiple lines; their text fragments own the visible
-		// per-line backgrounds, while the union box would fill the gaps.
-		//
-		// The outer shadow stands or falls with them: a text run of a non-inline
-		// generator copies that generator's style verbatim, BoxShadow included, and
-		// a ring around a word lies inside the element's own box, so the emission is
-		// a second composite on top of filled background (GOOSIE-SHADOWRUN-001).
-		// An inline generator's fragments keep emitting, which is the legitimate
-		// half - the union box paints no decoration at all.
 		owns := b.fragmentOwnsDecorations(obj)
 		if owns && len(computed.BoxShadow) > 0 {
 			b.paintBoxShadow(obj, paint.rect, paint.radius, paint.opacity)
 		}
 		if owns {
 			b.paintBoxBackground(obj, paint)
-			// Inset layers are the other half of the same declaration and cannot
-			// join the shadow call above: they paint over the background just
-			// emitted and under the borders below (CSS Backgrounds §4.4), so they
-			// belong on the background's own ownership test rather than the outer
-			// shadow's.
 			b.paintInsetBoxShadow(obj, paint)
 		}
 	}
 	switch {
 	case computed.Display == style.DisplayInline:
-		// An inline element fragments its border per line; the union box would
-		// draw a single rectangle across the line gaps. Outline on inline
-		// fragments stays deferred (GOOSIE-INLINEBORDER-001 §8).
 		if len(obj.InlineFragments) > 0 {
 			b.paintInlineBorderFragments(obj, paint.opacity)
 		}
@@ -284,8 +184,6 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 	}
 }
 
-// paintBoxBackground emits a box's four background layers in paint order: the
-// colour, then the linear and radial gradient layers, then any background-image.
 func (b *Builder) paintBoxBackground(obj *layout.Object, paint boxPaintContext) {
 	computed := obj.Style
 	if computed.BackgroundColor.A > 0 && !paint.backgroundClip.Empty() {
@@ -388,8 +286,6 @@ func (b *Builder) applyBoxEffects(obj *layout.Object, box boxPaintContext, comma
 
 func (b *Builder) overflowClip(obj *layout.Object, inherited *frame.Rect) *frame.Rect {
 	computed := obj.Style
-	// Clip for hidden, scroll, and auto overflow — all three establish a scroll
-	// container whose children must not paint outside the content box.
 	hasClip := computed.Overflow == style.OverflowHidden ||
 		computed.Overflow == style.OverflowScroll ||
 		computed.Overflow == style.OverflowAuto ||
@@ -430,7 +326,6 @@ func (b *Builder) paintChildren(obj *layout.Object, clip *frame.Rect, opacity fl
 	for kid := obj.FirstKid; kid != 0; kid = b.arena.Get(kid).NextSibling {
 		ordinal := 0
 		if child := b.arena.Get(kid); child.Style != nil && child.Style.Display == style.DisplayListItem {
-			// The counter advances for every item, even ones styled list-style:none.
 			item++
 			ordinal = item
 		}

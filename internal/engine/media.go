@@ -17,57 +17,24 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// MediaLoader prepares a media source into a local file a backend can open.
-// The browser's own HTTP client is what implements it, so media downloads keep
-// the cookies, redirect limits, shields and private-network rules every other
-// subresource goes through, and a native media stack never sees a URL.
 type MediaLoader interface {
-	// Load fetches url, resolved against base, completely, and returns a lease
-	// on the local file holding it. It blocks until the file is ready or ctx is
-	// cancelled, and runs on its own goroutine rather than the session's.
 	Load(ctx context.Context, base, url string) (MediaLease, error)
 }
 
-// MediaLease is ownership of one downloaded media file. Release removes it and
-// must be called exactly once, after the backend has finished with the path.
 type MediaLease interface {
 	Path() string
 	Release()
 }
 
 const (
-	// maxMediaControllers bounds how many elements one document can put into
-	// playback. Without it a page that inserts a video per timer tick would
-	// grow a controller, a download slot and a decoder each time.
 	maxMediaControllers = 16
-	// maxResidentPlayers bounds how many of those may hold a decoder at once.
-	// A decoder is the expensive part of a video: past two, a page that keeps
-	// adding elements is spending the machine rather than showing anything.
-	maxResidentPlayers = 2
-	// maxMediaLoads is the depth of one controller's load-result queue. A
-	// worker whose result nobody reads releases its own file rather than
-	// blocking forever holding it.
-	maxMediaLoads = 16
-	// maxMediaEvents bounds one controller's undrained event queue, and
-	// hardMaxMediaEvents is where even a terminal event is refused. A page that
-	// never drains loses timeupdates first; see emitLocked.
-	maxMediaEvents     = 256
-	hardMaxMediaEvents = 1024
-	// timeUpdateInterval is how often a playing element reports its position.
-	// The painted progress bar reads the same cadence, so a playing video
-	// damages its control bar four times a second rather than every tick.
-	timeUpdateInterval = 250 * time.Millisecond
+	maxResidentPlayers  = 2
+	maxMediaLoads       = 16
+	maxMediaEvents      = 256
+	hardMaxMediaEvents  = 1024
+	timeUpdateInterval  = 250 * time.Millisecond
 )
 
-// WithMedia supplies the playback backend and the fetcher that brings a source
-// in. base is the document's final URL, which media sources resolve against.
-// The engine owns the URL policy, the size caps and the temporary file the
-// bytes land in; the host owns the transport, so media downloads keep the same
-// cookies, redirect limit and private-network guard as every other subresource.
-//
-// Without this option a <video> stays the inert placeholder paint already draws,
-// and asking one to play reports that no backend exists rather than pretending
-// to succeed.
 func WithMedia(backend media.Backend, fetch MediaFetcher, base string) Option {
 	return func(s *Session) {
 		if backend == nil || fetch == nil {
@@ -84,12 +51,6 @@ func WithMedia(backend media.Backend, fetch MediaFetcher, base string) Option {
 	}
 }
 
-// mediaRegistry owns one document's media controllers.
-//
-// backend, loader and base are written once by the option and read without the
-// lock afterwards. activation is an atomic shared with every controller so a
-// play request can consult it without taking two locks in an order the pump
-// takes them the other way round.
 type mediaRegistry struct {
 	mu     sync.Mutex
 	list   []*mediaController
@@ -99,17 +60,10 @@ type mediaRegistry struct {
 	loader     MediaLoader
 	base       string
 	activation *atomic.Bool
-	// players counts the resident decoders this document holds, against
-	// maxResidentPlayers. It is atomic for the reason acquirePlayer gives.
-	players *atomic.Int32
-	// ops hands out operation ids document-wide, so an id names one request
-	// rather than one request per element.
-	ops *atomic.Uint64
+	players    *atomic.Int32
+	ops        *atomic.Uint64
 }
 
-// SetUserActivation records a host-identified trusted input activation. Media
-// activation follows the event dispatch bracket; DOM transient activation
-// remains available until a gated API consumes it or its bounded lifetime ends.
 func (s *Session) SetUserActivation(on bool) {
 	if s.media != nil {
 		s.media.activation.Store(on)
@@ -119,14 +73,8 @@ func (s *Session) SetUserActivation(on bool) {
 	}
 }
 
-// SetMediaActivation is retained for callers that only manipulate media
-// activation. New host input paths should use SetUserActivation.
 func (s *Session) SetMediaActivation(on bool) { s.SetUserActivation(on) }
 
-// MediaController returns the controller bound to a media element, creating it
-// the first time something asks. It returns nil when the session has no backend
-// or the node is not a video element, which is how the JS binding decides
-// whether the element gets a media API at all.
 func (s *Session) MediaController(n *dom.Node) media.Controller {
 	if s.media == nil || n == nil || !n.Element() || n.Data != "video" {
 		return nil
@@ -138,8 +86,6 @@ func (s *Session) MediaController(n *dom.Node) media.Controller {
 	return c
 }
 
-// MediaView is the presentation state paint will draw for a media element. It
-// reports false when the element has no controller.
 func (s *Session) MediaView(n *dom.Node) (paint.VideoView, bool) {
 	if s.media == nil || n == nil {
 		return paint.VideoView{}, false
@@ -176,18 +122,11 @@ func (r *mediaRegistry) controllerFor(n *dom.Node) *mediaController {
 		view:  paint.VideoView{Duration: math.NaN(), State: paint.VideoIdle},
 	}
 	c.shownPos = math.NaN()
-	// The source the markup named is recorded but not fetched. This engine
-	// ignores preload hints, so a page that embeds forty videos pays nothing
-	// until something asks one to play.
 	c.url = mediaSourceURL(n)
 	r.list = append(r.list, c)
 	return c
 }
 
-// mediaSourceURL picks an element's source: the src attribute wins, and failing
-// that the first <source> child that names a container this engine can play. A
-// child with no type at all is taken at its word, because refusing it would
-// refuse the common case of a bare <source src="clip.mp4">.
 func mediaSourceURL(n *dom.Node) string {
 	if src := strings.TrimSpace(n.GetAttribute("src")); src != "" {
 		return src
@@ -207,8 +146,6 @@ func mediaSourceURL(n *dom.Node) string {
 	return ""
 }
 
-// controllerByID is the reflow-time lookup: the arena walks objects, not nodes,
-// so attachment asks by ID.
 func (r *mediaRegistry) controllerByID(id dom.NodeID) *mediaController {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -220,9 +157,6 @@ func (r *mediaRegistry) controllerByID(id dom.NodeID) *mediaController {
 	return nil
 }
 
-// pump advances every controller one step and returns the document-space
-// rectangles whose painting changed. Elements that left the document are closed
-// here rather than leaking a decoder for a node nothing can reach any more.
 func (r *mediaRegistry) pump(root *dom.Node, arena *layout.Arena) []frame.RectF {
 	r.mu.Lock()
 	if r.closed {
@@ -257,10 +191,6 @@ func (r *mediaRegistry) pump(root *dom.Node, arena *layout.Arena) []frame.RectF 
 	return damage
 }
 
-// drainEvents takes every queued transition off the controllers, paired with the
-// element it belongs to. It is a separate step from pump because the events go to
-// the JavaScript runtime, and running page code is not something to do while
-// holding the pipeline lock.
 func (r *mediaRegistry) drainEvents() []mediaDispatch {
 	r.mu.Lock()
 	list := append([]*mediaController(nil), r.list...)
@@ -275,34 +205,17 @@ func (r *mediaRegistry) drainEvents() []mediaDispatch {
 	return out
 }
 
-// mediaDispatch is one element's drained transitions, waiting to be handed to the
-// runtime that owns its listeners.
 type mediaDispatch struct {
 	node   *dom.Node
 	events []media.Event
 }
 
-// MediaHit is one pointer press that landed on a video element's painted
-// controls.
 type MediaHit struct {
-	// Node is the element whose controls were hit.
-	Node *dom.Node
-	// Part is which control.
-	Part paint.VideoControlPart
-	// Fraction is where along the seek track the press landed, 0..1. It is only
-	// meaningful for VideoControlTrack.
+	Node     *dom.Node
+	Part     paint.VideoControlPart
 	Fraction float64
 }
 
-// MediaControlAt reports which of a video element's controls covers a
-// content-space point, in CSS pixels. It returns false when the point is not on a
-// control — including when it is on a video with no controls attribute, whose box
-// is then just content, and clicking it belongs to the page.
-//
-// The geometry comes from the same function the painter uses, at scale 1 so both
-// sides are speaking CSS pixels. That sharing is the point: a control whose ink
-// and whose click target are computed separately drift apart the first time
-// either is edited, and the result is a button a user can see and cannot press.
 func (s *Session) MediaControlAt(x, y float32) (MediaHit, bool) {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -329,10 +242,6 @@ func (s *Session) MediaControlAt(x, y float32) (MediaHit, bool) {
 	return MediaHit{}, false
 }
 
-// PauseAllMedia stops every element in the document that is playing. It is what a
-// tab switch calls: a background tab that keeps playing is a page making noise the
-// user cannot see the source of, and nothing resumes it when they come back, which
-// is also what the DOM's visibilitychange behaviour amounts to.
 func (s *Session) PauseAllMedia() {
 	if s.media == nil {
 		return
@@ -345,9 +254,6 @@ func (s *Session) PauseAllMedia() {
 	}
 }
 
-// FocusedMediaElement is the focused node when it is a video element this document
-// can play, and nil otherwise. Keyboard control of a video belongs to the element
-// with focus, which is the same rule form controls follow.
 func (s *Session) FocusedMediaElement() *dom.Node {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -358,11 +264,6 @@ func (s *Session) FocusedMediaElement() *dom.Node {
 	return n
 }
 
-// FocusMediaElement gives a video element the focus, so the keyboard controls it
-// afterwards. It reports false when the node is not a video this document can
-// play. A video is not one of the form controls IsActivatable admits, so clicking
-// its painted controls is the only way it can ever hold focus, and without that a
-// keyboard user has no route to the space bar pausing it.
 func (s *Session) FocusMediaElement(n *dom.Node) bool {
 	if n == nil || !n.Element() || n.Data != "video" || n.Doc != s.Doc {
 		return false
@@ -388,21 +289,13 @@ func (r *mediaRegistry) closeAll() {
 	for _, c := range list {
 		c.Close()
 	}
-	// The directory goes only after every controller has released its lease, so
-	// nothing is handed a path whose file was just unlinked.
 	if owner, ok := loader.(mediaDirOwner); ok {
 		owner.removeAll()
 	}
 }
 
-// mediaDirOwner is a loader that keeps its files in a directory it can drop
-// wholesale when the document goes away.
 type mediaDirOwner interface{ removeAll() }
 
-// acquirePlayer takes one of the document's resident decoder slots. It is
-// lock-free on purpose: the controller calls it while holding its own mutex,
-// and the pump takes the registry mutex before the controller's, so a registry
-// lock here would be the same two locks in the opposite order.
 func (r *mediaRegistry) acquirePlayer() bool {
 	for {
 		cur := r.players.Load()
@@ -436,22 +329,12 @@ func nodeConnected(root, n *dom.Node) bool {
 	return false
 }
 
-// mediaLoadResult is one download worker's outcome. The gen it carries is the
-// controller's load generation when the worker started, which is how a result
-// for a source the page has already replaced is recognised and its file
-// released instead of opened.
 type mediaLoadResult struct {
 	gen   uint64
 	lease MediaLease
 	err   error
 }
 
-// mediaController is one video element's playback state.
-//
-// Every field below is guarded by mu and every method runs on the session
-// owner's goroutine. The one other party is the download worker, and it only
-// ever sends on loads: no worker touches this state directly, which is what
-// keeps the media pump and the JS pump from needing to agree on a lock order.
 type mediaController struct {
 	reg  *mediaRegistry
 	node *dom.Node
@@ -470,26 +353,15 @@ type mediaController struct {
 	loads      chan mediaLoadResult
 	events     []media.Event
 	closed     bool
-	// resident records that this controller holds one of the document's decoder
-	// slots, so releasing it is not a guess about whether it was ever taken.
-	resident bool
+	resident   bool
 
-	// wantPlay and playOp are the play request waiting for the asset. The
-	// gesture that authorized it stays attached across the download, so a
-	// click on the play button still plays once the bytes arrive.
-	wantPlay bool
-	playOp   uint64
-	// playIssued says the request has been handed to the player, so a backend
-	// that takes a few polls to report playback is not asked to start again on
-	// every one of them.
+	wantPlay   bool
+	playOp     uint64
 	playIssued bool
 
 	lastSeek uint64
 	seeking  bool
 
-	// shownPos is the position the painted control bar displays. It advances
-	// on the timeupdate cadence rather than every poll, so a playing video
-	// damages its controls four times a second instead of every tick.
 	shownPos       float64
 	lastTimeUpdate time.Time
 
@@ -497,8 +369,6 @@ type mediaController struct {
 	hasView bool
 }
 
-// View is the presentation state paint draws. It is a value, so handing it to
-// a display list cannot be undone by the next poll.
 func (c *mediaController) View() paint.VideoView {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -525,10 +395,6 @@ func (c *mediaController) Muted() bool {
 	return c.snap.Muted
 }
 
-// SetSource records a new source without fetching it. The browser ignores
-// preload hints, so bytes only move on Load or on a play request the user is
-// allowed to make; a page that names forty sources in a loop pays nothing until
-// it asks to play one.
 func (c *mediaController) SetSource(url string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -550,7 +416,6 @@ func (c *mediaController) SetSource(url string) {
 	}
 }
 
-// Load starts fetching the selected source.
 func (c *mediaController) Load() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -595,7 +460,6 @@ func (c *mediaController) Play() (uint64, error) {
 	case media.StateReady, media.StatePaused, media.StateEnded, media.StateSeeking:
 		c.startPlaybackLocked()
 	case media.StateLoading, media.StatePreparing:
-		// Already on the way; playback starts when the asset is ready.
 	default:
 		c.startLoadLocked()
 	}
@@ -609,16 +473,10 @@ func (c *mediaController) Pause() {
 		return
 	}
 	if c.state == media.StateLoading || c.state == media.StatePreparing {
-		// Nothing is playing yet. Cancelling rather than remembering the pause
-		// is what stops a download the user walked away from completing and
-		// starting behind their back.
 		c.releaseLocked()
 	} else if c.player != nil {
 		c.player.Pause()
 	}
-	// Settled here rather than in setStateLocked: pausing an already-paused
-	// element is not a transition, but a play request it strands still has to
-	// be rejected rather than left hanging.
 	c.settlePlayLocked(media.CodeAborted, false)
 	c.setStateLocked(media.StatePaused)
 }
@@ -668,16 +526,9 @@ func (c *mediaController) Close() {
 }
 
 func (c *mediaController) nextOpLocked() uint64 {
-	// Allocated document-wide rather than per element, so an operation id names
-	// one request in the whole document. A page with two videos would otherwise
-	// hand the same id to both, and whatever settles a play() promise by id would
-	// resolve the wrong one.
 	return c.reg.ops.Add(1)
 }
 
-// CurrentSrc is the absolute URL the element resolved its source to, or "" while
-// nothing is selected. It is the browser's answer rather than the author's
-// attribute, which is the distinction the DOM draws between src and currentSrc.
 func (c *mediaController) CurrentSrc() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -687,9 +538,6 @@ func (c *mediaController) CurrentSrc() string {
 	return c.currentSrc
 }
 
-// resetLocked puts the snapshot back to "nothing loaded" without touching the
-// pending play request, which callers settle with the code that fits their
-// reason for resetting.
 func (c *mediaController) resetLocked() {
 	c.snap = media.Snapshot{State: media.StateEmpty, Duration: math.NaN()}
 	c.state = media.StateEmpty
@@ -700,14 +548,6 @@ func (c *mediaController) resetLocked() {
 	c.publishLocked()
 }
 
-// releaseLocked cancels in-flight work and frees the player and the downloaded
-// file. It also retires the load generation, so a worker that was already on
-// its way back has its result discarded and its file released rather than
-// opened behind the caller's back.
-//
-// It deliberately leaves a pending play request alone: only the caller knows
-// why the work stopped, and the promise has to be rejected with that reason
-// rather than left unsettled forever.
 func (c *mediaController) releaseLocked() {
 	c.loadGen++
 	if c.cancel != nil {
@@ -731,8 +571,6 @@ func (c *mediaController) releaseLocked() {
 	c.lastSeek = 0
 }
 
-// settlePlayLocked finishes a pending play request. A request that already
-// settled is not settled twice: a promise has one outcome.
 func (c *mediaController) settlePlayLocked(code media.ErrorCode, ok bool) {
 	if !c.wantPlay {
 		return
@@ -786,8 +624,6 @@ func (c *mediaController) startLoadLocked() {
 		select {
 		case loads <- mediaLoadResult{gen: gen, lease: lease, err: err}:
 		default:
-			// Nobody is reading: a full queue means the controller is closed or
-			// far behind, and either way holding the file would leak it.
 			if lease != nil {
 				lease.Release()
 			}
@@ -803,13 +639,9 @@ func (c *mediaController) startPlaybackLocked() {
 		c.player.Seek(c.nextOpLocked(), 0)
 	}
 	c.player.Play(c.playOp)
-	// Recorded so a backend that takes a few polls to report playback is not
-	// asked to start again on every one of them.
 	c.playIssued = true
 }
 
-// pump runs one owner-thread step: it applies whatever the download workers
-// produced, polls the backend, and reports whether the painted view moved.
 func (c *mediaController) pump() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -893,9 +725,6 @@ func (c *mediaController) applySnapshotLocked(s media.Snapshot) {
 	}
 
 	next := s.State
-	// A backend reports StatePreparing until it has something to show. Once
-	// metadata and a frame have arrived the element is ready whether or not the
-	// backend bothered to say so.
 	if next == media.StatePreparing && !math.IsNaN(c.snap.Duration) && c.snap.Pixels != nil {
 		next = media.StateReady
 	}
@@ -903,7 +732,6 @@ func (c *mediaController) applySnapshotLocked(s media.Snapshot) {
 		next = c.state
 	}
 	if c.seeking && next != media.StateSeeking && s.DoneOp != c.lastSeek {
-		// A position report that is not this seek's completion does not end it.
 		next = c.state
 	}
 	if next != c.state {
@@ -912,10 +740,6 @@ func (c *mediaController) applySnapshotLocked(s media.Snapshot) {
 		c.snap.State = next
 	}
 
-	// A play requested before the asset existed is still owed. This is the common
-	// case rather than an edge one: the user clicks the painted play button on a
-	// video that has not been fetched yet, so the request is recorded against a
-	// download and has to be honoured when the decoder finally reports ready.
 	if c.wantPlay && !c.playIssued && c.state == media.StateReady {
 		c.startPlaybackLocked()
 	}
@@ -936,9 +760,6 @@ func (c *mediaController) applySnapshotLocked(s media.Snapshot) {
 	if s.Position != c.snap.Position {
 		c.snap.Position = s.Position
 	}
-	// Publishing is throttled separately from the position changing: a backend can
-	// report the same position twice in a row, and gating on the change would
-	// leave the control bar showing a time the player has already moved past.
 	if c.state == media.StatePlaying {
 		if now := time.Now(); now.Sub(c.lastTimeUpdate) >= timeUpdateInterval {
 			c.lastTimeUpdate = now
@@ -952,8 +773,6 @@ func (c *mediaController) applySnapshotLocked(s media.Snapshot) {
 	}
 }
 
-// setStateLocked moves to a state and emits what the transition means to a
-// page. The states a backend reports are the truth; this only names them.
 func (c *mediaController) setStateLocked(next media.State) {
 	if next == c.state {
 		c.snap.State = next
@@ -983,8 +802,6 @@ func (c *mediaController) setStateLocked(next media.State) {
 	}
 }
 
-// publishLocked rebuilds the painted view and reports whether it moved, which
-// is the only thing that makes a media tick worth a repaint.
 func (c *mediaController) publishLocked() bool {
 	v := c.buildViewLocked()
 	if c.hasView && videoViewEqual(c.view, v) {
@@ -1026,10 +843,6 @@ func videoViewEqual(a, b paint.VideoView) bool {
 		a.Muted == b.Muted && a.Width == b.Width && a.Height == b.Height && a.Message == b.Message
 }
 
-// emitLocked appends an event, dropping the oldest coalescable one when the
-// queue is full. A queue of nothing but terminal events grows to
-// hardMaxMediaEvents before it starts refusing, because losing the settlement
-// of a play() promise would leave a page waiting forever.
 func (c *mediaController) emitLocked(e media.Event) {
 	if len(c.events) >= maxMediaEvents {
 		for i, old := range c.events {

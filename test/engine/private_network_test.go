@@ -7,16 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// localAuthorities are the spellings of "an address that only exists on the
-// viewer's machine or network". A public page that names one is not asking for a
-// stylesheet or a picture: it is asking the browser to reach into a network the
-// viewer happens to be attached to, which is where cloud metadata services
-// (169.254.169.254), routers (192.168.x.x, printer.local) and development
-// servers (127.0.0.1:8080) live.
-//
-// The base for every case is a plain http:// public origin on purpose. Under an
-// https:// base, an http:// subresource is already refused as mixed content, and a
-// test that passed for that reason would not be testing this rule.
 var localAuthorities = []string{
 	"127.0.0.1",
 	"127.0.0.1:8080",
@@ -110,11 +100,6 @@ func TestPublicPageCannotFetchLocalNetworkScript(t *testing.T) {
 	}
 }
 
-// TestLocalPageCanReachLocalNetwork covers the other half of the rule, and the
-// reason the rule is a policy about the initiator rather than a blocklist of
-// addresses: a page that is itself served from the machine or the private network
-// is entitled to use that network. Blocking 127.0.0.1 outright would break local
-// development and every test that drives the fetcher with a loopback server.
 func TestLocalPageCanReachLocalNetwork(t *testing.T) {
 	cases := []struct {
 		name string
@@ -145,9 +130,6 @@ func TestLocalPageCanReachLocalNetwork(t *testing.T) {
 	}
 }
 
-// TestPublicPageCanReachPublicNetwork is the non-vacuity check for the whole
-// rule: an over-broad classifier that refused every address would fail here
-// rather than turning the browser into a page that loads nothing.
 func TestPublicPageCanReachPublicNetwork(t *testing.T) {
 	cases := []struct {
 		name string

@@ -23,10 +23,6 @@ func TestTabByID(t *testing.T) {
 	}
 }
 
-// TestTabScrollClampsToStripRange pins the shared scroll ownership: the
-// offset the wheel, the draw path and the hit test all read is one mutex-held
-// value clamped to the strip's legal range, so an over-scroll or a resize
-// can never park the strip past its content.
 func TestTabScrollClampsToStripRange(t *testing.T) {
 	mgr := NewManager(nil)
 	for i := 0; i < 40; i++ {
@@ -48,9 +44,6 @@ func TestTabScrollClampsToStripRange(t *testing.T) {
 	}
 }
 
-// TestMoveTabFourTabsReordersAndKeepsActive repeats the drag-reorder contract
-// on a full four-tab strip: the dragged tab lands at the final index, every
-// other tab shifts in order, and the selected tab is still the same tab.
 // qc:BR-032
 func TestMoveTabFourTabsReordersAndKeepsActive(t *testing.T) {
 	mgr := NewManager(nil)
@@ -75,9 +68,6 @@ func TestMoveTabFourTabsReordersAndKeepsActive(t *testing.T) {
 	}
 }
 
-// TestMoveTabReordersAndKeepsActive pins drag-reorder ownership: moving a tab
-// reorders by final index, clamps out-of-range targets, ignores unknown IDs,
-// and keeps the ACTIVE tab (by identity, not position) across the move.
 func TestMoveTabReordersAndKeepsActive(t *testing.T) {
 	mgr := NewManager(nil)
 	a := mgr.NewTab()
@@ -121,8 +111,6 @@ func tabIDs(mgr *TabManager) []uint64 {
 	return out
 }
 
-// TestDragStateRoundtrip pins the shared drag handoff between hit-testing
-// and drawing: one mutex-held value, cleared on end.
 func TestDragStateRoundtrip(t *testing.T) {
 	mgr := NewManager(nil)
 	tab := mgr.NewTab()
@@ -175,7 +163,6 @@ func TestReopenTabStateAndStack(t *testing.T) {
 		t.Fatalf("ClosedTabCount() = %d, want 2", mgr.ClosedTabCount())
 	}
 
-	// First reopen restores tab2 (LIFO)
 	restored2, ok := mgr.ReopenTab()
 	if !ok || restored2 == nil {
 		t.Fatalf("ReopenTab() failed for tab2: ok=%v", ok)
@@ -193,7 +180,6 @@ func TestReopenTabStateAndStack(t *testing.T) {
 		t.Errorf("restored2 ID should be newly allocated, got same %d", tab2ID)
 	}
 
-	// Second reopen restores tab1
 	restored1, ok := mgr.ReopenTab()
 	if !ok || restored1 == nil {
 		t.Fatalf("ReopenTab() failed for tab1: ok=%v", ok)
@@ -212,7 +198,6 @@ func TestReopenTabStateAndStack(t *testing.T) {
 		t.Errorf("restored1 history mismatch: entries=%v, idx=%d", entries, idx)
 	}
 
-	// Third reopen has nothing left
 	empty, ok := mgr.ReopenTab()
 	if ok || empty != nil {
 		t.Fatalf("ReopenTab() on empty stack = (%v, %v), want (nil, false)", empty, ok)
@@ -224,7 +209,7 @@ func TestReopenTabStateAndStack(t *testing.T) {
 
 func TestReopenTabIgnoresBlankTabs(t *testing.T) {
 	mgr := NewManager(nil)
-	tab := mgr.NewTab() // Blank tab with no URL and no history entries
+	tab := mgr.NewTab()
 	mgr.CloseTab(tab.ID())
 
 	if mgr.CanReopenTab() {

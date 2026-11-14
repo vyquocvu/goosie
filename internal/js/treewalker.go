@@ -1,22 +1,5 @@
 package js
 
-// TreeWalker and NodeIterator implement the DOM Traversal API.
-//
-// document.createTreeWalker(root, whatToShow, filter) returns a TreeWalker
-// that navigates the DOM tree relative to a mutable currentNode using
-// directional methods (parentNode, firstChild, lastChild, previousSibling,
-// nextSibling) and linear methods (nextNode, previousNode) that walk in
-// document order.
-//
-// document.createNodeIterator(root, whatToShow, filter) returns a
-// NodeIterator whose currentNode advances through the subtree in pre-order
-// depth-first document order via nextNode and previousNode.
-//
-// Both accept a whatToShow bitmask (NodeFilter.SHOW_* constants) and an
-// optional NodeFilter callback. TreeWalker distinguishes FILTER_SKIP from
-// FILTER_REJECT so skipped nodes expose their descendants while rejected
-// subtrees are pruned. NodeIterator treats both results as omitted nodes.
-
 import (
 	"errors"
 
@@ -24,11 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// ---------------------------------------------------------------------------
-// Node-type to whatToShow-bit translation
-// ---------------------------------------------------------------------------
-
-// whatToShowBit returns the NodeFilter.SHOW_* bit for n's type.
 func whatToShowBit(n *dom.Node) uint32 {
 	if n == nil {
 		return 0
@@ -53,10 +31,6 @@ func whatToShowBit(n *dom.Node) uint32 {
 	}
 	return 0
 }
-
-// ---------------------------------------------------------------------------
-// Filter evaluation
-// ---------------------------------------------------------------------------
 
 const (
 	filterAccept uint16 = 1
@@ -161,12 +135,6 @@ func (r *Runtime) traversalFilterResultInChild(child *Runtime, node *dom.Node, f
 	return uint16(value.ToInteger())
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker
-// ---------------------------------------------------------------------------
-
-// treeWalker holds the Go-side state of one TreeWalker. The JS-facing object
-// carries __tw__ as an own property; methods and accessors read it from there.
 type treeWalker struct {
 	root       *dom.Node
 	current    *dom.Node
@@ -175,7 +143,6 @@ type treeWalker struct {
 	filtering  bool
 }
 
-// installTreeWalker creates the JS TreeWalker object and returns it.
 func (r *Runtime) installTreeWalker(root *dom.Node, whatToShow uint32, filter goja.Value) *goja.Object {
 	tw := &treeWalker{root: root, current: root, whatToShow: whatToShow, filter: filter}
 	obj := r.vm.NewObject()
@@ -193,8 +160,6 @@ func (r *Runtime) installTreeWalker(root *dom.Node, whatToShow uint32, filter go
 		return tw.filter
 	})
 
-	// currentNode: get/set accessor that reads/writes tw.current through
-	// the wrapper cache so identity is preserved across repeated reads.
 	_ = obj.Set("__getCurrent__", func(goja.FunctionCall) goja.Value {
 		t := obj.Get("__tw__").Export().(*treeWalker)
 		return r.wrapNode(t.current)
@@ -230,8 +195,6 @@ func (r *Runtime) installTreeWalker(root *dom.Node, whatToShow uint32, filter go
 		return r.twSibling(call.This.ToObject(r.vm).Get("__tw__").Export().(*treeWalker), true)
 	})
 
-	// Linear traversal: nextNode/previousNode walk in document order,
-	// stepping over nodes that fail the filter without stopping.
 	_ = obj.Set("nextNode", func(call goja.FunctionCall) goja.Value {
 		t := call.This.ToObject(r.vm).Get("__tw__").Export().(*treeWalker)
 		return r.twNext(t)
@@ -365,9 +328,6 @@ func (r *Runtime) twSibling(t *treeWalker, forward bool) goja.Value {
 	return goja.Null()
 }
 
-// twSearchSibling searches the descendants of a sibling candidate using the
-// TreeWalker sibling traversal rules. Unlike firstChild/lastChild traversal,
-// a filter result other than FILTER_REJECT descends into the candidate.
 func (r *Runtime) twSearchSibling(t *treeWalker, node *dom.Node, forward bool) *dom.Node {
 	for node != nil {
 		result := r.treeWalkerFilterResult(t, node)
@@ -390,8 +350,6 @@ func (r *Runtime) twSearchSibling(t *treeWalker, node *dom.Node, forward bool) *
 	return nil
 }
 
-// twNext returns the next node in pre-order depth-first order after current
-// that passes the filter, advancing current. The search stays within root.
 func (r *Runtime) twNext(t *treeWalker) goja.Value {
 	r.assertTreeWalkerInactive(t)
 	n := t.current
@@ -410,8 +368,6 @@ func (r *Runtime) twNext(t *treeWalker) goja.Value {
 	return goja.Null()
 }
 
-// twNextInTree returns the next node in pre-order depth-first order after n,
-// bounded by root. Returns nil when n is the last reachable node.
 func (r *Runtime) twNextInTree(n, root *dom.Node, descend ...bool) *dom.Node {
 	if (len(descend) == 0 || descend[0]) && n.FirstChild != nil {
 		return n.FirstChild
@@ -425,8 +381,6 @@ func (r *Runtime) twNextInTree(n, root *dom.Node, descend ...bool) *dom.Node {
 	return nil
 }
 
-// twPrev returns the previous node in document order before current that
-// passes the filter, moving current backwards.
 func (r *Runtime) twPrev(t *treeWalker) goja.Value {
 	r.assertTreeWalkerInactive(t)
 	n := t.current
@@ -477,8 +431,6 @@ func (r *Runtime) twPreviousBeforeSubtree(n, root *dom.Node) *dom.Node {
 	return nil
 }
 
-// twPrevInTree returns the previous node in pre-order depth-first order
-// before n, bounded by root.
 func (r *Runtime) twPrevInTree(n, root *dom.Node) *dom.Node {
 	if n.PrevSibling != nil {
 		c := n.PrevSibling
@@ -493,11 +445,6 @@ func (r *Runtime) twPrevInTree(n, root *dom.Node) *dom.Node {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// NodeIterator
-// ---------------------------------------------------------------------------
-
-// nodeIterator holds the Go-side state of one NodeIterator.
 type nodeIterator struct {
 	root             *dom.Node
 	current          *dom.Node
@@ -524,7 +471,6 @@ func (r *Runtime) observeNodeRemoval(doc *dom.Document) {
 	}
 }
 
-// installNodeIterator creates the JS NodeIterator object and returns it.
 func (r *Runtime) installNodeIterator(root *dom.Node, whatToShow uint32, filter goja.Value) *goja.Object {
 	r.observeNodeRemoval(root.Doc)
 	ni := &nodeIterator{root: root, current: root, whatToShow: whatToShow, filter: filter, before: true}
@@ -564,14 +510,11 @@ func (r *Runtime) installNodeIterator(root *dom.Node, whatToShow uint32, filter 
 		it := call.This.ToObject(r.vm).Get("__ni__").Export().(*nodeIterator)
 		return r.niPrev(it)
 	})
-	// detach() is a deprecated no-op kept for web compatibility.
 	_ = obj.Set("detach", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
 
 	return obj
 }
 
-// niNext advances current to the next node in pre-order depth-first order
-// that passes the filter, staying within the root subtree.
 func (r *Runtime) niNext(it *nodeIterator) goja.Value {
 	r.assertNodeIteratorFilterContext(it)
 	n := it.current
@@ -604,8 +547,6 @@ func (r *Runtime) niNext(it *nodeIterator) goja.Value {
 	}
 }
 
-// niPrev moves current to the previous node in document order that passes
-// the filter.
 func (r *Runtime) niPrev(it *nodeIterator) goja.Value {
 	r.assertNodeIteratorFilterContext(it)
 	n := it.current
@@ -712,9 +653,6 @@ func (it *nodeIterator) nextAfterSubtree(node *dom.Node) *dom.Node {
 	return nil
 }
 
-// nextInOrder returns the next node in pre-order depth-first order after n,
-// bounded by the iterator's root. Returns nil when n is the last reachable
-// node in the subtree.
 func (it *nodeIterator) nextInOrder(n *dom.Node) *dom.Node {
 	if n.FirstChild != nil {
 		return n.FirstChild
@@ -728,8 +666,6 @@ func (it *nodeIterator) nextInOrder(n *dom.Node) *dom.Node {
 	return nil
 }
 
-// prevInOrder returns the previous node in pre-order depth-first order
-// before n, bounded by the iterator's root.
 func (it *nodeIterator) prevInOrder(n *dom.Node) *dom.Node {
 	if n == it.root {
 		return nil
@@ -747,14 +683,7 @@ func (it *nodeIterator) prevInOrder(n *dom.Node) *dom.Node {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Document methods and NodeFilter constants
-// ---------------------------------------------------------------------------
-
-// installTreeWalkerAPI adds document.createTreeWalker,
-// document.createNodeIterator, and the global NodeFilter constants.
 func (r *Runtime) installTreeWalkerAPI(doc *goja.Object) {
-	// document.createTreeWalker(root, whatToShow, filter)
 	_ = doc.Set("createTreeWalker", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			panic(r.vm.NewTypeError("createTreeWalker requires a root Node"))
@@ -766,7 +695,7 @@ func (r *Runtime) installTreeWalkerAPI(doc *goja.Object) {
 		if root == nil {
 			panic(r.vm.NewTypeError("createTreeWalker root must be a Node"))
 		}
-		whatToShow := uint32(0xFFFFFFFF) // SHOW_ALL
+		whatToShow := uint32(0xFFFFFFFF)
 		if len(call.Arguments) >= 2 && !goja.IsUndefined(call.Arguments[1]) {
 			whatToShow = uint32(call.Arguments[1].ToInteger())
 		}
@@ -777,7 +706,6 @@ func (r *Runtime) installTreeWalkerAPI(doc *goja.Object) {
 		return r.installTreeWalker(root, whatToShow, filter)
 	})
 
-	// document.createNodeIterator(root, whatToShow, filter)
 	_ = doc.Set("createNodeIterator", func(call goja.FunctionCall) goja.Value {
 		if r.domDoc == nil || len(call.Arguments) < 1 {
 			return goja.Null()
@@ -797,9 +725,6 @@ func (r *Runtime) installTreeWalkerAPI(doc *goja.Object) {
 		return r.installNodeIterator(root, whatToShow, filter)
 	})
 
-	// NodeFilter constants: available as bare globals (NodeFilter.SHOW_ALL)
-	// and on the window object (window.NodeFilter.SHOW_ALL) since window
-	// IS the global object in this runtime.
 	nf := r.vm.NewObject()
 	constants := map[string]int64{
 		"SHOW_ALL":                    0xFFFFFFFF,

@@ -7,12 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// These oracles sit at the style->paint seam: they build a real document, run
-// the frozen display list (Session.PaintChecked, the untrusted-input contract),
-// and assert on the commands that reach the rasterizer. The values are pinned
-// to the Chromium measurements recorded in TASK-044 section 2, not to Goosie's
-// own prior behaviour.
-
 func visDisplayList(t *testing.T, html string) []paint.DisplayCmd {
 	t.Helper()
 	sess, err := engine.NewSession(html, nil, 800)
@@ -30,9 +24,6 @@ func visDisplayList(t *testing.T, html string) []paint.DisplayCmd {
 	return list.All()
 }
 
-// visSolidFills returns every opaque fill command whose premultiplied colour is
-// the requested rgb. Background colours here are chosen to be unique per box so
-// presence or absence of one colour identifies exactly one box.
 func visSolidFills(cmds []paint.DisplayCmd, r, g, b uint8) []paint.DisplayCmd {
 	var out []paint.DisplayCmd
 	for _, c := range cmds {
@@ -43,10 +34,6 @@ func visSolidFills(cmds []paint.DisplayCmd, r, g, b uint8) []paint.DisplayCmd {
 	return out
 }
 
-// TestVisibilityHiddenDropsBoxPaint is the core defect: an author hides a box,
-// so none of its own paint - background, border, text - may reach the display
-// list. Before the fix the box painted anyway because the builder consulted
-// Visibility only for list markers.
 // qc:BR-195
 func TestVisibilityHiddenDropsBoxPaint(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -75,10 +62,6 @@ func TestVisibilityHiddenDropsBoxPaint(t *testing.T) {
 	}
 }
 
-// TestVisibilityHiddenSubtreeInheritsHidden proves hidden cascades to the
-// subtree (visibility is an inherited property) - a child that says nothing is
-// hidden too - while a child that reasserts visible is painted again. This is
-// the shape Chromium showed when measured (section 2.3).
 // qc:BR-195
 func TestVisibilityHiddenSubtreeInheritsHidden(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -105,10 +88,6 @@ func TestVisibilityHiddenSubtreeInheritsHidden(t *testing.T) {
 	}
 }
 
-// TestVisibilityHiddenKeepsLayout shows the mechanism is not display:none: a
-// hidden box still reserves its box in flow, so the block after it starts below
-// it. This is the half of the acceptance the fix must not break while dropping
-// the paint.
 // qc:BR-195
 func TestVisibilityHiddenKeepsLayout(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
@@ -121,8 +100,6 @@ func TestVisibilityHiddenKeepsLayout(t *testing.T) {
 	</body></html>`
 	cmds := visDisplayList(t, html)
 
-	// The hidden box emits no fill, yet the following box must be pushed down by
-	// the hidden box's 50px height.
 	if got := visSolidFills(cmds, 1, 1, 1); len(got) != 0 {
 		t.Errorf("hidden box emitted %d fill(s); want 0", len(got))
 	}
@@ -135,9 +112,6 @@ func TestVisibilityHiddenKeepsLayout(t *testing.T) {
 	}
 }
 
-// TestDisplayNoneStillCollapses is the contrast case that keeps the two
-// mechanisms from being conflated: display:none removes the box from flow, so
-// the next block sits at the top, and it paints nothing.
 // qc:BR-195
 func TestDisplayNoneStillCollapses(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>

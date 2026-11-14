@@ -32,7 +32,6 @@ func TestSitePermissions_JSRuntimeBlocked(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := perms.NewManager(filepath.Join(tmpDir, "permissions.json"))
 
-	// 1. Load with permissions allowed by default: script executes.
 	_, _, _, sessAllowed, _, err := loadURLCtx(context.Background(), client, fonts, ts.URL, 800, 600, 1.0, tmpDir, false, false, mgr)
 	if err != nil {
 		t.Fatalf("loadURLCtx failed: %v", err)
@@ -47,7 +46,6 @@ func TestSitePermissions_JSRuntimeBlocked(t *testing.T) {
 		t.Errorf("expected script to execute and set headline to 'Executed', got %+v", elemAllowed)
 	}
 
-	// 2. Block JavaScript for this origin: script does NOT execute.
 	mgr.Set(ts.URL, perms.PermissionJavaScript, perms.StateBlock)
 
 	_, _, _, sessBlocked, _, err := loadURLCtx(context.Background(), client, fonts, ts.URL, 800, 600, 1.0, tmpDir, false, false, mgr)
@@ -71,7 +69,6 @@ func TestSitePermissions_ImagesBlocked(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, ".png") {
 			imageFetches++
 			w.Header().Set("Content-Type", "image/png")
-			// 1x1 transparent PNG bytes
 			pngBytes := []byte{
 				0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
 				0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
@@ -97,7 +94,6 @@ func TestSitePermissions_ImagesBlocked(t *testing.T) {
 	tmpDir := t.TempDir()
 	mgr := perms.NewManager(filepath.Join(tmpDir, "permissions.json"))
 
-	// Block images for this origin
 	mgr.Set(ts.URL, perms.PermissionImages, perms.StateBlock)
 
 	_, _, _, sess, _, err := loadURLCtx(context.Background(), client, fonts, ts.URL, 800, 600, 1.0, tmpDir, false, false, mgr)
@@ -210,7 +206,6 @@ func TestSitePermissions_InspectPageActions(t *testing.T) {
 		tabMgr: tabMgr,
 	}
 
-	// 1. Initial inspect page rendering: permissions are default (Allowed)
 	_, initialHTML := buildInspectPageHTML(f, fmt.Sprintf("goosie://inspect?tab=%d", tab.ID()))
 	if !strings.Contains(initialHTML, "Site Permissions &amp; Content Settings") {
 		t.Errorf("expected Site Permissions card in inspect page")
@@ -225,7 +220,6 @@ func TestSitePermissions_InspectPageActions(t *testing.T) {
 		t.Errorf("expected clipboard permission controls with prompt defaults")
 	}
 
-	// 2. Block JavaScript via perm_set action
 	actionURL := fmt.Sprintf("goosie://inspect?action=perm_set&origin=https://example.com&perm=javascript&state=block&tab=%d", tab.ID())
 	buildInspectPageHTML(f, actionURL)
 
@@ -233,13 +227,11 @@ func TestSitePermissions_InspectPageActions(t *testing.T) {
 		t.Errorf("expected javascript permission to be StateBlock")
 	}
 
-	// 3. Re-render inspect page: should reflect Blocked state
 	_, blockedHTML := buildInspectPageHTML(f, fmt.Sprintf("goosie://inspect?tab=%d", tab.ID()))
 	if !strings.Contains(blockedHTML, "Blocked") {
 		t.Errorf("expected 'Blocked' label in inspect page")
 	}
 
-	// 4. Reset to default via perm_set action
 	resetURL := fmt.Sprintf("goosie://inspect?action=perm_set&origin=https://example.com&perm=javascript&state=default&tab=%d", tab.ID())
 	buildInspectPageHTML(f, resetURL)
 

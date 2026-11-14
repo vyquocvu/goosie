@@ -7,27 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// The expectations here are measured against Chromium with
-// test/wpt/resources/element_scroll_probe.py, not assumed:
-//
-//   - a scroll container's scrollWidth/scrollHeight is its content box plus
-//     trailing padding, extended by any descendant that overflows it, and it
-//     stops at a descendant that is itself a scroll or clip container;
-//   - scrollTop/scrollLeft clamp to that extent minus the client box, so a
-//     100x100 scroll container holding a 200x200 child accepts 100;
-//   - an overflow:visible box reports the same extent but accepts no offset and
-//     fires nothing, while overflow:hidden — which scrolls only from script —
-//     accepts the offset and fires like any scroller;
-//   - the scroll event is queued: it is not visible inline after the write nor
-//     after a task, it arrives before the next animation frame callback, it is
-//     trusted, non-bubbling, non-cancelable, and targeted at the element;
-//   - one element gets one event per turn however many axes it scrolled;
-//   - scrollTo and scrollBy scroll the same way the setters do — the options
-//     form and the (left, top) form both clamp, the relative form adds to the
-//     current offset — and an overflow:visible box takes nothing from them
-//     either;
-//   - margins count toward the scrollable area, absolutely positioned descendants
-//     count, fixed-position descendants do not, and trailing padding counts.
 func scrollSession(t *testing.T, html string) *engine.Session {
 	t.Helper()
 	rt, err := js.New(js.Options{})
@@ -46,8 +25,6 @@ const scrollPage = `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="overflow:scroll;width:100px;height:100px"><div style="width:200px;height:200px"></div></div>
 </body></html>`
 
-// watchScroll installs the page-side recorder once: a #box element and a global
-// log of the scroll events it receives.
 func watchScroll(t *testing.T, s *engine.Session) {
 	t.Helper()
 	if _, err := s.EvaluateJS(`
@@ -78,8 +55,6 @@ func scrollReport(t *testing.T, s *engine.Session, expr string) string {
 	return got
 }
 
-// A scroll container's scrollable area is the union of what it contains, not its
-// own box: the 200x200 child makes the extent 200 while the client box stays 100.
 func TestScrollContainerReportsItsOverflowingExtent(t *testing.T) {
 	s := scrollSession(t, scrollPage)
 	got := scrollReport(t, s, `
@@ -91,9 +66,6 @@ func TestScrollContainerReportsItsOverflowingExtent(t *testing.T) {
 	}
 }
 
-// Trailing padding belongs to the scrollable area, so a container with 40px of
-// right padding and 60px of bottom padding measures 240x260 and its client box
-// 140x160 leaves 100 of travel on each axis.
 func TestScrollExtentIncludesTrailingPadding(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="overflow:scroll;width:100px;height:100px;padding:0 40px 60px 0"><div style="width:200px;height:200px"></div></div>
@@ -109,8 +81,6 @@ func TestScrollExtentIncludesTrailingPadding(t *testing.T) {
 	}
 }
 
-// A nested scroller contributes its own box, never the content that overflows
-// inside it, so the outer element has nothing to scroll.
 func TestNestedScrollContainerLimitsTheExtent(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="overflow:scroll;width:100px;height:100px">
@@ -127,9 +97,6 @@ func TestNestedScrollContainerLimitsTheExtent(t *testing.T) {
 	}
 }
 
-// A descendant's margins extend the scrollable area even though the border box
-// stops at the container's edge: a 100px child with 60px of trailing margin
-// measures 160 and travels 60.
 func TestScrollExtentIncludesDescendantMargins(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="overflow:scroll;width:100px;height:100px"><div style="width:100px;height:100px;margin:0 60px 60px 0"></div></div>
@@ -145,8 +112,6 @@ func TestScrollExtentIncludesDescendantMargins(t *testing.T) {
 	}
 }
 
-// Absolutely positioned descendants are part of the scrollable area, so a 200px
-// abspos child of a 100px container scrolls like any other overflow.
 func TestScrollExtentIncludesAbsposDescendants(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="overflow:scroll;position:relative;width:100px;height:100px"><div style="position:absolute;left:0;top:0;width:200px;height:200px"></div></div>
@@ -162,9 +127,6 @@ func TestScrollExtentIncludesAbsposDescendants(t *testing.T) {
 	}
 }
 
-// A fixed-position descendant is pinned to the viewport, not to the scroll
-// container, so it never enlarges the scrollable area: the container has nothing
-// to scroll and its offset stays at zero.
 func TestScrollExtentIgnoresFixedPositionDescendants(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="overflow:scroll;position:relative;width:100px;height:100px"><div style="position:fixed;left:0;top:0;width:300px;height:300px"></div></div>
@@ -180,8 +142,6 @@ func TestScrollExtentIgnoresFixedPositionDescendants(t *testing.T) {
 	}
 }
 
-// scrollTop and scrollLeft clamp to extent minus client size rather than being
-// stored as written; a negative write lands on zero.
 func TestElementScrollOffsetClampsToItsExtent(t *testing.T) {
 	s := scrollSession(t, scrollPage)
 	got := scrollReport(t, s, `
@@ -198,9 +158,6 @@ func TestElementScrollOffsetClampsToItsExtent(t *testing.T) {
 	}
 }
 
-// A scroll event is queued, not dispatched inline: the write must not re-enter
-// page code, and the frame that follows delivers exactly one event on the
-// scrolled element.
 func TestElementScrollOffsetQueuesOneScrollEvent(t *testing.T) {
 	s := scrollSession(t, scrollPage)
 	watchScroll(t, s)
@@ -216,8 +173,6 @@ func TestElementScrollOffsetQueuesOneScrollEvent(t *testing.T) {
 	}
 }
 
-// A write that leaves the offset where it was queues nothing, and both axes of
-// one element share a single queued event.
 func TestElementScrollOffsetQueuesNothingWithoutAChange(t *testing.T) {
 	s := scrollSession(t, scrollPage)
 	watchScroll(t, s)
@@ -242,8 +197,6 @@ func TestElementScrollOffsetQueuesNothingWithoutAChange(t *testing.T) {
 	}
 }
 
-// An overflow:visible box reports the same overflowing extent but is not a
-// scroll container, so nothing takes and nothing fires.
 func TestNonScrollableElementKeepsZeroScrollOffset(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="width:100px;height:100px"><div style="width:200px;height:200px"></div></div>
@@ -257,8 +210,6 @@ func TestNonScrollableElementKeepsZeroScrollOffset(t *testing.T) {
 	}
 }
 
-// overflow:hidden clips but still scrolls from script, so it behaves like a
-// scroller for the offset and the queued event.
 func TestClippedElementScrollsProgrammatically(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="overflow:hidden;width:100px;height:100px"><div style="width:200px;height:200px"></div></div>
@@ -274,10 +225,6 @@ func TestClippedElementScrollsProgrammatically(t *testing.T) {
 	}
 }
 
-// scrollTo and scrollBy are the same scroll as the property setters: the options
-// form clamps to the scrollable area, the relative form adds to the current
-// offset and clamps per axis, the two-argument form is (left, top), and a turn
-// that moves the box owes exactly one event however many writes made it.
 func TestElementScrollToAndScrollByClampAndQueue(t *testing.T) {
 	s := scrollSession(t, scrollPage)
 	watchScroll(t, s)
@@ -312,8 +259,6 @@ func TestElementScrollToAndScrollByClampAndQueue(t *testing.T) {
 	}
 }
 
-// A box that does not scroll takes no offset from scrollTo either, and queues
-// nothing: the method goes through the same bounds as the setter.
 func TestElementScrollToIgnoredOnNonScrollContainer(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div id="box" style="width:100px;height:100px"><div style="width:200px;height:200px"></div></div>
@@ -327,9 +272,6 @@ func TestElementScrollToIgnoredOnNonScrollContainer(t *testing.T) {
 	}
 }
 
-// The document's scrolling element is the viewport, not a box with an offset of
-// its own: scrollTo and scrollBy on it move window.scrollY, and the relative
-// form adds to where the viewport already is.
 func TestScrollingElementScrollToMovesTheViewport(t *testing.T) {
 	s := scrollSession(t, `<!doctype html><html><head></head><body style="margin:0">
 <div style="height:2000px"></div>

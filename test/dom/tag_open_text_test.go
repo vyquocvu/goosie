@@ -8,12 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// TestLessThanFollowedByNonLetterIsText pins the tag-open state: only a
-// letter after "<" starts a tag. "a <= b", "2 < 3" and a trailing "<" are
-// literal text. Routing "<=" into the tag reader swallowed the real close tag
-// that followed and nested every later sibling inside the box - which is how
-// one "<=" in a media-queries parity fixture collapsed the whole lower page
-// into a single div.
 func TestLessThanFollowedByNonLetterIsText(t *testing.T) {
 	doc := domtest.Parse(`<!doctype html><html><body>
 <div class="a">viewport <= 500px</div>
@@ -39,8 +33,6 @@ func TestLessThanFollowedByNonLetterIsText(t *testing.T) {
 	}
 }
 
-// TestBareLessThanAtEndIsText pins the end-of-input half of the same state:
-// a "<" with nothing after it is text, not a tag that eats the document.
 func TestBareLessThanAtEndIsText(t *testing.T) {
 	doc := domtest.Parse(`<!doctype html><html><body><div class="a">trailing <</div></body></html>`)
 	a := find(&doc.Node, "a")
@@ -52,10 +44,6 @@ func TestBareLessThanAtEndIsText(t *testing.T) {
 	}
 }
 
-// TestImpliedHtmlElementExists pins the always-there html element: a document
-// that omits <html> still grows one, so `html { background: ... }` matches and
-// canvas resolution sees it. Before the seed, Doc.HTML stayed nil and the
-// body's background wrongly won the canvas.
 func TestImpliedHtmlElementExists(t *testing.T) {
 	doc := domtest.Parse(`<!DOCTYPE html><title>t</title><body><p>x</p></body>`)
 	if doc.HTML == nil || doc.HTML.Data != "html" {
@@ -66,9 +54,6 @@ func TestImpliedHtmlElementExists(t *testing.T) {
 	}
 }
 
-// TestExplicitHtmlAttrsMerge pins attribute merging: an explicit <html> tag
-// keeps contributing lang/class onto the seeded element instead of being
-// dropped (or duplicating the element).
 func TestExplicitHtmlAttrsMerge(t *testing.T) {
 	doc := domtest.Parse(`<!DOCTYPE html><html lang="en" class="a"><body><p>x</p></body></html>`)
 	if doc.HTML == nil {
@@ -93,9 +78,6 @@ func TestExplicitHtmlAttrsMerge(t *testing.T) {
 	}
 }
 
-// TestVoidEndTagsIgnored pins void end-tag handling: </col> (and its void
-// kin) is a dropped parse error, never a stack unwind. Without this one
-// </col> ejects the table and every later sibling lands outside it.
 func TestVoidEndTagsIgnored(t *testing.T) {
 	doc := domtest.Parse(`<table><col></col><col></col><td></td></table>`)
 	var table, colCount int
@@ -117,7 +99,6 @@ func TestVoidEndTagsIgnored(t *testing.T) {
 	if table != 1 || colCount != 2 {
 		t.Errorf("table=%d cols=%d, want 1 table holding both cols", table, colCount)
 	}
-	// The td must nest inside the table structure (table > tbody > tr > td).
 	var findTdParent func(n *dom.Node) string
 	findTdParent = func(n *dom.Node) string {
 		for c := n.FirstChild; c != nil; c = c.NextSibling {

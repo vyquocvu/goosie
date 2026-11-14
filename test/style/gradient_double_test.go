@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// TestGradientDoublePositionStops pins solid-band expansion: `yellow 0%
-// 25%` is yellow from 0 to 0.25, so four bands need eight stops.
 func TestGradientDoublePositionStops(t *testing.T) {
 	s := styleFor(t, `<html><body><div>x</div></body></html>`,
 		`div { background-image: linear-gradient(to right, yellow 0% 25%, purple 25% 50%, yellow 50% 75%, purple 75% 100%); }`, "div")

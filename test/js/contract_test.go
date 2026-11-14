@@ -10,14 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// These are roadmap gate 6, sub-project 1 as executable requirements. They are
-// written before the runtime exists on purpose: the point of the round is to
-// find out what the contract costs before paying for the interpreter, and a
-// contract nobody tried to assert on is a guess.
-//
-// Everything here currently fails on behaviour, not on compilation - the
-// package under test declares the API and returns js.ErrNotImplemented.
-
 func newRuntime(t *testing.T, opts js.Options) *js.Runtime {
 	t.Helper()
 	r, err := js.New(opts)
@@ -137,24 +129,16 @@ func TestDynamicClassicScriptLimitIsBoundedPerRuntime(t *testing.T) {
 	}
 }
 
-// A negative timeout is a host that believes it configured a bound and did
-// not. Silently running without one is the failure mode this rejects, so the
-// constructor refuses it and the zero value means the default.
 func TestNewRejectsNegativeTimeout(t *testing.T) {
 	_, err := js.New(js.Options{Timeout: -time.Second})
 	if err == nil {
 		t.Fatalf("New accepted Timeout %v and would have run scripts unbounded", -time.Second)
 	}
-	// errors.Is alone would be satisfied by the unimplemented stub, so the test
-	// would report green for a rule nothing enforces.
 	if errors.Is(err, js.ErrNotImplemented) {
 		t.Fatalf("New rejected every option, not the negative timeout: %v", err)
 	}
 }
 
-// Two scripts in one document share one realm, and the second sees what the
-// first left behind. This is the whole reason the engine can run <script> tags
-// one at a time during a parse instead of concatenating the page.
 func TestScriptsRunInDocumentOrderAgainstOneRealm(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
 
@@ -180,8 +164,6 @@ func TestScriptsRunInDocumentOrderAgainstOneRealm(t *testing.T) {
 	}
 }
 
-// A computed value has to survive the call that produced it, or nothing a page
-// does is observable from the host side.
 func TestGlobalReadsBackANumber(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
 	if err := r.Run(`var answer = 20 + 22;`, "inline"); err != nil {
@@ -196,9 +178,6 @@ func TestGlobalReadsBackANumber(t *testing.T) {
 	}
 }
 
-// One bad script must not end the document: a page with a broken ad tag still
-// has to render and still has to run the scripts after it. The error is
-// reported, and it names the file and line that threw.
 func TestThrowingScriptIsReportedAndDoesNotStopTheRuntime(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
 
@@ -231,9 +210,6 @@ func TestThrowingScriptIsReportedAndDoesNotStopTheRuntime(t *testing.T) {
 	}
 }
 
-// A syntax error is a different failure from an exception - nothing executed at
-// all - and it is treated the same way by the loader: reported, and the next
-// script still runs.
 func TestSyntaxErrorDoesNotPoisonLaterScripts(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
 	if err := r.Run(`var = ;`, "https://example.test/broken.js"); err == nil {
@@ -247,9 +223,6 @@ func TestSyntaxErrorDoesNotPoisonLaterScripts(t *testing.T) {
 	}
 }
 
-// Source size is admitted before compilation, not charged to it: MaxScriptBytes
-// exists so a page cannot make the engine build a multi-megabyte AST on a tab
-// that is already at its document limit.
 // qc:BR-167
 func TestOversizedScriptIsRefusedBeforeRunning(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
@@ -264,9 +237,6 @@ func TestOversizedScriptIsRefusedBeforeRunning(t *testing.T) {
 	}
 }
 
-// Close is the document teardown. A runtime whose page is gone must report that
-// rather than execute into a realm nobody owns any more, which is the use-after
-// free this API has to make impossible at the Go level.
 func TestRunAfterCloseReportsErrClosed(t *testing.T) {
 	r, err := js.New(js.Options{URL: "https://example.test/a"})
 	if err != nil {

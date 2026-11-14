@@ -12,8 +12,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// dump-url prints the layout tree goosie builds for a live URL, for diagnosing
-// parity failures against Chromium.
 func main() {
 	url := flag.String("url", "", "URL to load")
 	w := flag.Float64("width", 1280, "viewport width")

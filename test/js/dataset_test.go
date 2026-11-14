@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// HTMLElement.dataset (DOMStringMap) is how dynamic pages stash per-node
-// state: Google reads b.dataset.ved off static markup, and a missing dataset
-// takes its impression logger down.
 func TestDatasetReads(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="b" data-ved="abc" data-trid="t1" data-multi-word="v"></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -48,8 +45,6 @@ var out = d1.a + "/" + b.dataset.a + "/" + Object.keys(b.dataset).length;`
 	if err := r.Run(src, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	// DOMStringMap is live: even an earlier handle reads the new value,
-	// and keys enumerate the data-* attributes.
 	if v, ok := r.Global("out"); !ok || v.Str != "2/2/1" {
 		t.Fatalf("dataset liveness = %+v, want 2/2/1", v)
 	}

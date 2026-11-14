@@ -14,10 +14,6 @@ import (
 	transport "github.com/vyquocvu/goosie/internal/net"
 )
 
-// redirectProbe serves one Set-Cookie-then-Location response and records the
-// Cookie header the destination actually received. A redirect is one exchange
-// as far as the user is concerned, so a cookie set by the response that caused
-// it has to reach the request it caused.
 func redirectProbe(t *testing.T, setCookie, startPath, targetPath string) (*httptest.Server, *atomic.Value) {
 	t.Helper()
 	var got atomic.Value
@@ -97,10 +93,6 @@ func TestCookieSetOnRedirectReachesTheRedirectTarget(t *testing.T) {
 	}
 }
 
-// TestCookieAlreadyInTheJarReachesAnInScopeRedirectTarget is the path-scoped
-// half of the same rule in the other direction: the first hop is outside the
-// cookie's path, the redirect lands inside it, and the destination request has
-// to be built from the jar rather than from the first hop's header.
 // qc:BR-157
 func TestCookieAlreadyInTheJarReachesAnInScopeRedirectTarget(t *testing.T) {
 	var targetCookie atomic.Value
@@ -136,8 +128,6 @@ func TestCookieAlreadyInTheJarReachesAnInScopeRedirectTarget(t *testing.T) {
 	}
 }
 
-// TestSecureCookieSetOnTLSRedirectReachesTheTarget covers the Secure flag on
-// the hop rather than on a later navigation.
 // qc:BR-157
 func TestSecureCookieSetOnTLSRedirectReachesTheTarget(t *testing.T) {
 	var targetCookie atomic.Value
@@ -168,9 +158,6 @@ func TestSecureCookieSetOnTLSRedirectReachesTheTarget(t *testing.T) {
 	}
 }
 
-// TestRedirectToAnotherOriginDoesNotCarryCookies is the boundary: rebuilding
-// the Cookie header per hop must scope it to that hop, not forward whatever the
-// first hop carried.
 // qc:BR-157 BR-158
 func TestRedirectToAnotherOriginDoesNotCarryCookies(t *testing.T) {
 	var foreignCookie atomic.Value
@@ -187,8 +174,6 @@ func TestRedirectToAnotherOriginDoesNotCarryCookies(t *testing.T) {
 
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Set-Cookie", "mine=1; Path=/")
-		// A different host name, not just a different port: cookies ignore the
-		// port, so the same address on another port is still the same origin.
 		http.Redirect(w, r, "http://localhost:"+foreignURL.Port()+"/landing", http.StatusFound)
 	}))
 	defer origin.Close()

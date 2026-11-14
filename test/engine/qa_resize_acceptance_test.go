@@ -8,11 +8,6 @@ import (
 )
 
 // qc:BR-077
-//
-// A wide -> narrow -> wide resize must reflow rather than crop: the full-width
-// box follows each viewport, the wrapped paragraph gets taller when narrow and
-// returns to its original height, and the rebuilt display list has no command
-// left over from the previous width.
 func TestViewportResizeReflowsAndDropsOldWidthGeometry(t *testing.T) {
 	s, err := engine.NewSession(`<html><head><style>
 		html, body { margin: 0; padding: 0; }

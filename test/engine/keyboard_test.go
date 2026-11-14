@@ -9,16 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// ---------------------------------------------------------------------------
-// GOO-04: real keyboard-event injection.
-//
-// These verify the engine's PressKey path: keydown on the old focus → default
-// action (focus move / activation) → keyup on the new focus, with event.key
-// observable to JS, preventDefault able to block the default action, and Enter
-// activating the focused control.
-// ---------------------------------------------------------------------------
-
-// TestKeyboard_EventKeyObservable asserts event.key reaches a JS listener.
 func TestKeyboard_EventKeyObservable(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -40,8 +30,6 @@ document.getElementById('a').addEventListener('keyup', function(e){ __keys += 'u
 	}
 }
 
-// TestKeyboard_TabMovesFocusWithKeyOrder asserts the full ordering: keydown on
-// the source, then blur/focus, then keyup on the destination.
 // qc:BR-140
 func TestKeyboard_TabMovesFocusWithKeyOrder(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -69,8 +57,6 @@ function L(s){ if(__log) __log += ','; __log += s; }
 	}
 }
 
-// TestKeyboard_TabFromNothingFocusesFirst asserts Tab with no focused control
-// still drives keydown and starts the cycle at the first tabbable.
 func TestKeyboard_TabFromNothingFocusesFirst(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -100,8 +86,6 @@ function L(s){ if(__log) __log += ','; __log += s; }
 	}
 }
 
-// TestKeyboard_ShiftTabMovesBack asserts Shift+Tab moves to the previous
-// control and fires blur on the source before focus on the destination.
 // qc:BR-140
 func TestKeyboard_ShiftTabMovesBack(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -120,7 +104,7 @@ function L(s){ if(__log) __log += ','; __log += s; }
 </body></html>`)
 
 	focusCenter(t, sess, "b")
-	sess.PressKey("Tab", true, false, false, false) // shift
+	sess.PressKey("Tab", true, false, false, false)
 
 	v, _ := rt.Global("__log")
 	want := "b:focus,b:keydown:Tab,b:blur,a:focus,a:keyup:Tab"
@@ -129,8 +113,6 @@ function L(s){ if(__log) __log += ','; __log += s; }
 	}
 }
 
-// TestKeyboard_PreventDefaultBlocksTab asserts a keydown listener that calls
-// preventDefault stops the focus move but keyup still fires on the source.
 func TestKeyboard_PreventDefaultBlocksTab(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -150,7 +132,6 @@ document.getElementById('b').addEventListener('focus',function(){ L('b:focus'); 
 	sess.PressKey("Tab", false, false, false, false)
 
 	v, _ := rt.Global("__log")
-	// No a:blur, no b:focus — the default action was prevented.
 	want := "a:keydown,a:keyup:Tab"
 	if v.Str != want {
 		t.Errorf("__log = %q, want %q", v.Str, want)
@@ -160,8 +141,6 @@ document.getElementById('b').addEventListener('focus',function(){ L('b:focus'); 
 	}
 }
 
-// TestKeyboard_EnterActivates asserts Enter on a focused checkbox toggles it
-// via the shared click default action, and the keydown/keyup both fire.
 // qc:BR-140
 func TestKeyboard_EnterActivates(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -184,7 +163,6 @@ cb.addEventListener('change',function(){ L('change:'+ (cb.checked ? 'true':'fals
 	}
 
 	v, _ := rt.Global("__log")
-	// Enter on a checkbox toggles it (default action) between keydown and keyup.
 	if !strings.Contains(v.Str, "keydown:Enter") || !strings.Contains(v.Str, "keyup:Enter") {
 		t.Errorf("__log = %q, want keydown:Enter and keyup:Enter", v.Str)
 	}
@@ -230,8 +208,6 @@ func TestKeyboard_ActivationTracksActiveAndDispatchesClick(t *testing.T) {
 		t.Fatal(":active remained after keyboard activation completed")
 	}
 
-	// Space activates buttons as well; the same transient active state wraps
-	// the complete key operation and the generated click event.
 	downActive, clickActive, upActive = false, false, false
 	if !sess.PressKey(" ", false, false, false, false) {
 		t.Fatal("Space activation default was not performed")
@@ -480,8 +456,6 @@ func TestKeyboard_RadioGroupHasOneSequentialFocusStop(t *testing.T) {
 	if f := sess.Focused(); f == nil || f.GetAttribute("id") != "end" {
 		t.Fatalf("third Tab target = %v, want end input", f)
 	}
-	// A programmatically focused non-selected member moves to the group's
-	// sequential stop when Tab is pressed.
 	a := nodeByID(&sess.Doc.Node, "a")
 	if a == nil || !sess.FocusNode(a) {
 		t.Fatal("could not programmatically focus radio a")
@@ -492,8 +466,6 @@ func TestKeyboard_RadioGroupHasOneSequentialFocusStop(t *testing.T) {
 	}
 }
 
-// The click event is still dispatched on a focused link even when a listener
-// prevents its default; activation, not propagation, is what gets cancelled.
 // qc:BR-094
 func TestKeyboard_EnterLinkActivationHonorsClickPreventDefault(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html><html><body><a id="link" href="/next">next</a></body></html>`)
@@ -539,5 +511,4 @@ func nodeByID(n *dom.Node, id string) *dom.Node {
 	return nil
 }
 
-// Compile-time guard: engine.EditAction is used elsewhere; ensure import stays.
 var _ = engine.EditRune

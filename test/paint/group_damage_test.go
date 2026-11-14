@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// Two identical command lists whose only difference is a group's OWN opacity must
-// still report damage over the group's range, because OwnOpacity lives outside
-// the command fields and sameCommand never sees it.
 func TestContentDamageGroupOpacityOnlyChange(t *testing.T) {
 	before := paint.NewList(2)
 	before.Append(paint.DisplayCmd{Kind: paint.CmdFill, Rect: frame.Rect4(10, 10, 70, 70), Color: frame.RGB(0, 0, 255)})

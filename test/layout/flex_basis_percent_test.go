@@ -4,13 +4,6 @@ import (
 	"testing"
 )
 
-// TestFlexBasisPercentage guards CSS Flexbox §7.2.3: a percentage `flex-basis`
-// resolves against the container's content box, and it is the item's basis
-// before any growing or shrinking. A percentage basis arrives from the style
-// layer as a sentinel rather than a length, so the flex row read it as `auto`
-// and measured the content instead - which is how Bootstrap's grid, whose
-// columns are `flex: 0 0 75%` plus `max-width: 75%`, collapsed its main column
-// from 855px to the width of its own text on xresch.com.
 func TestFlexBasisPercentage(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex;">

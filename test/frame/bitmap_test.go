@@ -9,16 +9,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// frameTime and frameDuration keep the recorder tests on a fake epoch. They take
-// and return milliseconds as integers because the assertions are about ranks, and
-// a wall-clock reading here would only make the test flaky.
 func frameTime(ms int) time.Time { return time.Unix(0, int64(ms)*int64(time.Millisecond)) }
 
 func frameDuration(ms int) time.Duration { return time.Duration(ms) * time.Millisecond }
 
-// newStrideBitmap returns a 4x4 bitmap whose stride is 8 pixels wide, so every
-// access path that assumes stride == W*4 breaks loudly rather than shifting the
-// image diagonally.
 func newStrideBitmap() *frame.Bitmap {
 	w, h, stridePx := 4, 4, 8
 	b := &frame.Bitmap{RGBA: make([]byte, stridePx*4*h), W: w, H: h, Stride: stridePx * 4}
@@ -31,8 +25,6 @@ func TestBitmapHonorsStride(t *testing.T) {
 	if got := b.At(3, 3); got != frame.RGB(1, 2, 3) {
 		t.Fatalf("At after Set = %v", got)
 	}
-	// Padding past the row must be untouched; a stride bug writes there and the
-	// next row's pixels shift by one pixel per row.
 	if got := b.At(0, 1); got != frame.TransparentBlack {
 		t.Fatalf("untouched pixel = %v, want transparent (rows are aliasing)", got)
 	}
@@ -54,7 +46,7 @@ func TestBitmapAtOutOfBoundsIsTransparent(t *testing.T) {
 			t.Fatalf("At(%v) = %#x, want transparent", p, uint32(got))
 		}
 	}
-	b.Set(9, 9, frame.RGB(255, 0, 0)) // must be ignored, not a panic
+	b.Set(9, 9, frame.RGB(255, 0, 0))
 	if b.At(0, 0) != frame.TransparentBlack {
 		t.Fatal("out-of-range Set wrote into the buffer")
 	}
@@ -76,7 +68,6 @@ func TestFillRectClipsAllFourEdges(t *testing.T) {
 	if b.At(0, 0) != frame.TransparentBlack {
 		t.Fatal("Reset did not clear the buffer; a pooled buffer would paint the previous page")
 	}
-	// Each edge in turn.
 	b.FillRect(frame.Rect4(2, 6, 5, 20), want, nil)
 	if b.At(3, 7) != want || b.At(3, 5) != frame.TransparentBlack {
 		t.Fatal("fill clipped the wrong side of the bottom edge")
@@ -121,9 +112,6 @@ func TestBlitOverOpaqueAndTranslucent(t *testing.T) {
 }
 
 func TestBlitOverClipsPartialTilesWithoutOOB(t *testing.T) {
-	// A tile hanging off the right and bottom of the backing store is the normal
-	// case at a viewport edge, and the case that indexes past a slice if the
-	// source bounds are not clipped.
 	src := frame.NewBitmap(8, 8)
 	src.FillRect(src.Bounds(), frame.RGB(5, 5, 5), nil)
 	dst := frame.NewBitmap(10, 10)
@@ -142,8 +130,6 @@ func TestBlitOverClipsPartialTilesWithoutOOB(t *testing.T) {
 		t.Fatal("clipped blit wrote outside the destination rect")
 	}
 
-	// A srcRect larger than the source must clip to what exists rather than read
-	// past the buffer.
 	dst2 := frame.NewBitmap(10, 10)
 	dst2.BlitOver(src, frame.Point{X: 0, Y: 0}, frame.Rect4(0, 0, 64, 64), dst2.Bounds(), nil)
 	if dst2.At(7, 7) != frame.RGB(5, 5, 5) {
@@ -204,8 +190,6 @@ func TestPoolRejectsWrongSize(t *testing.T) {
 
 func TestRecorderPercentilesAreNearestRank(t *testing.T) {
 	rec := frame.NewFrameRecorder(1024)
-	// 100 frames with work times 1ms..100ms, so nearest-rank p50 = 50ms and
-	// p99 = 99ms. A mean of 50.5ms. Anything interpolated would differ.
 	for i := 1; i <= 100; i++ {
 		start := frameTime(i)
 		rec.Record(frame.FrameMark{
@@ -270,8 +254,6 @@ func TestRecorderReportAggregatesInvariantCounters(t *testing.T) {
 	if rep.TilesRasterized != 3 || rep.TilesReused != 100 || rep.StylePasses != 1 {
 		t.Fatalf("aggregated counters = %+v", rep)
 	}
-	// Only the second frame did no style, no layout, and no rasterization, so it
-	// is the only one that can count as a warm scroll frame.
 	if rep.ZeroWorkFrames != 1 {
 		t.Fatalf("ZeroWorkFrames = %d, want 1", rep.ZeroWorkFrames)
 	}
@@ -280,11 +262,6 @@ func TestRecorderReportAggregatesInvariantCounters(t *testing.T) {
 	}
 }
 
-// TestRecorderReportsPresentPathLatency covers M1's criterion 8 instrument: how long a
-// frame took to leave the composer and be accepted by the window. It is reported apart
-// from the frame mean because the two move independently - a shim that copies or refuses
-// changes this figure and nobody else's - and because the baseline file has to record
-// one number that came from the window rather than from the pipeline.
 func TestRecorderReportsPresentPathLatency(t *testing.T) {
 	rec := frame.NewFrameRecorder(1024)
 	for i := 1; i <= 100; i++ {
@@ -297,7 +274,6 @@ func TestRecorderReportsPresentPathLatency(t *testing.T) {
 		})
 	}
 	rep := rec.Report()
-	// composed→presented is i ms for i in 1..100, so the ranks are the frame ones above.
 	if rep.PresentMeanMS < 50.4 || rep.PresentMeanMS > 50.6 {
 		t.Errorf("PresentMeanMS = %v, want 50.5", rep.PresentMeanMS)
 	}
@@ -305,8 +281,6 @@ func TestRecorderReportsPresentPathLatency(t *testing.T) {
 		t.Errorf("PresentP99MS = %v, want 99", rep.PresentP99MS)
 	}
 
-	// A frame that never reached a present contributes nothing, rather than a zero that
-	// drags the mean down and a percentile read off a list one shorter than the frames.
 	noPresent := frame.NewFrameRecorder(4)
 	noPresent.Record(frame.FrameMark{Serial: 1, VsyncAt: frameTime(0)})
 	noPresent.Record(frame.FrameMark{Serial: 2, ComposedAt: frameTime(0), PresentedAt: frameTime(4)})
@@ -315,7 +289,6 @@ func TestRecorderReportsPresentPathLatency(t *testing.T) {
 		t.Errorf("PresentMeanMS = %v with one unstamped frame in the window; unstamped frames must be left out of the denominator, not averaged in as zero", got.PresentMeanMS)
 	}
 
-	// The instrument is worth nothing if it cannot see a slow present.
 	late := frame.NewFrameRecorder(4)
 	late.Record(frame.FrameMark{Serial: 1, ComposedAt: frameTime(0), PresentedAt: frameTime(2)})
 	late.Record(frame.FrameMark{Serial: 2, ComposedAt: frameTime(0), PresentedAt: frameTime(900)})
@@ -324,10 +297,6 @@ func TestRecorderReportsPresentPathLatency(t *testing.T) {
 	}
 }
 
-// TestRecorderJSONFieldNamesSayWhatTheyHold keeps the artifact a shell script reads
-// honest about its own keys. The timestamps are time.Time values, so they encode as RFC
-// 3339 strings; a name ending in "_ns" invites a consumer to subtract them as integers,
-// which jq answers with a coerced null - the failure shape that looks like a fast frame.
 func TestRecorderJSONFieldNamesSayWhatTheyHold(t *testing.T) {
 	rec := frame.NewFrameRecorder(4)
 	start := frameTime(0)
@@ -365,16 +334,9 @@ func TestRecorderJSONFieldNamesSayWhatTheyHold(t *testing.T) {
 	}
 }
 
-// TestRecorderReportsStartupLatency covers the brief's other headline number: how long
-// the process took to put a frame on screen. The recorder is the only instrument that
-// sees every frame, so the first presented mark is in its hands rather than the loop's,
-// and the delta is computed here for the reason the marks' header gives - deltas are not
-// a shell's job.
 func TestRecorderReportsStartupLatency(t *testing.T) {
 	rec := frame.NewFrameRecorder(8)
 	rec.SetStartupReference(frameTime(0))
-	// A vsync that arrived before the producer published a plan stamps no present,
-	// and it is not the frame the user saw.
 	rec.Record(frame.FrameMark{Serial: 1, VsyncAt: frameTime(0)})
 	rec.Record(frame.FrameMark{Serial: 2, VsyncAt: frameTime(16), ComposedAt: frameTime(120), PresentedAt: frameTime(120)})
 	rec.Record(frame.FrameMark{Serial: 3, VsyncAt: frameTime(32), ComposedAt: frameTime(200), PresentedAt: frameTime(200)})
@@ -387,10 +349,6 @@ func TestRecorderReportsStartupLatency(t *testing.T) {
 	}
 }
 
-// TestRecorderStartupSurvivesRingEviction is why the first present is held outside the
-// window. A 600-frame gate run evicts its own first frame from a 1024-slot ring only
-// rarely, but a run long enough to wrap the ring would otherwise report the startup of
-// whichever frame happened to still be in it, and the number would read as plausible.
 func TestRecorderStartupSurvivesRingEviction(t *testing.T) {
 	rec := frame.NewFrameRecorder(4)
 	rec.SetStartupReference(frameTime(0))
@@ -407,19 +365,13 @@ func TestRecorderStartupSurvivesRingEviction(t *testing.T) {
 	}
 }
 
-// TestRecorderStartupIsNilWhenNotMeasured keeps "no measurement" out of the artifact as a
-// number. A zero here is the fastest possible startup, so a build that stopped stamping
-// one, or a run whose window never presented, would gate as a sub-second cold start
-// rather than as the missing metric it is.
 func TestRecorderStartupIsNilWhenNotMeasured(t *testing.T) {
-	// Nothing was ever told when the process began.
 	unreferenced := frame.NewFrameRecorder(4)
 	unreferenced.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
 	if got := unreferenced.Report().StartupMS; got != nil {
 		t.Errorf("StartupMS = %v with no startup reference set; want nil", *got)
 	}
 
-	// The reference is known but no frame reached a window.
 	noPresent := frame.NewFrameRecorder(4)
 	noPresent.SetStartupReference(frameTime(0))
 	noPresent.Record(frame.FrameMark{Serial: 1, VsyncAt: frameTime(0)})
@@ -428,10 +380,6 @@ func TestRecorderStartupIsNilWhenNotMeasured(t *testing.T) {
 		t.Errorf("StartupMS = %v for a run that presented nothing; want nil", *got)
 	}
 
-	// Reset empties the window, so the frame it called first is gone with it. The
-	// reference survives: it is a fact about the process, not about the window. The
-	// assertion is the one after the reset rather than an empty-window nil, which the
-	// report's empty-window early return would hand back whether or not Reset worked.
 	rec := frame.NewFrameRecorder(4)
 	rec.SetStartupReference(frameTime(0))
 	rec.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(250)})
@@ -443,9 +391,6 @@ func TestRecorderStartupIsNilWhenNotMeasured(t *testing.T) {
 	}
 }
 
-// TestRecorderStartupJSONIsNullRatherThanZero pins the shape the gate script reads. jq
-// answers a missing key and a null the same way, so null is the encoding that lets the
-// script's existing fail-closed check refuse an unmeasured startup.
 func TestRecorderStartupJSONIsNullRatherThanZero(t *testing.T) {
 	var buf bytes.Buffer
 	unmeasured := frame.NewFrameRecorder(4)
@@ -482,13 +427,6 @@ func TestRecorderStartupJSONIsNullRatherThanZero(t *testing.T) {
 	}
 }
 
-// TestRecorderReportsTileLedger gives the artifact the number the frame timings cannot
-// imply. TilesRasterized counts work, and a run that rasterized 3,000 tiles is the same
-// report whether those buffers are held, were freed back to the pool, or escaped the
-// accounting that authorised them - which is the difference between a cache that filled
-// its configuration and a path that retains memory nobody asked for. The grid knows it
-// and the recorder, which times frames, does not, so it arrives by setter exactly the
-// way the startup reference does.
 func TestRecorderReportsTileLedger(t *testing.T) {
 	rec := frame.NewFrameRecorder(4)
 	rec.SetStartupReference(frameTime(0))
@@ -515,11 +453,6 @@ func TestRecorderReportsTileLedger(t *testing.T) {
 	}
 }
 
-// TestRecorderTileLedgerJSONIsMissingRatherThanZero is the fail-closed half of the
-// ledger. An absent field and a zero read the same way to a shell that trusts them, and
-// zero bytes held is a cache that never filled - the best possible result - so a build
-// that stopped handing the grid in would gate as a pass rather than as the missing
-// metric it is. null is what lets the script refuse.
 func TestRecorderTileLedgerJSONIsMissingRatherThanZero(t *testing.T) {
 	read := func(t *testing.T, rec *frame.FrameRecorder) map[string]any {
 		t.Helper()
@@ -550,9 +483,6 @@ func TestRecorderTileLedgerJSONIsMissingRatherThanZero(t *testing.T) {
 		}
 	}
 
-	// A measured zero stays a zero. Evictions in particular is a figure a warm
-	// scroll run is meant to reach, and nulling it would make the passing case
-	// indistinguishable from the uninstrumented one.
 	buf := frame.NewFrameRecorder(4)
 	buf.Record(frame.FrameMark{Serial: 1, PresentedAt: frameTime(80)})
 	buf.SetTileLedger(frame.GridStats{Bytes: 262144, Budget: 785383424})
@@ -571,10 +501,6 @@ func TestRecorderTileLedgerJSONIsMissingRatherThanZero(t *testing.T) {
 	}
 }
 
-// TestRecorderReportsContent is the artifact's provenance. Every timing in a report was
-// taken on something, and the recorder times frames without knowing what those frames
-// depicted - so a caller that handed in the page's name and laid-out height has to be the
-// one saying so, and an artifact with no frames in its window still describes the run.
 func TestRecorderReportsContent(t *testing.T) {
 	rec := frame.NewFrameRecorder(4)
 	rec.SetContent("file:///tmp/tall.html", 16016)
@@ -586,8 +512,6 @@ func TestRecorderReportsContent(t *testing.T) {
 	if got.DocHeight != 16016 {
 		t.Errorf("DocHeight = %d, want the laid-out height in device pixels", got.DocHeight)
 	}
-	// The synthetic case is the empty name rather than a made-up one: a gate reading a
-	// scene's artifact must be able to tell it apart from a page's.
 	scene := frame.NewFrameRecorder(4)
 	scene.SetContent("", 63600)
 	if d := scene.Report().Document; d != "" {

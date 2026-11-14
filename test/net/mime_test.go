@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 )
 
-// A <link rel=stylesheet> whose response is not CSS must not reach the cascade.
-// Broken CDN paths answer with an HTML error page, and those pages carry their
-// own <style> rules: parsed as CSS they silently restyle the real document,
-// which is how one 404 page gave css-tricks.com a 390px <body>.
 func TestStyleSheetRefused(t *testing.T) {
 	cases := []struct {
 		contentType string

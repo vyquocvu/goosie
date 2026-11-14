@@ -6,15 +6,12 @@ import (
 	"strings"
 )
 
-// parseColorMix implements CSS Color Module Level 5 §3 "Mixing Colors: the color-mix() function".
-// Syntax: color-mix(in <color-interpolation-method>, <color-percentage>, <color-percentage>)
 func parseColorMix(body string) (Color, bool) {
 	parts := splitArgs(body)
 	if len(parts) != 3 {
 		return Color{}, false
 	}
 
-	// 1. Parse interpolation method: "in <space> [<hue-method>]"
 	inMethod := strings.TrimSpace(parts[0])
 	lowerIn := strings.ToLower(inMethod)
 	if !strings.HasPrefix(lowerIn, "in ") && !strings.HasPrefix(lowerIn, "in\t") {
@@ -34,20 +31,17 @@ func parseColorMix(body string) (Color, bool) {
 		}
 	}
 
-	// 2. Parse color percentages
 	c1, p1, hasP1, ok1 := parseColorPercentage(parts[1])
 	c2, p2, hasP2, ok2 := parseColorPercentage(parts[2])
 	if !ok1 || !ok2 {
 		return Color{}, false
 	}
 
-	// 3. Normalize percentages
 	normP1, normP2, alphaScale, ok := normalizePercentages(p1, p2, hasP1, hasP2)
 	if !ok {
 		return Color{}, false
 	}
 
-	// 4. Mix colors in the target color space
 	return mixInColorSpace(space, hueMethod, c1, c2, normP1, normP2, alphaScale)
 }
 
@@ -57,7 +51,6 @@ func parseColorPercentage(s string) (col Color, pct float64, hasPct bool, ok boo
 		return Color{}, 0, false, false
 	}
 
-	// Case 1: "<color> <percentage>" (percentage at end outside parens)
 	lastSpace := -1
 	depth := 0
 	for i := 0; i < len(s); i++ {
@@ -86,7 +79,6 @@ func parseColorPercentage(s string) (col Color, pct float64, hasPct bool, ok boo
 		}
 	}
 
-	// Case 2: "<percentage> <color>" (percentage at start outside parens)
 	firstSpace := -1
 	depth = 0
 	for i := 0; i < len(s); i++ {
@@ -115,7 +107,6 @@ func parseColorPercentage(s string) (col Color, pct float64, hasPct bool, ok boo
 		}
 	}
 
-	// Case 3: No percentage specified
 	c, ok := ParseColor(s)
 	if ok {
 		return c, 0, false, true
@@ -317,7 +308,7 @@ func interpolateHue(h1, h2, p1, p2 float64, method string) float64 {
 		if h1 < h2 {
 			h1 += 360
 		}
-	default: // "shorter"
+	default:
 		diff := h2 - h1
 		if diff > 180 {
 			h1 += 360
@@ -333,8 +324,6 @@ func interpolateHue(h1, h2, p1, p2 float64, method string) float64 {
 	}
 	return res
 }
-
-// --- Space conversion helpers ---
 
 func srgbToXYZD65(c Color) (float64, float64, float64) {
 	lr := srgbDecode(float64(c.R) / 255.0)
@@ -473,8 +462,6 @@ func srgbToDisplayP3(c Color) (float64, float64, float64) {
 	return clip01(srgbEncode(lr)), clip01(srgbEncode(lg)), clip01(srgbEncode(lb))
 }
 
-// --- Relative Color Syntax (CSS Color 5 §4) ---
-
 func isRelativeColor(body string) bool {
 	trim := strings.TrimSpace(body)
 	lower := strings.ToLower(trim)
@@ -489,7 +476,6 @@ func parseRelativeColor(fn, body, colorScheme string) (Color, bool) {
 	}
 	afterFrom := strings.TrimSpace(trim[4:])
 
-	// Extract origin color: read until first whitespace at depth 0
 	depth := 0
 	originEnd := -1
 	for i := 0; i < len(afterFrom); i++ {
@@ -519,7 +505,6 @@ func parseRelativeColor(fn, body, colorScheme string) (Color, bool) {
 		return Color{}, false
 	}
 
-	// Check for "/ alpha"
 	alphaExpr := ""
 	hasAlpha := false
 	depth = 0
@@ -737,7 +722,6 @@ func parseRelativeColor(fn, body, colorScheme string) (Color, bool) {
 		return Color{R: rr, G: gg, B: bb, A: clampByte(a * 255.0)}, true
 
 	case "color":
-		// color(from <color> <space> <c1> <c2> <c3> [ / <a> ])
 		if len(chanExprs) != 4 {
 			return Color{}, false
 		}
@@ -779,11 +763,9 @@ func evalChannelExpr(expr string, vars map[string]float64) (float64, bool) {
 	if strings.EqualFold(expr, "none") {
 		return 0, true
 	}
-	// Check direct variable match
 	if v, ok := vars[strings.ToLower(expr)]; ok {
 		return v, true
 	}
-	// Direct literal percent or number
 	if strings.HasSuffix(expr, "%") {
 		f, err := strconv.ParseFloat(strings.TrimSuffix(expr, "%"), 64)
 		if err == nil {
@@ -800,7 +782,6 @@ func evalChannelExpr(expr string, vars map[string]float64) (float64, bool) {
 		return f, true
 	}
 
-	// If calc(...)
 	if strings.HasPrefix(strings.ToLower(expr), "calc(") && strings.HasSuffix(expr, ")") {
 		inner := strings.TrimSpace(expr[5 : len(expr)-1])
 		return evalCalcExpr(inner, vars)
@@ -981,7 +962,6 @@ func splitTokensOutsideParens(s string) []string {
 	return tokens
 }
 
-// parseLightDark implements CSS Color Module Level 5 §5 "light-dark() color function".
 func parseLightDark(body, colorScheme string) (Color, bool) {
 	parts := splitArgs(body)
 	if len(parts) != 2 {

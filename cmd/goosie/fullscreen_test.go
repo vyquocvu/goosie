@@ -27,7 +27,6 @@ func TestFullscreenToggle(t *testing.T) {
 		t.Fatalf("expected initial chrome height > 0, got %d", initialH)
 	}
 
-	// 1. Toggle fullscreen with Cmd+Shift+F
 	evCmdShiftF := surface.Event{
 		Kind: surface.EvKey,
 		Key:  'f',
@@ -43,10 +42,9 @@ func TestFullscreenToggle(t *testing.T) {
 		t.Fatalf("expected chromeHeight() = 0 in fullscreen, got %d", cw.chromeHeight())
 	}
 
-	// 2. Exit fullscreen with Escape
 	evEsc := surface.Event{
 		Kind: surface.EvKey,
-		Key:  0x1B, // Escape
+		Key:  0x1B,
 	}
 	if !cw.intercept(evEsc) {
 		t.Fatal("Escape was not handled to exit fullscreen")
@@ -58,7 +56,6 @@ func TestFullscreenToggle(t *testing.T) {
 		t.Fatalf("expected chromeHeight() restored to %d, got %d", initialH, cw.chromeHeight())
 	}
 
-	// 3. Toggle fullscreen with F11 (0xF70E)
 	evF11 := surface.Event{
 		Kind: surface.EvKey,
 		Key:  0xF70E,
@@ -70,7 +67,6 @@ func TestFullscreenToggle(t *testing.T) {
 		t.Fatal("expected IsFullscreen() = true after F11")
 	}
 
-	// 4. Toggle off fullscreen with F11 keysym (0xFFC8)
 	evF11Keysym := surface.Event{
 		Kind: surface.EvKey,
 		Key:  0xFFC8,
@@ -104,13 +100,11 @@ func TestFullscreenPresentAndPointer(t *testing.T) {
 	cw := newChromeWindow(cw2, tb, mgr,
 		nil, nil, nil, nil, nil, nil, nil, nil, onFocus, nil, nil, nil, nil, nil, nil, fonts, 1)
 
-	// Enter fullscreen
 	cw.SetFullscreen(true)
 	if !cw.IsFullscreen() {
 		t.Fatal("SetFullscreen(true) failed")
 	}
 
-	// Present in fullscreen mode
 	buf := frame.NewBitmap(800, 600)
 	buf.FillRect(frame.Rect4(0, 0, 800, 600), frame.RGB(0, 128, 255), nil)
 	if err := cw.Present(buf, nil); err != nil {
@@ -124,7 +118,6 @@ func TestFullscreenPresentAndPointer(t *testing.T) {
 		t.Fatalf("expected presented bitmap 800x600, got %dx%d", cw2.got.W, cw2.got.H)
 	}
 
-	// Click at y=10 (where tab bar would normally be in non-fullscreen)
 	clickEv := surface.Event{
 		Kind:   surface.EvPointer,
 		Pos:    frame.Point{X: 150, Y: 10},

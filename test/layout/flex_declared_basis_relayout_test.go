@@ -2,14 +2,6 @@ package layout_test
 
 import "testing"
 
-// TestDeclaredBasisFlexItemLaysSubtreeOutAtFinalOrigin guards the flex item that
-// skips the auto-measure loop: an item with a declared basis (`width:100%` plus a
-// max-width) never gets the blockKids flag, so the "measured at least once" pass
-// laid its subtree out at the container's origin and the final placement only
-// moved the boxes. Every nested inline box stayed where the measure pass left it,
-// which is what put a centered card's heading and labels two hundred pixels left
-// of the card — testdata/render/complex/04-login-form.html scored 83.51% against
-// Chromium before this, with the card's text painted outside its own background.
 func TestDeclaredBasisFlexItemLaysSubtreeOutAtFinalOrigin(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0; height: 600px; display: flex; align-items: center; justify-content: center;">
 <div style="width: 100%; max-width: 400px; padding: 40px; box-sizing: border-box;">
@@ -21,7 +13,6 @@ func TestDeclaredBasisFlexItemLaysSubtreeOutAtFinalOrigin(t *testing.T) {
 	if card == nil {
 		t.Fatal("card not found")
 	}
-	// The row centers a 400px border box in an 800px viewport.
 	if !almostEqual(card.X, 200) {
 		t.Errorf("card.X = %v, want 200 (justify-content: center)", card.X)
 	}
@@ -58,8 +49,6 @@ func TestDeclaredBasisFlexItemLaysSubtreeOutAtFinalOrigin(t *testing.T) {
 	if !seen {
 		t.Fatal("heading carries no text runs")
 	}
-	// The stale fragments sat at [101,299]: centered on the measure origin
-	// rather than on the heading's own box.
 	if minX < h1.X || maxX > h1.X+h1.W {
 		t.Errorf("heading text spans [%v,%v], outside its box [%v,%v]", minX, maxX, h1.X, h1.X+h1.W)
 	}

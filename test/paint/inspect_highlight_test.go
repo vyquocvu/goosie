@@ -9,13 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// BR-142's paint half: the inspector highlights the node it is showing by
-// drawing a translucent overlay over that node's box, on top of the whole
-// document and without touching the DOM. These oracles read the display list
-// back and check the overlay covers exactly the node's border rect, lands after
-// every document glyph (so nothing clips or covers it), and disappears when the
-// highlight is cleared.
-
 const inspectHTML = `<html><head><style>` +
 	`html,body{margin:0}` +
 	`#target{position:absolute;left:10px;top:20px;width:100px;height:40px}` +
@@ -71,8 +64,6 @@ func TestInspectHighlightCoversNodeBorderRect(t *testing.T) {
 		t.Errorf("highlight overlay = %v, want the node's border rect %v", overlays[0], want)
 	}
 
-	// The overlay is emitted after the document walk, so it lands on top of
-	// every glyph and no ancestor overflow can clip it.
 	lastText := -1
 	overlayIdx := -1
 	for i, cmd := range cmds {

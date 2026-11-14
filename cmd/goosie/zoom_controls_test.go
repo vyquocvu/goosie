@@ -37,7 +37,6 @@ func TestZoomClampsAtBounds(t *testing.T) {
 		t.Fatalf("toolbar.ZoomPercent after zoom-in = %q, want %q", got, want)
 	}
 
-	// An overflowing step must clamp, not leave the state at infinity.
 	f.handleZoom(math.Inf(1))
 	if math.IsNaN(f.zoom) || math.IsInf(f.zoom, 0) || f.zoom != maxZoom {
 		t.Fatalf("zoom after infinite step = %v, want %v", f.zoom, maxZoom)
@@ -59,7 +58,6 @@ func TestZoomClampsAtBounds(t *testing.T) {
 		t.Fatalf("toolbar.ZoomPercent after zoom-out = %q, want %q", got, want)
 	}
 
-	// An underflowing step must clamp, not leave the state negative.
 	f.handleZoom(math.Inf(-1))
 	if math.IsNaN(f.zoom) || math.IsInf(f.zoom, 0) || f.zoom != minZoom {
 		t.Fatalf("zoom after negative infinite step = %v, want %v", f.zoom, minZoom)

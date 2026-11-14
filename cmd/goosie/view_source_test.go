@@ -34,7 +34,6 @@ func TestViewSource_Navigation(t *testing.T) {
 		t.Fatalf("expected finalURL to start with view-source:, got %q", finalURL)
 	}
 
-	// Verify the session painted without errors
 	list, err := sess.PaintChecked(1.0)
 	if err != nil {
 		t.Fatalf("PaintChecked failed: %v", err)
@@ -50,7 +49,6 @@ func TestViewSource_Shortcut(t *testing.T) {
 		onViewSource: func() { called = true },
 	}
 
-	// Cmd+Option+U
 	ev := surface.Event{
 		Kind: surface.EvKey,
 		Key:  'u',
@@ -64,7 +62,6 @@ func TestViewSource_Shortcut(t *testing.T) {
 		t.Fatal("expected onViewSource to be called on Cmd+Option+U")
 	}
 
-	// Uppercase 'U'
 	called = false
 	evUpper := surface.Event{
 		Kind: surface.EvKey,

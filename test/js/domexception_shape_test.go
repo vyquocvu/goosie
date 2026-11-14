@@ -6,9 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// TestDOMExceptionShapeMatchesChromium verifies that DOMException instances
-// have the same shape as Chromium's: non-enumerable code, no inherited stack,
-// and Symbol.toStringTag set to "DOMException".
 // qc:BR-123
 func TestDOMExceptionShapeMatchesChromium(t *testing.T) {
 	r, err := js.New(js.Options{URL: "https://example.test/"})
@@ -17,7 +14,6 @@ func TestDOMExceptionShapeMatchesChromium(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Test 1: code should be non-enumerable
 	if err := r.Run(`
 		var ex = new DOMException('test message', 'AbortError');
 		var keys = Object.keys(ex);
@@ -28,7 +24,6 @@ func TestDOMExceptionShapeMatchesChromium(t *testing.T) {
 		t.Errorf("code enumerable check: %v", err)
 	}
 
-	// Test 2: stack should not be present
 	if err := r.Run(`
 		var ex = new DOMException('test message', 'AbortError');
 		if (ex.hasOwnProperty('stack') || 'stack' in ex) {
@@ -38,7 +33,6 @@ func TestDOMExceptionShapeMatchesChromium(t *testing.T) {
 		t.Errorf("stack check: %v", err)
 	}
 
-	// Test 3: Symbol.toStringTag should be "DOMException"
 	if err := r.Run(`
 		var ex = new DOMException('test message', 'AbortError');
 		var tag = Object.prototype.toString.call(ex);
@@ -49,7 +43,6 @@ func TestDOMExceptionShapeMatchesChromium(t *testing.T) {
 		t.Errorf("toStringTag check: %v", err)
 	}
 
-	// Test 4: Verify the full shape matches Chromium's measurement
 	if err := r.Run(`
 		var ex = new DOMException('signal is aborted without reason', 'AbortError');
 		
@@ -101,7 +94,6 @@ func TestDOMExceptionShapeMatchesChromium(t *testing.T) {
 		t.Errorf("full shape check: %v", err)
 	}
 
-	// Test 5: Empty DOMException should stringify to empty string
 	if err := r.Run(`
 		var ex = new DOMException('', '');
 		var str = String(ex);

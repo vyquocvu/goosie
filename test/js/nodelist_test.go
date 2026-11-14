@@ -7,13 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// ---------------------------------------------------------------------------
-// Live NodeList (childNodes)
-// ---------------------------------------------------------------------------
-
-// TestLiveNodeListReflectsAppendChild pins the core live-NodeList contract:
-// a childNodes reference taken before a mutation must see the new child in
-// its length and indexed access without re-querying the DOM.
 func TestLiveNodeListReflectsAppendChild(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="parent"><p>one</p><p>two</p></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -34,8 +27,6 @@ func TestLiveNodeListReflectsAppendChild(t *testing.T) {
 	}
 }
 
-// TestLiveNodeListReflectsRemoveChild verifies that removing a child from the
-// DOM shrinks the live NodeList.
 func TestLiveNodeListReflectsRemoveChild(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="parent"><p>one</p><p>two</p><p>three</p></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -56,7 +47,6 @@ func TestLiveNodeListReflectsRemoveChild(t *testing.T) {
 	}
 }
 
-// TestLiveNodeListItemOutOfBounds verifies item() returns null for invalid indices.
 func TestLiveNodeListItemOutOfBounds(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="d"><p>one</p></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -74,7 +64,6 @@ func TestLiveNodeListItemOutOfBounds(t *testing.T) {
 	}
 }
 
-// TestLiveNodeListForEach verifies the forEach method works on live NodeLists.
 func TestLiveNodeListForEach(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="d"><p>a</p><p>b</p><p>c</p></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -90,7 +79,6 @@ func TestLiveNodeListForEach(t *testing.T) {
 	}
 }
 
-// TestLiveNodeListForOf verifies Symbol.iterator works for for-of loops.
 func TestLiveNodeListForOf(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="d"><p>x</p><p>y</p></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -125,13 +113,6 @@ func TestChildNodesIdentityAndNodeListIterators(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Live HTMLCollection (getElementsByTagName)
-// ---------------------------------------------------------------------------
-
-// TestLiveHTMLCollectionTagReflectsAppend pins the core live-HTMLCollection
-// contract for getElementsByTagName: appending a matching element to the
-// document must increase the collection's length.
 func TestLiveHTMLCollectionTagReflectsAppend(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div>one</div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -148,7 +129,6 @@ func TestLiveHTMLCollectionTagReflectsAppend(t *testing.T) {
 	}
 }
 
-// TestLiveHTMLCollectionTagItem verifies item() returns the correct element.
 func TestLiveHTMLCollectionTagItem(t *testing.T) {
 	doc := domtest.Parse(`<html><body><p>first</p><p>second</p></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -162,7 +142,6 @@ func TestLiveHTMLCollectionTagItem(t *testing.T) {
 	}
 }
 
-// TestLiveHTMLCollectionTagIndexed verifies numeric indexed access works.
 func TestLiveHTMLCollectionTagIndexed(t *testing.T) {
 	doc := domtest.Parse(`<html><body><span>a</span><span>b</span></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -176,8 +155,6 @@ func TestLiveHTMLCollectionTagIndexed(t *testing.T) {
 	}
 }
 
-// HTMLCollection exposes its legacy iterator, but not NodeList's iterable
-// helper methods.
 func TestHTMLCollectionIterableSurface(t *testing.T) {
 	doc := domtest.Parse(`<html><body><li>1</li><li>2</li><li>3</li></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -217,7 +194,6 @@ func TestHTMLCollectionNamedPropertiesAndIndexedWrites(t *testing.T) {
 	}
 }
 
-// TestLiveHTMLCollectionTagForOf verifies for-of works on HTMLCollections.
 func TestLiveHTMLCollectionTagForOf(t *testing.T) {
 	doc := domtest.Parse(`<html><body><em>x</em><em>y</em></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -233,12 +209,6 @@ func TestLiveHTMLCollectionTagForOf(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Live HTMLCollection (getElementsByClassName)
-// ---------------------------------------------------------------------------
-
-// TestLiveHTMLCollectionClassReflectsMutation verifies getElementsByClassName
-// returns a live collection that reflects class attribute changes.
 func TestLiveHTMLCollectionClassReflectsMutation(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div class="a">1</div><div class="b">2</div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -256,11 +226,6 @@ func TestLiveHTMLCollectionClassReflectsMutation(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// namedItem
-// ---------------------------------------------------------------------------
-
-// TestHTMLCollectionNamedItemByID verifies namedItem finds elements by id.
 func TestHTMLCollectionNamedItemByID(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="foo">found</div><div id="bar">other</div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -275,7 +240,6 @@ func TestHTMLCollectionNamedItemByID(t *testing.T) {
 	}
 }
 
-// TestHTMLCollectionNamedItemByName verifies namedItem finds elements by name attribute.
 func TestHTMLCollectionNamedItemByName(t *testing.T) {
 	doc := domtest.Parse(`<html><body><input name="username" /><input name="password" /></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -290,7 +254,6 @@ func TestHTMLCollectionNamedItemByName(t *testing.T) {
 	}
 }
 
-// TestHTMLCollectionNamedItemMissing verifies namedItem returns null for missing names.
 func TestHTMLCollectionNamedItemMissing(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="a">1</div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -305,12 +268,6 @@ func TestHTMLCollectionNamedItemMissing(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Element-level query methods
-// ---------------------------------------------------------------------------
-
-// TestElementGetElementsByTagName verifies elements have getElementsByTagName
-// and it returns a live HTMLCollection scoped to the element's subtree.
 func TestElementGetElementsByTagName(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="outer"><span>a</span><div id="inner"><span>b</span></div></div><span>c</span></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -325,7 +282,6 @@ func TestElementGetElementsByTagName(t *testing.T) {
 	}
 }
 
-// TestElementGetElementsByClassName verifies elements have getElementsByClassName.
 func TestElementGetElementsByClassName(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="outer"><p class="x">1</p><p class="y">2</p><p class="x">3</p></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -340,11 +296,6 @@ func TestElementGetElementsByClassName(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Empty collection edge cases
-// ---------------------------------------------------------------------------
-
-// TestLiveNodeListEmpty verifies an empty node has a childNodes with length 0.
 func TestLiveNodeListEmpty(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="empty"></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -359,7 +310,6 @@ func TestLiveNodeListEmpty(t *testing.T) {
 	}
 }
 
-// TestLiveHTMLCollectionNoMatches verifies an empty HTMLCollection.
 func TestLiveHTMLCollectionNoMatches(t *testing.T) {
 	doc := domtest.Parse(`<html><body><p>text</p></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})

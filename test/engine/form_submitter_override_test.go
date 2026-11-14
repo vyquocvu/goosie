@@ -12,7 +12,6 @@ func TestSubmitterOverridesFormDestination(t *testing.T) {
 	</form>`)
 	form := s.Doc.ElementByID("f")
 
-	// The activated button's formaction/formmethod win over the form's.
 	s.SubmitForm(form, s.Doc.ElementByID("save"))
 	save := popForm(t, s)
 	if save.Method != "POST" || save.Action != "/saved" {
@@ -22,15 +21,12 @@ func TestSubmitterOverridesFormDestination(t *testing.T) {
 		t.Fatalf("save payload = %q, want title=draft&action=save", save.Encoded)
 	}
 
-	// Without overrides the form's own attributes still decide.
 	s.SubmitForm(form, s.Doc.ElementByID("publish"))
 	publish := popForm(t, s)
 	if publish.Method != "GET" || publish.Action != "/published" {
 		t.Fatalf("publish submission = %s %q, want GET /published", publish.Method, publish.Action)
 	}
 
-	// An explicitly empty formaction overrides the form action with the
-	// current document's URL, which the host represents as "".
 	s.SubmitForm(form, s.Doc.ElementByID("blank"))
 	blank := popForm(t, s)
 	if blank.Action != "" {
@@ -64,14 +60,12 @@ func TestSubmitterNoValidateSkipsConstraintValidation(t *testing.T) {
 	s := newFormSession(t, `<form id="f" action="/send"><input id="q" name="q" required><button id="skip" type="submit" name="skip" value="1" formaction="/draft" formnovalidate>Skip</button><button id="send" type="submit" name="go" value="1">Go</button></form>`)
 	form, required := s.Doc.ElementByID("f"), s.Doc.ElementByID("q")
 
-	// A normal submit is blocked by the empty required control.
 	s.SubmitForm(form, s.Doc.ElementByID("send"))
 	assertNoForm(t, s)
 	if s.Focused() != required {
 		t.Fatalf("focused node = %v, want the empty required control", s.Focused())
 	}
 
-	// The activated button's formnovalidate opts this submission out.
 	s.SubmitForm(form, s.Doc.ElementByID("skip"))
 	sub := popForm(t, s)
 	if sub.Action != "/draft" || sub.Encoded != "q=&skip=1" {

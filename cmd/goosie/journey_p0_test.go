@@ -24,7 +24,6 @@ func TestJourneyHTTPSNavigation(t *testing.T) {
 	browser := newBrowserE2E(t)
 	defer browser.close(t)
 
-	// Trust the self-signed certificate of the test TLS server
 	browser.f.client = gonet.DefaultClientWithTLS(server.Client().Transport.(*http.Transport).TLSClientConfig)
 
 	targetURL := server.URL + "/secure"
@@ -35,11 +34,6 @@ func TestJourneyHTTPSNavigation(t *testing.T) {
 		return ok && browser.activeURL() == targetURL
 	})
 
-	// Assert post-conditions:
-	// - URL has https scheme
-	// - Address bar accessibility node shows the exact URL
-	// - AX tree contains the rendered document content
-	// - Active tab has no error and title matches
 	if !strings.HasPrefix(browser.activeURL(), "https://") {
 		t.Errorf("active URL = %q, want https:// scheme", browser.activeURL())
 	}
@@ -78,16 +72,11 @@ func TestJourneyHTTPNavigationAndRedirect(t *testing.T) {
 
 	browser.navigateViaAddressBar(t, sourceURL)
 
-	// Wait for redirection to destination
 	browser.waitFor(t, "redirect destination loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "dest-head")
 		return ok && browser.activeURL() == destURL
 	})
 
-	// Assert post-conditions:
-	// - Final URL preserves http scheme (not altered outside the received redirect)
-	// - Address bar displays the final redirected URL, not the requested one
-	// - Document content matches the destination
 	if !strings.HasPrefix(browser.activeURL(), "http://") {
 		t.Errorf("active URL = %q, want http:// scheme", browser.activeURL())
 	}
@@ -113,7 +102,6 @@ func TestJourneyBareHostnameNormalization(t *testing.T) {
 
 	browser.f.client = gonet.DefaultClientWithTLS(server.Client().Transport.(*http.Transport).TLSClientConfig)
 
-	// Input is bare host/IP:port without scheme
 	bareHost := strings.TrimPrefix(server.URL, "https://")
 	bareInput := bareHost + "/bare"
 	expectedURL := "https://" + bareInput
@@ -125,10 +113,6 @@ func TestJourneyBareHostnameNormalization(t *testing.T) {
 		return ok && browser.activeURL() == expectedURL
 	})
 
-	// Assert post-conditions:
-	// - The app normalized the URL to https://
-	// - Address bar displays normalized URL
-	// - Content rendered correctly from the host
 	addrNode, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 	if !ok || addrNode.Value != expectedURL {
 		t.Errorf("address bar AX node value = %q, want %q", addrNode.Value, expectedURL)
@@ -161,36 +145,29 @@ func TestJourneyStaleNavigationDoesNotOverwriteCurrent(t *testing.T) {
 	slowURL := server.URL + "/slow"
 	fastURL := server.URL + "/fast"
 
-	// 1. Start slow navigation
 	browser.navigateViaAddressBar(t, slowURL)
 
-	// Wait until server starts handling slow navigation
 	select {
 	case <-slowEntered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for slow request to reach server")
 	}
 
-	// 2. While slow navigation is in-flight, navigate to fast URL
 	browser.navigateViaAddressBar(t, fastURL)
 
-	// 3. Fast navigation completes first
 	browser.waitFor(t, "fast document loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "fast-doc")
 		return ok && browser.activeURL() == fastURL
 	})
 
-	// 4. Now release the slow navigation
 	close(releaseSlow)
 
-	// Wait for any pending results to drain through event loop
 	browser.waitFor(t, "stale slow result is ignored and fast doc remains", func() bool {
 		_, fastPresent := findAXNode(browser.window.AccessibilityTree(), "fast-doc")
 		_, slowPresent := findAXNode(browser.window.AccessibilityTree(), "slow-doc")
 		return fastPresent && !slowPresent && browser.activeURL() == fastURL
 	})
 
-	// Verify tab state and address bar still show fast URL
 	if browser.activeURL() != fastURL {
 		t.Errorf("active URL = %q, want %q (slow navigation overwrote fast!)", browser.activeURL(), fastURL)
 	}
@@ -217,7 +194,6 @@ func TestJourneyBackForwardFiveNavigations(t *testing.T) {
 		urls[i] = fmt.Sprintf("%s/page%d", server.URL, i+1)
 	}
 
-	// 1. Navigate through 5 pages sequentially
 	for i, u := range urls {
 		pageID := fmt.Sprintf("page-%d", i+1)
 		browser.navigateViaAddressBar(t, u)
@@ -227,13 +203,11 @@ func TestJourneyBackForwardFiveNavigations(t *testing.T) {
 		})
 	}
 
-	// Verify history has 5 entries
 	entries, current := browser.f.tabMgr.Active().History().Entries()
 	if len(entries) != 5 || current != 4 {
 		t.Fatalf("history entries = %v (current = %d), want 5 entries at index 4", entries, current)
 	}
 
-	// 2. Step backward through pages 4, 3, 2, 1
 	for step := 4; step >= 1; step-- {
 		browser.clickToolbarButton(t, toolbar.ButtonBack)
 		wantURL := urls[step-1]
@@ -244,12 +218,10 @@ func TestJourneyBackForwardFiveNavigations(t *testing.T) {
 		})
 	}
 
-	// At page 1, CanBack should be false
 	if browser.f.tabMgr.Active().History().CanBack() {
 		t.Errorf("at page 1, CanBack = true, want false")
 	}
 
-	// 3. Step forward through pages 2, 3, 4, 5
 	for step := 2; step <= 5; step++ {
 		browser.clickToolbarButton(t, toolbar.ButtonForward)
 		wantURL := urls[step-1]
@@ -260,7 +232,6 @@ func TestJourneyBackForwardFiveNavigations(t *testing.T) {
 		})
 	}
 
-	// At page 5, CanForward should be false
 	if browser.f.tabMgr.Active().History().CanForward() {
 		t.Errorf("at page 5, CanForward = true, want false")
 	}
@@ -287,38 +258,31 @@ func TestJourneyCmdLFocusesAddressBar(t *testing.T) {
 	firstURL := server.URL + "/first"
 	secondURL := server.URL + "/second"
 
-	// 1. Navigate to first URL
 	browser.navigateViaAddressBar(t, firstURL)
 	browser.waitFor(t, "first page loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "first")
 		return ok && browser.activeURL() == firstURL
 	})
 
-	// Blur address bar via Escape
 	browser.pressKey(t, 0x1b)
 	browser.waitFor(t, "address bar loses focus after Escape", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 		return ok && !node.Focused
 	})
 
-	// 2. Press Cmd+L to focus address bar
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 'l', Mods: surface.ModCommand})
 
-	// 3. Post-condition: Address bar node in accessibility tree is Focused
 	browser.waitFor(t, "address bar focused after Cmd+L", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 		return ok && node.Focused && node.AddressBar
 	})
 
-	// 4. Content is selected for replacement: typing one key without an explicit
-	// select-all must replace the whole URL rather than append to it.
 	browser.pressKey(t, 'x')
 	browser.waitFor(t, "typing after Cmd+L replaces the selected URL", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 		return ok && node.Focused && node.Value == "x"
 	})
 
-	// 5. Navigating to a new URL succeeds
 	browser.navigateViaAddressBar(t, secondURL)
 	browser.waitFor(t, "second page loaded after address bar replacement", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "second")

@@ -3,10 +3,6 @@
 package darwin
 
 /*
-// The Objective-C runtime is linked for us - a package with a .m file gets -lobjc from
-// cmd/go - so this list is the frameworks the shim imports and nothing else.
-// AVFoundation and CoreMedia are here for media_darwin.m's player, which is the
-// same rule: a framework is linked because a file in this directory imports it.
 #cgo LDFLAGS: -framework AppKit -framework Foundation -framework CoreGraphics -framework CoreVideo -framework QuartzCore -framework AVFoundation -framework CoreMedia -framework UniformTypeIdentifiers
 #cgo CFLAGS: -I${SRCDIR} -Wno-deprecated-declarations
 #include "shim.h"
@@ -25,33 +21,14 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// Name is this backend's name. It is a method's return value as much as a constant: a
-// report that says "darwin" is claiming a real NSWindow was on screen for these frames,
-// so the same string has to come from the window that opened as from the table that
-// chose it.
 const Name = "darwin"
 
-// Config is the window a caller asks for.
 type Config struct {
-	// Title is the window's title bar text.
 	Title string
-	// Size is the surface in device pixels, not points: the units the frame path
-	// composes in, so a 2x display asked for at 2880x1800 gets a 1440x900pt window.
-	Size frame.Size
-	// Scale is the ratio the caller sized its buffer for. It is a request rather than a
-	// fact - the window reports the ratio the screen it landed on actually uses - and it
-	// is what a 1x-external-monitor run and a Retina run disagree about.
+	Size  frame.Size
 	Scale float32
 }
 
-// Window is a macOS surface.Window: an NSWindow plus the goroutine that turns its
-// display link and its input handlers into the one event channel the loop reads.
-//
-// Three threads reach a Window. The main thread owns it - AppKit will not be called
-// from anywhere else, and so Open and Run are both main-thread-only. The UI thread
-// calls Present and SetCursor. A pump goroutine calls Events' machinery and nothing
-// else. No Go field is shared between them: Present's scratch belongs to the UI thread
-// alone, and everything another thread reads comes out of the shim's atomics.
 type Window struct {
 	gw       *C.GoosieWindow
 	events   chan surface.Event
@@ -59,26 +36,11 @@ type Window struct {
 	pumpDone chan struct{}
 	closing  sync.Once
 
-	// dmg is the present's damage list flattened into C ints, kept in the window so a
-	// warm frame allocates nothing. It grows to the high-water mark of the list the
-	// composer reports and then stops, which is the same argument the scheduler makes
-	// about its own scratch. Only the goroutine that calls Present touches it, and the
-	// frame path guarantees there is exactly one of those.
 	dmg [][4]C.int
 }
 
-// Available reports whether this process can reach a window server.
-//
-// It asks CoreGraphics rather than AppKit on purpose: a capability probe that needed
-// the main thread could only be answered by a program already committed to opening a
-// window, and go test on a macOS runner has to be able to ask without popping one.
 func Available() bool { return C.GoosieHasDisplay() != 0 }
 
-// Open creates the window. It may be called from any thread: the first window is
-// opened on the main thread (pinned with runtime.LockOSThread) before Run, and a
-// later window is opened off-main while Run turns - the shim's create trampoline
-// marshals that onto the main queue. An off-main create with no running app loop
-// returns ErrAppQuitting rather than hanging or aborting.
 func Open(cfg Config) (*Window, error) {
 	if cfg.Size.W <= 0 || cfg.Size.H <= 0 {
 		return nil, fmt.Errorf("platform/darwin: a window needs a positive size, got %dx%d",
@@ -102,9 +64,6 @@ func Open(cfg Config) (*Window, error) {
 	return w, nil
 }
 
-// createErr turns the shim's failure code into one of the named errors. The codes are
-// spelled out in GoosieWindowCreate; a bare "create failed" would leave a caller
-// unable to tell "no display" from "wrong thread", which are two different fixes.
 func createErr(code int, cfg Config) error {
 	switch code {
 	case 1:
@@ -125,16 +84,8 @@ func createErr(code int, cfg Config) error {
 	return fmt.Errorf("platform/darwin: window create failed with code %d", code)
 }
 
-// Events implements surface.Window.
-//
-// The channel is unbuffered and the shim's ring is the buffer, which puts the drop
-// point and the drop count in exactly one place: a window whose reader has stopped is
-// visible in the counters rather than in a Go queue that grew.
 func (w *Window) Events() <-chan surface.Event { return w.events }
 
-// pump is the one goroutine allowed to block in the platform. GoosieNextEvent waits on
-// a condition variable rather than consuming CPU, so an idle window costs nothing, and
-// the frame path's single input source stays a channel.
 func (w *Window) pump() {
 	defer close(w.events)
 	defer close(w.pumpDone)
@@ -159,17 +110,6 @@ func (w *Window) pump() {
 	}
 }
 
-// translate maps one shim event onto the frame path's Event, and reports whether the
-// shim's kind meant anything. An unmapped kind is dropped rather than turned into a
-// zero Event, because a zero Event reads as a vsync and would draw a frame nobody
-// asked for.
-//
-// At is stamped here rather than lifted from the shim's own stamp. The two clocks have
-// no common epoch in this build - the shim reads CLOCK_MONOTONIC_RAW, Go's monotonic
-// clock reads mach_absolute_time - and a FrameMark whose VsyncAt came from one and
-// whose PlanAt came from the other subtracts to nonsense. What the recorder's chain
-// measures is therefore the frame path from the tick's arrival, and the shim's stamp is
-// left for a measure that wants input-to-pixel and translates the base first.
 func translate(ce C.GoosieEvent) (surface.Event, bool) {
 	ev := surface.Event{
 		Scale: float32(ce.scale),
@@ -180,7 +120,6 @@ func translate(ce C.GoosieEvent) (surface.Event, bool) {
 		ev.Kind = surface.EvVsync
 	case C.GOOSIE_EV_SCROLL:
 		ev.Kind = surface.EvScroll
-		// AppKit reports content movement, opposite to the viewport offset.
 		ev.Delta = frame.Point{X: -int32(ce.dx), Y: -int32(ce.dy)}
 		ev.Pos = frame.Point{X: int32(ce.px), Y: int32(ce.py)}
 	case C.GOOSIE_EV_POINTER:
@@ -223,13 +162,11 @@ func translate(ce C.GoosieEvent) (surface.Event, bool) {
 		}
 		ev.Text = C.GoString(&ce.text[0])
 	default:
-		// GOOSIE_EV_NONE and anything a future shim adds before this file learns it.
 		return ev, false
 	}
 	return ev, true
 }
 
-// button maps the shim's button number; 1 left, 2 middle, 3 right, 0 none.
 func button(n C.int) surface.Button {
 	switch n {
 	case 1:
@@ -242,16 +179,6 @@ func button(n C.int) surface.Button {
 	return surface.ButtonNone
 }
 
-// Present hands the composed buffer to Core Animation.
-//
-// It does not wait for the commit. The shim copies the damaged rects into its own pixel
-// surface and returns; the CGImage that references that copy is built on the main
-// thread. A frame path that blocked here would be a frame path whose scroll rate is
-// set by how fast the window server drains a queue.
-//
-// GOOSIE_DROPPED is not an error and does not become one: it means all three of the
-// shim's surfaces were still owed to the display, so this tick's pixels were skipped
-// and the next frame's own damage covers them.
 func (w *Window) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	if buf == nil || buf.Empty() {
 		return ErrNoPixels
@@ -290,9 +217,6 @@ func (w *Window) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	return fmt.Errorf("%w: present returned %d", ErrClosed, int(rc))
 }
 
-// SetCursor asks the main thread for a pointer shape. It is asynchronous by necessity:
-// the frame path calls it mid-draw, and the only thread allowed to call AppKit is the
-// one that may be busy elsewhere in the run loop.
 func (w *Window) SetCursor(c surface.Cursor) {
 	var shape C.int
 	switch c {
@@ -308,9 +232,6 @@ func (w *Window) SetCursor(c surface.Cursor) {
 	C.GoosieSetCursor(w.gw, shape)
 }
 
-// SetIME implements surface.Window. Like SetCursor it is asynchronous by necessity:
-// the engine calls it from focus changes, and the input context lives on the main
-// thread.
 func (w *Window) SetIME(on bool) {
 	v := C.int(0)
 	if on {
@@ -319,63 +240,32 @@ func (w *Window) SetIME(on bool) {
 	C.GoosieSetIME(w.gw, v)
 }
 
-// ScaleFactor implements surface.Window. It is the ratio the window actually got,
-// which is not necessarily the one Config asked for.
 func (w *Window) ScaleFactor() float32 { return float32(C.GoosieScaleFactor(w.gw)) }
 
-// Size returns the surface size in device pixels, which is what a buffer presented to
-// this window has to match.
 func (w *Window) Size() frame.Size {
 	var cw, ch C.int
 	C.GoosieSizeDevice(w.gw, &cw, &ch)
 	return frame.Size{W: int32(cw), H: int32(ch)}
 }
 
-// Name satisfies platform.Namer.
 func (w *Window) Name() string { return Name }
 
-// Presents satisfies platform.PresentCounter. Committed is the number that says the
-// frame reached Core Animation: a present the loop made and the shim queued is not the
-// same claim as a commit that ran, and on a window whose run loop has stopped the two
-// differ by everything still in the queue.
 func (w *Window) Presents() (queued, dropped, committed int64) {
 	var q, d, c C.int
 	C.GoosieCounters(w.gw, &q, &d, nil, &c, nil)
 	return int64(q), int64(d), int64(c)
 }
 
-// DroppedVsyncs satisfies platform.DroppedVsyncer. It counts the ticks the display
-// produced and this window could not deliver, which is the number that tells a skipped
-// frame apart from a slow one.
 func (w *Window) DroppedVsyncs() int64 {
 	var shed C.int
 	C.GoosieCounters(w.gw, nil, nil, &shed, nil, nil)
 	return int64(shed)
 }
 
-// Run enters AppKit's run loop and does not return until the app quits - that is,
-// until the last window closes. Closing this window alone leaves Run turning for
-// the others.
-//
-// It belongs on the main thread, on the goroutine that called Open: the alternative is
-// a second thread owning AppKit while the first one sits idle, which is not a shape
-// NSApplication supports. A backend with no run loop does not have this method, and
-// cmd/goosie finds out by asking for platform.Runner.
 func (w *Window) Run() {
 	C.GoosieAppRun(w.gw)
-	// Whatever ended the loop - a close button, ⌘Q, or GoosieClose - GoosieAppRun has
-	// already pushed the quit flag on the way out, so a pump blocked in
-	// GoosieNextEvent is released by this return rather than left in it.
 }
 
-// Close stops the display link, orders this window out, and waits for the pump to
-// leave. The app run loop ends when the LAST window closes, not this one. It is
-// idempotent, and it is safe to call from a goroutine that is not the main thread -
-// which is the only way to call it while Run is turning the loop.
-//
-// Every caller waits for the pump, including a second one arriving while the first is
-// still waiting: a window that reports itself closed while something is still inside
-// the platform is a window whose next Present is a surprise.
 func (w *Window) Close() error {
 	w.closing.Do(func() {
 		close(w.detach)
@@ -385,17 +275,11 @@ func (w *Window) Close() error {
 	return nil
 }
 
-// cgoAx carries the state of one flatten pass. The nodes go into a slice whose
-// backing array is handed to the shim, so the strings it points at are kept alive
-// until the call returns and freed right after: the shim copies both array and
-// strings synchronously during the call, which is what makes a pointer into a
-// slice safe for the duration and unsafe a moment longer.
 type cgoAx struct {
 	nodes []C.GoosieAxNode
 	strs  []*C.char
 }
 
-// str copies one string for C, or gives the shim's NULL for an empty one.
 func (f *cgoAx) str(s string) *C.char {
 	if s == "" {
 		return nil
@@ -405,11 +289,6 @@ func (f *cgoAx) str(s string) *C.char {
 	return c
 }
 
-// emit appends one run of siblings depth first. Each node is appended with its
-// links unset, then first_child is patched to the index the children append at
-// and next_sibling to the index the next sibling appends at - both computed from
-// len(f.nodes) at the moment the next append is about to happen, so a subtree of
-// any size shifts its following siblings without the indices ever lying.
 func (f *cgoAx) emit(siblings []ax.Node) {
 	for i, n := range siblings {
 		cur := len(f.nodes)
@@ -493,10 +372,6 @@ func axFlags(n ax.Node) C.int {
 	return flags
 }
 
-// SetAccessibility flattens the tree and hands it to the shim. It implements
-// surface.AccessibilityWindow, so a caller publishing a document's tree reaches
-// the platform through the same capability assertion as every other optional
-// window feature. An empty tree clears what is published.
 func (w *Window) SetAccessibility(nodes []ax.Node) {
 	f := &cgoAx{}
 	f.emit(nodes)

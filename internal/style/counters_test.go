@@ -74,7 +74,6 @@ func TestFormatCounter(t *testing.T) {
 		{5, "thai", "๕"},
 		{12, "arabic-indic", "١٢"},
 		{7, "devanagari", "७"},
-		// Georgian spot checks from the css-lists WPT references.
 		{1, "georgian", "ა"},
 		{8, "georgian", "ჱ"},
 		{10, "georgian", "ი"},
@@ -142,9 +141,8 @@ func TestParseContentParts(t *testing.T) {
 }
 
 func TestCounterScopeNesting(t *testing.T) {
-	// Mirrors counters-003: body resets c, p increments it, first span nests.
 	body := (&CounterScope{}).ApplyReset(map[string]int{"c": 0})
-	body = body.ApplyIncrement(map[string]int{"c": 1}) // <p>
+	body = body.ApplyIncrement(map[string]int{"c": 1})
 	if v, _ := body.Lookup("c"); v != 1 {
 		t.Fatalf("body c = %d, want 1", v)
 	}
@@ -155,12 +153,10 @@ func TestCounterScopeNesting(t *testing.T) {
 	if levels := span1.Levels("c"); !reflect.DeepEqual(levels, []int{1, 1}) {
 		t.Fatalf("span1 levels = %v, want [1 1] (body, own)", levels)
 	}
-	// A sibling without reset increments the body's counter.
 	body2 := body.ApplyIncrement(map[string]int{"c": 1})
 	if v, _ := body2.Lookup("c"); v != 2 {
 		t.Fatalf("body c after sibling = %d, want 2", v)
 	}
-	// Set overwrites in place, creating nothing new.
 	set := body2.ApplySet(map[string]int{"c": 48})
 	if v, _ := set.Lookup("c"); v != 48 {
 		t.Fatalf("set c = %d, want 48", v)
@@ -168,8 +164,6 @@ func TestCounterScopeNesting(t *testing.T) {
 	if levels := set.Levels("c"); !reflect.DeepEqual(levels, []int{48}) {
 		t.Fatalf("set levels = %v, want single [48]", levels)
 	}
-	// Increment with no counter anywhere creates it locally, invisible to
-	// the parent scope.
 	fresh := (&CounterScope{}).ApplyIncrement(map[string]int{"c": 3})
 	if v, _ := fresh.Lookup("c"); v != 3 {
 		t.Fatalf("fresh c = %d, want 3", v)

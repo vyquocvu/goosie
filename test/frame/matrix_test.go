@@ -38,14 +38,12 @@ func TestMatrixScale(t *testing.T) {
 }
 
 func TestMatrixRotate(t *testing.T) {
-	// Rotate 90 degrees: (1, 0) -> (0, 1)
 	m := frame.MatrixRotate(math.Pi / 2)
 	x, y := m.TransformPoint(1, 0)
 	if !approx(x, 0) || !approx(y, 1) {
 		t.Fatalf("rotate(90deg) * (1,0) = (%g, %g), want ~(0, 1)", x, y)
 	}
 
-	// Rotate 180 degrees: (1, 0) -> (-1, 0)
 	m = frame.MatrixRotate(math.Pi)
 	x, y = m.TransformPoint(1, 0)
 	if !approx(x, -1) || !approx(y, 0) {
@@ -54,9 +52,6 @@ func TestMatrixRotate(t *testing.T) {
 }
 
 func TestMatrixMultiply(t *testing.T) {
-	// translate(10, 20) * scale(2, 3):
-	// First scale (2,3), then translate (10,20).
-	// Point (5, 5) -> scale -> (10, 15) -> translate -> (20, 35)
 	tr := frame.MatrixTranslate(10, 20)
 	sc := frame.MatrixScale(2, 3)
 	combined := tr.Multiply(sc)
@@ -67,7 +62,6 @@ func TestMatrixMultiply(t *testing.T) {
 }
 
 func TestMatrixTransformRect(t *testing.T) {
-	// Translate a rect.
 	m := frame.MatrixTranslate(10, 20)
 	r := frame.RectF4(0, 0, 100, 50)
 	got := m.TransformRect(r)
@@ -76,7 +70,6 @@ func TestMatrixTransformRect(t *testing.T) {
 		t.Fatalf("translate transform rect = %v, want %v", got, want)
 	}
 
-	// Scale a rect.
 	m = frame.MatrixScale(2, 3)
 	got = m.TransformRect(r)
 	want = frame.RectF4(0, 0, 200, 150)
@@ -84,11 +77,8 @@ func TestMatrixTransformRect(t *testing.T) {
 		t.Fatalf("scale transform rect = %v, want %v", got, want)
 	}
 
-	// Rotate 90 degrees: rect (0,0,100,50) -> AABB should be (-50,0,0,100)
 	m = frame.MatrixRotate(math.Pi / 2)
 	got = m.TransformRect(r)
-	// After 90deg rotation: (0,0)->(0,0), (100,0)->(0,100), (100,50)->(-50,100), (0,50)->(-50,0)
-	// AABB: (-50, 0, 0, 100)
 	want = frame.RectF4(-50, 0, 0, 100)
 	if !rectFApprox(got, want) {
 		t.Fatalf("rotate 90 transform rect = %v, want %v", got, want)
@@ -96,7 +86,6 @@ func TestMatrixTransformRect(t *testing.T) {
 }
 
 func TestMatrixInverse(t *testing.T) {
-	// Translate inverse.
 	m := frame.MatrixTranslate(10, 20)
 	inv := m.Inverse()
 	x, y := inv.TransformPoint(15, 25)
@@ -104,7 +93,6 @@ func TestMatrixInverse(t *testing.T) {
 		t.Fatalf("inverse translate * (15,25) = (%g, %g), want (5, 5)", x, y)
 	}
 
-	// Scale inverse.
 	m = frame.MatrixScale(2, 4)
 	inv = m.Inverse()
 	x, y = inv.TransformPoint(10, 20)
@@ -112,7 +100,6 @@ func TestMatrixInverse(t *testing.T) {
 		t.Fatalf("inverse scale * (10,20) = (%g, %g), want (5, 5)", x, y)
 	}
 
-	// Combined: M * M^-1 should be identity.
 	m = frame.MatrixTranslate(10, 20).Multiply(frame.MatrixScale(2, 3))
 	inv = m.Inverse()
 	product := m.Multiply(inv)

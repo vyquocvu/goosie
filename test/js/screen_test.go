@@ -6,11 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// GOOSIE-SCREEN-001: `screen` did not exist, so the first line of a boot script
-// that reads it aborted with a ReferenceError and everything after it in the same
-// script never ran. The sweep that found it measured a live page reporting
-// "ReferenceError: screen is not defined"; this is the same statement the page
-// makes, evaluated instead of observed.
 // qc:BR-267
 func TestScreenIsDefinedWithoutADOM(t *testing.T) {
 	r := newRuntime(t, jsOpts())
@@ -29,10 +24,6 @@ reached = true;`
 	}
 }
 
-// The numbers have to be the viewport the engine configured - not a host display,
-// which a headless run does not have - and avail* must not invent chrome to
-// subtract. innerWidth is asserted from the same runtime so the two interfaces
-// cannot drift apart into two different stories about the window's size.
 // qc:BR-267
 func TestScreenReportsTheConfiguredViewport(t *testing.T) {
 	r := newDOMRuntime(t, domtest.Parse("<html><body></body></html>"))
@@ -47,9 +38,6 @@ func TestScreenReportsTheConfiguredViewport(t *testing.T) {
 	}
 }
 
-// A resize re-answers rather than reporting the size the runtime started with:
-// the accessors read the viewport each time, which is what lets one runtime serve
-// a window that changes width.
 // qc:BR-267
 func TestScreenTracksAViewportChange(t *testing.T) {
 	r := newDOMRuntime(t, domtest.Parse("<html><body></body></html>"))
@@ -66,8 +54,6 @@ func TestScreenTracksAViewportChange(t *testing.T) {
 	}
 }
 
-// Screen attributes are readonly in the IDL, so a page cannot retype the display;
-// the assignment is ignored rather than throwing in sloppy mode.
 // qc:BR-267
 func TestScreenWidthIsReadOnly(t *testing.T) {
 	r := newRuntime(t, jsOpts())
@@ -81,10 +67,6 @@ func TestScreenWidthIsReadOnly(t *testing.T) {
 	}
 }
 
-// screen.orientation is withheld on purpose: an angle and a type both derive from
-// a device's natural orientation, which a browser with no host display cannot
-// know. Pinning its absence keeps the decision visible instead of looking like an
-// oversight the next person fills in with a number from the window's aspect ratio.
 // qc:BR-267
 func TestScreenOrientationIsAbsent(t *testing.T) {
 	r := newRuntime(t, jsOpts())

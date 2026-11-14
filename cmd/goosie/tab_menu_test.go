@@ -11,8 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// menuItemsByAction indexes the actionable entries so a test can name the one
-// it cares about instead of counting separators.
 func menuItemsByAction(items []ContextMenuItem) map[string]ContextMenuItem {
 	byAction := make(map[string]ContextMenuItem, len(items))
 	for _, it := range items {
@@ -23,8 +21,6 @@ func menuItemsByAction(items []ContextMenuItem) map[string]ContextMenuItem {
 	return byAction
 }
 
-// menuItemPoint returns a point inside the band painted for action, so a test
-// clicks the item the pixels show rather than a hardcoded row.
 func menuItemPoint(cm *ContextMenu, action string, scale int32) (frame.Point, bool) {
 	y := cm.Y + int32(menuPadding)*scale
 	for _, it := range cm.Items {
@@ -160,7 +156,6 @@ func TestTabContextMenuRightClickTargetsTab(t *testing.T) {
 		t.Errorf("tab action %q was also dispatched as a content action", contentAction)
 	}
 
-	// A press on empty strip space targets nothing and must not open the menu.
 	if !cw.intercept(surface.Event{Kind: surface.EvPointer, Action: surface.PointerPress, Button: surface.ButtonRight,
 		Pos: frame.Point{X: 700, Y: 18}}) {
 		t.Fatal("right press on the strip was not consumed")

@@ -58,7 +58,6 @@ func TestHighlightHTML(t *testing.T) {
 	if !strings.Contains(highlighted, "token-attr-value") {
 		t.Errorf("expected attr value token in %s", highlighted)
 	}
-	// Check resolved source-link
 	if !strings.Contains(highlighted, `href="view-source:https://example.com/about"`) {
 		t.Errorf("expected resolved view-source anchor link in %s", highlighted)
 	}

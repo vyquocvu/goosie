@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// TestBoxShadowResolved verifies that box-shadow declarations resolve through
-// the cascade into the computed style's BoxShadow field.
 func TestBoxShadowResolved(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="x">x</div></body></html>`,
@@ -29,7 +27,6 @@ func TestBoxShadowResolved(t *testing.T) {
 	}
 }
 
-// TestBoxShadowNone verifies that box-shadow:none results in nil.
 func TestBoxShadowNone(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="x">x</div></body></html>`,
@@ -40,7 +37,6 @@ func TestBoxShadowNone(t *testing.T) {
 	}
 }
 
-// TestBoxShadowMultiple verifies that multiple comma-separated shadows resolve.
 func TestBoxShadowMultiple(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="x">x</div></body></html>`,
@@ -59,7 +55,6 @@ func TestBoxShadowMultiple(t *testing.T) {
 	}
 }
 
-// TestBoxShadowInset verifies the inset keyword resolves.
 func TestBoxShadowInset(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="x">x</div></body></html>`,
@@ -73,7 +68,6 @@ func TestBoxShadowInset(t *testing.T) {
 	}
 }
 
-// TestBoxShadowDefault verifies that an element with no box-shadow has nil.
 func TestBoxShadowDefault(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="x">x</div></body></html>`,
@@ -84,7 +78,6 @@ func TestBoxShadowDefault(t *testing.T) {
 	}
 }
 
-// TestTextShadowResolved verifies that text-shadow declarations resolve.
 func TestTextShadowResolved(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><p class="x">text</p></body></html>`,
@@ -105,7 +98,6 @@ func TestTextShadowResolved(t *testing.T) {
 	}
 }
 
-// TestTextShadowNone verifies that text-shadow:none results in nil.
 func TestTextShadowNone(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><p class="x">text</p></body></html>`,
@@ -116,7 +108,6 @@ func TestTextShadowNone(t *testing.T) {
 	}
 }
 
-// TestTextShadowMultiple verifies multiple text shadows resolve.
 func TestTextShadowMultiple(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><p class="x">text</p></body></html>`,
@@ -127,7 +118,6 @@ func TestTextShadowMultiple(t *testing.T) {
 	}
 }
 
-// TestTextShadowDefault verifies that an element with no text-shadow has nil.
 func TestTextShadowDefault(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><p class="x">text</p></body></html>`,
@@ -138,7 +128,6 @@ func TestTextShadowDefault(t *testing.T) {
 	}
 }
 
-// TestTextShadowNoBlur verifies text-shadow works without blur.
 func TestTextShadowNoBlur(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><p class="x">text</p></body></html>`,
@@ -159,15 +148,6 @@ func TestTextShadowNoBlur(t *testing.T) {
 	}
 }
 
-// TestBoxShadowNotInheritedButTextShadowIs pins the two properties' opposite
-// inheritance rules on the smallest document that shows them. box-shadow is not
-// inherited (css-backgrounds-3 §7.1). text-shadow IS (css-text-decor-3 §3): the
-// child span below computes the parent's layer list, which is what Chromium
-// measures on the same shape (460 px of shadow ink inside a `<span>` child of a
-// shadowed parent, TASK-053 §9.2 limit 6). The assertion this replaced claimed
-// text-shadow stayed nil in a child, i.e. it encoded GOOSIE-TEXTSHADOW-001 as
-// expected behaviour; the full measured law lives in
-// test/style/text_shadow_inherit_test.go.
 // qc:BR-278
 func TestBoxShadowNotInheritedButTextShadowIs(t *testing.T) {
 	const html = `<html><body><div class="parent"><span class="child">text</span></div></body></html>`
@@ -188,7 +168,6 @@ func TestBoxShadowNotInheritedButTextShadowIs(t *testing.T) {
 	}
 }
 
-// TestBoxShadowHexColor verifies box-shadow with hex color works.
 func TestBoxShadowHexColor(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="x">x</div></body></html>`,
@@ -203,8 +182,6 @@ func TestBoxShadowHexColor(t *testing.T) {
 	}
 }
 
-// TestShadowDeclarationsResolve verifies each declaration against its CSS
-// meaning, including layer order and all exposed shadow components.
 func TestShadowDeclarationsResolve(t *testing.T) {
 	tests := []struct {
 		decl string

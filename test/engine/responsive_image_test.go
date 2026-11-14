@@ -9,13 +9,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestResponsiveImageClampsToContainer guards the `img { max-width: 100% }`
-// sizing path. A picture wider than its column must shrink to fit and keep its
-// aspect ratio; without the clamp the box keeps its intrinsic width and
-// overflows into its neighbours.
 func TestResponsiveImageClampsToContainer(t *testing.T) {
-	// A 640x292 intrinsic image inside a 200px column: the used width must be
-	// 200 and the height 200 * 292/640 = 91.25.
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 640, 292))); err != nil {
 		t.Fatal(err)

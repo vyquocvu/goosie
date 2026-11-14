@@ -14,9 +14,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
-// contentWidth and contentHeight are the live content viewport in CSS pixels.
-// The chrome pump writes it on resize, so readers on other goroutines take the
-// lock rather than touch config directly.
 func (f *framePath) contentWidth() int {
 	f.sizeMu.RLock()
 	defer f.sizeMu.RUnlock()
@@ -29,15 +26,12 @@ func (f *framePath) contentHeight() int {
 	return f.config.height
 }
 
-// devSize is the current viewport in device pixels.
 func (f *framePath) devSize() frame.Size {
 	f.sizeMu.RLock()
 	defer f.sizeMu.RUnlock()
 	return f.config.devSize()
 }
 
-// setContentSize records a new live viewport. Callers hold no other lock; the
-// chrome pump is the only writer.
 func (f *framePath) setContentSize(w, h int) {
 	f.sizeMu.Lock()
 	f.config.width = w
@@ -45,7 +39,6 @@ func (f *framePath) setContentSize(w, h int) {
 	f.sizeMu.Unlock()
 }
 
-// handleResize reflows and repaints the active tab after the window is resized.
 func (f *framePath) handleResize(contentW, contentH int) {
 	f.setContentSize(contentW, contentH)
 
@@ -67,14 +60,6 @@ func (f *framePath) handleResize(contentW, contentH int) {
 	f.repaintTab(tab, frame.Rect{})
 }
 
-// pumpJS runs one event-loop turn for the active tab and repaints on change.
-// Background tabs stay frozen (and cheap) until shown. It runs on the chrome
-// pump thread like every input callback; see the wiring at openWindow. It
-// reports whether it published a repaint, which the paced drivers use to tell
-// a run that is settling from one a page callback just woke up.
-//
-// A paced run has no tab manager and no chrome window, so the tab path above
-// would return without pumping anything; its one document is pumped instead.
 func (f *framePath) pumpJS() bool {
 	if f.tabMgr == nil {
 		return f.pumpPaced()
@@ -88,16 +73,10 @@ func (f *framePath) pumpJS() bool {
 		return false
 	}
 	changed := sess.PumpJS(float32(f.contentWidth()))
-	// showPicker() and HTMLElement.click() on a file control ask the host for a
-	// picker from inside a script turn, so the request is drained here rather
-	// than only on the input paths.
 	changed = f.serviceFilePicker(tab) || changed
 	if !changed {
 		return false
 	}
-	// A callback that ran past the deadline was stopped by the engine. Replace
-	// the page with the prompt so the user chooses what happens next instead of
-	// the tab silently swallowing the runaway.
 	if sess.HasScriptTimeout() {
 		tab.Nav.Mu.Lock()
 		serial := tab.Nav.Serial
@@ -110,12 +89,6 @@ func (f *framePath) pumpJS() bool {
 	return true
 }
 
-// pendingReveal asks the document pumpJS ticks when it next owes itself a
-// timer queued during its own load. It mirrors pumpJS's two shapes - a paced
-// run has no tab manager, an interactive one resolves the active tab - because
-// a driver that waits has to consult the same session the pump runs, and
-// consulting another one would let a frame be called settled while the page it
-// depicts was still about to change.
 func (f *framePath) pendingReveal() (time.Duration, bool) {
 	sess := f.pacedSession
 	if f.tabMgr != nil {
@@ -131,10 +104,6 @@ func (f *framePath) pendingReveal() (time.Duration, bool) {
 	return sess.PendingLoadTimerDelay()
 }
 
-// pumpPaced is pumpJS for a paced run: one synchronously loaded document, no
-// tabs, no chrome window. It runs on the driver's pump goroutine, the same
-// single thread that ticks the session, so it has the same one-thread
-// discipline as the interactive tick.
 func (f *framePath) pumpPaced() bool {
 	sess := f.pacedSession
 	if sess == nil {
@@ -146,15 +115,6 @@ func (f *framePath) pumpPaced() bool {
 	return f.repaintPaced(sess)
 }
 
-// repaintPaced rebuilds the paced document's layer and publishes it, and
-// reports whether it did. It is the tab-less twin of repaintTab, with one
-// addition the tab path gets from navigation: the plan's Background is what
-// the composer fills uncovered surface with and what every tile rasterizes
-// over, so a page callback that only changes the canvas colour (a timer or an
-// image onload setting body background) is invisible unless the plan is
-// republished with the new colour. A background change therefore republishes
-// the plan; the scheduler treats that as a full redraw. A geometry change
-// needs a fresh layer for the same reason a tab does.
 func (f *framePath) repaintPaced(sess *engine.Session) bool {
 	list, err := sess.PaintChecked(f.effectiveScale())
 	if err != nil {
@@ -201,11 +161,6 @@ func (f *framePath) repaintPaced(sess *engine.Session) bool {
 	return true
 }
 
-// selectionDamage unions the previous selection bounds with the current
-// ones, scaled to device pixels: a highlight change damages exactly where
-// ink appeared or disappeared. Either side may be absent (a collapsed caret
-// paints nothing, a cleared highlight leaves nothing); both absent yields an
-// empty rect, which repaintTab resolves by comparing display lists.
 func (f *framePath) selectionDamage(tab *tabs.Tab, oldR frame.Rect, oldOK bool) frame.Rect {
 	scale := float32(f.config.dpr) * float32(f.zoom)
 	var x0, y0, x1, y1 int32
@@ -241,22 +196,6 @@ func (f *framePath) selectionDamage(tab *tabs.Tab, oldR frame.Rect, oldOK bool) 
 	return frame.Rect{X0: x0, Y0: y0, X1: x1, Y1: y1}
 }
 
-// repaintTab rebuilds the active tab's layer from its session and hands the
-// plan to the scheduler. dirty is the device-pixel damage in layer space;
-// an empty rect derives damage from the old and new display lists.
-//
-// When the tab already holds a layer over the same extent and budget, the
-// layer (and its tile cache and pool) is reused: the new content is
-// attached and only dirty tiles go stale via InvalidateRect, and no plan is
-// republished — the loop re-reads the shared layer pointer every frame and
-// re-rasterizes exactly what went stale. A new layer (and full plan) happens
-// only when geometry demands it.
-//
-// Versions deliberately do not advance on reuse: bumping the content version
-// would skew any frame already rasterizing the previous list (its completion
-// arrives stamped with the old display-list version and would be dropped as
-// stale forever, requeued every frame). Invalidating dirty tiles at a fixed
-// version converges by construction instead.
 func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	effectiveDPR := float32(f.config.dpr) * float32(f.zoom)
 	if f.emulationPreset != nil {
@@ -285,23 +224,9 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	}
 
 	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Budget() == budgetBytes {
-		// Reuse: keep the tile cache and pool. How the new content is attached
-		// depends on whether the frame thread is reading this layer.
 		if f.tabMgr.Active() == tab {
-			// Handed to the scheduler rather than written here, because this runs
-			// on the chrome pump thread and SetContent/InvalidateRect are
-			// frame-thread operations. Writing them directly races BeginFrame's
-			// read of the same fields, and since Invalidate leaves a painting tile
-			// alone, a swap made while one of the damaged tiles is in flight can
-			// leave it showing content nothing displays any more. A repaint driven
-			// by a video frame is that case thirty times a second rather than once
-			// in a while. The scheduler applies the swap on its own thread once no
-			// rasterization is in flight for a tile the damage covers.
 			f.sched.UpdateLayer(lyr, dl, dirty)
 		} else {
-			// A background tab's layer is not the one being drawn, so no frame
-			// thread is reading it and attaching directly cannot race. Doing it
-			// here is also what keeps the tab current for when it comes forward.
 			if dirty.Empty() {
 				dirty = paint.ContentDamage(lyr.Content, dl)
 			}
@@ -317,8 +242,6 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	layer.SetContent(dl)
 
 	tab.SetLayer(layer)
-	// A background tab's repaint must not steal the screen; switchTab
-	// presents the fresh layer when the tab comes forward.
 	if f.tabMgr.Active() == tab {
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     tab.Nav.Serial,
@@ -329,12 +252,6 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	f.publishAccessibility()
 }
 
-// publishAccessibility hands the active document's accessibility tree to a
-// window that can publish it. The tree's coordinates are document CSS pixels;
-// the platform wants window content coordinates, so every rect is shifted by
-// the scroll offset before it leaves. A backend with no accessibility story,
-// or a tab with no session, publishes nothing - clearing what a previous
-// document left behind.
 func (f *framePath) publishAccessibility() {
 	aw, ok := f.window.(surface.AccessibilityWindow)
 	if !ok {
@@ -355,12 +272,6 @@ func (f *framePath) publishAccessibility() {
 		float32(vp.Offset.X)/effectiveDPR, float32(vp.Offset.Y)/effectiveDPR))
 }
 
-// scheduleInspectRepaint queues a tab whose inspector highlight changed for a
-// repaint on the chrome thread. It is called from the inspector page builder,
-// which runs on a navigation worker before the inspector tab's own session is
-// committed, so it must not repaint synchronously: repaintTab publishes the
-// active tab's accessibility tree, and mid-commit that tree is half-built. The
-// chrome tick drains the queue once the navigation has committed.
 func (f *framePath) scheduleInspectRepaint(tab *tabs.Tab) {
 	if tab == nil {
 		return
@@ -376,11 +287,6 @@ func (f *framePath) scheduleInspectRepaint(tab *tabs.Tab) {
 	f.inspectRepaintMu.Unlock()
 }
 
-// drainInspectRepaints repaints the tabs queued by scheduleInspectRepaint. It
-// runs on the chrome thread (pumpChrome), the same thread as every input
-// callback and repaintTab, after the inspector navigation has committed. The
-// queue is swapped out under the lock and released before any repaint, so no
-// queue, tab or engine lock is held across repaintTab.
 func (f *framePath) drainInspectRepaints() {
 	f.inspectRepaintMu.Lock()
 	pending := f.inspectRepaintPending
@@ -390,7 +296,6 @@ func (f *framePath) drainInspectRepaints() {
 		return
 	}
 	for _, tab := range pending {
-		// The tab may have closed or been replaced since it was queued.
 		if tab == nil || f.tabMgr.TabByID(tab.ID()) != tab || tab.Session() == nil {
 			continue
 		}
@@ -398,7 +303,6 @@ func (f *framePath) drainInspectRepaints() {
 	}
 }
 
-// shiftAx copies the tree with every rect translated by (dx, dy).
 func shiftAx(nodes []ax.Node, dx, dy float32) []ax.Node {
 	out := make([]ax.Node, len(nodes))
 	for i, n := range nodes {
@@ -412,8 +316,6 @@ func shiftAx(nodes []ax.Node, dx, dy float32) []ax.Node {
 	return out
 }
 
-// docPoint converts a content-area point to document coordinates through the
-// active zoom and scroll offset.
 func (f *framePath) docPoint(contentX, contentY int32) (float32, float32) {
 	dpr := float32(f.config.dpr)
 	if dpr <= 0 {

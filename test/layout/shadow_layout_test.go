@@ -76,7 +76,6 @@ func TestShadowLayout_DefaultSlotProjection(t *testing.T) {
 		t.Fatal("no arena object for slotted")
 	}
 
-	// Verify that slotted's parent in the layout arena is container!
 	slottedObj := arena.Get(slottedID)
 	if slottedObj == nil {
 		t.Fatal("nil slotted object")
@@ -132,7 +131,6 @@ func TestShadowLayout_NamedSlotProjection(t *testing.T) {
 }
 
 func TestShadowLayout_SlotFallbackContent(t *testing.T) {
-	// When host has no slotted children, slot fallback content is rendered into the arena
 	html := `<!DOCTYPE html>
 <html>
 <body>

@@ -98,7 +98,6 @@ func TestContentKeyCmdPaste(t *testing.T) {
 	tab.SetURL("https://example.com/")
 	tab.SetSession(sess)
 
-	// Focus the input
 	var inpX, inpY int32
 	for _, obj := range sess.Arena.Objects {
 		if obj.Node != nil && obj.Node.GetAttribute("id") == "inp" {
@@ -113,10 +112,8 @@ func TestContentKeyCmdPaste(t *testing.T) {
 		t.Fatal("focusClick failed to focus input")
 	}
 
-	// Write text to platform clipboard
 	cb.Write("clipdata")
 
-	// Trigger Cmd+V
 	handled := f.contentKey('v', surface.ModCommand)
 	if !handled {
 		t.Fatalf("contentKey Cmd+V was not handled")
@@ -167,9 +164,6 @@ func TestContentKeyCmdCopyAndCutDispatchEditingClipboardEvents(t *testing.T) {
 }
 
 // qc:BR-110
-//
-// With nothing focused, Cmd+A selects the whole document: the "outside a
-// control" half of the select-all policy.
 func TestContentKeyCmdSelectAll(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}
@@ -188,7 +182,6 @@ func TestContentKeyCmdSelectAll(t *testing.T) {
 	tab.SetURL("https://example.com/")
 	tab.SetSession(sess)
 
-	// No control focused: Cmd+A selects document
 	handled := f.contentKey('a', surface.ModCommand)
 	if !handled {
 		t.Fatalf("contentKey Cmd+A was not handled")
@@ -227,7 +220,7 @@ func TestContentKeyShiftArrowSelectsAndReplacesInputText(t *testing.T) {
 	if !f.focusClick(x, y) {
 		t.Fatal("focusClick did not focus the input")
 	}
-	if !f.contentKey(0xF702, surface.ModShift) { // Shift+Left
+	if !f.contentKey(0xF702, surface.ModShift) {
 		t.Fatal("contentKey did not handle Shift+Left")
 	}
 	if got := sess.FocusedText(); got != "d" {
@@ -281,7 +274,6 @@ func TestContentKeyCmdCopy(t *testing.T) {
 		t.Fatal("could not select input text before Cmd+C")
 	}
 
-	// Trigger Cmd+C
 	handled := f.contentKey('c', surface.ModCommand)
 	if !handled {
 		t.Fatalf("contentKey Cmd+C was not handled")

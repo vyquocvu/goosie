@@ -16,11 +16,9 @@ func TestNodeAdoption(t *testing.T) {
 	p2 := doc2.NewElement("p")
 	div2.AppendChild(p2)
 
-	// In doc2, div2 and p2 have their own IDs.
 	oldDiv2ID := div2.ID
 	oldP2ID := p2.ID
 
-	// Moving div2 into doc1 must adopt div2 and all its children into doc1.
 	div1.AppendChild(div2)
 
 	if div2.Doc != doc1 {

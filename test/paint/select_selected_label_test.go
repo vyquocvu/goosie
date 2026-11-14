@@ -10,9 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// paintedSelectText builds the display list for a document whose only text is a
-// select's label and returns the painted glyphs in reading order. The select has
-// no surrounding text, so every text command belongs to the control.
 func paintedSelectText(t *testing.T, selectHTML string) string {
 	t.Helper()
 	html := `<!doctype html><html><body style="margin:0">` + selectHTML + `</body></html>`
@@ -52,10 +49,6 @@ func TestSelectPaintsNormalizedSelectedLabel(t *testing.T) {
 	}
 }
 
-// Two selected options are resolved by the same last-authored-wins rule the
-// accessibility tree and form submission use, so the control cannot paint the
-// first option while announcing and submitting the second.
-//
 // qc:BR-101
 func TestSelectPaintsLastAuthoredSelectedOption(t *testing.T) {
 	got := paintedSelectText(t, `<select>`+
@@ -67,11 +60,6 @@ func TestSelectPaintsLastAuthoredSelectedOption(t *testing.T) {
 	}
 }
 
-// An explicitly selected option with an empty label paints nothing. The
-// first-option default belongs to a control with no selection at all; falling
-// back to it here would paint a label the control neither announces nor
-// submits.
-//
 // qc:BR-101
 func TestSelectPaintsNoTextForSelectedOptionWithEmptyLabel(t *testing.T) {
 	got := paintedSelectText(t, `<select>`+
@@ -83,9 +71,6 @@ func TestSelectPaintsNoTextForSelectedOptionWithEmptyLabel(t *testing.T) {
 	}
 }
 
-// Skipping an empty label must not skip the control: the dropdown arrow is what
-// tells the user the box is a select.
-//
 // qc:BR-101
 func TestSelectPaintsArrowWithoutSelectedLabel(t *testing.T) {
 	html := `<!doctype html><html><body style="margin:0">` +

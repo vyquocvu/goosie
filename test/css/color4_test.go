@@ -6,16 +6,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestColor4SpacesResolveToSRGB pins the one-way CSS Color 4 conversions:
-// every predefined space answers the sRGB it displays as instead of dropping
-// the declaration (which fell back to the previous value, usually red, and
-// cost the WPT css-color directory most of its failures).
 func TestColor4SpacesResolveToSRGB(t *testing.T) {
 	for _, c := range []struct {
 		src     string
 		r, g, b uint8
 	}{
-		// The WPT xyz swatch: green #008000 converted to xyz-d65.
 		{"color(xyz-d65 0.07719 0.15438 0.02573)", 0, 128, 0},
 		{"hwb(120 0% 0%)", 0, 255, 0},
 		{"hwb(0 100% 0%)", 255, 255, 255},
@@ -26,13 +21,8 @@ func TestColor4SpacesResolveToSRGB(t *testing.T) {
 		{"lab(0% 0 0)", 0, 0, 0},
 		{"oklab(1 0 0)", 255, 255, 255},
 		{"oklab(0 0 0)", 0, 0, 0},
-		// CSS Color 4 percentage reference ranges: 100% of Oklab a/b is
-		// 0.4, and 100% of OkLCh chroma is 0.4. These WPT values encode
-		// sRGB green (#008000).
 		{"oklab(51.975% -35.075% 26.92%)", 0, 128, 0},
 		{"oklch(51.975% 44.215% 142.495)", 0, 128, 0},
-		// At the lightness endpoints, gamut mapping yields achromatic
-		// black/white regardless of the supplied chroma or hue.
 		{"lch(100% 110 60)", 255, 255, 255},
 		{"lch(0% 110 60)", 0, 0, 0},
 		{"oklch(100% 110 60)", 255, 255, 255},
@@ -49,7 +39,6 @@ func TestColor4SpacesResolveToSRGB(t *testing.T) {
 	}
 }
 
-// TestColor4AlphaForm pins the slash-alpha form shared by all the spaces.
 func TestColor4AlphaForm(t *testing.T) {
 	got, ok := css.ParseColor("lab(50% 40 59.5 / 50%)")
 	if !ok {
@@ -60,8 +49,6 @@ func TestColor4AlphaForm(t *testing.T) {
 	}
 }
 
-// TestColor4UnknownSpaceDrops pins the boundary: an unknown colorspace keeps
-// the old behavior (unsupported, declaration drops) instead of guessing.
 func TestColor4UnknownSpaceDrops(t *testing.T) {
 	for _, src := range []string{
 		"color(bogus-space 1 0 0)",
@@ -74,10 +61,6 @@ func TestColor4UnknownSpaceDrops(t *testing.T) {
 	}
 }
 
-// TestColorCommentsAsSeparators pins comment handling inside values: a
-// comment separates tokens rather than fusing them, so `120/*c*/75%` reads
-// as 120 and 75%, not 12075%. The old strip dropped the comment outright
-// and every commented swatch lost its background.
 func TestColorCommentsAsSeparators(t *testing.T) {
 	for _, src := range []string{
 		"hsla(120/* comment */75%/* comment */50%/1.0)",
@@ -94,8 +77,6 @@ func TestColorCommentsAsSeparators(t *testing.T) {
 	}
 }
 
-// TestDisplayP3Linear pins the linear-light P3 space: same primaries as
-// display-p3, no transfer curve on the way in.
 func TestDisplayP3Linear(t *testing.T) {
 	got, ok := css.ParseColor("color(display-p3-linear 1 0 0)")
 	if !ok {

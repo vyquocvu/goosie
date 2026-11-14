@@ -292,9 +292,6 @@ func storePrivacyCookies(t *testing.T, f *framePath) {
 }
 
 // qc:BR-058
-//
-// The clear card must name each site that holds cookies, with a control that
-// targets that site alone - "all sites" is not enough for a user clearing one.
 func TestSettingsPrivacyCardListsCookiesBySite(t *testing.T) {
 	f, _ := newPrivacyTestPath(t)
 	storePrivacyCookies(t, f)
@@ -330,9 +327,6 @@ func TestSettingsClearSiteCookiesWaitsForConfirmation(t *testing.T) {
 }
 
 // qc:BR-058
-//
-// Confirming removes only that domain's cookies, keeps the rest, and rewrites
-// the profile file so the deletion survives a restart.
 func TestSettingsClearSiteCookiesRemovesOnlyThatSite(t *testing.T) {
 	f, _ := newPrivacyTestPath(t)
 	storePrivacyCookies(t, f)

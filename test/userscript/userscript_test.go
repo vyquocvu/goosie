@@ -85,7 +85,7 @@ func TestMatchPattern(t *testing.T) {
 		{"https://*.example.com/*", "https://sub.example.com/index.html", true},
 		{"https://*.example.com/*", "https://example.com/", true},
 		{"https://*.example.com/*", "https://other.com/", false},
-		{"https://*.example.com/*", "http://sub.example.com/", false}, // wrong scheme
+		{"https://*.example.com/*", "http://sub.example.com/", false},
 
 		{"https://example.com/foo/*", "https://example.com/foo/bar", true},
 		{"https://example.com/foo/*", "https://example.com/bar", false},
@@ -116,7 +116,6 @@ func TestScript_MatchesURL_IncludesExcludes(t *testing.T) {
 		t.Error("expected exclude rule to block login page")
 	}
 
-	// When disabled, no URLs match
 	s.Enabled = false
 	if s.MatchesURL("https://news.ycombinator.com/") {
 		t.Error("disabled script must not match any URL")
@@ -168,7 +167,6 @@ console.log("end");
 		t.Fatalf("endMatches = %v, want [End Modifier]", endMatches)
 	}
 
-	// Toggle disable
 	s := mgr.ScriptByID("script1")
 	if s == nil {
 		t.Fatal("could not find script1 by ID")

@@ -213,19 +213,19 @@ func TestHandleKeyCtrlShortcuts(t *testing.T) {
 	s.Input = "hello"
 	s.Cursor = 5
 
-	s.HandleKey(0x01) // Ctrl-A: start
+	s.HandleKey(0x01)
 	if s.Cursor != 0 {
 		t.Fatalf("Ctrl-A: Cursor = %d, want 0", s.Cursor)
 	}
-	s.HandleKey(0x05) // Ctrl-E: end
+	s.HandleKey(0x05)
 	if s.Cursor != 5 {
 		t.Fatalf("Ctrl-E: Cursor = %d, want 5", s.Cursor)
 	}
-	s.HandleKey(0x02) // Ctrl-B: left
+	s.HandleKey(0x02)
 	if s.Cursor != 4 {
 		t.Fatalf("Ctrl-B: Cursor = %d, want 4", s.Cursor)
 	}
-	s.HandleKey(0x06) // Ctrl-F: right
+	s.HandleKey(0x06)
 	if s.Cursor != 5 {
 		t.Fatalf("Ctrl-F: Cursor = %d, want 5", s.Cursor)
 	}
@@ -237,7 +237,7 @@ func TestHandleKeyCtrlK(t *testing.T) {
 	s.Input = "hello world"
 	s.Cursor = 5
 
-	s.HandleKey(0x0b) // Ctrl-K: kill to end
+	s.HandleKey(0x0b)
 	if s.Input != "hello" {
 		t.Fatalf("Input = %q after Ctrl-K, want hello", s.Input)
 	}
@@ -456,8 +456,6 @@ func TestOnTraverseCallback(t *testing.T) {
 	s.Navigate("https://a.com")
 	s.Navigate("https://b.com")
 
-	// OnTraverse should be called with the delta; simulate what the real
-	// traverse does by moving the history index.
 	s.OnTraverse = func(delta int) {
 		if delta < 0 {
 			s.History.Back()
@@ -466,14 +464,12 @@ func TestOnTraverseCallback(t *testing.T) {
 		}
 	}
 
-	// Click back button.
 	r := toolbar.ButtonRect(toolbar.ButtonBack, 800)
 	s.HandleClick(frame.Point{X: r.X0 + 1, Y: r.Y0 + 1}, surface.ButtonLeft)
 	if got := s.History.Current(); got != "https://a.com" {
 		t.Fatalf("after back: Current() = %q, want https://a.com", got)
 	}
 
-	// Click forward button.
 	r = toolbar.ButtonRect(toolbar.ButtonForward, 800)
 	s.HandleClick(frame.Point{X: r.X0 + 1, Y: r.Y0 + 1}, surface.ButtonLeft)
 	if got := s.History.Current(); got != "https://b.com" {
@@ -549,7 +545,7 @@ func TestFindQueryRestoredOnReopen(t *testing.T) {
 	if s.Input != "need" {
 		t.Fatalf("Input = %q while typing, want need", s.Input)
 	}
-	s.HandleKey(0x1b) // Esc closes and saves.
+	s.HandleKey(0x1b)
 	if s.FindActive {
 		t.Fatal("FindActive still true after Esc")
 	}
@@ -671,8 +667,6 @@ func TestCursorAtScalesWithDevicePixels(t *testing.T) {
 	s := toolbar.NewState(800, nil)
 	s.SetScale(2)
 
-	// CursorAt takes device pixels, like HandleClick: a hover at twice the
-	// logical Back-button rect must still read as the button.
 	back := toolbar.ButtonRect(toolbar.ButtonBack, 800)
 	pos := frame.Point{X: (back.X0+1)*2 + back.W()/2, Y: (back.Y0 + 1) * 2}
 	if c := s.CursorAt(pos); c != surface.CursorPointer {
@@ -698,9 +692,6 @@ func TestFindBackspaceStillReportsQuery(t *testing.T) {
 	}
 }
 
-// TestHistoryPeekDoesNotMoveCursor guards the traversal contract: peeking
-// reports the target and the base index while the cursor stays put, so a
-// failed load strands nothing.
 func TestHistoryPeekDoesNotMoveCursor(t *testing.T) {
 	h := toolbar.NewHistory()
 	h.Push("https://a.com")
@@ -714,8 +705,6 @@ func TestHistoryPeekDoesNotMoveCursor(t *testing.T) {
 	if got := h.Current(); got != "https://c.com" {
 		t.Fatalf("Current() = %q after peek, want https://c.com (cursor must not move)", got)
 	}
-	// The peek consumed nothing: a real Back still reaches b, and the trail
-	// back to c survives it.
 	if url, ok := h.Back(); !ok || url != "https://b.com" {
 		t.Fatalf("Back() after peek = (%q, %v), want (https://b.com, true)", url, ok)
 	}
@@ -724,8 +713,6 @@ func TestHistoryPeekDoesNotMoveCursor(t *testing.T) {
 	}
 }
 
-// TestHistoryStepCommitsFromBase guards commit-on-success: a step from the
-// peeked base moves, a stale step (another navigation landed first) drops.
 func TestHistoryStepCommitsFromBase(t *testing.T) {
 	h := toolbar.NewHistory()
 	h.Push("https://a.com")
@@ -738,7 +725,6 @@ func TestHistoryStepCommitsFromBase(t *testing.T) {
 	if got := h.Current(); got != "https://b.com" {
 		t.Fatalf("Current() = %q, want https://b.com", got)
 	}
-	// Stale: the peek saw base 2 but the cursor has since moved.
 	if h.Step(-1, 2) {
 		t.Fatal("Step(-1, 2) moved a stale cursor (index is now 1)")
 	}
@@ -747,14 +733,10 @@ func TestHistoryStepCommitsFromBase(t *testing.T) {
 	}
 }
 
-// lockZoneMarkCount counts dark pixels in the address bar's indicator zone:
-// the lock glyph is the only thing ever drawn there (text starts past it, and
-// these states draw no text without fonts), so the count is the indicator.
 func lockZoneMarkCount(t *testing.T, s *toolbar.State) int {
 	t.Helper()
 	const width = 800
 	bar := toolbar.AddressBarRect(width)
-	// Indicator zone: the first 30 logical pixels of the bar.
 	x0, x1 := bar.X0, bar.X0+30
 	if x1 > bar.X1 {
 		t.Fatalf("indicator zone exceeds address bar %+v", bar)
@@ -764,7 +746,6 @@ func lockZoneMarkCount(t *testing.T, s *toolbar.State) int {
 	n := 0
 	for y := bar.Y0; y < bar.Y1; y++ {
 		for x := x0; x < x1; x++ {
-			// frame.Color.RGBA returns 8-bit channels (not the std 16-bit).
 			c := shot.At(int(x), int(y)).RGBA()
 			if (int(c.R)+int(c.G)+int(c.B))/3 < 200 {
 				n++
@@ -774,8 +755,6 @@ func lockZoneMarkCount(t *testing.T, s *toolbar.State) int {
 	return n
 }
 
-// TestSecureLockDrawnForHTTPS pins the Gate 3 origin display: an https page
-// shows a lock mark at the left of the address bar.
 func TestSecureLockDrawnForHTTPS(t *testing.T) {
 	s := toolbar.NewState(800, nil)
 	s.SyncFromTab("https://example.com/", false, "", toolbar.NewHistory())
@@ -784,9 +763,6 @@ func TestSecureLockDrawnForHTTPS(t *testing.T) {
 	}
 }
 
-// TestInsecureMarkDrawnForHTTP: a plain-http page shows the broken-lock mark
-// in the same indicator zone — http must never look as bare as a page that
-// simply has no origin yet.
 func TestInsecureMarkDrawnForHTTP(t *testing.T) {
 	s := toolbar.NewState(800, nil)
 	s.SyncFromTab("http://example.com/", false, "", toolbar.NewHistory())
@@ -795,8 +771,6 @@ func TestInsecureMarkDrawnForHTTP(t *testing.T) {
 	}
 }
 
-// TestNoMarkWithoutNetworkOrigin: new tabs and local files show no mark —
-// nothing to assert about an origin that is not on the network.
 func TestNoMarkWithoutNetworkOrigin(t *testing.T) {
 	for _, url := range []string{"", "file:///Users/me/notes/index.html"} {
 		s := toolbar.NewState(800, nil)
@@ -807,9 +781,6 @@ func TestNoMarkWithoutNetworkOrigin(t *testing.T) {
 	}
 }
 
-// TestNoSecureLockWhenError: a failed navigation shows the error instead of
-// the lock, even when the attempted URL was https (a certificate failure must
-// never sit next to a reassuring lock).
 func TestNoSecureLockWhenError(t *testing.T) {
 	s := toolbar.NewState(800, nil)
 	s.SyncFromTab("https://example.com/", false, "certificate signed by unknown authority", toolbar.NewHistory())

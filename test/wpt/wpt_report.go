@@ -11,24 +11,20 @@ import (
 	"strings"
 )
 
-// Reporter writes WPT results in JSON and HTML formats.
 type Reporter struct {
 	result *SuiteResult
 }
 
-// NewReporter creates a Reporter for the given suite result.
 func NewReporter(result *SuiteResult) *Reporter {
 	return &Reporter{result: result}
 }
 
-// WriteJSON writes the results as a JSON file.
 func (r *Reporter) WriteJSON(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(r.result)
 }
 
-// WriteJSONFile writes the results to a JSON file at the given path.
 func (r *Reporter) WriteJSONFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -41,12 +37,10 @@ func (r *Reporter) WriteJSONFile(path string) error {
 	return r.WriteJSON(f)
 }
 
-// WriteHTML writes an HTML dashboard of the results.
 func (r *Reporter) WriteHTML(w io.Writer) error {
 	return htmlTmpl.Execute(w, r.result)
 }
 
-// WriteHTMLFile writes the HTML dashboard to a file at the given path.
 func (r *Reporter) WriteHTMLFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -59,7 +53,6 @@ func (r *Reporter) WriteHTMLFile(path string) error {
 	return r.WriteHTML(f)
 }
 
-// PrintSummary writes a human-readable summary to w.
 func (r *Reporter) PrintSummary(w io.Writer) {
 	res := r.result
 	fmt.Fprintf(w, "\n=== WPT Results Summary ===\n")
@@ -74,7 +67,6 @@ func (r *Reporter) PrintSummary(w io.Writer) {
 	fmt.Fprintf(w, "Errored:   %d\n", res.Errored)
 	fmt.Fprintf(w, "Pass Rate: %.1f%%\n", res.PassRate)
 
-	// Group results by directory for a per-area breakdown.
 	byDir := make(map[string]*dirSummary)
 	for _, tr := range res.Results {
 		dir := filepath.Dir(tr.Path)
@@ -96,7 +88,6 @@ func (r *Reporter) PrintSummary(w io.Writer) {
 		}
 	}
 
-	// Sort directories by name.
 	var dirNames []string
 	for name := range byDir {
 		dirNames = append(dirNames, name)
@@ -115,7 +106,6 @@ func (r *Reporter) PrintSummary(w io.Writer) {
 			name, ds.passed, runnable, rate, ds.failed, ds.skipped, ds.errored)
 	}
 
-	// List failures.
 	var failures []TestResult
 	for _, tr := range res.Results {
 		if tr.Status == "fail" {
@@ -139,7 +129,6 @@ type dirSummary struct {
 	errored int
 }
 
-// htmlTmpl is the HTML dashboard template.
 var htmlTmpl = template.Must(template.New("wpt-report").Funcs(template.FuncMap{
 	"statusClass": func(status string) string {
 		switch status {

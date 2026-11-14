@@ -8,11 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// GradientStop is one colour of a ramp. At is its position along the gradient
-// line as a fraction of that line's length, expressible only for a percentage
-// position; a position written as a <length> cannot become a fraction until
-// the box is laid out, so it rides on Px, PxSet through the cascade and paint
-// resolves it against the gradient line it measures.
 type GradientStop struct {
 	At    float32
 	Px    float32
@@ -20,42 +15,27 @@ type GradientStop struct {
 	Color css.Color
 }
 
-// Gradient is a linear colour ramp: the direction its colours run across the
-// box, and the colours themselves. Angle is CSS's, in degrees, where 0 points at
-// the top of the box and the value grows clockwise, so the default is 180.
 type Gradient struct {
 	Angle float32
 	Stops []GradientStop
 }
 
-// RadialGradient is a radial colour ramp: colours radiate from a centre point.
-// Shape is "circle" or "ellipse" (default). Size is "closest-side",
-// "farthest-side", "closest-corner", or "farthest-corner" (default).
-// Cx, Cy are the centre as fractions of the box (0.5, 0.5 = centre); a centre
-// component written as a <length> rides CxPx/CyPx with its PxSet flag, because
-// a fraction of the box is not expressible until the box is measured.
 type RadialGradient struct {
-	Shape   string  // "circle" or "ellipse"
-	Size    string  // "closest-side", "farthest-side", "closest-corner", "farthest-corner"
-	Cx      float32 // centre x as fraction (0..1)
-	Cy      float32 // centre y as fraction (0..1)
-	CxPx    float32 // centre x in px from the left edge, when CxPxSet
-	CyPx    float32 // centre y in px from the top edge, when CyPxSet
+	Shape   string
+	Size    string
+	Cx      float32
+	Cy      float32
+	CxPx    float32
+	CyPx    float32
 	CxPxSet bool
 	CyPxSet bool
 	Stops   []GradientStop
 }
 
-// Empty reports whether there is nothing to paint. A ramp needs two colours to
-// blend between; a single stop is the flat background colour's job.
 func (g Gradient) Empty() bool { return len(g.Stops) < 2 }
 
-// Empty reports whether the radial gradient has nothing to paint.
 func (g RadialGradient) Empty() bool { return len(g.Stops) < 2 }
 
-// parseBackground reads the background shorthand. A gradient in it is the
-// shorthand's image, and the colour is whatever is left once the function calls
-// are out of the way — declaring a gradient alone leaves the colour transparent.
 func parseBackground(v string) (css.Color, Gradient, RadialGradient) {
 	return parseBackgroundWithScheme(v, "")
 }
@@ -66,7 +46,6 @@ func parseBackgroundWithScheme(v, scheme string) (css.Color, Gradient, RadialGra
 	return parseBackgroundColorWithScheme(stripFunctions(v), scheme), g, rg
 }
 
-// parseGradient takes the first linear-gradient() or radial-gradient() in a value.
 func parseGradient(v string) Gradient {
 	lower := strings.ToLower(v)
 	i := strings.Index(lower, "linear-gradient(")
@@ -80,7 +59,6 @@ func parseGradient(v string) Gradient {
 	return parseLinearGradientArgs(args)
 }
 
-// parseRadialGradient takes the first radial-gradient() in a value.
 func parseRadialGradient(v string) RadialGradient {
 	lower := strings.ToLower(v)
 	i := strings.Index(lower, "radial-gradient(")
@@ -118,10 +96,6 @@ func parseLinearGradientArgs(args string) Gradient {
 	return g
 }
 
-// parseRadialGradientArgs reads one radial-gradient() argument list. The first
-// part may carry the header - shape, size, position in any order, the position
-// introduced by `at` - and the remaining parts are colour stops. A part whose
-// first token names none of those is headerless: every part is a stop.
 func parseRadialGradientArgs(args string) RadialGradient {
 	parts := splitArgs(args)
 	if len(parts) == 0 {
@@ -160,8 +134,6 @@ func parseRadialGradientArgs(args string) RadialGradient {
 				return RadialGradient{}
 			}
 			i += 1 + n
-			// The position ends the header: anything after it is not a colour
-			// this model accepts.
 			if i < len(header) {
 				return RadialGradient{}
 			}
@@ -178,9 +150,6 @@ func parseRadialGradientArgs(args string) RadialGradient {
 	return radialWithStops(g, parts[1:])
 }
 
-// isRadialHeaderToken reports whether tok can start a radial header. A colour
-// stop never begins with one of these words, so this is also the headerless
-// test.
 func isRadialHeaderToken(tok string) bool {
 	switch tok {
 	case "circle", "ellipse", "at",
@@ -190,13 +159,6 @@ func isRadialHeaderToken(tok string) bool {
 	return false
 }
 
-// radialPosition consumes position components from toks and writes the centre
-// they denote into g, returning how many tokens it consumed, or -1 if the
-// position is malformed. One component owns the axis it names - a vertical
-// keyword the y, anything else the x - and the other axis keeps the centre;
-// two components fill both, a vertical keyword taking y, a horizontal one x,
-// and a component with no axis of its own (center, a length) taking whichever
-// axis its partner left open, or first x then y when neither has one.
 func radialPosition(toks []string, g *RadialGradient) int {
 	if len(toks) == 0 {
 		return -1
@@ -245,17 +207,13 @@ func radialPosition(toks []string, g *RadialGradient) int {
 	return 2
 }
 
-// radialComp is one parsed position component: a keyword (vertical or
-// horizontal by its word), a fraction, or a px length.
 type radialComp struct {
-	vertical   bool // top/bottom
-	horizontal bool // left/right
+	vertical   bool
+	horizontal bool
 	val        float32
 	isPx       bool
 }
 
-// radialPosComp reads one position component: a keyword, a percentage, a px
-// length, or the bare zero CSS allows a length to drop its unit for.
 func radialPosComp(tok string) (radialComp, bool) {
 	switch tok {
 	case "left":
@@ -289,8 +247,6 @@ func radialPosComp(tok string) (radialComp, bool) {
 	return radialComp{}, false
 }
 
-// applyRadialComp writes one component into g on the given axis: 0 for the
-// horizontal centre coordinate, 1 for the vertical one.
 func applyRadialComp(g *RadialGradient, c radialComp, axis int) {
 	if c.isPx {
 		if axis == 1 {
@@ -307,8 +263,6 @@ func applyRadialComp(g *RadialGradient, c radialComp, axis int) {
 	}
 }
 
-// radialWithStops parses the stop parts of a radial declaration and distributes
-// them. A part that is not a stop drops the whole gradient, as Chromium does.
 func radialWithStops(g RadialGradient, parts []string) RadialGradient {
 	stops := make([]GradientStop, 0, len(parts))
 	for _, p := range parts {
@@ -322,8 +276,6 @@ func radialWithStops(g RadialGradient, parts []string) RadialGradient {
 	return g
 }
 
-// parseGradientAngle reads the direction argument: a bare angle, or one of the
-// "to …" keywords.
 func parseGradientAngle(s string) (float32, bool) {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if strings.HasPrefix(s, "to ") {
@@ -344,10 +296,6 @@ func parseGradientAngle(s string) (float32, bool) {
 	return 0, false
 }
 
-// gradientKeywordAngle turns a "to …" direction into an angle. A corner keyword
-// aims the ramp at that corner, which for a box that is not square is not the
-// 45deg it looks like: the gradient line is perpendicular to the line joining
-// the two corners it runs between, so the angle carries the box's aspect ratio.
 func gradientKeywordAngle(s string) (float32, bool) {
 	fields := strings.Fields(s)
 	if len(fields) != 2 && len(fields) != 3 {
@@ -382,9 +330,6 @@ func gradientKeywordAngle(s string) (float32, bool) {
 		}
 		return 270, true
 	}
-	// A corner keyword aims the ramp at that corner. The exact angle depends on
-	// the box's proportions, which the cascade has no box to measure, so this is
-	// the value a square box gets.
 	const diag = float32(45)
 	switch vertical + " " + horizontal {
 	case "top right":
@@ -399,28 +344,12 @@ func gradientKeywordAngle(s string) (float32, bool) {
 	return 0, false
 }
 
-// stopPos is one parsed position token: either a fraction of the gradient
-// line, or a length in px that cannot become a fraction until the laid-out
-// box is measured at paint time.
 type stopPos struct {
 	at   float32
 	px   float32
 	isPx bool
 }
 
-// stopPosition reads the token that ends a colour stop. It returns the
-// position, whether the token IS one, and whether it could have been one - a
-// token that could have been and was not invalidates the whole ramp rather
-// than being folded into the colour, which is what Chromium does with
-// `#0a0 50`.
-//
-// A percentage is always a position. A bare number is one only when it is
-// zero, because CSS lets a <length> drop its unit only at zero. A pixel
-// length is a real position too, but the model cannot turn it into a
-// fraction of the gradient line at cascade time - the line's length belongs
-// to the laid-out box - so it rides on the stop (Px, PxSet) for paint to
-// resolve; the gap this leaves for other units is recorded as
-// GOOSIE-GRADIENTPX-001.
 func stopPosition(tok string) (p stopPos, is, legal bool) {
 	if strings.HasSuffix(tok, "%") {
 		n, err := strconv.ParseFloat(strings.TrimSuffix(tok, "%"), 64)
@@ -445,8 +374,6 @@ func stopPosition(tok string) (p stopPos, is, legal bool) {
 	return stopPos{}, false, true
 }
 
-// parseGradientStop reads one stop: a colour and an optional percentage
-// position.
 func parseGradientStop(s string) (GradientStop, bool) {
 	stops, ok := parseGradientStops(s)
 	if !ok || len(stops) != 1 {
@@ -455,15 +382,6 @@ func parseGradientStop(s string) (GradientStop, bool) {
 	return stops[0], true
 }
 
-// parseGradientStops reads one stop, expanding a double position
-// (color 25% 75%) into the solid band it denotes: two stops sharing the
-// colour at each position. A position is a <length-percentage>, so it is
-// written as a percentage, as a length with a unit, or - the only unitless
-// form CSS allows - as a bare zero. Percentage and bare-zero positions become
-// fractions here; pixel lengths ride on the stop unresolved, because the
-// fraction they denote needs the laid-out gradient line. Single positions and
-// bare colours behave as before; a bare non-zero number makes the stop, and
-// so the whole ramp, invalid.
 func parseGradientStops(s string) ([]GradientStop, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -498,15 +416,11 @@ func parseGradientStops(s string) ([]GradientStop, bool) {
 	}
 	switch len(pos) {
 	case 0:
-		// Unpositioned: distributeStops gives it an even share of the line.
 		return []GradientStop{{Color: c, At: -1}}, true
 	case 1:
 		return []GradientStop{stop(pos[0])}, true
 	default:
 		lo, hi := pos[0], pos[1]
-		// Two tokens of the same kind can be ordered here; a mixed pair -
-		// `10px 50%` - waits for paint, which resolves the lengths first and
-		// clamps the whole run afterwards.
 		if lo.isPx == hi.isPx {
 			if lo.isPx {
 				if hi.px < lo.px {
@@ -520,12 +434,6 @@ func parseGradientStops(s string) ([]GradientStop, bool) {
 	}
 }
 
-// distributeStops fills in the positions the declaration left out. The ends
-// anchor at 0 and 1, a run of unpositioned stops between two positioned ones
-// splits the distance evenly, and positions may not run backwards. A ramp
-// carrying a <length> position skips all of it: a fraction of the gradient
-// line is not expressible until the box is measured, so paint resolves the
-// whole run through StopsAlong instead.
 func distributeStops(stops []GradientStop) []GradientStop {
 	for _, s := range stops {
 		if s.PxSet {
@@ -550,11 +458,6 @@ func distributeStops(stops []GradientStop) []GradientStop {
 	return stops
 }
 
-// fillPositions fills unset positions between set ones: the ends anchor at 0
-// and end, an unset run between two set positions splits the distance evenly,
-// and the run may not go backwards. One algorithm serves both the cascade -
-// fractions of the line, end 1 - and paint's resolution of length stops along
-// the measured line, end lineLen.
 func fillPositions(pos []float32, set []bool, end float32) {
 	n := len(pos)
 	if n == 0 {
@@ -575,7 +478,6 @@ func fillPositions(pos []float32, set []bool, end float32) {
 		for j < n && !set[j] {
 			j++
 		}
-		// pos[i-1] is set and pos[j] is, or is the end.
 		lo, hi := pos[i-1], end
 		if j < n {
 			hi = pos[j]
@@ -592,11 +494,6 @@ func fillPositions(pos []float32, set []bool, end float32) {
 	}
 }
 
-// StopsAlong resolves a ramp's length-written stop positions against the
-// gradient line the painter measured: each px position becomes a fraction of
-// that line, the stops the declaration left unpositioned are distributed as
-// usual, and the run never goes backwards. A ramp without a length position
-// comes back unchanged - the cascade already distributed those.
 func StopsAlong(stops []GradientStop, lineLen float32) []GradientStop {
 	any := false
 	for _, s := range stops {
@@ -629,8 +526,6 @@ func StopsAlong(stops []GradientStop, lineLen float32) []GradientStop {
 	return out
 }
 
-// callArgs returns what sits inside a function call whose opening parenthesis
-// has already been consumed, stopping at the matching close.
 func callArgs(s string) (string, bool) {
 	depth := 1
 	for i := 0; i < len(s); i++ {
@@ -647,8 +542,6 @@ func callArgs(s string) (string, bool) {
 	return "", false
 }
 
-// splitArgs breaks a function's argument list on the commas that separate its
-// top-level arguments, leaving the commas inside rgb(…) alone.
 func splitArgs(s string) []string {
 	var out []string
 	depth := 0
@@ -671,9 +564,6 @@ func splitArgs(s string) []string {
 	return append(out, strings.TrimSpace(s[start:]))
 }
 
-// splitOutsideParens breaks a value on whitespace that is not inside a
-// function call, so a colour and its position separate but rgba(0, 0, 0, .5)
-// does not.
 func splitOutsideParens(s string) []string {
 	var out []string
 	depth := 0
@@ -702,11 +592,6 @@ func splitOutsideParens(s string) []string {
 	return out
 }
 
-// stripFunctions removes the image-producing function calls from a background
-// value so the remaining tokens can be read for the colour. It must NOT touch
-// colour functions: `background: rgba(0,0,0,.4)` keeps its rgba(), while
-// `url(...)`, `linear-gradient(...)` and friends are dropped. Only the named
-// image functions are excised, balanced-paren included.
 func stripFunctions(s string) string {
 	var b strings.Builder
 	i := 0
@@ -754,9 +639,6 @@ func isIdentChar(c byte) bool {
 	return isIdentStart(c) || ('0' <= c && c <= '9')
 }
 
-// isImageFunc reports whether a function name produces an image layer (and so
-// must be stripped before reading the shorthand's colour). It receives the raw
-// identifier; the comparison is case-insensitive.
 func isImageFunc(name string) bool {
 	switch strings.ToLower(name) {
 	case "url", "src", "image", "image-set", "-webkit-image-set",

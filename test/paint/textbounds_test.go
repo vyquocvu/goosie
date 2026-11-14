@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// A one-glyph run must claim ink width, not one pixel: tile selection drops any
-// command whose bounds miss the tile, so an under-reported first glyph loses its
-// ink in every tile right of its origin pixel.
 func TestTextRunBoundsCoverSingleGlyph(t *testing.T) {
 	run := paint.TextRun{
 		Glyphs: []paint.GlyphRun{{Rune: 0x2014, X: 240, Y: 100, Size: 32}},

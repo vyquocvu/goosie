@@ -2,27 +2,17 @@ package frame
 
 import "math"
 
-// Radius is one corner of a rounded box: the horizontal and vertical radii of the
-// quarter ellipse that cuts it, in device pixels.
 type Radius struct{ X, Y float32 }
 
-// Corners are a box's four corner radii, ordered top-left, top-right,
-// bottom-right, bottom-left, which is the order the CSS shorthand fills them.
 type Corners struct{ TL, TR, BR, BL Radius }
 
-// Empty reports whether every corner is square, which lets a caller keep the
-// whole-row fast path for the boxes that declare no radius at all.
 func (c Corners) Empty() bool { return c == Corners{} }
 
-// Scaled returns the radii in device pixels for a layer drawn at scale.
 func (c Corners) Scaled(scale float32) Corners {
 	mul := func(r Radius) Radius { return Radius{X: r.X * scale, Y: r.Y * scale} }
 	return Corners{TL: mul(c.TL), TR: mul(c.TR), BR: mul(c.BR), BL: mul(c.BL)}
 }
 
-// Shrunk returns the radii of the box inset by the given edge widths, which is
-// how a rounded border's inner outline is derived: a corner loses as much radius
-// as the edges meeting it take in width.
 func (c Corners) Shrunk(top, right, bottom, left int32) Corners {
 	sub := func(r Radius, w, h int32) Radius {
 		out := Radius{}
@@ -42,11 +32,6 @@ func (c Corners) Shrunk(top, right, bottom, left int32) Corners {
 	}
 }
 
-// Contains reports whether the point (px, py) falls in the rounded rectangle
-// that cuts the corners of the box (x0, y0)-(x1, y1). With no radius declared
-// this is the plain rectangle test; a rounded corner drops the pixels outside
-// its quarter ellipse, so whatever paints the corner and whatever hit-tests it
-// agree about which pixels the element owns.
 func (c Corners) Contains(x0, y0, x1, y1, px, py float32) bool {
 	if px < x0 || px >= x1 || py < y0 || py >= y1 {
 		return false
@@ -74,9 +59,6 @@ func (c Corners) Contains(x0, y0, x1, y1, px, py float32) bool {
 	return true
 }
 
-// FillRounded paints r with c, cutting its corners along rad. It is FillRect for
-// boxes that declare a radius: rows outside the corner bands keep the whole-row
-// copy, and only the rows an arc crosses take the per-pixel coverage path.
 func (b *Bitmap) FillRounded(r Rect, rad Corners, c Color, writes *int64) {
 	if rad.Empty() {
 		b.FillRect(r, c, writes)
@@ -101,9 +83,6 @@ func (b *Bitmap) FillRounded(r Rect, rad Corners, c Color, writes *int64) {
 	}
 }
 
-// StrokeRounded paints the ring between the outer rounded box and the box its
-// edge widths leave inside, one colour per edge. Corner bands belong to the
-// horizontal edges, which is how a real browser miters them.
 func (b *Bitmap) StrokeRounded(r Rect, rad Corners, top, right, bottom, left int32, ct, cr, cb, cl Color, writes *int64) {
 	if rad.Empty() {
 		return
@@ -132,9 +111,6 @@ func (b *Bitmap) StrokeRounded(r Rect, rad Corners, top, right, bottom, left int
 	}
 }
 
-// spanAt returns the horizontal extent the rounded outline covers across row y.
-// The row's centre line decides the arc inset, so a corner's edge pixels pick up
-// partial coverage instead of snapping to whole pixels.
 func (c Corners) spanAt(r Rect, y int) (x0, x1 float32) {
 	x0, x1 = float32(r.X0), float32(r.X1)
 	dy := float32(y) + 0.5 - float32(r.Y0)
@@ -163,8 +139,6 @@ func (c Corners) spanAt(r Rect, y int) (x0, x1 float32) {
 	return
 }
 
-// arcInset is how far a corner's quarter ellipse reaches into the row running d
-// device pixels in from the edge that corner sits on.
 func arcInset(rad Radius, d float32) float32 {
 	if rad.X <= 0 || rad.Y <= 0 || d >= rad.Y {
 		return 0
@@ -176,8 +150,6 @@ func arcInset(rad Radius, d float32) float32 {
 	return rad.X * (1 - float32(math.Sqrt(float64(1-t*t))))
 }
 
-// fillRowCover writes one row between two horizontal edges, blending the pixels
-// an arc only partly covers.
 func (b *Bitmap) fillRowCover(y int, x0, x1 float32, c Color) {
 	if x1 <= x0 {
 		return
@@ -201,7 +173,6 @@ func (b *Bitmap) fillRowCover(y int, x0, x1 float32, c Color) {
 		return
 	}
 
-	// Left partial pixel
 	leftCov := float32(float64(leftPixel+1) - float64(x0))
 	if leftCov >= 0.999 {
 		b.FillRect(Rect4(int32(leftPixel), int32(y), int32(leftPixel+1), int32(y)+1), c, nil)
@@ -209,12 +180,10 @@ func (b *Bitmap) fillRowCover(y int, x0, x1 float32, c Color) {
 		b.Set(leftPixel, y, BlendOver(b.At(leftPixel, y), ScaleColor(c, leftCov)))
 	}
 
-	// Middle integer pixels (fully covered)
 	if rightPixel > leftPixel+1 {
 		b.FillRect(Rect4(int32(leftPixel+1), int32(y), int32(rightPixel), int32(y)+1), c, nil)
 	}
 
-	// Right partial pixel
 	rightCov := float32(float64(x1) - float64(rightPixel))
 	if rightCov >= 0.999 {
 		b.FillRect(Rect4(int32(rightPixel), int32(y), int32(rightPixel+1), int32(y)+1), c, nil)
@@ -223,9 +192,6 @@ func (b *Bitmap) fillRowCover(y int, x0, x1 float32, c Color) {
 	}
 }
 
-// ScaleColor reduces a premultiplied colour to a fraction of its own coverage,
-// which is the only scaling that leaves it premultiplied. Opacity and partial
-// pixel coverage both arrive here.
 func ScaleColor(c Color, k float32) Color {
 	s := func(v uint8) uint32 { return uint32(float32(v) * k) }
 	return Color(s(c.R())<<24 | s(c.G())<<16 | s(c.B())<<8 | s(c.A()))

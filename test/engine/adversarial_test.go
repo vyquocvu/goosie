@@ -16,12 +16,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// TestImageFloodCostsAtMost256Attempts pins the attempt ceiling, not a success
-// ceiling: 257 unique references that ALL fail must still cost at most 256
-// fetches. Fetching is the expensive half (dial/TLS/bytes); a cap that only
-// counts decoded successes never trips when every fetch fails, turning one
-// hostile page into an unbounded burst of outbound requests. The document
-// itself must still build: over-budget images are omitted, not fatal.
 func TestImageFloodCostsAtMost256Attempts(t *testing.T) {
 	const total = 257
 	var b strings.Builder
@@ -62,9 +56,6 @@ func TestImageFloodCostsAtMost256Attempts(t *testing.T) {
 	}
 }
 
-// TestOversizedImageHeaderRejectedBeforeDecode pins pre-decode admission at
-// the engine boundary: a valid PNG claiming 8193x1 pixels must never reach
-// full decode, while a valid 1x1 PNG must be attached to its layout object.
 // qc:BR-166
 func TestOversizedImageHeaderRejectedBeforeDecode(t *testing.T) {
 	for _, tc := range []struct {
@@ -102,9 +93,6 @@ func TestOversizedImageHeaderRejectedBeforeDecode(t *testing.T) {
 
 // qc:BR-165
 func TestOversizedEncodedImageRejectedBeforeDecode(t *testing.T) {
-	// A valid 1x1 PNG padded past the encoded cap: metadata decoding and full
-	// decode would both succeed, so only the length check before either can
-	// keep the pixels off the layout object.
 	encoded := append(encodePNG(t, 1, 1), make([]byte, imgdec.MaxEncodedImageBytes)...)
 	fetcher := func(base, url string) ([]byte, error) { return encoded, nil }
 	sess, err := engine.NewSession(`<img src="https://cdn.example.com/padded.png">`, nil, 400,

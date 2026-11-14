@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// TestURLConstructor verifies the URL components parsed from an absolute URL
-// including credentials, port, query, and fragment.
 // qc:BR-124
 func TestURLConstructor(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
@@ -59,8 +57,6 @@ func TestURLConstructor(t *testing.T) {
 	}
 }
 
-// TestURLWithBase verifies that a relative URL resolves against an explicit
-// base URL.
 // qc:BR-124
 func TestURLWithBase(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
@@ -86,8 +82,6 @@ func TestURLWithBase(t *testing.T) {
 	}
 }
 
-// TestURLSearchParams verifies get/has over a decoded query string, including
-// repeated keys and a missing key.
 // qc:BR-124
 func TestURLSearchParams(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})
@@ -230,9 +224,6 @@ func TestURLSearchParamsSort(t *testing.T) {
 	}
 }
 
-// TestURLSearchParamsSpecialCharactersRoundTrip verifies that separators,
-// spaces, and non-ASCII text survive serialization and parsing without being
-// split into extra parameters or dropped.
 // qc:BR-124
 func TestURLSearchParamsSpecialCharactersRoundTrip(t *testing.T) {
 	r, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://example.com"})

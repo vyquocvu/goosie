@@ -6,12 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// TestFlexItemDisplayIsBlockified guards the rule that a flex or grid item has
-// its inline-level display blockified (Flexbox §4, Grid §8.1). A `<span>` in a
-// column flex container that stays inline is measured across no width at all, so
-// its words stack one per line and the container inherits a height built out of
-// them - which is how theuselessweb's fixed footer came to be ~330px tall where
-// Chromium draws ~100px.
 func TestFlexItemDisplayIsBlockified(t *testing.T) {
 	cases := []struct {
 		name, html, tag string

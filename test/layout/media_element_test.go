@@ -40,7 +40,6 @@ func TestAudioWithControlsHasSize(t *testing.T) {
 func TestAudioWithoutControlsHidden(t *testing.T) {
 	arena := session(t, `<html><body><audio></audio></body></html>`, 800)
 	a := findByTag(arena, "audio")
-	// By default audio:not([controls]) is display:none, so it doesn't get a layout box
 	if a != nil && a.W > 0 && a.H > 0 {
 		t.Errorf("audio without controls should not have visible size, got %vx%v", a.W, a.H)
 	}

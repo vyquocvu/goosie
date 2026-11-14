@@ -25,7 +25,6 @@ func TestDialog_TopmostModalClosing(t *testing.T) {
 		t.Fatal("dialog elements not found")
 	}
 
-	// Open both as modal
 	_, err := rt.Evaluate("document.getElementById('d1').showModal()")
 	if err != nil {
 		t.Fatalf("showModal d1: %v", err)
@@ -42,7 +41,6 @@ func TestDialog_TopmostModalClosing(t *testing.T) {
 		t.Fatal("d2 should be open modal")
 	}
 
-	// Close topmost modal (should be d2)
 	closed := sess.CloseTopmostModalDialog()
 	if !closed {
 		t.Fatal("expected CloseTopmostModalDialog to return true")
@@ -54,7 +52,6 @@ func TestDialog_TopmostModalClosing(t *testing.T) {
 		t.Fatal("d1 should remain open")
 	}
 
-	// Close next topmost modal (should be d1)
 	closed = sess.CloseTopmostModalDialog()
 	if !closed {
 		t.Fatal("expected second CloseTopmostModalDialog to return true")
@@ -63,7 +60,6 @@ func TestDialog_TopmostModalClosing(t *testing.T) {
 		t.Fatal("d1 should have been closed")
 	}
 
-	// Calling again when none open returns false
 	closed = sess.CloseTopmostModalDialog()
 	if closed {
 		t.Fatal("expected CloseTopmostModalDialog on empty top layer to return false")
@@ -197,7 +193,6 @@ func TestDialog_EscapeKeyInteraction(t *testing.T) {
 		t.Fatalf("active element after showModal = %v (err %v), want dialog", active, err)
 	}
 
-	// Press Escape
 	sess.PressKey("Escape", false, false, false, false)
 
 	if dlg.HasAttribute("open") || dlg.IsModal {
@@ -247,7 +242,6 @@ func TestDialog_EscapePreventDefaultBlocksClose(t *testing.T) {
 	}
 
 	dlg := sess.Doc.ElementByID("modal")
-	// Press Escape
 	sess.PressKey("Escape", false, false, false, false)
 
 	if !dlg.HasAttribute("open") || !dlg.IsModal {

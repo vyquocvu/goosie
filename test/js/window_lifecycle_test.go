@@ -7,37 +7,12 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// window as an EventTarget, document.readyState, and the two lifecycle events.
-//
-// The count that puts this here: the saved vnexpress home page registers
-//
-//	window.addEventListener('DOMContentLoaded', ...)  x4
-//	window.addEventListener('load', ...)              x1
-//	window.addEventListener('pageshow', ...)          x1
-//
-// and before this cluster each of those threw `Object has no member
-// 'addEventListener'` on the window object - three of the six script errors the
-// page produces, and the reason four content-injection handlers on a news
-// front page never ran. jQuery 3.6 adds its own pair next to it:
-//
-//	E.addEventListener("DOMContentLoaded", B)   // E is document
-//	C.addEventListener("load", B)               // C is window
-//
-// so a window that is not an EventTarget cannot reach `$(document).ready` at
-// all, and on www.gov.vn that reveal is the only thing that opens the
-// `<form id="form1" style="display:none">` holding the entire body.
-
 func lifecycleRuntime(t *testing.T, html string) *js.Runtime {
 	t.Helper()
 	doc := domtest.Parse(html)
 	return newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})
 }
 
-// The propagation path the standard gives a document-targeted event ends at
-// window, one step after the document: window's capture listeners first, the
-// document's own next, window's bubble listeners last. The order is what a page
-// that puts a listener on both objects observes, and it is the order pinned
-// here.
 // qc:BR-204
 func TestDOMContentLoadedReachesWindowAfterDocument(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
@@ -48,8 +23,6 @@ func TestDOMContentLoadedReachesWindowAfterDocument(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rt.FireDocumentLifecycle() {
-		// A listener that only pushes to an array is not a DOM mutation, so the
-		// engine is told "no repaint owed" - and it must be told that exactly.
 		t.Fatalf("FireDocumentLifecycle reported a DOM mutation for a listener that only appended to an array")
 	}
 	if got := evalString(t, rt, `seen.join(",")`); got != "document,window" {
@@ -57,16 +30,6 @@ func TestDOMContentLoadedReachesWindowAfterDocument(t *testing.T) {
 	}
 }
 
-// readyState is what jQuery's boot branches on:
-//
-//	"complete" === E.readyState || "loading" !== E.readyState && !E.documentElement.doScroll
-//	  ? C.setTimeout(S.ready)
-//	  : (E.addEventListener("DOMContentLoaded", B), C.addEventListener("load", B))
-//
-// It has to read "loading" while the document's own scripts run, or a library
-// resolves ready inline, before the listeners it registers on the next line
-// exist. Then "interactive" before DOMContentLoaded and "complete" before load,
-// which is the order a page's handler sees when it reads it from inside.
 // qc:BR-204
 func TestReadyStateTracksTheLifecycle(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
@@ -87,20 +50,11 @@ func TestReadyStateTracksTheLifecycle(t *testing.T) {
 	if got := evalString(t, rt, `window.readyStateInHandler`); got != "interactive" {
 		t.Fatalf("readyState seen inside DOMContentLoaded = %q, want %q", got, "interactive")
 	}
-	// Read-only: an assignment is ignored rather than throwing, so a page that
-	// pokes it does not lose the rest of its script.
 	if got := evalString(t, rt, `document.readyState = "loading"; document.readyState`); got != "complete" {
 		t.Fatalf("readyState after a script write = %q, want %q", got, "complete")
 	}
 }
 
-// A script that defers with the usual guard runs its handler inline once the
-// document is already complete, which is the branch that makes the pattern work
-// on a fast cache:
-//
-//	if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", h);
-//	else h();
-//
 // qc:BR-204
 func TestReadyStateGuardRunsHandlerAfterLoad(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body><div id="box"></div></body></html>`)
@@ -125,9 +79,6 @@ func TestReadyStateGuardRunsHandlerAfterLoad(t *testing.T) {
 	}
 }
 
-// The HTML load event is targeted at the Document and includes Window in its
-// event path even though it does not bubble. Both document and window listeners
-// observe it with Document as the target.
 // qc:BR-204
 func TestLoadEventTargetsDocumentAndReachesWindow(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
@@ -253,11 +204,6 @@ var errorDispatchSucceeds = window.dispatchEvent(new Event("error", {cancelable:
 	}
 }
 
-// The dedup and removal rules. jQuery's ready handler registers itself on both
-// objects and removes itself from both on the first callback, so a
-// removeEventListener that does not find its entry is a listener that fires on
-// every later load, and one that does not dedup is a handler that runs twice for
-// one event.
 // qc:BR-204
 func TestWindowListenerDedupAndRemoval(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
@@ -281,7 +227,7 @@ func TestWindowListenerDedupAndRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	rt2 := rt
-	rt2.FireDocumentLifecycle() // already fired: idempotent, so nothing re-runs
+	rt2.FireDocumentLifecycle()
 	if got := evalString(t, rt, `String(window.count)`); got != "0" {
 		t.Fatalf("count after a re-fire = %q, want 0 (the lifecycle is once per document)", got)
 	}
@@ -290,16 +236,9 @@ func TestWindowListenerDedupAndRemoval(t *testing.T) {
 	}
 }
 
-// Removal really removes: a listener taken off window before the lifecycle does
-// not run. This is the one EventTarget method the element binding still cannot
-// do (its Go closure wrapper has no stable identity), which is why window keeps
-// its own registry and can promise this.
 // qc:BR-204
 func TestWindowRemoveEventListenerBeforeDispatch(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
-	// This realm has no Event constructor (not in scope for this task, and no
-	// page in the sweep constructs one), so the dispatch passes a plain object
-	// with a `type`, which is all the binding reads.
 	if err := rt.Run(`
 	window.hits = [];
 	function h() { window.hits.push("hit"); }
@@ -311,8 +250,6 @@ func TestWindowRemoveEventListenerBeforeDispatch(t *testing.T) {
 	if got := evalString(t, rt, `String(window.hits.length)`); got != "0" {
 		t.Fatalf("removed listener fired %s times, want 0", got)
 	}
-	// Removal took out exactly that entry: re-registering the same function
-	// dispatches again.
 	if err := rt.Run(`
 	window.addEventListener("pageshow", h);
 	window.dispatchEvent({ type: "pageshow" });`, "inline"); err != nil {
@@ -323,9 +260,6 @@ func TestWindowRemoveEventListenerBeforeDispatch(t *testing.T) {
 	}
 }
 
-// window.dispatchEvent is a dispatch, not a hint: the document is not in the
-// path of an event whose target is the window, so a document listener must not
-// hear it.
 // qc:BR-204
 func TestWindowDispatchEventDoesNotReachDocument(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body></body></html>`)
@@ -342,9 +276,6 @@ func TestWindowDispatchEventDoesNotReachDocument(t *testing.T) {
 	}
 }
 
-// An event an element dispatches and lets bubble reaches window last; a listener
-// that stops propagation at the document keeps it from reaching window at all.
-// Both are what a page that puts one global listener on window depends on.
 // qc:BR-204
 func TestBubblingEventReachesWindowUnlessPropagationStops(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body><div id="box"></div></body></html>`)
@@ -374,11 +305,6 @@ func TestBubblingEventReachesWindowUnlessPropagationStops(t *testing.T) {
 	}
 }
 
-// The engine's own contract with a ready handler: user code that changes the DOM
-// during the lifecycle tells its caller another style and layout pass is owed,
-// because a reveal that changed nothing would leave the painted page blank - and
-// a reveal the caller was not told about leaves the arena laid out for the
-// hidden version.
 // qc:BR-204
 func TestFireDocumentLifecycleReportsDomMutation(t *testing.T) {
 	rt := lifecycleRuntime(t, `<html><head></head><body><div id="hidden" style="display:none">body</div></body></html>`)

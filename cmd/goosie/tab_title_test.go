@@ -32,8 +32,6 @@ func navigateWithTitle(t *testing.T, f *framePath, html, url string) {
 	f.applyNavResult(navResult{tabID: tab.ID(), serial: 7, url: url, layer: tab.Layer(), session: sess})
 }
 
-// Bug C2: the tab bar painted the bare URL because a completed navigation
-// never looked at the document's <title>.
 func TestTabTitleShowsDocumentTitleAfterNavigation(t *testing.T) {
 	f, store := titleNavPath(t)
 	navigateWithTitle(t, f, `<html><head><title>Hello Goosie</title></head><body>hi</body></html>`, "https://example.com/page")
@@ -45,7 +43,6 @@ func TestTabTitleShowsDocumentTitleAfterNavigation(t *testing.T) {
 	if got := tab.URL(); got != "https://example.com/page" {
 		t.Errorf("tab.URL() = %q, want the navigation URL", got)
 	}
-	// The visit log carries the same title the tab displays.
 	entries := store.Entries()
 	if len(entries) != 1 {
 		t.Fatalf("history entries = %d, want 1", len(entries))
@@ -58,7 +55,6 @@ func TestTabTitleShowsDocumentTitleAfterNavigation(t *testing.T) {
 	}
 }
 
-// Markup usually breaks a title over several lines; the tab shows one line.
 func TestTabTitleCollapsesWhitespace(t *testing.T) {
 	f, _ := titleNavPath(t)
 	navigateWithTitle(t, f, "<html><head><title>\n\t Welcome\n  to Goosie \n</title></head></html>", "https://example.com/ws")
@@ -68,7 +64,6 @@ func TestTabTitleCollapsesWhitespace(t *testing.T) {
 	}
 }
 
-// Without a usable title the tab keeps falling back to the URL.
 func TestTabTitleFallsBackToURLWhenDocumentHasNoTitle(t *testing.T) {
 	for _, tt := range []struct{ name, html string }{
 		{"missing", `<html><head></head><body>no title</body></html>`},
@@ -85,8 +80,6 @@ func TestTabTitleFallsBackToURLWhenDocumentHasNoTitle(t *testing.T) {
 	}
 }
 
-// A hostile document must not hand the tab bar — and the saved session — an
-// arbitrarily long title.
 func TestTabTitleTruncatesOverlongTitle(t *testing.T) {
 	f, _ := titleNavPath(t)
 	long := strings.Repeat("g", 160*3)

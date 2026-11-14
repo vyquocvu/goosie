@@ -8,24 +8,20 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Promise state constants per the ECMAScript specification.
 const (
 	promisePending   = "pending"
 	promiseFulfilled = "fulfilled"
 	promiseRejected  = "rejected"
 )
 
-// Hidden property key to store the internal promiseObj on the JS object.
 const promiseInternalKey = "__promise__"
 
-// promiseReaction is a callback waiting for a promise to settle.
 type promiseReaction struct {
 	promise     *promiseObj
 	onFulfilled goja.Value
 	onRejected  goja.Value
 }
 
-// promiseObj holds the internal state of a Promise.
 type promiseObj struct {
 	r         *Runtime
 	obj       *goja.Object
@@ -35,9 +31,6 @@ type promiseObj struct {
 	reactions []promiseReaction
 }
 
-// setupPromise installs the Promise constructor and related APIs on the
-// global scope. This provides a standards-compliant Promise implementation
-// that works with async/await patterns common in modern JavaScript.
 func (r *Runtime) setupPromise() {
 	promiseConstructor := func(call goja.ConstructorCall) *goja.Object {
 		return r.constructPromise(call)
@@ -90,8 +83,6 @@ func (r *Runtime) setupPromise() {
 	_ = r.vm.Set("Promise", promiseCtorObj)
 }
 
-// promiseWithResolvers implements Promise.withResolvers with the generic
-// constructor receiver required by NewPromiseCapability.
 func (r *Runtime) promiseWithResolvers(call goja.FunctionCall) goja.Value {
 	constructor, ok := goja.AssertConstructor(call.This)
 	if !ok {
@@ -133,7 +124,6 @@ func (r *Runtime) promiseWithResolvers(call goja.FunctionCall) goja.Value {
 	return result
 }
 
-// constructPromise implements the Promise(executor) constructor.
 func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 	p := &promiseObj{
 		r:     r,
@@ -143,7 +133,6 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 	obj := call.This
 	p.obj = obj
 
-	// Store the internal promiseObj on the JS object for later retrieval.
 	_ = obj.Set(promiseInternalKey, p)
 
 	_ = obj.Set("then", func(call goja.FunctionCall) goja.Value {
@@ -167,10 +156,6 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 		return obj
 	}
 
-	// The executor runs synchronously during construction, per spec. A throw
-	// rejects the promise it was building instead of escaping — except an
-	// interrupt, which must keep propagating so Run still reports timeouts
-	// that fire mid-executor.
 	resolve := r.resolveFunc(p)
 	reject := r.rejectFunc(p)
 	if _, err := executor(nil, r.vm.ToValue(resolve), r.vm.ToValue(reject)); err != nil {
@@ -178,9 +163,6 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 		if errors.As(err, &ie) {
 			panic(err)
 		}
-		// Promise(executor) rejects with the exact value thrown by the
-		// executor. Preserve JS exceptions such as DOMException instead of
-		// flattening them to their diagnostic string.
 		var rejected goja.Value = r.vm.ToValue(err.Error())
 		var exception *goja.Exception
 		if errors.As(err, &exception) {
@@ -192,8 +174,6 @@ func (r *Runtime) constructPromise(call goja.ConstructorCall) *goja.Object {
 	return obj
 }
 
-// resolveFunc builds the resolve callback handed to executors and thenables:
-// settling always enqueues, so user code never runs on a foreign goroutine.
 func (r *Runtime) resolveFunc(p *promiseObj) func(goja.FunctionCall) goja.Value {
 	return func(call goja.FunctionCall) goja.Value {
 		var val goja.Value
@@ -207,7 +187,6 @@ func (r *Runtime) resolveFunc(p *promiseObj) func(goja.FunctionCall) goja.Value 
 	}
 }
 
-// rejectFunc builds the matching reject callback.
 func (r *Runtime) rejectFunc(p *promiseObj) func(goja.FunctionCall) goja.Value {
 	return func(call goja.FunctionCall) goja.Value {
 		var val goja.Value
@@ -221,19 +200,12 @@ func (r *Runtime) rejectFunc(p *promiseObj) func(goja.FunctionCall) goja.Value {
 	}
 }
 
-// queueMicrotask appends a reaction job. Producers on any goroutine only
-// ever append; only the Run/Tick goroutine drains, so user callbacks always
-// run on the runtime's own thread even when a network event settled.
 func (r *Runtime) queueMicrotask(job func() error) {
 	r.mu.Lock()
 	r.microtasks = append(r.microtasks, job)
 	r.mu.Unlock()
 }
 
-// drainMicrotasks runs queued jobs FIFO until empty: one microtask
-// checkpoint. A job that settles further promises only enqueues, so chains
-// cannot grow the Go stack no matter how deep they run. The first error
-// stops the drain; only interrupts produce errors.
 func (r *Runtime) drainMicrotasks() error {
 	for i := 0; ; i++ {
 		if i >= MaxMicrotasksPerCheckpoint {
@@ -254,10 +226,6 @@ func (r *Runtime) drainMicrotasks() error {
 	}
 }
 
-// resolvePromise settles a promise as fulfilled. Everything past the enqueue
-// runs on the drain goroutine: thenable getters and assimilation call user
-// code, which must never run on a foreign (e.g. network) thread or inline
-// inside whatever settled.
 func (r *Runtime) resolvePromise(p *promiseObj, val goja.Value) {
 	r.queueMicrotask(func() error {
 		p.mu.Lock()
@@ -283,7 +251,6 @@ func (r *Runtime) resolvePromise(p *promiseObj, val goja.Value) {
 			}
 			p.mu.Lock()
 			if p.state != promisePending {
-				// The getter settled us while reading `then`.
 				p.mu.Unlock()
 				return nil
 			}
@@ -303,7 +270,6 @@ func (r *Runtime) resolvePromise(p *promiseObj, val goja.Value) {
 	})
 }
 
-// rejectPromise settles a promise as rejected, same queuing as resolve.
 func (r *Runtime) rejectPromise(p *promiseObj, val goja.Value) {
 	r.queueMicrotask(func() error {
 		p.mu.Lock()
@@ -326,10 +292,6 @@ func (r *Runtime) rejectPromise(p *promiseObj, val goja.Value) {
 	})
 }
 
-// runReaction invokes one reaction callback with the promise's result,
-// settling the chained promise with whatever it returns. It reports only
-// interrupts; ordinary callback failures become rejections of the chained
-// promise. It runs on the drain goroutine, never inline in a settler.
 func (r *Runtime) runReaction(reaction promiseReaction, isRejected bool, val goja.Value) error {
 	var callback goja.Value
 	if isRejected {
@@ -377,7 +339,6 @@ func (r *Runtime) runReaction(reaction promiseReaction, isRejected bool, val goj
 	return nil
 }
 
-// promiseThen implements promise.then(onFulfilled, onRejected).
 func (r *Runtime) promiseThen(call goja.FunctionCall, p *promiseObj) goja.Value {
 	var onFulfilled, onRejected goja.Value
 	if len(call.Arguments) >= 1 && !goja.IsUndefined(call.Arguments[0]) {
@@ -400,8 +361,6 @@ func (r *Runtime) promiseThen(call goja.FunctionCall, p *promiseObj) goja.Value 
 		p.reactions = append(p.reactions, reaction)
 		p.mu.Unlock()
 	} else {
-		// Already settled: the reaction still queues rather than running
-		// inline, so attach order always wins over settle order.
 		p.reactions = append(p.reactions, reaction)
 		p.mu.Unlock()
 		r.queueMicrotask(func() error {
@@ -426,7 +385,6 @@ func (r *Runtime) promiseThen(call goja.FunctionCall, p *promiseObj) goja.Value 
 	return chained.obj
 }
 
-// promiseCatch implements promise.catch(onRejected).
 func (r *Runtime) promiseCatch(call goja.FunctionCall, p *promiseObj) goja.Value {
 	var onRejected goja.Value
 	if len(call.Arguments) >= 1 && !goja.IsUndefined(call.Arguments[0]) {
@@ -439,7 +397,6 @@ func (r *Runtime) promiseCatch(call goja.FunctionCall, p *promiseObj) goja.Value
 	}, p)
 }
 
-// promiseFinally implements promise.finally(onFinally).
 func (r *Runtime) promiseFinally(call goja.FunctionCall, p *promiseObj) goja.Value {
 	var onFinally goja.Value
 	if len(call.Arguments) >= 1 && !goja.IsUndefined(call.Arguments[0]) {
@@ -477,7 +434,6 @@ func (r *Runtime) promiseFinally(call goja.FunctionCall, p *promiseObj) goja.Val
 	}, p)
 }
 
-// newPromiseObj creates a new pending promise object.
 func (r *Runtime) newPromiseObj() *promiseObj {
 	p := &promiseObj{
 		r:     r,
@@ -506,7 +462,6 @@ func (r *Runtime) newPromiseObj() *promiseObj {
 	return p
 }
 
-// getInternalPromise retrieves the internal promiseObj from a JS object.
 func getInternalPromise(obj *goja.Object) *promiseObj {
 	v := obj.Get(promiseInternalKey)
 	if v == nil || goja.IsUndefined(v) {
@@ -519,7 +474,6 @@ func getInternalPromise(obj *goja.Object) *promiseObj {
 	return p
 }
 
-// promiseResolveValue implements Promise.resolve(value).
 func (r *Runtime) promiseResolveValue(call goja.FunctionCall) goja.Value {
 	var val goja.Value
 	if len(call.Arguments) > 0 {
@@ -528,7 +482,6 @@ func (r *Runtime) promiseResolveValue(call goja.FunctionCall) goja.Value {
 		val = goja.Undefined()
 	}
 
-	// If the value is already a promise with our internal marker, return it.
 	if obj, ok := val.(*goja.Object); ok {
 		if getInternalPromise(obj) != nil {
 			return val
@@ -540,7 +493,6 @@ func (r *Runtime) promiseResolveValue(call goja.FunctionCall) goja.Value {
 	return p.obj
 }
 
-// promiseRejectValue implements Promise.reject(reason).
 func (r *Runtime) promiseRejectValue(call goja.FunctionCall) goja.Value {
 	var val goja.Value
 	if len(call.Arguments) > 0 {
@@ -554,7 +506,6 @@ func (r *Runtime) promiseRejectValue(call goja.FunctionCall) goja.Value {
 	return p.obj
 }
 
-// promiseAll implements Promise.all(iterable).
 func (r *Runtime) promiseAll(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) < 1 {
 		p := r.newPromiseObj()
@@ -592,7 +543,6 @@ func (r *Runtime) promiseAll(call goja.FunctionCall) goja.Value {
 			val = goja.Undefined()
 		}
 
-		// Wrap value in a resolved promise if it's not already a promise.
 		var promiseJSObj *goja.Object
 		if obj, ok := val.(*goja.Object); ok && getInternalPromise(obj) != nil {
 			promiseJSObj = obj
@@ -638,7 +588,6 @@ func (r *Runtime) promiseAll(call goja.FunctionCall) goja.Value {
 	return p.obj
 }
 
-// promiseRace implements Promise.race(iterable).
 func (r *Runtime) promiseRace(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) < 1 {
 		p := r.newPromiseObj()

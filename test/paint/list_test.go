@@ -9,8 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// content is the compile-time proof that a frozen display list can be attached
-// to a layer without paint and frame importing each other.
 var _ frame.Content = (*paint.LayerDL)(nil)
 
 func fill(x0, y0, x1, y1 int32, z uint32) paint.DisplayCmd {
@@ -126,8 +124,6 @@ func TestListResetDropsCommandBounds(t *testing.T) {
 	if got := l.All(); len(got) != 0 {
 		t.Fatalf("All after Reset = %d commands", len(got))
 	}
-	// The retained capacity is zeroed, so a Reset list cannot pin the glyphs
-	// slice alive through a stale reference in the unused tail.
 	l.Append(fill(0, 0, 2, 2, 0))
 	if got := l.All()[0].Text.Glyphs; got != nil {
 		t.Fatalf("Reset left a live glyph reference: %v", got)
@@ -145,7 +141,6 @@ func TestAppendTracksUnionBounds(t *testing.T) {
 	if got := l.Bounds(); got != want {
 		t.Fatalf("union bounds = %v, want %v", got, want)
 	}
-	// A command that paints nothing must not widen the extent.
 	l.Append(paint.DisplayCmd{Kind: paint.CmdFill, Rect: frame.Rect4(0, 0, 999, 999)})
 	if got := l.Bounds(); got != want {
 		t.Fatalf("transparent fill widened bounds to %v, want %v", got, want)
@@ -154,7 +149,6 @@ func TestAppendTracksUnionBounds(t *testing.T) {
 
 func TestSortStableIsOrderedByZAndTiedAppendOrder(t *testing.T) {
 	l := paint.NewList(0)
-	// Three groups by Z, each with distinguishable append order via Y.
 	l.Append(fill(0, 300, 1, 301, 2))
 	l.Append(fill(0, 100, 1, 101, 1))
 	l.Append(fill(0, 200, 1, 201, 2))
@@ -212,13 +206,10 @@ func TestPublishTwicePanics(t *testing.T) {
 }
 
 func TestIntersectingReturnsSpanWithoutAllocating(t *testing.T) {
-	// Commands at y 0, 100, 200, 300, 400 with one transparent command in the
-	// middle of the queried range so the span must over-approximate rather than
-	// filter.
 	dl := published(3,
 		fill(0, 0, 10, 10, 0),
 		fill(0, 100, 10, 110, 0),
-		paint.DisplayCmd{Kind: paint.CmdFill, Rect: frame.Rect4(0, 200, 10, 210)}, // transparent
+		paint.DisplayCmd{Kind: paint.CmdFill, Rect: frame.Rect4(0, 200, 10, 210)},
 		fill(0, 300, 10, 310, 0),
 		fill(0, 400, 10, 410, 0),
 	)
@@ -235,7 +226,6 @@ func TestIntersectingReturnsSpanWithoutAllocating(t *testing.T) {
 		t.Fatalf("disjoint query returned %d commands, want nil", len(got))
 	}
 
-	// The span is a view into the same array, not a copy.
 	head := unsafe.SliceData(dl.All())
 	spanHead := unsafe.SliceData(span)
 	if spanHead == head {

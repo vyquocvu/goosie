@@ -6,19 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// TestDriverTouchAction maps one phase of the WPT adapter's touch pointer onto
-// the trusted touch events a real gesture raises: "down" puts a contact on the
-// node under the point and dispatches touchstart, "move" slides the held contact
-// and dispatches touchmove, "up" lifts it and dispatches touchend.
-//
-// The contact set lives on the session rather than in the page because a page may
-// not decide what a generated gesture contains. A "move" before any "down" raises
-// nothing: a browser sends no touchmove until a contact is on the screen, which is
-// why resources/touching.js presses before it moves.
-//
-// The gesture's default action is deliberately absent. Chromium pans the nearest
-// scrollable box under a touch drag; goosie does not model touch panning yet, and
-// scrolling the viewport instead would be a guess rather than a measurement.
 func (s *Session) TestDriverTouchAction(id, phase string, x, y float32) {
 	s.opMu.Lock()
 	rt := s.jsRT
@@ -34,8 +21,6 @@ func (s *Session) TestDriverTouchAction(id, phase string, x, y float32) {
 	switch phase {
 	case "down":
 		if touch != nil {
-			// A second "down" for the same source re-targets the contact instead
-			// of stacking a phantom finger on top of it.
 			touch.Target = target
 			touch.ClientX, touch.ClientY = float64(x), float64(y)
 		} else {
@@ -51,8 +36,6 @@ func (s *Session) TestDriverTouchAction(id, phase string, x, y float32) {
 			s.opMu.Unlock()
 			return
 		}
-		// A drag can slide off the node it started on, so the contact follows the
-		// point while touchmove reports the held set unchanged.
 		touch.Target = target
 		touch.ClientX, touch.ClientY = float64(x), float64(y)
 		move := dom.NewTrustedTouchEvent("touchmove", target, s.heldTouchesLocked(), []*dom.Touch{touch})
@@ -64,8 +47,6 @@ func (s *Session) TestDriverTouchAction(id, phase string, x, y float32) {
 			return
 		}
 		touch.ClientX, touch.ClientY = float64(x), float64(y)
-		// touchend reports the released contact only in changedTouches: every
-		// contact still down stays in touches, and this one leaves it.
 		delete(s.touches, id)
 		end := dom.NewTrustedTouchEvent("touchend", target, s.heldTouchesLocked(), []*dom.Touch{touch})
 		s.opMu.Unlock()
@@ -75,8 +56,6 @@ func (s *Session) TestDriverTouchAction(id, phase string, x, y float32) {
 			s.opMu.Unlock()
 			return
 		}
-		// touchcancel ends the contact: the cancelled touch point leaves the
-		// active set and touches reports what remains.
 		delete(s.touches, id)
 		cancel := dom.NewTrustedTouchEvent("touchcancel", target, s.heldTouchesLocked(), []*dom.Touch{touch})
 		s.opMu.Unlock()
@@ -86,9 +65,6 @@ func (s *Session) TestDriverTouchAction(id, phase string, x, y float32) {
 	}
 }
 
-// heldTouchesLocked returns the contacts currently down, ordered by the
-// identifier each was raised with so a generated gesture's touch lists read the
-// same however the map iterates. The caller holds opMu.
 func (s *Session) heldTouchesLocked() []*dom.Touch {
 	if len(s.touches) == 0 {
 		return nil

@@ -85,7 +85,6 @@ func TestEngine_PropertyAndStartingStyleSession(t *testing.T) {
 	if innerStyle == nil {
 		t.Fatalf("innerStyle is nil")
 	}
-	// Since --card-bg inherits: false, inner receives initial-value white
 	wantInnerBg := css.Color{R: 255, G: 255, B: 255, A: 255}
 	if innerStyle.BackgroundColor != wantInnerBg {
 		t.Errorf("inner background-color = %+v, want %+v (initial-value white)", innerStyle.BackgroundColor, wantInnerBg)
@@ -99,7 +98,6 @@ func TestEngine_PropertyAndStartingStyleSession(t *testing.T) {
 		t.Errorf("dialog starting opacity = %+v, want opacity 0", dlgStyle.Starting)
 	}
 
-	// Verify PaintChecked works smoothly with DPR 1.0
 	displayList, err := sess.PaintChecked(1.0)
 	if err != nil {
 		t.Fatalf("PaintChecked failed: %v", err)

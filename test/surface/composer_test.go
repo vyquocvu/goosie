@@ -12,8 +12,6 @@ func newComposer(w, h int32) *surface.Composer {
 	return surface.NewComposer(frame.Size{W: w, H: h}, frame.NewBitmapPool(frame.Size{W: w, H: h}, 8))
 }
 
-// tile returns an opaque tile buffer of the given edge length filled with c, plus
-// the rect it belongs at.
 func tile(size int32, at frame.Point, c frame.Color) surface.TileBlit {
 	b := frame.NewBitmap(int(size), int(size))
 	b.FillRect(b.Bounds(), c, nil)
@@ -36,8 +34,6 @@ func TestComposeBlitsOverlappingTiles(t *testing.T) {
 	}
 
 	b := c.Backing
-	// Hand-written expectation: red owns x<2, the second tile wins the overlap at
-	// x>=2 because it is later in paint order, and nothing reaches past x<8.
 	for x := 0; x < 8; x++ {
 		var want frame.Color
 		switch {
@@ -58,8 +54,6 @@ func TestComposeBlitsOverlappingTiles(t *testing.T) {
 
 func TestComposeClipsTileOutsideViewport(t *testing.T) {
 	const guard = 32
-	// A buffer with padding past its own end: an out-of-bounds write lands there
-	// and is detected, rather than corrupting the heap for someone else to debug.
 	b := &frame.Bitmap{RGBA: make([]byte, guard*4*4), W: 4, H: 4, Stride: guard * 4}
 	for i := range b.RGBA {
 		b.RGBA[i] = 0xAA
@@ -74,7 +68,6 @@ func TestComposeClipsTileOutsideViewport(t *testing.T) {
 		if v == 0xAA {
 			continue
 		}
-		// Only the 4x4 useful area may change; the guard padding must not.
 		x := (i % (guard * 4)) / 4
 		y := i / (guard * 4)
 		if x >= 4 || y >= 4 {
@@ -107,8 +100,6 @@ func TestComposeScrollDamageTouchesOnlyExposedRows(t *testing.T) {
 	c := newComposer(200, h)
 	tl := tile(200, frame.Point{}, frame.RGB(1, 2, 3))
 
-	// A 10px scroll exposes the bottom 10 rows. Only those may be touched, and
-	// each is written twice: once by the background fill and once by the tile.
 	var writes int64
 	c.Compose(frame.RGB(255, 255, 255), []surface.TileBlit{tl}, []frame.Rect{frame.Rect4(0, h-10, 200, h)}, &writes)
 	if writes != 4000 {
@@ -134,8 +125,6 @@ func TestComposerReusesBackingAcrossFrames(t *testing.T) {
 	if n := testing.AllocsPerRun(100, func() {
 		c.Compose(frame.RGB(0, 0, 0), nil, []frame.Rect{c.Backing.Bounds()}, nil)
 	}); n != 0 {
-		// The damage literal stays on the stack because Compose does not retain it,
-		// so the composer's own overhead has to be zero for this to read 0.
 		t.Fatalf("Compose allocated %v times per frame", n)
 	}
 }
@@ -153,8 +142,6 @@ func TestComposeWithScratchDamageIsAllocationFree(t *testing.T) {
 	}
 }
 
-// columns returns n one-pixel-wide rects across a 64px surface, which is the shape a
-// page whose every visible tile changed produces.
 func columns(n int) []frame.Rect {
 	out := make([]frame.Rect, n)
 	for i := range out {
@@ -163,14 +150,6 @@ func columns(n int) []frame.Rect {
 	return out
 }
 
-// TestReserveDamagePaysForTheWideningAtSetup is Composer.ReserveDamage's contract: the
-// list it reserves is the one Compose returns, a request smaller than what is already
-// there changes nothing, and a list too wide for the reserve is still correct.
-//
-// The buffer's address is the evidence that a frame allocated nothing, which is a
-// steadier claim than an allocation counter: growth would have to move the list, and the
-// frame path's consequence - a cold burst that allocates - is what the gate in
-// test/gate asserts end to end.
 func TestReserveDamagePaysForTheWideningAtSetup(t *testing.T) {
 	c := newComposer(64, 64)
 	c.ReserveDamage(8)
@@ -182,7 +161,6 @@ func TestReserveDamagePaysForTheWideningAtSetup(t *testing.T) {
 	}
 	addr := unsafe.Pointer(&got[0])
 
-	// A narrower frame reuses the buffer rather than trading it for a smaller one.
 	if got = c.Compose(frame.RGB(0, 0, 0), nil, wide[:3], nil); len(got) != 3 {
 		t.Fatalf("Compose returned %d rects for 3", len(got))
 	}
@@ -191,8 +169,6 @@ func TestReserveDamagePaysForTheWideningAtSetup(t *testing.T) {
 		t.Fatal("a request smaller than the current capacity moved the list; ReserveDamage must not shrink it")
 	}
 
-	// Wider than the reserve is still correct: the list grows, and what comes back is
-	// what went in.
 	d := newComposer(64, 64)
 	d.ReserveDamage(2)
 	if got = d.Compose(frame.RGB(0, 0, 0), nil, columns(8), nil); len(got) != 8 {
@@ -224,7 +200,6 @@ func TestShiftYMovesRowsAndCountsWrites(t *testing.T) {
 			t.Fatalf("row %d after shift = %v, want row %d's color", y, got, y+3)
 		}
 	}
-	// Scrolling back up restores the original rows in the region that survives.
 	c.ShiftY(-3, nil)
 	for y := 3; y < 8; y++ {
 		if got := b.At(1, y); got != frame.RGB(byte(y+1), 0, 0) {
@@ -232,7 +207,7 @@ func TestShiftYMovesRowsAndCountsWrites(t *testing.T) {
 		}
 	}
 	c.ShiftY(0, nil)
-	c.ShiftY(1<<20, nil) // must be a no-op, not a panic
+	c.ShiftY(1<<20, nil)
 }
 
 func TestComposerResizeKeepsBufferPooled(t *testing.T) {

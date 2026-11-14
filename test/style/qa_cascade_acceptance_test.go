@@ -30,17 +30,13 @@ p.note.lead { background-color: yellow; }
 		t.Fatal("fixture nodes not found")
 	}
 
-	// The id selector wins the colour on p1, but the compound type.class.class
-	// selector is the only rule that paints its background.
 	if got := styles[p1.ID].Color; got != col(0, 0, 255, 255) {
 		t.Errorf("p1 colour = %v, want blue from #p1", got)
 	}
 	if got := styles[p1.ID].BackgroundColor; got != col(255, 255, 0, 255) {
 		t.Errorf("p1 background = %v, want yellow from p.note.lead", got)
 	}
-	// A node with one of two required classes must not match the compound.
 	if got := styles[p2.ID].BackgroundColor; got.A == 0 {
-		// A=0 is the initial transparent background, which is the point.
 	} else {
 		t.Errorf("p2 background = %v, want transparent (it lacks .lead)", got)
 	}
@@ -131,8 +127,6 @@ func TestInheritedFontColorAndLineHeightReachDescendants(t *testing.T) {
 		}
 	}
 
-	// A unitless line-height inherits as a ratio, so a descendant that sets its
-	// own font-size recomputes the same factor against its own size.
 	cs := styles[big.ID]
 	if cs.FontSize != 24 {
 		t.Errorf("big font-size = %v, want 24px", cs.FontSize)
@@ -141,8 +135,6 @@ func TestInheritedFontColorAndLineHeightReachDescendants(t *testing.T) {
 		t.Errorf("big line-height = %v, want 48px (2 x its own 24px font)", cs.LineHeight)
 	}
 
-	// The inherited values must reach layout too: one line in a <div> inheriting
-	// line-height 2 at 20px is 40px tall.
 	arena := layout.Build(doc, styles, nil)
 	layout.Block(arena, layout.ObjectID(1), 800, 0)
 	for i := range arena.Objects {

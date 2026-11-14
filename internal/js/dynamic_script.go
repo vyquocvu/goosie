@@ -28,8 +28,6 @@ func (r *Runtime) queueDynamicScript(node *dom.Node) {
 	r.pendingDynamicScripts = append(r.pendingDynamicScripts, node)
 }
 
-// SetDynamicScriptLimit bounds external classic scripts fetched for this
-// document. The engine supplies its per-document admission limit.
 func (r *Runtime) SetDynamicScriptLimit(limit int) {
 	if r == nil {
 		return
@@ -40,9 +38,6 @@ func (r *Runtime) SetDynamicScriptLimit(limit int) {
 	r.dynamicScriptLimit = limit
 }
 
-// tickDynamicScripts performs one dynamically inserted classic script task.
-// A fresh queue is used so scripts inserted by the executing script run in a
-// later turn, as they do for async classic scripts in browsers.
 func (r *Runtime) tickDynamicScripts() bool {
 	if len(r.pendingDynamicScripts) == 0 {
 		return false
@@ -93,8 +88,6 @@ func (r *Runtime) tickDynamicScripts() bool {
 	return true
 }
 
-// DynamicScriptErrors returns bounded execution/fetch errors from this
-// Runtime and its iframe browsing contexts. Hosts use it for diagnostics.
 func (r *Runtime) DynamicScriptErrors() []string {
 	var errors []string
 	seen := make(map[*Runtime]bool)

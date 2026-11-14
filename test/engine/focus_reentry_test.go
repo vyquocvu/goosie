@@ -8,10 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// withinDeadline runs fn on another goroutine and fails the test when it does
-// not finish in time. A page listener that reenters the engine while opMu is
-// held self-deadlocks; the deadline turns that hang into a failure instead of
-// stalling the whole suite.
 func withinDeadline(t *testing.T, d time.Duration, fn func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -28,9 +24,6 @@ func withinDeadline(t *testing.T, d time.Duration, fn func()) {
 
 const reentryDeadline = 10 * time.Second
 
-// cleanupReentry closes a session and runtime without letting a deadlocked
-// opMu hang test cleanup: when a listener self-deadlocked, the session lock is
-// never released and Close would block forever.
 func cleanupReentry(s *engine.Session, rt *js.Runtime) {
 	done := make(chan struct{})
 	go func() {
@@ -62,9 +55,6 @@ func newReentrySession(t *testing.T, html string) (*engine.Session, *js.Runtime)
 	return s, rt
 }
 
-// TestFocusListenerComputedStyleDuringParse reproduces the WPT suite hang: an
-// inline parser script focuses a control whose focus listener reads
-// getComputedStyle. The focus event must not be dispatched under opMu.
 func TestFocusListenerComputedStyleDuringParse(t *testing.T) {
 	rt, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://test.example/"})
 	if err != nil {
@@ -101,8 +91,6 @@ func TestFocusListenerComputedStyleDuringParse(t *testing.T) {
 	}
 }
 
-// TestBlurListenerComputedStyleOnFocusChange checks the same hazard on the
-// blur side of a focus change between two controls.
 func TestBlurListenerComputedStyleOnFocusChange(t *testing.T) {
 	html := `<html><body><input id="a" value="ab"><input id="b" value="cd">` +
 		`<script>` +
@@ -126,9 +114,6 @@ func TestBlurListenerComputedStyleOnFocusChange(t *testing.T) {
 	}
 }
 
-// TestBlurListenerRefocusWins checks that a blur listener may move focus
-// itself without deadlocking, and that its decision wins over the original
-// focus change.
 func TestBlurListenerRefocusWins(t *testing.T) {
 	html := `<html><body><input id="a" value="ab"><input id="b" value="cd"><input id="c" value="ef">` +
 		`<script>` +
@@ -149,8 +134,6 @@ func TestBlurListenerRefocusWins(t *testing.T) {
 	}
 }
 
-// TestSubmitListenerComputedStyle checks the submit event dispatch: the
-// listener reads CSSOM, and preventDefault must still block the submission.
 func TestSubmitListenerComputedStyle(t *testing.T) {
 	html := `<html><body><form id="f" action="/go"><input name="q" value="x">` +
 		`<script>` +
@@ -171,8 +154,6 @@ func TestSubmitListenerComputedStyle(t *testing.T) {
 	}
 }
 
-// TestInvalidListenerComputedStyle checks the blocked-submission path: the
-// invalid event listener reads CSSOM and the first invalid control gets focus.
 func TestInvalidListenerComputedStyle(t *testing.T) {
 	html := `<html><body><form id="f" action="/go"><input id="q" name="q" required>` +
 		`<script>` +
@@ -196,8 +177,6 @@ func TestInvalidListenerComputedStyle(t *testing.T) {
 	}
 }
 
-// TestDialogCancelListenerComputedStyle checks the dialog cancel gate: the
-// listener reads CSSOM, and preventDefault must keep the dialog open.
 func TestDialogCancelListenerComputedStyle(t *testing.T) {
 	html := `<html><body><button id="opener">open</button>` +
 		`<dialog id="d"><input id="di" value="x"></dialog>` +
@@ -222,9 +201,6 @@ func TestDialogCancelListenerComputedStyle(t *testing.T) {
 	}
 }
 
-// TestEditEnterSubmitListenerComputedStyle checks implicit submission from the
-// keyboard path: Enter in a text input fires submit with the listener reading
-// CSSOM.
 func TestEditEnterSubmitListenerComputedStyle(t *testing.T) {
 	html := `<html><body><form id="f" action="/go"><input id="q" name="q" value="x">` +
 		`<script>` +
@@ -248,9 +224,6 @@ func TestEditEnterSubmitListenerComputedStyle(t *testing.T) {
 	}
 }
 
-// TestEditInputListenerComputedStyle checks the locked edit tail: a number
-// input is edited through the legacy insert path, whose input event must not
-// be dispatched under opMu.
 func TestEditInputListenerComputedStyle(t *testing.T) {
 	html := `<html><body><input id="n" type="number" value="1">` +
 		`<script>` +
@@ -270,7 +243,6 @@ func TestEditInputListenerComputedStyle(t *testing.T) {
 	}
 }
 
-// TestEscapeBlurListenerComputedStyle checks the Escape dismissal blur.
 func TestEscapeBlurListenerComputedStyle(t *testing.T) {
 	html := `<html><body><input id="a" value="ab">` +
 		`<script>` +
@@ -293,8 +265,6 @@ func TestEscapeBlurListenerComputedStyle(t *testing.T) {
 	}
 }
 
-// TestMoveSelectListenerComputedStyle checks the select keyboard path: input
-// and change fire with the listener reading CSSOM.
 func TestMoveSelectListenerComputedStyle(t *testing.T) {
 	html := `<html><body><select id="s"><option value="1">one</option><option value="2">two</option></select>` +
 		`<script>` +

@@ -7,12 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// An outline is drawn outside the border box and takes no layout space (CSS
-// UI §outline / Effects §3.1), which is why Chromium keeps the box's own rect as
-// the hit area even when the ring is under the pointer. This oracle pins the
-// matching paint-side fact: the ring is four bands at the offset distance, and
-// none of them inks a pixel the box owns.
-//
 // qc:BR-073
 func TestOutlinePaintsARingThatTouchesNoneOfTheBorderBox(t *testing.T) {
 	html := `<!doctype html><html><head><style>` +
@@ -37,10 +31,10 @@ func TestOutlinePaintsARingThatTouchesNoneOfTheBorderBox(t *testing.T) {
 		}
 	}
 	want := []frame.Rect{
-		frame.Rect4(190, 130, 330, 134), // above
-		frame.Rect4(190, 206, 330, 210), // below
-		frame.Rect4(190, 134, 194, 206), // left
-		frame.Rect4(326, 134, 330, 206), // right
+		frame.Rect4(190, 130, 330, 134),
+		frame.Rect4(190, 206, 330, 210),
+		frame.Rect4(190, 134, 194, 206),
+		frame.Rect4(326, 134, 330, 206),
 	}
 	if len(ring) != len(want) {
 		t.Fatalf("outline fills = %v, want the %d bands %v", ring, len(want), want)
@@ -58,9 +52,6 @@ func TestOutlinePaintsARingThatTouchesNoneOfTheBorderBox(t *testing.T) {
 	}
 }
 
-// `outline: none` is the initial state of every element, and a width without a
-// style must not leak ink: an element that declares nothing paints no ring.
-//
 // qc:BR-073
 func TestNoOutlineStylePaintsNoRing(t *testing.T) {
 	cases := []struct{ label, css string }{

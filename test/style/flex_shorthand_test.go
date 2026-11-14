@@ -8,7 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// flexOf resolves one styled div and returns its flex triple.
 func flexOf(t *testing.T, declared string) (grow, shrink, basis float32) {
 	t.Helper()
 	doc := domtest.Parse(`<html><body><div style="flex: ` + declared + `;">x</div></body></html>`)
@@ -32,10 +31,6 @@ func flexOf(t *testing.T, declared string) (grow, shrink, basis float32) {
 	return cs.FlexGrow, cs.FlexShrink, cs.FlexBasis
 }
 
-// TestFlexShorthandTwoPartBasis pins `flex: <grow> <basis>`: a length second
-// half is the basis with shrink defaulting to 1, not the shrink. Reading
-// `flex: 0 10px` as shrink 10 collapsed two-part basis items to content size
-// in every flex direction.
 func TestFlexShorthandTwoPartBasis(t *testing.T) {
 	grow, shrink, basis := flexOf(t, "0 10px")
 	if grow != 0 || shrink != 1 || basis != 10 {
@@ -45,21 +40,16 @@ func TestFlexShorthandTwoPartBasis(t *testing.T) {
 	if grow != 0 || shrink != 1 || basis != -32 {
 		t.Errorf("flex: 0 30%% = (%v, %v, %v), want (0, 1, -32%% sentinel)", grow, shrink, basis)
 	}
-	// Two bare numbers stay grow+shrink.
 	grow, shrink, basis = flexOf(t, "2 3")
 	if grow != 2 || shrink != 3 || basis != 0 {
 		t.Errorf("flex: 2 3 = (%v, %v, %v), want (2, 3, 0)", grow, shrink, basis)
 	}
-	// A lone length is the basis, not the grow.
 	grow, shrink, basis = flexOf(t, "10px")
 	if grow != 1 || shrink != 1 || basis != 10 {
 		t.Errorf("flex: 10px = (%v, %v, %v), want (1, 1, 10)", grow, shrink, basis)
 	}
 }
 
-// TestFlexShorthandInvalidUnitlessBasis pins declaration validity: a
-// unitless nonzero basis makes the whole shorthand drop, so the previous
-// value stands instead of a 4px basis appearing from nowhere.
 func TestFlexShorthandInvalidUnitlessBasis(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div style="flex: 1 1 200px; flex: 0 0 4;">x</div></body></html>`)
 	styles := style.Resolve(doc, nil, nil)
@@ -85,9 +75,6 @@ func TestFlexShorthandInvalidUnitlessBasis(t *testing.T) {
 	}
 }
 
-// TestFlexFlowShorthand pins `flex-flow: <direction> || <wrap>` in either
-// order, with unknown halves leaving their axis alone. Without it a `column
-// wrap` container laid out as a row.
 func TestFlexFlowShorthand(t *testing.T) {
 	for _, c := range []struct {
 		declared string
@@ -126,9 +113,6 @@ func TestFlexFlowShorthand(t *testing.T) {
 	}
 }
 
-// TestInlineCommentSeparators pins comment stripping for inline style
-// attributes, which never pass the stylesheet parser: comments can sit in
-// values and even inside property names, and each one separates tokens.
 func TestInlineCommentSeparators(t *testing.T) {
 	for _, c := range []struct {
 		declared string

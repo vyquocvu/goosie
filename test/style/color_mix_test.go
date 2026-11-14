@@ -32,21 +32,17 @@ func TestStyle_ColorMix(t *testing.T) {
 		t.Fatal("computed style for target not found")
 	}
 
-	// 40% red + 60% blue in srgb -> (102, 0, 153, 255)
 	if cs.Color.R != 102 || cs.Color.G != 0 || cs.Color.B != 153 || cs.Color.A != 255 {
 		t.Errorf("computed Color = %+v, want (102, 0, 153, 255)", cs.Color)
 	}
 
-	// 50% white + 50% black in srgb -> (128, 128, 128, 255)
 	if cs.BackgroundColor.R != 128 || cs.BackgroundColor.G != 128 || cs.BackgroundColor.B != 128 || cs.BackgroundColor.A != 255 {
 		t.Errorf("computed BackgroundColor = %+v, want (128, 128, 128, 255)", cs.BackgroundColor)
 	}
 
-	// 50% red + 50% transparent -> (255, 0, 0, 128)
 	if cs.BorderTopColor.R != 255 || cs.BorderTopColor.G != 0 || cs.BorderTopColor.B != 0 || cs.BorderTopColor.A != 128 {
 		t.Errorf("computed BorderTopColor = %+v, want (255, 0, 0, 128)", cs.BorderTopColor)
 	}
 }
 
-// Suppress unused css import warning
 var _ = css.Color{}

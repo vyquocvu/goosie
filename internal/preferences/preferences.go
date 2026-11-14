@@ -1,4 +1,3 @@
-// Package preferences stores user-facing browser preferences for one profile.
 package preferences
 
 import (
@@ -18,8 +17,6 @@ const (
 	StartupNewTab  = "newtab"
 )
 
-// Settings are shared by normal tabs in one profile. Private sessions may read
-// them, but callers must not persist changes made from a private window.
 type Settings struct {
 	SearchURLTemplate   string `json:"searchURLTemplate"`
 	DownloadDir         string `json:"downloadDir,omitempty"`
@@ -38,9 +35,6 @@ func ValidateStartupMode(mode string) error {
 	return nil
 }
 
-// ValidateSearchURLTemplate accepts one {query} marker in an HTTP(S) URL.
-// The marker is replaced with a harmless value before parsing so that URL
-// syntax and the destination origin are checked independently of the query.
 func ValidateSearchURLTemplate(template string) error {
 	if strings.Count(template, "{query}") != 1 {
 		return errors.New("search URL must contain exactly one {query} marker")
@@ -66,8 +60,6 @@ func SearchURL(template, query string) (string, error) {
 	return strings.Replace(template, "{query}", url.QueryEscape(query), 1), nil
 }
 
-// ValidateDownloadDir requires an explicit absolute directory so a profile
-// never changes where downloads land based on the process working directory.
 func ValidateDownloadDir(dir string) error {
 	if dir == "" || !filepath.IsAbs(dir) || strings.IndexByte(dir, 0) >= 0 || strings.ContainsAny(dir, "\r\n") {
 		return errors.New("download directory must be an absolute path without control characters")
@@ -75,8 +67,6 @@ func ValidateDownloadDir(dir string) error {
 	return nil
 }
 
-// Load reads the profile settings. Missing settings are initialized in memory
-// with defaults; malformed or unreadable files are reported to the caller.
 func Load(path string) (Settings, error) {
 	s := Defaults()
 	b, err := os.ReadFile(path)
@@ -103,7 +93,6 @@ func Load(path string) (Settings, error) {
 	return s, nil
 }
 
-// Save atomically replaces the profile settings file.
 func Save(path string, s Settings) error {
 	if err := ValidateSearchURLTemplate(s.SearchURLTemplate); err != nil {
 		return err

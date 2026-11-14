@@ -29,7 +29,6 @@ func TestDetailsSummary_ClickToggle(t *testing.T) {
 		t.Fatal("det or sum not found in document")
 	}
 
-	// Initial state: details does not have open attribute
 	if det.HasAttribute("open") {
 		t.Fatal("details should not have open attribute initially")
 	}
@@ -39,7 +38,6 @@ func TestDetailsSummary_ClickToggle(t *testing.T) {
 		toggleFiredCount++
 	}, false)
 
-	// Click summary
 	x, y := clickPoint(t, s, "sum")
 	handled := s.ClickAt(x, y)
 	if !handled {
@@ -53,7 +51,6 @@ func TestDetailsSummary_ClickToggle(t *testing.T) {
 		t.Fatalf("expected 1 toggle event, got %d", toggleFiredCount)
 	}
 
-	// Click summary again to collapse
 	s.ClickAt(x, y)
 	if det.HasAttribute("open") {
 		t.Fatal("expected details to NOT have open attribute after second click on summary")

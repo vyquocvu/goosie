@@ -71,8 +71,6 @@ func buildViewerTestPDF(title, content string) []byte {
 	return buf.Bytes()
 }
 
-// TestPDFViewer_NavigationRendersViewer tests that navigating to a PDF URL
-// renders the PDF document directly inside the browser using the built-in viewer.
 func TestPDFViewer_NavigationRendersViewer(t *testing.T) {
 	pdfBytes := buildViewerTestPDF("Research Paper", "Engine Conformance Report")
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +89,6 @@ func TestPDFViewer_NavigationRendersViewer(t *testing.T) {
 	}
 	defer sess.Close()
 
-	// Verify rendered session represents the viewer
 	h1Text, err := sess.EvaluateJS(`document.querySelector(".pdf-title").textContent`)
 	if err != nil {
 		t.Fatalf("EvaluateJS title: %v", err)
@@ -109,8 +106,6 @@ func TestPDFViewer_NavigationRendersViewer(t *testing.T) {
 	}
 }
 
-// TestPDFViewer_AttachmentDispositionDownloads tests that Content-Disposition: attachment
-// forces a file download instead of opening the viewer.
 // qc:BR-149
 func TestPDFViewer_AttachmentDispositionDownloads(t *testing.T) {
 	pdfBytes := buildViewerTestPDF("Invoice", "Total Due: $0")

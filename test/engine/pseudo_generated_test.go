@@ -9,9 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// displayText concatenates the glyph runes of every text command so the test
-// can assert on what actually reaches the display list rather than on resolved
-// style alone.
 func displayText(dl *paint.LayerDL) string {
 	var b strings.Builder
 	for _, cmd := range dl.All() {

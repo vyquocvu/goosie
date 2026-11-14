@@ -7,7 +7,6 @@ import (
 	xhtml "golang.org/x/net/html"
 )
 
-// ParseLimits bounds allocations while the actual HTML tokenizer builds the tree.
 type ParseLimits struct {
 	Nodes, Depth, Attributes, AttributeBytes int
 }
@@ -132,24 +131,14 @@ func doctypeModes(data string) (quirks, limited bool) {
 	return false, false
 }
 
-// ParseBounded builds the Document an HTML string describes within limits.
 func ParseBounded(html string, limits ParseLimits) (*Document, error) {
 	return ParseBoundedWithScriptHandler(html, limits, nil)
 }
 
-// ParseBoundedWithScriptHandler parses an HTML document within limits and
-// invokes onScript synchronously when an eligible parser-inserted script
-// element has been fully tokenized. The callback runs while the tree builder is paused,
-// so script mutations are visible before the next input token is processed.
-// A nil callback has the same behavior as ParseBounded.
 func ParseBoundedWithScriptHandler(html string, limits ParseLimits, onScript func(*Document, *Node)) (*Document, error) {
 	return ParseBoundedWithHandlers(html, limits, nil, nil, onScript)
 }
 
-// ParseBoundedWithHandlers adds parser element-reaction hooks around ordinary
-// bounded document parsing. onElement runs before the token's attributes are
-// attached, and onInserted runs after insertion but before child tokens. The
-// script hook runs when a parser-inserted script pauses input.
 func ParseBoundedWithHandlers(html string, limits ParseLimits, onElement, onInserted func(*Node), onScript func(*Document, *Node)) (*Document, error) {
 	return ParseBoundedWithParserCallbacks(html, limits, func(node *Node, _ []Attribute) *Node {
 		if onElement != nil {
@@ -159,24 +148,14 @@ func ParseBoundedWithHandlers(html string, limits ParseLimits, onElement, onInse
 	}, nil, onInserted, onScript)
 }
 
-// ParseBoundedWithParserCallbacks exposes the parser's custom-element timing
-// points: construct before token attributes, report each attribute afterward,
-// and report insertion before child tokens are processed.
 func ParseBoundedWithParserCallbacks(html string, limits ParseLimits, onElement func(*Node, []Attribute) *Node, onAttribute func(*Node, Attribute), onInserted func(*Node), onScript func(*Document, *Node)) (*Document, error) {
 	return ParseBoundedWithParserCallbacksAndScripting(html, limits, true, onElement, onAttribute, onInserted, onScript)
 }
 
-// ParseBoundedWithParserCallbacksAndScripting is ParseBoundedWithParserCallbacks
-// with the HTML parser's scripting flag explicitly supplied.
 func ParseBoundedWithParserCallbacksAndScripting(html string, limits ParseLimits, scriptingEnabled bool, onElement func(*Node, []Attribute) *Node, onAttribute func(*Node, Attribute), onInserted func(*Node), onScript func(*Document, *Node)) (*Document, error) {
 	return parseDocumentBounded(html, limits, true, scriptingEnabled, onElement, onAttribute, onInserted, onScript)
 }
 
-// ParseBoundedWithHandlersAndScripting parses a document with the HTML
-// scripting flag set to scriptingEnabled. A document whose sandboxing flags
-// disable scripts must use false so <noscript> is parsed by the in-head-noscript
-// insertion mode. Script callbacks are still supplied by the caller and should
-// be nil when scripts are disabled.
 func ParseBoundedWithHandlersAndScripting(html string, limits ParseLimits, scriptingEnabled bool, onElement, onInserted func(*Node), onScript func(*Document, *Node)) (*Document, error) {
 	return ParseBoundedWithParserCallbacksAndScripting(html, limits, scriptingEnabled, func(node *Node, _ []Attribute) *Node {
 		if onElement != nil {
@@ -186,23 +165,14 @@ func ParseBoundedWithHandlersAndScripting(html string, limits ParseLimits, scrip
 	}, nil, onInserted, onScript)
 }
 
-// ParseOpenBounded parses the currently available input for an open
-// document.write stream. Unlike ParseBounded it does not perform EOF
-// completion steps, so a stream containing only a doctype has only that child.
 func ParseOpenBounded(html string, limits ParseLimits) (*Document, error) {
 	return parseDocumentBounded(html, limits, false, true, nil, nil, nil, nil)
 }
 
-// ParseOpenBoundedWithParserCallbacks parses an open document.write stream and
-// reports custom-element construction, attribute, and insertion steps while
-// the tree builder processes each token.
 func ParseOpenBoundedWithParserCallbacks(html string, limits ParseLimits, onElement func(*Node, []Attribute) *Node, onAttribute func(*Node, Attribute), onInserted func(*Node)) (*Document, error) {
 	return parseDocumentBounded(html, limits, false, true, onElement, onAttribute, onInserted, nil)
 }
 
-// ParseOpenBoundedWithParserCallbacksAndScripts parses an open document.write
-// stream and reports parser-inserted script pauses in addition to the custom
-// element construction, attribute, and insertion steps.
 func ParseOpenBoundedWithParserCallbacksAndScripts(html string, limits ParseLimits, onElement func(*Node, []Attribute) *Node, onAttribute func(*Node, Attribute), onInserted func(*Node), onScript func(*Document, *Node)) (*Document, error) {
 	return parseDocumentBounded(html, limits, false, true, onElement, onAttribute, onInserted, onScript)
 }
@@ -254,25 +224,15 @@ func (tb *treeBuilder) documentHasFrameset() bool {
 	return false
 }
 
-// ParseFragmentBounded runs the HTML fragment parsing algorithm in the
-// insertion-mode and namespace context supplied by context. The returned
-// DocumentFragment owns the parsed nodes in a temporary document; inserting
-// them into the destination document adopts them through the normal DOM path.
 func ParseFragmentBounded(context *Node, input string, limits ParseLimits) (*Node, error) {
 	return ParseFragmentBoundedWithParserCallbacks(context, input, limits, nil, nil, nil)
 }
 
-// ParseFragmentBoundedWithParserCallbacks applies parser custom-element hooks
-// while parsing the fragment, preserving construction and insertion order.
 func ParseFragmentBoundedWithParserCallbacks(context *Node, input string, limits ParseLimits, onElement func(*Node, []Attribute) *Node, onAttribute func(*Node, Attribute), onInserted func(*Node)) (*Node, error) {
 	fragment, _, err := ParseFragmentBoundedWithParserCallbacksAndState(context, input, limits, onElement, onAttribute, onInserted)
 	return fragment, err
 }
 
-// ParseFragmentBoundedWithParserCallbacksAndState also reports whether the
-// parser ended at a token boundary with no elements left open in the fragment.
-// Streaming document.write uses this to commit complete input synchronously
-// while retaining partial tags and open-element content for the next write.
 func ParseFragmentBoundedWithParserCallbacksAndState(context *Node, input string, limits ParseLimits, onElement func(*Node, []Attribute) *Node, onAttribute func(*Node, Attribute), onInserted func(*Node)) (*Node, bool, error) {
 	if context == nil || !context.Element() {
 		return nil, false, fmt.Errorf("HTML fragment parsing requires an element context")
@@ -309,10 +269,6 @@ func ParseFragmentBoundedWithParserCallbacksAndState(context *Node, input string
 	if contextNode.IsHTMLTemplate() {
 		tb.templateStack = []insertionMode{modeInTemplate}
 	}
-	// The fragment form-element pointer is seeded from the context element's
-	// nearest form ancestor. In particular, descendants of a template's
-	// contents are ordinary subtree contexts even though their root is a
-	// DocumentFragment.
 	for ancestor := context.Parent; ancestor != nil; ancestor = ancestor.Parent {
 		if ancestor.Element() && ancestor.Namespace == NSHTML && ancestor.Data == "form" {
 			tb.formElem = ancestor
@@ -362,15 +318,11 @@ func completeHTMLInputBoundary(input string) bool {
 	return true
 }
 
-// HTMLFragmentInputComplete reports whether input ends between fragment tokens
-// with no open elements. It is intended for deciding when a buffered
-// document.write stream can be applied without losing parser context.
 func HTMLFragmentInputComplete(context *Node, input string, limits ParseLimits) (bool, error) {
 	_, complete, err := ParseFragmentBoundedWithParserCallbacksAndState(context, input, limits, nil, nil, nil)
 	return complete, err
 }
 
-// insertionMode identifies one of the HTML5 tree-construction insertion modes.
 type insertionMode int
 
 const (
@@ -554,8 +506,6 @@ var voidElements = map[string]bool{
 	"track": true, "wbr": true,
 }
 
-// svgTagAdjustments applies the HTML parser's SVG tag-name adjustments. Keys
-// are ASCII-lowercase tokenizer names; values are the DOM local names.
 var svgTagAdjustments = map[string]string{
 	"altglyph": "altGlyph", "altglyphdef": "altGlyphDef", "altglyphitem": "altGlyphItem",
 	"animatecolor": "animateColor", "animatemotion": "animateMotion", "animatetransform": "animateTransform",
@@ -613,10 +563,6 @@ func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bo
 		return nil
 	}
 	n := tb.doc.NewElement(tag)
-	// Template contents belong to the document's separate inert template
-	// contents owner document. Assign that owner before parser hooks run so a
-	// registered element in template markup is not upgraded in the live
-	// document's registry.
 	if parent != nil && parent.Type == NodeDocumentFragment && parent.Doc != nil && parent.Doc != tb.doc {
 		n.Doc = parent.Doc
 	}
@@ -654,9 +600,6 @@ func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bo
 			tb.onParserAttribute(n, attr)
 		}
 	}
-	// Parser attribute callbacks may inspect an input before its later
-	// `checked` token attribute has been appended. Restore the clean live
-	// checkedness from the complete start-tag after all attributes are present.
 	if n.Data == "input" {
 		n.syncInputCheckednessFromAttribute()
 	}
@@ -664,9 +607,6 @@ func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bo
 	if insertIntoParent && parent != nil && parent.Type == NodeDocument {
 		for child := parent.FirstChild; child != nil; child = child.NextSibling {
 			if child.Element() {
-				// The insertion is dropped by the DOM pre-insertion validity
-				// rules, but tree construction still pushes the newly created
-				// element and its descendants onto the parser stack.
 				insertIntoParent = false
 				break
 			}
@@ -678,8 +618,6 @@ func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bo
 		} else {
 			parent.AppendChild(n)
 		}
-		// A radio that becomes connected joins its radio button group. Form
-		// insertion can also resolve a previously ownerless form="id" control.
 		if n.Data == "input" && strings.EqualFold(n.GetAttribute("type"), "radio") {
 			tb.arbitrateConnectedRadio(n)
 		} else if n.Data == "form" && n.HasAttribute("id") {
@@ -707,9 +645,6 @@ func (tb *treeBuilder) insertElement(tag string, attrs []Attribute, selfClose bo
 	return n
 }
 
-// arbitrateConnectedRadio applies the checked-radio exclusivity rule when a
-// parsed radio becomes connected. The last checked radio inserted into a group
-// remains selected, matching the parser's connection order.
 func (tb *treeBuilder) arbitrateConnectedRadio(node *Node) {
 	if tb == nil || tb.doc == nil || node == nil || !node.Element() || node.Namespace != NSHTML || node.Data != "input" || !strings.EqualFold(node.GetAttribute("type"), "radio") || !node.IsConnected() || !node.InputChecked() {
 		return
@@ -849,10 +784,6 @@ func isTableElement(n *Node) bool {
 	return false
 }
 
-// fosterInsertionLocation returns the adjusted insertion parent and reference
-// node for a foster-parented token. The live parent of the last table takes
-// precedence over the open-element stack because script can move the table
-// while parsing is paused.
 func (tb *treeBuilder) fosterInsertionLocation() (*Node, *Node) {
 	for i := len(tb.openStack) - 1; i >= 0; i-- {
 		table := tb.openStack[i]
@@ -959,11 +890,6 @@ func (tb *treeBuilder) insertRawText(data string) {
 	}
 }
 
-// flushText commits buffered character data before parser-blocking script
-// execution. Scripts run against the live, partially-built document, so text
-// tokens already consumed by the tokenizer must be visible to DOM reads before
-// parsing resumes. Clearing the buffers prevents a later flush from
-// overwriting script mutations to those text nodes.
 func (tb *treeBuilder) flushText() {
 	for n, text := range tb.text {
 		if n != nil && text != nil {
@@ -1041,10 +967,6 @@ func (tb *treeBuilder) consumeInitialFragmentText(p *tokenizer) {
 	if !rawTextElements[tag] {
 		return
 	}
-	// The fragment context selects a tokenizer state, but there is no matching
-	// context end tag token in this input stream. Treat every end-tag-looking
-	// sequence as character data through EOF; otherwise innerHTML on <title>,
-	// <textarea>, raw-text elements, or <plaintext> can escape its context.
 	text := p.input
 	if tag == "title" || tag == "textarea" {
 		text = unescapeHTMLReferences(strings.ReplaceAll(text, "\x00", "\uFFFD"))
@@ -1084,10 +1006,6 @@ func (tb *treeBuilder) consumeBogusComment(p *tokenizer, prefix int) {
 	tb.processToken(tokenComment, "", nil, false, data)
 }
 
-// preprocessHTMLInput implements the preprocessing pass over an already
-// decoded HTML input stream: an initial BOM is discarded and CRLF/CR become
-// LF. NUL handling belongs to the active tokenizer state. The engine's network
-// layer owns byte decoding; this pass is shared by document and fragment parses.
 func preprocessHTMLInput(input string) string {
 	if strings.HasPrefix(input, "\uFEFF") {
 		input = input[len("\uFEFF"):]
@@ -1100,9 +1018,6 @@ func preprocessHTMLInput(input string) string {
 	return input
 }
 
-// unescapeHTMLReferences applies character references to text whose NUL
-// handling has already been resolved by its tokenizer state. The x/net HTML
-// package carries the complete entity table, including multi-code-point names.
 func unescapeHTMLReferences(input string) string {
 	if !strings.Contains(input, "&") {
 		return input
@@ -1110,9 +1025,6 @@ func unescapeHTMLReferences(input string) string {
 	return xhtml.UnescapeString(input)
 }
 
-// decodeHTMLDataText models the data-state NUL behavior. A NUL ends a
-// character-reference attempt and is then discarded as a data-state token;
-// decoding each side independently preserves that state transition.
 func decodeHTMLDataText(input string) string {
 	if !strings.ContainsAny(input, "&\x00") {
 		return input
@@ -1124,16 +1036,10 @@ func decodeHTMLDataText(input string) string {
 	return strings.Join(parts, "")
 }
 
-// unescapeHTMLAttributeReferences uses the HTML tokenizer's attribute-value
-// state. In particular, legacy named references without a semicolon are not
-// consumed when followed by an ASCII alphanumeric or '='.
 func unescapeHTMLAttributeReferences(input string) string {
 	if !strings.Contains(input, "&") {
 		return input
 	}
-	// The attribute scanner has already removed its delimiter. Escape literal
-	// double quotes so a small tokenizer wrapper can decode the value without
-	// changing where the source attribute ended.
 	input = strings.ReplaceAll(input, `"`, "&#34;")
 	t := xhtml.NewTokenizer(strings.NewReader(`<x a="` + input + `">`))
 	if t.Next() != xhtml.StartTagToken {
@@ -1327,10 +1233,6 @@ func (tb *treeBuilder) consumeRawText(p *tokenizer, tag string) {
 	}
 }
 
-// scanScriptDataEnd finds the end tag for an HTML script-data token stream.
-// The escaped and double-escaped states matter for legacy script content such
-// as <!-- ... <script> ... </script> ... -->: the inner end tag only returns
-// the tokenizer to the escaped state and does not close the element.
 func scanScriptDataEnd(input string, start int) int {
 	const (
 		scriptData = iota
@@ -1374,9 +1276,6 @@ func (tb *treeBuilder) parserScriptMayExecute() bool {
 	for i := len(tb.openStack) - 1; i >= 0; i-- {
 		node := tb.openStack[i]
 		if node != nil && node.IsHTMLTemplate() {
-			// Scripts inside declarative shadow-root templates are parser
-			// scripts for the active document. Nested ordinary templates remain
-			// inert, as do scripts in ordinary template contents.
 			return node.HasAttribute("shadowrootmode") || node.HasAttribute("shadowroot")
 		}
 	}
@@ -1493,9 +1392,6 @@ func (tb *treeBuilder) handleCommentOrDoctype(p *tokenizer) {
 		p.pos += 7
 		end := strings.Index(p.input[p.pos:], ">")
 		if end < 0 {
-			// EOF in the after-doctype-name state still emits the doctype
-			// token. The tree builder can then recover its name and identifiers
-			// from the portion that was present before EOF.
 			end = len(p.input) - p.pos
 		}
 		data := strings.ReplaceAll(strings.TrimSpace(p.input[p.pos:p.pos+end]), "\x00", "\uFFFD")
@@ -1568,7 +1464,6 @@ func (tb *treeBuilder) processToken(tokenType int, tag string, attrs []Attribute
 	}
 }
 
-// Legacy helpers retained for backward compatibility.
 func (tb *treeBuilder) ensureHead() {
 	if tb.headElem == nil && tb.htmlElem != nil {
 		tb.insertElement("head", nil, false)

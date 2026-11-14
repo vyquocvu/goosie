@@ -9,29 +9,15 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// Block runs the block layout pass over the arena.
-//
-// Block layout is the first pass and the one every other pass depends on: it
-// sets the width and height of every block box, positions block kids vertically
-// with margin collapsing, and establishes the containing block for positioned
-// descendants. The pass is a single recursive walk; the recursion is the
-// containing-block stack.
 func Block(a *Arena, root ObjectID, viewportW, viewportH float32) {
 	a.ViewportW = viewportW
 	a.ViewportH = viewportH
 	flattenDisplayContents(a, root)
-	// inlineInto first runs inside blockInto, so the inline border-fragment
-	// capture map must be fresh and inline element borders resolved before then.
-	// Percentage padding re-resolves in Inline once block widths are known.
 	a.inlineFragLines = make(map[ObjectID]map[int]frame.RectF)
 	resolveInlineEdges(a, root, viewportW)
 	blockInto(a, root, viewportW)
 }
 
-// flattenDisplayContents removes display:contents elements from the tree before
-// layout runs. Each such element's children are spliced into its parent's child
-// list in its place, so every layout pass sees them as direct children. The
-// element itself is unlinked and zeroed; it generates no box and no paint.
 func flattenDisplayContents(a *Arena, id ObjectID) {
 	obj := a.Get(id)
 	kid := obj.FirstKid
@@ -83,15 +69,6 @@ func flattenDisplayContents(a *Arena, id ObjectID) {
 	}
 }
 
-// definiteH reports the content height the children of box id may resolve a
-// percentage height against, or -1 when that height is indefinite. CSS 2.1
-// §10.5 makes a percentage height behave as auto unless the containing block's
-// height is given, so the walk up the parent chain stops at the first auto box
-// and the initial containing block - the viewport - ends it.
-//
-// Only the stylesheet answers this, never obj.H: the block pass lays children
-// out before it knows the height they produce, so an auto box's H is whatever
-// the last pass left in it.
 func definiteH(a *Arena, id ObjectID) float32 {
 	if id == 0 || id == rootID {
 		if a.ViewportH > 0 {
@@ -129,23 +106,12 @@ func blockInto(a *Arena, id ObjectID, containingW float32) float32 {
 	return blockIntoInner(a, id, containingW, true)
 }
 
-// blockIntoSized lays content out in a box whose own sizes are already
-// settled: unlike blockInto it does not resolve them first. The float path
-// uses it for the content pass because the box was sized against the
-// containing block while the settled width here is the box itself -
-// re-resolving would answer percentages (`33%` of 267 instead of 800)
-// and auto margins against the wrong base, then lay the children out
-// inside the corrupted box.
 func blockIntoSized(a *Arena, id ObjectID, containingW float32) float32 {
 	return blockIntoInner(a, id, containingW, false)
 }
 
 func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) float32 {
 	obj := a.Get(id)
-	// Two heights travel down this pass: parentH, which this box resolves its own
-	// percentage height against, and childH, which it hands to its children. Both
-	// are -1 when indefinite, and §10.5 turns an indefinite percentage height
-	// into auto.
 	parentH := definiteH(a, obj.Parent)
 	childH := parentH
 	var replacedH float32
@@ -160,17 +126,12 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 			return 0
 		}
 		if w, h, ok := replacedSize(a, obj, containingW); ok {
-			// An `auto` size on a replaced box is the control's own size. Nothing
-			// downstream can measure it out of content the box does not have.
 			if resolveBoxWidth(a, obj.Style, containingW) < 0 {
 				obj.W = w
 			}
 			replacedH = h
 		}
 	}
-	// The content box is inside the padding. Children are positioned relative to
-	// the content box origin, and the containing width for percentage children
-	// is the content width.
 	contentX := obj.X + obj.BorderLeft + obj.PaddingLeft
 	contentY := obj.Y + obj.BorderTop + obj.PaddingTop
 	contentW := obj.W
@@ -180,59 +141,25 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	if contentW < 0 {
 		contentW = 0
 	}
-	// Inline content that shares a container with block children needs a block
-	// box of its own to occupy a slot in the flow. A flex or grid container
-	// blockifies its children instead, so only its text runs need a wrapper.
-	// Tables are exempt entirely: layoutTable generates missing rows and
-	// cells itself, and the generic pass would box table-column elements
-	// and stray text into block wrappers that hide the grid from it.
 	if blockifiesChildren(obj.Style) {
 		wrapTextRuns(a, id)
 	} else if !isTableStructure(obj.Style) {
 		wrapInlineRuns(a, id)
 	}
-	// Re-fetch: the anonymous boxes just allocated may have grown the arena
-	// slice, invalidating the pointer captured above.
 	obj = a.Get(id)
 	y := float32(0)
 	prevBottomMargin := float32(0)
 	firstChild := true
-	// Inline-block kids flow as rows: they sit side by side from the current
-	// vertical cursor, and the row's height is settled when it closes.
 	var rowTop, rowCursor float32
 	rowActive := false
-	// What a row owes the container's own font, read when the first row opens.
-	// A row is a line whose content is only atomic inline-level boxes, and such
-	// a line still has to contain the strut (lineExtent, CSS 2.1 10.6.1).
-	// The tallest margin box alone leaves out whatever the strut reaches below
-	// the baseline, so a row of chips or icons is short by that much and every
-	// block under it drifts up by the same amount per row. Reading it here keeps
-	// the metrics call off every block that has no inline-block kid at all.
 	var sm strutMetrics
-	// Once the container has inline text of its own, though, its inline-blocks
-	// belong to that text's line list: the inline pass flows them as one
-	// unbreakable word each, which is what lets a title, its tag pills and its
-	// domain share a line. The row cursor starts every line at the content edge,
-	// so using it here would drop the pills on top of the title.
 	hasInlineRuns := flowsInlineContent(a, obj)
-	// Floats hang on the side they were thrown to, one after another along the
-	// current flow height, and the deepest one reserves the container's height
-	// only when that container establishes a formatting context.
 	var floatLead, floatTrail, floatBottom float32
-	// floatTop is the highest margin-box top already assigned to a float in
-	// this container and in the sibling subtrees merged into it. CSS 2.1
-	// §9.5.1 puts a later float no higher than that, which is what stops a
-	// float from jumping back to the top of the page after a clear:left pushed
-	// an earlier one down. A negative value means no float has been placed.
 	floatTop := float32(-1)
 	if obj.floatSeedHas {
 		floatTop = obj.floatSeedTop
 	}
 	obj.floatSeedHas = false
-	// Per-side bottoms feed clearance: clear:left cares only about left
-	// floats. floatBottom stays the max for container-height purposes. The seed
-	// a parent handed in covers floats from earlier sibling subtrees that share
-	// this formatting context; consume it so a re-layout starts clean.
 	floatBottomL, floatBottomR := obj.floatSeedL, obj.floatSeedR
 	obj.floatSeedL, obj.floatSeedR = 0, 0
 	var rowKids []ObjectID
@@ -255,13 +182,6 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				}
 			}
 		}
-		// The row is a line whose content is only atomic inline-level boxes, so
-		// it takes the strut's shape rather than just the tallest margin box:
-		// baseline-aligned kids put their own baseline on the line's, which sits
-		// at the taller of those baselines and the strut's ascent, and the strut's
-		// descent still belongs below it. Each kid is currently placed with its
-		// margin box at the row top, so the offset its class asks for is exactly
-		// how far it has to travel.
 		boxes := make([]runDemand, len(rowKids))
 		for i, rk := range rowKids {
 			boxes[i] = atomicDemand(boxOfAtomic(a, rk, sm), sm)
@@ -298,16 +218,8 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 			if k.Style == nil || k.Style.Display == style.DisplayNone {
 				continue
 			}
-			// An inline box that holds block content takes a vertical slot of its
-			// own: CSS splits such a box around the block child, and the fragment
-			// carrying that content spans the full line.
 			if isBlock(k) || holdsBlockContent(a, kid) {
 				if isOutOfFlow(k.Style) {
-					// Out of the flow: record where the box would have started and
-					// leave the placement to the positioning pass, which is the
-					// first point a final containing block exists. The box takes
-					// no part in this container's height or margin collapsing, and
-					// does not consume the first-child slot.
 					resolveBoxSizes(a, k, contentW, childH)
 					k = a.Get(kid)
 					k.StaticX = contentX + k.MarginLeft
@@ -316,12 +228,6 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					continue
 				}
 				if k.Style.Float != style.FloatNone {
-					// A float takes no vertical slot: the content after it starts at
-					// the same height and rides past its side, which is what puts a
-					// 30px vote column beside a story's text instead of above it. Its
-					// auto width shrink-wraps like an inline-block's, and it hangs at
-					// the edge of the content box, after any float already placed on
-					// that side.
 					closeRow()
 					resolveBoxSizes(a, k, contentW, childH)
 					k = a.Get(kid)
@@ -357,17 +263,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						boxW = contentW
 					}
 					outer := k.MarginLeft + boxW + k.MarginRight
-					// A float that does not fit beside the floats already on this
-					// line starts a new one below all of them. Without this, two
-					// width:100% floats are placed side by side and every later
-					// block is pushed one viewport further right, off the document.
 					floatY := y
-					// clear on a float drops its top below the floats already
-					// placed on that side, in this container and in the sibling
-					// subtrees merged into it. On the new line no left float is
-					// in the way, so the side's lead resets; the other side may
-					// still hold a float deeper than the cleared one, and its
-					// width is all this model keeps.
 					if f := clearanceFloor(k.Style, floatBottomL, floatBottomR); f > floatY {
 						floatY = f
 						if f >= floatBottomL {
@@ -397,15 +293,10 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						floatTrail += outer
 					}
 					k.Y = contentY + floatY + k.MarginTop
-					// Sized against the containing block above; the settled
-					// width here is the box itself, which would answer
-					// percentages against the wrong base.
 					blockIntoSized(a, kid, boxW)
 					if !blockifiesChildren(a.Get(kid).Style) {
 						inlineInto(a, kid)
 					}
-					// Re-read the box: laying its content out may have grown the
-					// arena and left the captured pointer pointing at the old slice.
 					placed := a.Get(kid)
 					bottom := floatY + placed.MarginTop + placed.BorderH() + placed.MarginBottom
 					if bottom > floatBottom {
@@ -427,23 +318,12 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				}
 				if k.Style.Display == style.DisplayInlineBlock {
 					if hasInlineRuns {
-						// The inline pass places this box against the container's
-						// text, so it gets no slot and no row here. It still has to
-						// close a row any earlier inline-block opened one.
 						closeRow()
 						continue
 					}
-					// Inline-level, so it takes no vertical slot of its own: it
-					// joins the row in progress, or starts a new one after the
-					// content width runs out.
 					resolveBoxSizes(a, k, contentW, childH)
 					k = a.Get(kid)
 					extra := k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
-					// An auto width shrinks to the content instead of filling the
-					// container, which is what puts a row of buttons side by side.
-					// The measure is the extent the words take at the container's
-					// own width, read back off the placed words rather than off the
-					// box, because a text-align would otherwise be baked into it.
 					intrinsicTextarea := k.Node != nil && k.Node.Data == "textarea"
 					shrink := resolveBoxWidth(a, k.Style, contentW) < 0 && !intrinsicTextarea
 					var srcX, measureX, measureY, contentExtent float32
@@ -464,9 +344,6 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 							clampWidth(a, k, contentW)
 							k = a.Get(kid)
 						} else if w := blockMaxContentW(a, kid); w > 0 {
-							// The measure allocated word objects, so the pointer
-							// captured above may address the slice the arena grew
-							// out of. Write through a fresh one.
 							k = a.Get(kid)
 							k.W = w
 							clampWidth(a, k, contentW)
@@ -493,12 +370,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					k.flags |= flagRowPlaced
 					rowKids = append(rowKids, kid)
 					if measured {
-						// The content is still where the measure left it, so it
-						// travels to the box rather than being laid out a second
-						// time, which would allocate a second set of word objects.
 						shiftInlineContent(a, kid, k.X+k.BorderLeft+k.PaddingLeft-srcX, k.Y-measureY)
-						// Block descendants were positioned against the measured
-						// origin, so they move with the box.
 						for c := a.Get(kid).FirstKid; c != 0; c = a.Get(c).NextSibling {
 							if isBlock(a.Get(c)) {
 								shiftSubtree(a, c, k.X-measureX, k.Y-measureY)
@@ -506,11 +378,6 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 						}
 						k = a.Get(kid)
 					} else {
-						// A shrunk box has a width of its own now, so the re-layout
-						// has to be handed that rather than the parent's line:
-						// blockInto resolves an auto width against the containing
-						// width it is given, which would widen the box straight back
-						// out to the full row.
 						own := contentW
 						if shrank {
 							own = boxW
@@ -525,9 +392,6 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				closeRow()
 				resolveBoxSizes(a, k, contentW, childH)
 				if !isFlowBlock(k) {
-					// resolveBoxSizes leaves an inline box at width 0. The fragment
-					// CSS splits out around the block content is a block box, so it
-					// fills the line instead.
 					k.W = contentW - k.MarginLeft - k.MarginRight - k.PaddingLeft - k.PaddingRight - k.BorderLeft - k.BorderRight
 					if k.W < 0 {
 						k.W = 0
@@ -537,18 +401,6 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				var topMargin float32
 				if firstChild {
 					firstChild = false
-					// A parent with no top border or padding has its top margin
-					// collapse with its first in-flow child's, and the child's own
-					// first-child chain rides along with it. carryTop already paid
-					// for the whole run when this box was placed, so the child
-					// starts flush with the content edge rather than pushing the
-					// box down a second time. Only reached for non-flex containers;
-					// flex parents never collapse margins with their items.
-					// Relatively positioned boxes are in-flow (CSS 2.1 §8.3.1):
-					// their margins collapse here and the relative shift applies
-					// afterwards in the positioning pass. Only out-of-flow boxes
-					// (absolute/fixed, which never reach this path with a slot)
-					// are excluded, matching outOfFlowForCollapse.
 					if collapsesThroughTop(a, obj) && !isOutOfFlow(k.Style) {
 						topMargin = 0
 					} else {
@@ -557,24 +409,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 				} else {
 					topMargin = collapseMargin(prevBottomMargin, carryTop(a, kid))
 				}
-				// Clearance: a block that clears floats it would otherwise
-				// overlap drops its border-top edge to the float bottom. Only
-				// the requested sides count, and an already-past float needs
-				// nothing. Margin collapsing runs as computed; the shift only
-				// moves the box, which is exact for marginless cases and a
-				// bounded approximation otherwise.
 				if f := clearanceFloor(k.Style, floatBottomL, floatBottomR); y+topMargin < f {
 					y = f - topMargin
 				}
 				k.X = contentX + k.MarginLeft + centerBlockChildLead(obj, k, contentW)
 				k.Y = contentY + y + topMargin
-				// A plain block shares this formatting context, so the floats
-				// merged here must be visible to clearance inside it too. Hand
-				// them over in the child's own content coordinates; a box that
-				// establishes a new context contains its floats and gets none.
-				// An inline box holding block content is split into anonymous
-				// block boxes that belong to this context, so it takes a seed
-				// even though its computed display is not block-level.
 				blockifiedInline := k.Style.Display == style.DisplayInline && holdsBlockContent(a, kid)
 				if !startsNewFC(a, k) || blockifiedInline {
 					childTop := k.Y + k.BorderTop + k.PaddingTop - contentY
@@ -595,20 +434,10 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					}
 				}
 				blockInto(a, kid, contentW)
-				// Run inline layout immediately so the element's height is known
-				// before positioning the next sibling. A flex or grid container
-				// already laid its content out itself; running the inline pass
-				// over it would re-split the word objects its items made.
 				if !blockifiesChildren(a.Get(kid).Style) {
 					inlineInto(a, kid)
 				}
-				// Re-fetch k: inlineInto may have allocated word objects, growing
-				// the arena slice and invalidating the pointer captured above.
 				k = a.Get(kid)
-				// Floats inside a plain block belong to the nearest formatting
-				// context, not to that block. Merge them up so a later sibling's
-				// clear moves below them; a box that establishes its own context
-				// contains its floats instead.
 				if !startsNewFC(a, k) || blockifiedInline {
 					childTop := k.Y + k.BorderTop + k.PaddingTop - contentY
 					if b := childTop + k.floatBottomL; b > floatBottomL {
@@ -628,31 +457,17 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 			}
 		}
 		closeRow()
-		// A container that establishes a formatting context grows around the
-		// floats it holds. A plain block box does not: it collapses past them,
-		// which is the clearance problem a clearfix exists for rather than a
-		// height problem.
 		if floatBottom > y && startsNewFC(a, a.Get(id)) {
 			y = floatBottom
 		}
 	}
-	// Re-fetch obj: the block kids loop or layoutFlexRow may have called
-	// Alloc (via collectInline), growing the arena slice and invalidating
-	// the pointer captured at function entry or after the flex path.
 	obj = a.Get(id)
 	obj.floatBottomL = floatBottomL
 	obj.floatBottomR = floatBottomR
 	obj.floatTop = floatTop
-	// A box with no bottom border or padding hands its last child's bottom margin
-	// to the next sibling instead of growing around it, so the margin only takes
-	// up room inside this box when it has nowhere to carry out to.
 	if !collapsesThroughBottom(a, obj) {
 		y += prevBottomMargin
 	}
-	// H is the content height, like W; the padding and borders a box carries
-	// are added back by ContentRect/BorderRect at the edges. A percentage height
-	// only counts here when it resolved, which is why the test reads the height
-	// through the containing block rather than the raw declaration.
 	if obj.Style != nil && resolvePctLength(obj.Style.Height, parentH) < 0 {
 		if obj.Style.AspectRatio > 0 && obj.W > 0 {
 			obj.H = obj.W / obj.Style.AspectRatio
@@ -670,22 +485,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	if obj.Style == nil {
 		return obj.BorderH()
 	}
-	// The height children produced is the box's height only until min-height and
-	// max-height have a say, which is why this runs after the stacking above.
 	clampHeight(a, obj, parentH)
 	return obj.BorderH() + obj.MarginTop + obj.MarginBottom
 }
 
-// layoutFlexRow lays out a single-line row flex container.
-//
-// Supports flex-grow, flex-basis, gap, and auto-width items. Items without
-// flex-grow and without explicit sizing share the remaining space equally.
-// align-items:stretch is the default for auto-height items in a definite-height
-// container. Raw text nodes inside a flex container are skipped.
 func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
-	// Re-fetch obj: the caller's pointer may be stale if a prior sibling's
-	// layout caused arena reallocation. Recompute all content-box values
-	// from the fresh pointer so coordinates are never derived from stale data.
 	obj := a.Get(id)
 	contentX := obj.X + obj.BorderLeft + obj.PaddingLeft
 	contentY := obj.Y + obj.BorderTop + obj.PaddingTop
@@ -697,44 +501,21 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		contentW = 0
 	}
 	type item struct {
-		id       ObjectID
-		obj      *Object
-		basis    float32
-		grow     float32
-		measured bool
-		// pct is the percentage a style width was written as, or 0 when the width
-		// was not a percentage. Block layout has to re-resolve such a width, and
-		// this says what it was a share of.
-		pct float32
-		// srcX is where the measured item's inline content actually landed, and
-		// contentW the width that content needs. Both are read back from the
-		// placed words so the measure survives a text-align that shifts them.
-		srcX     float32
-		contentW float32
-		// minW is the item's min-content width plus its own box extras: the floor
-		// flex-shrink may not take it below, which is CSS's min-width:auto for a
-		// flex item. Zero means the item has no text floor we could compute.
-		minW float32
-		// declared marks an item whose basis came from the stylesheet rather than
-		// from measuring its content. Only such an item has to hand that basis
-		// back to the block pass as its containing width.
-		declared bool
-		// atMax marks an item whose base size exceeded the width its max-width
-		// allows. Such an item is frozen at that clamped size before any
-		// shrinking, so it takes nothing off the line's shortfall.
-		atMax bool
-		// blockKids marks an item whose content is block level rather than inline
-		// text. inlineExtent cannot see it, so its max-content comes from
-		// itemMaxContentW, and it must be re-laid out at its final width instead
-		// of having measured words shifted into place.
+		id        ObjectID
+		obj       *Object
+		basis     float32
+		grow      float32
+		measured  bool
+		pct       float32
+		srcX      float32
+		contentW  float32
+		minW      float32
+		declared  bool
+		atMax     bool
 		blockKids bool
-		// order is the CSS `order` value; items sort by it (stable) before
-		// measurement so a reordered line paints in visual order.
-		order int
+		order     int
 	}
 	var items []item
-	// A row container's main axis is horizontal, so the space between its items
-	// comes from column-gap.
 	gap := obj.Style.ColumnGap
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
@@ -742,17 +523,12 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			continue
 		}
 		if k.Node != nil && !k.Node.Element() {
-			// Skip raw text inside flex containers, but clear the content so
-			// the paint builder doesn't render it at the object's zero position.
 			if k.Node.Text() {
 				k.Node.DataContent = ""
 			}
 			continue
 		}
 		if isOutOfFlow(k.Style) {
-			// An out-of-flow child is not a flex item; the positioning pass
-			// places it. Give it a static position from the container's content
-			// origin so an unset inset has something to fall back to.
 			k.StaticX = contentX
 			k.StaticY = contentY
 			k.flags |= flagOutOfFlow
@@ -760,8 +536,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		items = append(items, item{id: kid, obj: k, grow: k.Style.FlexGrow, order: k.Style.Order})
 	}
-	// CSS `order`: reorder the line's items by their order value before any
-	// measurement or placement, keeping DOM order among equal values.
 	sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
 	n := len(items)
 	if n == 0 {
@@ -774,20 +548,10 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		case s.FlexBasis >= 0:
 			basis = s.FlexBasis
 		case isPctLength(s.FlexBasis):
-			// A percentage basis is written as a sentinel too, and it speaks the
-			// same box a percentage width would: the container's content box.
-			// Missing it leaves the item on auto, so Bootstrap's grid columns -
-			// `flex: 0 0 75%` - collapse to the width of their text. Unlike a
-			// percentage width, the basis needs no `pct`: the item's own width
-			// stays auto, so nothing has to be re-resolved against the container.
 			basis = resolvePctLength(s.FlexBasis, contentW)
 		case s.Width >= 0:
 			basis = s.Width
 		case resolveBoxWidth(a, s, contentW) >= 0:
-			// A percentage width arrives as a sentinel, so the checks above miss
-			// it. It speaks the container's content box, which is exactly the
-			// basis `width: 100%` gives a flex item. A deferred calc resolves
-			// against the same box.
 			basis = resolveBoxWidth(a, s, contentW)
 			items[i].pct = -2 - s.Width
 		}
@@ -805,20 +569,10 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		items[i].declared = true
 	}
 
-	// Re-fetch obj: the item collection loop may have triggered Alloc calls
-	// (e.g. from prior block layout passes on sibling flex containers), growing
-	// the arena and invalidating the pointer fetched at function entry.
 	obj = a.Get(id)
 	contentH := obj.H
 	alignItems := obj.Style.AlignItems
 
-	// First pass: measure the auto-basis items. Each is laid out at the
-	// container's content origin with an effectively infinite available width,
-	// which is max-content sizing: the text cannot wrap, so the extent it needs
-	// is the extent it gets. The extent is read back off the placed words rather
-	// than off the box, because resolveBoxSizes has already filled the item's own
-	// width with the measurement width and a text-align would otherwise be baked
-	// into the measure.
 	for i := range items {
 		if items[i].basis >= 0 {
 			continue
@@ -828,10 +582,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		blockInto(a, items[i].id, maxFlexMeasureWidth)
 		it = a.Get(items[i].id)
 		if it.W <= 0 {
-			// blockInto hands its children a resolved content width locally but
-			// only commits W to the box for auto block sizes; an inline-display
-			// flex item keeps its auto sentinel. The inline pass reads W, so an
-			// uncommitted width would wrap every word onto its own line.
 			it.W = maxFlexMeasureWidth - it.PaddingLeft - it.PaddingRight - it.BorderLeft - it.BorderRight
 			it = a.Get(items[i].id)
 		}
@@ -842,33 +592,15 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		if ok {
 			contentWidth = right - srcX
 		}
-		// An item whose content is a block child - a nav cell wrapping a
-		// block-level link, a card holding a header and a figure - has no inline
-		// extent of its own, so inlineExtent reports nothing and the item would
-		// collapse to zero width and pile onto its siblings. Its max-content is
-		// the width the laid-out block subtree actually needs. Only take this
-		// path when the inline pass found nothing: an item that does have inline
-		// content already measured correctly above, and its block walk can
-		// over-count against a not-yet-final obj.X during measurement.
 		if !ok {
 			if blockW := itemMaxContentW(a, items[i].id); blockW > 0 {
 				contentWidth = blockW
 				items[i].blockKids = true
 			}
 		}
-		// A replaced element (input, img) has its width set by replacedSize() in
-		// blockInto. If contentWidth is 0 but the element already has a width,
-		// use that instead of overwriting it with 0. This must stay limited
-		// to replaced elements: any other box holding a width here carries
-		// the probe width blockInto measured it at, and keeping that strands
-		// 10000px flex items across pages.
 		if contentWidth == 0 && it.W > 0 && isReplacedElement(it) {
 			contentWidth = it.W
 		}
-		// An auto-basis item still honors min-width/max-width: 34px of text in
-		// a min-width: 60px item measures 60px of content, not 34. Without the
-		// floor every item in the row measured narrow and the whole row packed
-		// left of where Chromium puts it.
 		lo, hi := flexContentBounds(a, it, contentW)
 		if lo > 0 && contentWidth < lo {
 			contentWidth = lo
@@ -877,22 +609,16 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			contentWidth = hi
 		}
 		it.W = contentWidth
-		// Basis is a border-box width.
 		items[i].basis = contentWidth + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight
 		items[i].measured = !items[i].blockKids
 		items[i].srcX = srcX
 		items[i].contentW = contentWidth
 		items[i].minW = inlineMinWidth(a, items[i].id) + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight
 		if floor := lo + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight; floor > items[i].minW {
-			// The shrink pass may not squeeze the item below its min-width
-			// either: the floor there is min-content by default, but a
-			// declared minimum raises it.
 			items[i].minW = floor
 		}
 	}
 
-	// A row-reverse container reads its items from the container's right edge, so
-	// the visual order is settled before the items are grouped into lines.
 	reverse := a.Get(id).Style.FlexDirection == style.FlexRowReverse
 	if reverse {
 		for l, r := 0, n-1; l < r; l, r = l+1, r-1 {
@@ -900,9 +626,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
-	// Lines: a nowrap container keeps every item on one line and shrinks them
-	// into it, while a wrapping container starts a new line at the first item that
-	// no longer fits. `wrap-reverse` stacks the lines from the other end.
 	wrap := a.Get(id).Style.FlexWrap
 	lineOf := make([]int, n)
 	lineCount := 0
@@ -926,10 +649,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	lineCount++
 
-	// Distribute each line's free space once every basis is known, so an auto
-	// item's share is computed against the real content widths rather than zero.
-	// Space left over goes to the items that grow; space that does not fit comes
-	// back off the items that shrink, weighted by how much of it they carry.
 	for l := 0; l < lineCount; l++ {
 		var lineBasis, lineMargins, growSum, shrinkWeight float32
 		count := 0
@@ -953,11 +672,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		free := avail - lineBasis
 		if free > 0 && growSum > 0 {
-			// Growth is clamped (§9.7): an item that reaches its max-width freezes
-			// there and the space it would have taken goes round again. Adding the
-			// whole share in one pass left `basis` longer than the box the item
-			// paints, and the cursor that advances by `basis` shifted every later
-			// sibling by the difference.
 			frozen := make([]bool, len(items))
 			for spare, weight := free, growSum; spare > 0 && weight > 0; {
 				var excess float32
@@ -983,16 +697,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				}
 			}
 		} else if free < 0 && shrinkWeight > 0 {
-			// Shrink proportionally to the weighted basis, but never below an
-			// item's min-content floor - CSS's min-width:auto for a flex item.
-			// An item that hits its floor freezes out of the pool and the rest
-			// of the shortfall redistributes; two passes cover the common case
-			// of one or two items freezing.
 			frozen := make([]bool, len(items))
-			// An item clamped down by its max-width is frozen there before the
-			// shortfall is shared out. A `width: 370px; max-width: 300px` sidebar
-			// pays for none of a sibling's overflow, so it keeps its 300px and the
-			// main column gives up the difference instead of sliding under it.
 			for i := range items {
 				if lineOf[i] == l && items[i].atMax {
 					frozen[i] = true
@@ -1032,13 +737,8 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
-	// Whatever the main axis did not consume is spare space, and justify-content
-	// decides where it goes.
 	justify := a.Get(id).Style.JustifyContent
 
-	// Ensure every item has been measured at least once so that BorderH reflects
-	// the item's natural cross size. Items with a declared basis (explicit width
-	// or flex-basis) skipped the measurement pass above and still carry H=0.
 	for i := range items {
 		it := a.Get(items[i].id)
 		if it.BorderH() > 0 {
@@ -1052,9 +752,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
-	// Pre-compute each line's natural cross size (the tallest item's margin box)
-	// and then distribute any remaining cross-axis space according to
-	// align-content. A single line fills the container so the packing is a no-op.
 	lineCross := make([]float32, lineCount)
 	for l := 0; l < lineCount; l++ {
 		if lineCount == 1 && contentH > 0 {
@@ -1072,8 +769,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			}
 		}
 	}
-	// align-content: stretch (the default for an unset value) divides the cross
-	// axis evenly among the lines; any other keyword packs content-sized lines.
 	if lineCount > 1 && contentH > 0 {
 		if ac := normalizeAxis(obj.Style.AlignContent); ac == "" {
 			for l := range lineCross {
@@ -1094,8 +789,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	wrapReverse := wrap == style.FlexWrapReverse
 	crossLead, crossTrackGap := distributeFlex(obj.Style.AlignContent, wrapReverse, crossRemaining, gap, lineCount)
-	// Compute each line's visual Y offset. Visual order reverses under
-	// wrap-reverse, but the gap and lead still flow from the cross start.
 	lineY := make([]float32, lineCount)
 	{
 		y := contentY + crossLead
@@ -1109,13 +802,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
-	// Second pass: place every line, and inside it every item. An item measured
-	// above still holds its inline content at the measurement origin, so that
-	// content travels with it; re-running the inline pass instead would allocate a
-	// second set of word objects, which the laid-out flag exists to prevent.
-	//
-	// A line's cross size is only known once its items have been laid out, so each
-	// line places its items first and aligns them afterwards.
 	maxBottom := float32(0)
 	for order := 0; order < lineCount; order++ {
 		l := order
@@ -1143,12 +829,9 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 
 		cursor := contentX + lead
 		for _, i := range line {
-			// Re-fetch: the previous iteration may have grown the arena slice.
 			it := a.Get(items[i].id)
 			mTop := flexMargin(it.Style.MarginTop)
 			finalX := cursor + flexMargin(it.Style.MarginLeft)
-			// Where the measurement pass left the item: the shift path below and
-			// the declared-basis path need the delta to the final origin.
 			prevX, prevY := it.X, it.Y
 			if items[i].basis >= 0 && it.Style.Width < 0 {
 				w := items[i].basis - it.PaddingLeft - it.PaddingRight - it.BorderLeft - it.BorderRight
@@ -1160,9 +843,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			it.X = finalX
 			it.Y = lineY[l] + mTop
 			if items[i].measured {
-				// Only an item shrunk below its max-content width needs its
-				// words re-wrapped; one that fits keeps the shift path so
-				// text-align still applies.
 				shrunk := it.W+0.5 < items[i].contentW
 				var h float32
 				var wrapped bool
@@ -1170,17 +850,11 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 					h, wrapped = reflowInlineWords(a, items[i].id, it.W, finalX+it.BorderLeft+it.PaddingLeft, it.Y+it.BorderTop+it.PaddingTop)
 				}
 				if wrapped {
-					// The item was shrunk below its max-content width, so its
-					// single measured line re-wrapped into the width it ended up
-					// with. That changes the item's content height.
 					if it.Style.Height < 0 && h > 0 {
 						it.H = h
 						it = a.Get(items[i].id)
 					}
 				} else {
-					// The words are still where the measurement pass left them.
-					// Move them to the item's own content origin, re-applying the
-					// item's alignment against the width it ended up with.
 					extra := float32(0)
 					if spare := it.W - items[i].contentW; spare > 0 {
 						switch it.Style.TextAlign {
@@ -1195,24 +869,10 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			} else {
 				containW := it.W
 				if items[i].pct > 0 {
-					// The item's width is a share of the container, so re-resolving
-					// it inside block layout needs that share scaled back: the
-					// basis is the width the percentage already produced.
 					containW = items[i].basis * 100 / items[i].pct
 				} else if items[i].declared && it.Style.Width == -1 {
-					// The item's main size came from a declared basis while its own
-					// width is auto. blockInto re-resolves an auto width as "fill the
-					// containing block", so it has to be handed the basis back as
-					// that container - otherwise the item stretches to the whole
-					// flex line and every sibling after it overflows.
 					containW = items[i].basis + it.MarginLeft + it.MarginRight
 				} else if items[i].blockKids && it.Style.Width == -1 {
-					// An item with block children was measured at max-content, but
-					// the flex distribution may have grown or shrunk it. Update the
-					// width to reflect the final basis before re-laying out the
-					// block subtree. The basis is a border-box width, and block
-					// layout subtracts the padding itself: handing it the content
-					// width took the padding off twice, nine pixels a side here.
 					w := items[i].basis - it.PaddingLeft - it.PaddingRight - it.BorderLeft - it.BorderRight
 					if w < 0 {
 						w = 0
@@ -1221,22 +881,10 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 					containW = items[i].basis + it.MarginLeft + it.MarginRight
 				}
 				if items[i].blockKids {
-					// The measure pass laid the block subtree out at an effectively
-					// infinite width and left the inline flag set, so re-running the
-					// inline pass would be a no-op. Clear it down to the nested
-					// containers so the subtree re-wraps into the width it earned.
 					clearInlineLaidOut(a, items[i].id)
 					blockInto(a, items[i].id, containW)
 					it = a.Get(items[i].id)
 				} else {
-					// A declared-basis item skips the auto-measure loop, so
-					// blockKids was never set for it even when it holds block
-					// children: the "measured at least once" pass laid that subtree
-					// out at the container's origin instead. Block children carry
-					// content heights derived from those stale fragments, so the
-					// whole subtree has to be laid out again at the final origin;
-					// inline-only content only moved, and shifting its fragments
-					// costs no allocation.
 					prevW := it.W
 					if hasBlockChild(a, items[i].id) {
 						clearInlineLaidOut(a, items[i].id)
@@ -1273,8 +921,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				align = "stretch"
 			}
 			if align == "stretch" && it.Style.Height < 0 {
-				// Stretch gives the item the line's cross size, keeping only the
-				// space its own margins and box decorations need.
 				pb := it.PaddingTop + it.PaddingBottom + it.BorderTop + it.BorderBottom + mTop + mBottom
 				if cross > pb {
 					it.H = cross - pb
@@ -1286,10 +932,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			if spare := cross - it.BorderH() - mTop - mBottom; spare > 0 {
 				switch normalizeAxis(align) {
 				case "flex-end":
-					// The item was laid out at the line start, so the alignment
-					// delta has to move the whole subtree, not just its inline
-					// content: a block child left behind ends up outside an
-					// overflow:hidden item and disappears.
 					shiftSubtree(a, items[i].id, 0, spare)
 				case "center":
 					shiftSubtree(a, items[i].id, 0, spare/2)
@@ -1303,10 +945,6 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 	return maxBottom
 }
 
-// clampFlexBasis holds a declared basis to the item's min- and max-width, which
-// is what keeps `width: 100%; max-width: 400px` a 400px item rather than one that
-// fills the line. Both constraints speak the same box language as the basis, so
-// no border-sizing adjustment is needed here.
 func clampFlexBasis(obj *Object, basis, containingW float32) float32 {
 	s := obj.Style
 	if s == nil {
@@ -1324,11 +962,6 @@ func clampFlexBasis(obj *Object, basis, containingW float32) float32 {
 	return basis
 }
 
-// flexContentBounds resolves an item's min/max-width to content-box bounds
-// against the container width, for the auto-basis measure path. Border-box
-// shifts the constraint by the decorations, the same adjustment clampWidth
-// applies to laid-out boxes. Unset bounds come back 0/-1 and constrain
-// nothing.
 func flexContentBounds(a *Arena, obj *Object, containingW float32) (float32, float32) {
 	s := obj.Style
 	if s == nil {
@@ -1348,9 +981,6 @@ func flexContentBounds(a *Arena, obj *Object, containingW float32) (float32, flo
 	return lo, hi
 }
 
-// flexMargin resolves an item's margin against the flex rules: `auto` is a
-// keyword carried as the -1 sentinel, and outside the free-space distribution it
-// participates in as 0.
 func flexMargin(v float32) float32 {
 	if v == style.MarginAuto || v < 0 {
 		return 0
@@ -1358,11 +988,6 @@ func flexMargin(v float32) float32 {
 	return v
 }
 
-// distributeFlex turns justify-content into the leading offset and the per-track
-// gap that place the line's items. remaining is the main-axis space flex-grow did
-// not consume. A reverse direction has its main axis starting at the far edge,
-// which flips a flex-start pack into a flex-end pack; the centred and evenly
-// spread values mirror onto themselves.
 func distributeFlex(justify string, reverse bool, remaining, gap float32, n int) (lead, trackGap float32) {
 	if reverse {
 		switch justify {
@@ -1394,10 +1019,6 @@ func distributeFlex(justify string, reverse bool, remaining, gap float32, n int)
 	return
 }
 
-// layoutFlexColumn lays out a single-line column flex container: the main axis
-// runs vertically, so the items stack and flex-grow, justify-content and the
-// free space all apply top-to-bottom, while the cross axis sizes them
-// horizontally.
 func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 	obj := a.Get(id)
 	contentX := obj.X + obj.BorderLeft + obj.PaddingLeft
@@ -1411,8 +1032,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	contentH := obj.H
 	alignItems := obj.Style.AlignItems
-	// A column container stacks along the vertical axis, so the space between its
-	// items comes from row-gap.
 	gap := obj.Style.RowGap
 
 	type item struct {
@@ -1426,9 +1045,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		order         int
 	}
 	var items []item
-	// containerH is the column's definite content height, which is what a
-	// percentage flex-basis or height on an item sizes against. It is -1 when the
-	// container is content-sized, and then those percentages behave as auto.
 	containerH := definiteH(a, id)
 	vMargins := float32(0)
 	growSum := float32(0)
@@ -1459,8 +1075,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 			mRight:  flexMargin(s.MarginRight),
 			order:   s.Order,
 		}
-		// flex-basis and height both size the main axis here, as border-box
-		// extents; a content-box declaration needs the padding and borders added.
 		var declared float32 = -1
 		switch {
 		case s.FlexBasis >= 0:
@@ -1484,8 +1098,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		vMargins += it.mTop + it.mBottom
 		growSum += it.grow
 	}
-	// CSS `order`: stack the column's items by their order value, DOM order for
-	// ties, before main-axis sizing distributes free space.
 	sort.SliceStable(items, func(i, j int) bool { return items[i].order < items[j].order })
 	n := len(items)
 	if n == 0 {
@@ -1497,17 +1109,11 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
-	// Measure pass: lay each item out across the cross size it ends up with -
-	// the container's content box for a stretching item, its own fit-content for
-	// one aligned away from the line. The natural main extent is then the height
-	// that content produced.
 	availForItems := contentH - vMargins - gap*float32(n-1)
 	if availForItems < 0 {
 		availForItems = 0
 	}
 	if contentH <= 0 {
-		// An auto-height column has no main space to distribute: grow and
-		// justify-content have nothing to work with.
 		availForItems = 0
 	}
 	for i := range items {
@@ -1515,8 +1121,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		if w, ok := fitContentCrossW(a, items[i].id, contentX, contentY, contentW, alignItems); ok {
 			avail = w
 		}
-		// A probe runs the item's own passes at the container's origin, so put the
-		// box back on the line before laying it out at its final width.
 		it := a.Get(items[i].id)
 		it.X = contentX + items[i].mLeft
 		it.Y = contentY
@@ -1539,12 +1143,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	_ = totalBasis
 
-	// Lines: a nowrap container - or an auto-height one, which has no definite
-	// main size to break against - keeps every item on one line. Otherwise
-	// items wrap past the container height into a new line, the vertical image
-	// of the row pass breaking past its width. Single-line layout below is
-	// untouched by lines: with one line every per-line total equals the old
-	// global one.
 	wrap := obj.Style.FlexWrap
 	lineOf := make([]int, n)
 	lineCount := 1
@@ -1570,10 +1168,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		lineCount++
 	}
 
-	// A line's cross size is its widest item; the single line spans the whole
-	// container so alignment keeps meeting the content box exactly as before.
-	// Default packing stretches lines across evenly (the reference floats
-	// equal columns); any other align-content packs content-sized lines.
 	lineCross := make([]float32, lineCount)
 	if lineCount == 1 {
 		lineCross[0] = contentW
@@ -1596,8 +1190,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 			}
 		}
 	}
-	// Lines pack across from the cross start (or end for wrap-reverse) under
-	// align-content; a lone line fills the axis and the packing is a no-op.
 	crossUsed := float32(0)
 	for l := 0; l < lineCount; l++ {
 		crossUsed += lineCross[l]
@@ -1666,17 +1258,11 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		lead, trackGap := distributeFlex(obj.Style.JustifyContent, mainReverse, remaining, gap, len(line))
 
-		// Place pass: the cross positions are already final, so only the vertical
-		// origin moves, and it takes the item's whole subtree with it because block
-		// descendants were positioned from that origin.
 		cursor := contentY + lead
 		lineOriginX := lineX[l]
 		for _, i := range line {
 			it := a.Get(items[i].id)
 			if lineCross[l] < contentW {
-				// A stretched item on a narrowed line re-lays out at the
-				// line width instead of keeping the full-axis measure: its
-				// words rewrap into the column it actually occupies.
 				alignN := it.Style.AlignSelf
 				if alignN == "" {
 					alignN = alignItems
@@ -1696,11 +1282,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 				}
 			}
 			if items[i].declared {
-				// A declared main size always wins over the measured height:
-				// the basis is a border-box extent, so the content box keeps
-				// what is left after the decorations. Without the write the
-				// item kept its content height while the cursor advanced by
-				// the basis, stacking every declared column item wrong.
 				h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
 				if h < 0 {
 					h = 0
@@ -1708,8 +1289,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 				it.H = h
 				it = a.Get(items[i].id)
 			} else if it.Style.Height < 0 && it.Style.FlexGrow > 0 {
-				// Only a grown item outgrows the height its content measured at; an
-				// auto item's basis is that measurement, so it keeps it.
 				h := items[i].basis - it.PaddingTop - it.PaddingBottom - it.BorderTop - it.BorderBottom
 				if h < 0 {
 					h = 0
@@ -1717,9 +1296,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 				it.H = h
 				it = a.Get(items[i].id)
 			}
-			// The measure pass left the whole subtree positioned from contentY, so a
-			// single shift moves the item box and its descendants together. Setting
-			// it.Y first and then shifting by the same delta would move only the box.
 			if dy := (cursor + items[i].mTop) - it.Y; dy != 0 {
 				shiftSubtree(a, items[i].id, 0, dy)
 				it = a.Get(items[i].id)
@@ -1729,11 +1305,6 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 				align = alignItems
 			}
 			if lineCross[l] > items[i].crossW {
-				// The measure pass left the box at the start of the line, so the item
-				// moves by the difference: assigning X and then shifting by the same
-				// amount would move the box twice while its content moved once.
-				// Alignment meets the line's own cross size, which is the container
-				// box for a lone line.
 				targetX := lineOriginX + items[i].mLeft
 				switch normalizeAxis(align) {
 				case "center":
@@ -1755,25 +1326,11 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 	return maxBottom
 }
 
-// fitContentCrossW reports the width a column flex item takes when its
-// alignment does not stretch it: its max-content width, clamped to the
-// container's content box. Only `align-items: stretch` fills the line, so a
-// centred item is as wide as its own content and the box has to be moved to the
-// middle - leaving it full width pins its text to the start edge and paints its
-// background across the whole line. It reports false when the item keeps the
-// container's width: a declared or percentage width, a stretching alignment, a
-// replaced box measured through its own sizing, or content that overflows the
-// line. Measuring leaves the subtree placed at the probe's origin, so the caller
-// re-runs the block and inline passes at the width returned here.
 func fitContentCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32, alignItems string) (float32, bool) {
 	s := a.Get(id).Style
 	if s == nil || s.Width >= 0 || isPctLength(s.Width) {
 		return 0, false
 	}
-	// Logical start/end resolve like their physical twins: `align-self:
-	// start` shrink-wraps exactly like flex-start, and without it the item
-	// kept the full line width. Normalization happens after the empty-item
-	// fallback so an explicit stretch still wins over a centered container.
 	align := s.AlignSelf
 	if align == "" {
 		align = alignItems
@@ -1786,9 +1343,6 @@ func fitContentCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32, 
 	return probeCrossW(a, id, contentX, contentY, avail)
 }
 
-// probeCrossW measures one item's fit-content cross width without any
-// alignment gate: the hypothetical size its line contributes when lines pack
-// by content. False means the content needs the whole axis.
 func probeCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32) (float32, bool) {
 	it := a.Get(id)
 	it.X, it.Y = contentX, contentY
@@ -1810,10 +1364,6 @@ func probeCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32) (floa
 	} else if w := itemMaxContentW(a, id); w > 0 {
 		contentWidth = w
 	}
-	// The probe left the subtree laid out at max-content width and marked it
-	// done, so the caller's inline pass would skip it and leave the words hung
-	// where the wide measure put them - whether or not the width it settles on
-	// turns out to be narrower.
 	clearInlineLaidOut(a, id)
 	if contentWidth < 0 || contentWidth+boxW >= avail {
 		return 0, false
@@ -1821,10 +1371,6 @@ func probeCrossW(a *Arena, id ObjectID, contentX, contentY, avail float32) (floa
 	return contentWidth + boxW, true
 }
 
-// blockMaxContentW is the max-content width of a box whose content is block
-// level, which inlineExtent cannot see because it only walks placed words. The
-// subtree is probed at a width nothing wraps at; the caller's own pass then lays
-// it out again at the width the box settles on.
 func blockMaxContentW(a *Arena, id ObjectID) float32 {
 	blockInto(a, id, maxFlexMeasureWidth)
 	if !blockifiesChildren(a.Get(id).Style) {
@@ -1838,14 +1384,8 @@ func blockMaxContentW(a *Arena, id ObjectID) float32 {
 	return w
 }
 
-// maxFlexMeasureWidth is the available width handed to a flex item being
-// measured for max-content sizing. It is large enough that no text wraps and
-// small enough that the geometry stays inside the engine's own limits.
 const maxFlexMeasureWidth = 10000
 
-// inlineExtent reports the horizontal span of an object's inline descendants in
-// absolute coordinates, and false when it has none. Flex measurement reads the
-// width its content actually took instead of reconstructing it from advances.
 func inlineExtent(a *Arena, id ObjectID) (minX, maxX float32, ok bool) {
 	obj := a.Get(id)
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
@@ -1854,9 +1394,6 @@ func inlineExtent(a *Arena, id ObjectID) (minX, maxX float32, ok bool) {
 			continue
 		}
 		_, _, x1, _ := k.BorderRect()
-		// An inline element container carries no box of its own; only the words
-		// under it are positioned and sized, so an empty span must not drag the
-		// extent back to the origin.
 		if x1 > k.X {
 			if !ok || k.X < minX {
 				minX = k.X
@@ -1873,18 +1410,12 @@ func inlineExtent(a *Arena, id ObjectID) (minX, maxX float32, ok bool) {
 			if !ok || cmax > maxX {
 				maxX = cmax
 			}
-			// Content that only exists below this child is still the item's own
-			// width: an inline element carries no box, so the words under it are
-			// the extent.
 			ok = true
 		}
 	}
 	return
 }
 
-// inlineMinWidth reports the widest word in a measured subtree: the item's
-// min-content width, which is the floor flex-shrink cannot pass. Space runs are
-// excluded because they collapse at a break point.
 func inlineMinWidth(a *Arena, id ObjectID) float32 {
 	m := float32(0)
 	var walk func(ObjectID)
@@ -1909,20 +1440,10 @@ func inlineMinWidth(a *Arena, id ObjectID) float32 {
 	return m
 }
 
-// itemMaxContentW reports the max-content width of a flex or grid item's content
-// box. inlineExtent only sees inline descendants, so an item whose content is a
-// block child measures zero through it. This walks the laid-out subtree - the
-// caller has already run blockInto at an effectively infinite width, so nothing
-// wrapped - and takes the furthest right any descendant word reaches, adding each
-// block child's own box on both flanks so its padding, border and margin count.
-// It stops at nested flex and grid containers, which size their own content.
 func itemMaxContentW(a *Arena, id ObjectID) float32 {
 	return maxContentW(a, id, true)
 }
 
-// isReplacedElement reports the elements whose auto size comes from outside
-// the box model (intrinsic dimensions, widget metrics), matching the tags
-// replacedSize handles.
 func isReplacedElement(obj *Object) bool {
 	if obj == nil || obj.Node == nil || !obj.Node.Element() {
 		return false
@@ -1934,11 +1455,6 @@ func isReplacedElement(obj *Object) bool {
 	return false
 }
 
-// maxContentW is itemMaxContentW. `probed` says the caller laid the subtree out
-// at maxFlexMeasureWidth first, which is what makes reading a block container's
-// placed words safe; without it a box that blockifies its children is still
-// wrapped at whatever width an earlier pass gave it and its words would measure
-// as its min-content.
 func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 	obj := a.Get(id)
 	if obj.Node != nil && obj.Node.Text() {
@@ -1960,11 +1476,6 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 			lead := flexMargin(k.Style.MarginLeft) + k.BorderLeft + k.PaddingLeft
 			trailBox := k.PaddingRight + k.BorderRight + flexMargin(k.Style.MarginRight)
 			if k.Node != nil && k.Node.Text() {
-				// Max-content is the words themselves on one line, so the running
-				// sum of their own widths is the measure. Reading a placed run's
-				// right edge instead takes in where an earlier pass put it, and a
-				// centred label sits far right of the box's origin: the button that
-				// way measures its own offset as its content.
 				run += k.W
 				if w := origin + trail + run; w > right {
 					right = w
@@ -1972,14 +1483,7 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 				continue
 			}
 			if isBlock(k) && !atomicInlineLevel(k.Style) {
-				// A block sibling ends the inline line the run so far describes.
 				run = 0
-				// A nested flex or grid container sizes its own content, so use
-				// its width rather than walking into it - but only when that
-				// width is definite. An auto or percentage width resolved against
-				// the 10000px probe, so the box carries the measure width rather
-				// than its content: a flex item holding `width:100%` measured the
-				// whole probe and stranded viewport-wide strips across pages.
 				if blockifiesChildren(k.Style) {
 					if definiteWidth(k.Style) {
 						if w := origin + trail + lead + k.W + trailBox; w > right {
@@ -1995,30 +1499,18 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 							}
 							continue
 						}
-						// A column flex stacks its items, so the generic walk
-						// below - max of children - already matches its
-						// max-content. Fall through to it.
 					} else {
-						// Grid intrinsic sizing needs track resolution; keep
-						// trusting the probe layout rather than guessing.
 						if w := origin + trail + lead + k.W + trailBox; w > right {
 							right = w
 						}
 						continue
 					}
 				}
-				// A child that brings a width of its own to the line - a fixed-size
-				// figure, a min-width box - is a line of its own as far as
-				// max-content goes, even when the text inside it is narrower.
 				if own := declaredOuterW(k.Style); own >= 0 {
 					if w := origin + trail + lead + own + trailBox; w > right {
 						right = w
 					}
 				}
-				// The words inside a block child sit after its leading box, and the
-				// box closes after its trailing one, so both flanks belong to the
-				// measure. Counting only the trailing side left a nav cell holding a
-				// padded link 32px short of its own padding and wrapped its label.
 				before := right
 				walk(kid, trail+lead)
 				if right > before {
@@ -2028,26 +1520,10 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 				}
 				continue
 			}
-			// An inline-level child - a plain inline element or an inline-block -
-			// goes on the same line as its siblings, and its own box flanks count
-			// as much as a word's. Measuring only the glyphs inside left a row of
-			// tag pills narrower than their own padding and the text after them
-			// painted straight through the labels. An empty atomic with a width
-			// of its own (a 15px spacer, a replaced box) has no words at all,
-			// so without a fallback the measure is zero and the flex fallback
-			// upstream keeps the probe width - a 10000px item in the finished
-			// row. Only declared and replaced widths qualify: anything else
-			// (notably percentages) is probe-width dependent and stays zero
-			// rather than poisoning the measure.
 			inner := walk(kid, trail+run+lead)
 			if inner <= 0 {
 				switch {
 				case atomicInlineLevel(k.Style) && k.Style.Width == -1:
-					// An auto-width inline-block shrinks to its content. Its
-					// own probe width can still be zero when the size comes
-					// from a block descendant, so measure the subtree. This
-					// has to precede declaredOuterW: that helper folds auto
-					// into a definite zero, which would hide the box.
 					inner = maxContentW(a, kid, true)
 				case declaredOuterW(k.Style) >= 0:
 					inner = declaredOuterW(k.Style)
@@ -2073,14 +1549,6 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 	return w
 }
 
-// definiteWidth reports whether the style's width resolves independently of
-// the containing block (and hence of the probe width): a plain length with no
-// percentage in the width or its clamps. declaredOuterW cannot answer this -
-// the default min-width:0 clamp folds auto and every percentage into 0, so it
-// reads indefinite widths as a definite zero. Percentages, auto, and deferred
-// calc-with-percentage (WidthCalc is only set for percentage-bearing
-// functions) all speak the container, so a box measured at the probe width
-// carries the probe.
 func definiteWidth(s *style.ComputedStyle) bool {
 	if s == nil {
 		return false
@@ -2097,15 +1565,6 @@ func definiteWidth(s *style.ComputedStyle) bool {
 	return true
 }
 
-// rowFlexMaxContent measures the max-content width of a row-direction flex
-// container whose own width is indefinite (auto or percentage), so its
-// laid-out width is probe artifact rather than content. A row's intrinsic
-// width is the sum of its items': each item's own max-content plus its
-// flanks, joined by the column gap. Words were laid out at the probe width
-// with nothing to wrap against, so their placed widths are already the
-// unwrapped ones; blocks resolve through maxContentW, which recurses here
-// for deeper indefinite rows. Definite and replaced widths short-circuit
-// the walk the way the generic measure does.
 func rowFlexMaxContent(a *Arena, id ObjectID) float32 {
 	obj := a.Get(id)
 	run := float32(0)
@@ -2139,10 +1598,6 @@ func rowFlexMaxContent(a *Arena, id ObjectID) float32 {
 	return run
 }
 
-// hasBlockChild reports whether any direct child of id is block level. Flex
-// items with a declared basis never enter the auto-measure loop, so the flag
-// blockKids does not describe them; this answers the same question at the point
-// their subtree is re-laid out.
 func hasBlockChild(a *Arena, id ObjectID) bool {
 	for kid := a.Get(id).FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		if k := a.Get(kid); isBlock(k) {
@@ -2152,10 +1607,6 @@ func hasBlockChild(a *Arena, id ObjectID) bool {
 	return false
 }
 
-// clearInlineLaidOut drops the inline-laid-out flag down an item's subtree so a
-// re-run of the inline pass re-wraps it. It does not descend into a nested flex
-// or grid container: that container re-lays its own items, and clearing the
-// words it placed would make the outer pass allocate a second set.
 func clearInlineLaidOut(a *Arena, id ObjectID) {
 	obj := a.Get(id)
 	obj.flags &^= flagInlineLaidOut
@@ -2167,12 +1618,6 @@ func clearInlineLaidOut(a *Arena, id ObjectID) {
 	}
 }
 
-// reflowInlineWords re-wraps the word objects that flex max-content measurement
-// left on a single line into the item's final, shrunk width - the way a browser
-// re-lays out a shrunk flex item's text instead of overflowing it. It reports
-// false, leaving the caller to shift the content as before, for anything it must
-// not touch: mixed block content or unbreakable white-space. The return on
-// success is the content height of the wrapped result.
 func reflowInlineWords(a *Arena, id ObjectID, finalW, baseX, baseY float32) (float32, bool) {
 	if finalW <= 0 {
 		return 0, false
@@ -2253,9 +1698,6 @@ func reflowInlineWords(a *Arena, id ObjectID, finalW, baseX, baseY float32) (flo
 	return total, true
 }
 
-// shiftInlineContent moves the inline content of a subtree by a delta. Block
-// descendants are skipped rather than shifted: block layout positions them from
-// their parent's content box, so they already sit where they belong.
 func shiftInlineContent(a *Arena, id ObjectID, dx, dy float32) {
 	if dx == 0 && dy == 0 {
 		return
@@ -2273,15 +1715,6 @@ func shiftInlineContent(a *Arena, id ObjectID, dx, dy float32) {
 	}
 }
 
-// replacedSize reports the content size a replaced element brings with it: an
-// input control, or an image. These are drawn by the control or the decoded
-// pixels rather than laid out from text content, so their `auto` size has to
-// come from outside the box model.
-//
-// Content size, always: the caller adds the box's padding and border back, so
-// the chrome a control carries has to come from the cascade. That is what makes
-// a field's box one line of the control font plus the reference's own 1px/2px
-// padding and 2px border, instead of a height guessed here.
 func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok bool) {
 	s := obj.Style
 	if s == nil || obj.Node == nil || !obj.Node.Element() {
@@ -2291,14 +1724,6 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		return imgContentSize(a, obj, containingW)
 	}
 	if obj.Node.Data == "select" {
-		// Chromium sizes a select's border box to one line of the control font
-		// plus its 1px frame: measured 19 tall at the UA 13.3333px, 20 at 14px
-		// and 22 at 16px, so the content box is the line and 2px. The width is
-		// the widest option label plus the arrow, which nothing here can
-		// measure (the labels are display:none boxes and the metric is an
-		// average char width Goosie's font library does not read:
-		// GOOSIE-CONTROLWIDTH-001), so the 154px box the engine has always
-		// drawn survives, as 152px of content inside that frame.
 		w, h = 152, 21
 		if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
 			h = lh + 2
@@ -2371,24 +1796,12 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 	}
 	switch strings.ToLower(obj.Node.GetAttribute("type")) {
 	case "image":
-		// An image input is an image: Chromium sizes it the way it sizes an
-		// <img>, answering 13x13 for width=13 height=13 (measured 2026-11-12).
-		// The engine never fetches or paints this control's src, so the
-		// attributes are all that can reach the box (GOOSIE-IMAGEINPUT-001).
 		return imgContentSize(a, obj, containingW)
 	case "checkbox", "radio":
-		// The UA sheet gives these no border and no padding, so 13x13 is both
-		// the content box and the border box Chromium measures.
 		return 13, 13, true
 	case "range":
 		return 129, 16, true
 	case "submit", "reset", "button":
-		// A button-like input shrink-wraps its value label. Chromium has no
-		// minimum width for one: measured at the UA control font, an empty
-		// submit is 16px wide (its own 12px of padding and 4px of border and
-		// nothing else), "Go" is 33.796875px and "Submit" 57.5px. The height is
-		// one line of the control font, which the 1px/6px padding and 2px border
-		// the UA sheet carries turn into the 21px box the reference draws.
 		var text string
 		if obj.Node.HasAttribute("value") {
 			text = obj.Node.GetAttribute("value")
@@ -2409,21 +1822,6 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 		return w, h, true
 	case "", "text", "password", "email", "tel", "url", "search", "number":
 	case "date", "time", "datetime-local", "datetime", "month", "week", "color", "file":
-		// Replaced controls the engine has no picker UI for still occupy a box:
-		// the page's border and padding on them must paint, and the row they
-		// sit in must not collapse to nothing, which is what left five bands
-		// blank in testdata/render/forms/04-advanced-inputs.html. These are
-		// Chromium's content boxes, measured 2026-11-12 through
-		// getComputedStyle at the UA control font (13.3333px): date
-		// 119.328125x17.328125, time 72x20, month 149.328125x17.328125, week
-		// 141.328125x17.328125, datetime-local 179.328125x17.328125, colour
-		// swatch 44x23, and the file control's "Choose File" button and label
-		// 253x21. The reference scales every one of them with the control font
-		// - the date family answers 130x22 total at 14px where it is
-		// 124.328125x21.328125 at 13.3333px - and the numbers behind that
-		// scaling are the shadow editor's own metrics, which are not the page's
-		// (GOOSIE-DATECONTROL-001). Only the file box follows from a line: its
-		// content is the interior button, one line of lh plus its 6px of chrome.
 		switch strings.ToLower(obj.Node.GetAttribute("type")) {
 		case "date":
 			w, h = 119.328125, 17.328125
@@ -2448,12 +1846,6 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 	default:
 		return 0, 0, false
 	}
-	// A text field is 153px wide and 21px tall in Chromium at the UA control
-	// font; 145px of that width is content, the rest being the 2px border and
-	// 2px side padding the UA sheet now carries. The width follows the size
-	// attribute through an average-character metric Goosie's font library does
-	// not expose (GOOSIE-CONTROLWIDTH-001), so it stays the UA default; the
-	// height is one line of the control font, which is 15px at 13.3333px.
 	w, h = 145, 15
 	if lh, _ := runHeights(a.Metrics, s.FontSize, s.FontSlot(), s.LineHeight); lh > 0 {
 		h = lh
@@ -2461,8 +1853,6 @@ func replacedSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok 
 	return w, h, true
 }
 
-// estimateTextWidth estimates the pixel width of text using the style's font
-// metrics. Falls back to a half-em per character when metrics are unavailable.
 func estimateTextWidth(a *Arena, s *style.ComputedStyle, text string) float32 {
 	if text == "" {
 		return 0
@@ -2486,15 +1876,9 @@ func estimateTextWidth(a *Arena, s *style.ComputedStyle, text string) float32 {
 		}
 		return float32((pen + 32) >> 6)
 	}
-	// Fallback: half-em per character.
 	return float32(len(runes)) * s.FontSize / 2
 }
 
-// imgContentSize resolves an image box's content size the way CSS replaced
-// elements do: an explicit CSS length wins, then the width/height attributes,
-// then the decoded image's intrinsic size. When only one axis is pinned from an
-// attribute or the intrinsic size, the other follows the intrinsic aspect ratio
-// so an image constrained to one dimension keeps its shape.
 func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, ok bool) {
 	s := obj.Style
 	natW, natH := float32(0), float32(0)
@@ -2529,11 +1913,6 @@ func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, o
 	} else if attrH > 0 {
 		h, haveH = attrH, true
 	} else if natH > 0 && !haveW {
-		// Intrinsic height counts only when the width is intrinsic too (both
-		// auto): with a specified width and `height: auto` the ratio below
-		// derives the height, which is what keeps `width: 100%` images
-		// undistorted. Taking natH unconditionally pinned every responsive
-		// image to its natural height and shoved the page below it down.
 		h, haveH = natH, true
 	}
 
@@ -2551,11 +1930,6 @@ func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, o
 	if h < 0 {
 		h = 0
 	}
-	// Responsive images. `img { max-width: 100% }` is the single most common way
-	// a page keeps an image inside its column, and without clamping here the box
-	// keeps its intrinsic width and overflows into its neighbours. When the width
-	// is clamped and the height was derived from the image (no explicit CSS
-	// height), the height follows the aspect ratio so the picture stays undistorted.
 	if clamped := clampReplaced(w, resolveBoxMinWidth(a, s, containingW), resolveBoxMaxWidth(a, s, containingW)); clamped != w {
 		w = clamped
 		if s.Height < 0 && ratio > 0 {
@@ -2566,8 +1940,6 @@ func imgContentSize(a *Arena, obj *Object, containingW float32) (w, h float32, o
 	return w, h, true
 }
 
-// clampReplaced bounds a replaced-element dimension to its min/max, where a max
-// below 0 and a min at 0 mean "unconstrained" (the resolved-style sentinels).
 func clampReplaced(v, minW, maxW float32) float32 {
 	if minW > 0 && v < minW {
 		v = minW
@@ -2578,9 +1950,6 @@ func clampReplaced(v, minW, maxW float32) float32 {
 	return v
 }
 
-// svgContentSize resolves a root <svg>'s used size. Without width/height
-// attributes the viewBox supplies the aspect ratio and the root fills its
-// containing block, which is how an unsized icon SVG gets its size.
 func svgContentSize(obj *Object, containingW float32) (w, h float32, ok bool) {
 	w, h = 300, 150
 	attrW := attrPx(obj.Node.GetAttribute("width"))
@@ -2618,8 +1987,6 @@ func svgContentSize(obj *Object, containingW float32) (w, h float32, ok bool) {
 	return w, h, true
 }
 
-// attrPx reads a presentational length attribute as CSS pixels. A missing,
-// non-numeric, or non-positive value is 0, meaning "unspecified".
 func attrPx(v string) float32 {
 	v = strings.TrimSpace(v)
 	if v == "" {
@@ -2635,10 +2002,6 @@ func attrPx(v string) float32 {
 	return float32(f)
 }
 
-// resolveBoxSizes turns one box's declared sizes into the margins, paddings,
-// borders and content width and height the passes downstream read. containingH is
-// the height this box's percentage heights resolve against, or -1 when the
-// containing block has no definite height and CSS 2.1 §10.5 makes them auto.
 func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 	s := obj.Style
 	if s == nil {
@@ -2667,12 +2030,6 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 		}
 	}
 
-	// Margin auto: MarginAuto (-1) from the style means the CSS value was
-	// "auto". It is a share of the space the box's used width leaves on the
-	// line, which is not known until the width has been resolved and clamped,
-	// so the first pass treats it as 0 and distributeAutoMargins revisits it
-	// below. Vertical auto margins are always 0; the -1 sentinel in the style is
-	// the keyword, not a length.
 	leftAuto := s.MarginLeft == style.MarginAuto
 	rightAuto := s.MarginRight == style.MarginAuto
 
@@ -2695,7 +2052,6 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 		obj.MarginBottom = 0
 	}
 
-	// Width: -1 means auto. For block boxes, auto fills the containing block.
 	if explicitW >= 0 {
 		obj.W = explicitW
 	} else if s.Display != style.DisplayInline {
@@ -2709,9 +2065,6 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 		distributeAutoMargins(obj, leftAuto, rightAuto, containingW, innerExtra)
 	}
 
-	// Height: -1 means auto, resolved later by blockInto from children. A
-	// percentage of an indefinite parent arrives back negative for the same
-	// reason, so it falls into that same auto path.
 	heightVal := resolveBoxHeight(a, s, containingH)
 	if heightVal >= 0 {
 		if s.BoxSizing == style.BoxSizingBorderBox {
@@ -2729,20 +2082,12 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 	}
 	clampHeight(a, obj, containingH)
 
-	// If width was auto and height was definite, aspect-ratio resolves width
 	if explicitW < 0 && s.AspectRatio > 0 && obj.H > 0 && s.Display != style.DisplayBlock {
 		obj.W = obj.H * s.AspectRatio
 		clampWidth(a, obj, containingW)
 	}
 }
 
-// distributeAutoMargins gives the line an auto-width or clamped block leaves
-// over to its auto horizontal margins (CSS 2.1 §10.3.3 rule 3).
-//
-// It runs after min-width and max-width have settled the used width, because
-// §10.4 re-solves the whole equation with that clamped width: `max-width: 60rem`
-// on an auto-width body is what leaves 320px for `margin: auto` to split, which
-// is how a centered page column works.
 func distributeAutoMargins(obj *Object, leftAuto, rightAuto bool, containingW, innerExtra float32) {
 	if !leftAuto && !rightAuto {
 		return
@@ -2761,17 +2106,10 @@ func distributeAutoMargins(obj *Object, leftAuto, rightAuto bool, containingW, i
 	}
 }
 
-// centerBlockChildLead is the left offset a block child of <center> takes to sit
-// in the middle of its parent's content box, the same way `margin: 0 auto`
-// centres a fixed-width box. It is gated on the tag rather than on the
-// inherited text-align because that is what the two mean: a plain
-// `text-align: center` container centres its text, not its full-width children.
 func centerBlockChildLead(parent, kid *Object, contentW float32) float32 {
 	if parent.Node == nil || parent.Node.Data != "center" {
 		return 0
 	}
-	// A child that already carries a declared horizontal margin, or whose auto
-	// margins resolved to a share of the leftover, has been placed once.
 	if kid.MarginLeft != 0 || kid.MarginRight != 0 {
 		return 0
 	}
@@ -2783,9 +2121,6 @@ func centerBlockChildLead(parent, kid *Object, contentW float32) float32 {
 	return remaining / 2
 }
 
-// clampWidth applies min-width and max-width to a box whose width is otherwise
-// settled. Both constraints speak the same box language as width itself, so
-// under border-sizing they are measured from the border box inward.
 func clampWidth(a *Arena, obj *Object, containingW float32) {
 	s := obj.Style
 	if s == nil {
@@ -2805,8 +2140,6 @@ func clampWidth(a *Arena, obj *Object, containingW float32) {
 	if minW > 0 && obj.W < minW {
 		obj.W = minW
 	}
-	// A negative max is either the unset sentinel or a value the clamps above
-	// drove below zero; both mean the content width is zero at most.
 	if maxW >= 0 && obj.W > maxW {
 		obj.W = maxW
 	}
@@ -2815,9 +2148,6 @@ func clampWidth(a *Arena, obj *Object, containingW float32) {
 	}
 }
 
-// clampHeight applies min-height and max-height. min-height raises a box whose
-// content fell short of it; max-height shortens the box and leaves the content
-// over flowing, which is what the box's own overflow then clips.
 func clampHeight(a *Arena, obj *Object, containingH float32) {
 	s := obj.Style
 	if s == nil {
@@ -2845,8 +2175,6 @@ func clampHeight(a *Arena, obj *Object, containingH float32) {
 	}
 }
 
-// blockifiesChildren reports whether a container turns every child into a box of
-// its own, so raw inline content never needs an anonymous block to hold it.
 func blockifiesChildren(s *style.ComputedStyle) bool {
 	if s == nil {
 		return false
@@ -2858,9 +2186,6 @@ func blockifiesChildren(s *style.ComputedStyle) bool {
 	return false
 }
 
-// atomicInlineLevel reports a box that is a block formatting root but still
-// sits on a line of text: it breaks its own content into lines but not the
-// parent's, so max-content keeps measuring it in the parent's inline run.
 func atomicInlineLevel(s *style.ComputedStyle) bool {
 	if s == nil {
 		return false
@@ -2887,10 +2212,6 @@ func isBlock(obj *Object) bool {
 	return false
 }
 
-// flowsInlineContent reports whether a container has inline content of its own
-// to flow: text that renders, an inline-level element, or a forced break.
-// Whitespace-only text does not count, because between two inline-blocks it is
-// only a space and the row cursor lays that pair out correctly on its own.
 func flowsInlineContent(a *Arena, obj *Object) bool {
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
@@ -2910,9 +2231,6 @@ func flowsInlineContent(a *Arena, obj *Object) bool {
 	return false
 }
 
-// holdsBlockContent reports whether an inline-level box has block-level content
-// below it. CSS splits such a box around that content, leaving a block-level
-// fragment where the inline box used to be, so block flow has to give it a slot.
 func holdsBlockContent(a *Arena, id ObjectID) bool {
 	obj := a.Get(id)
 	if obj.Node == nil || !obj.Node.Element() || isBlock(obj) {
@@ -2930,25 +2248,14 @@ func holdsBlockContent(a *Arena, id ObjectID) bool {
 	return false
 }
 
-// isOutOfFlow reports the positions that take a box out of its parent's flow.
-// The positioning pass places such a box against its containing block instead,
-// so it contributes neither to the container's height nor to its collapsing.
 func isOutOfFlow(s *style.ComputedStyle) bool {
 	return s.Position == style.PositionAbsolute || s.Position == style.PositionFixed
 }
 
-// isFlowFloat reports a box thrown to one side of its container. A float is out
-// of the block flow - it takes no vertical slot - but unlike an absolutely
-// positioned box it stays in the document, so it still paints where the block
-// pass puts it.
 func isFlowFloat(s *style.ComputedStyle) bool {
 	return s != nil && (s.Float == style.FloatLeft || s.Float == style.FloatRight)
 }
 
-// startsNewFC reports whether obj is a box a descendant's margin cannot collapse
-// through. Only a block-level box in the normal flow that does not clip absorbs a
-// child's margin into its own edge, so flex and grid items, inline-blocks, table
-// parts, and anything with a visible-elsewhere overflow all stop the chain.
 func startsNewFC(a *Arena, obj *Object) bool {
 	s := obj.Style
 	if s == nil {
@@ -2974,15 +2281,8 @@ func startsNewFC(a *Arena, obj *Object) bool {
 	return false
 }
 
-// edgeDeclared reports whether a box edge is there at all. A carry walk reaches
-// descendants block layout has not resolved yet, and a percentage padding is not
-// the zero its box still holds: it has to count as an edge that stops a margin,
-// because the width it resolves against is not known at this point either.
 func edgeDeclared(v float32) bool { return v > 0 || v <= -2 }
 
-// collapsesThroughTop reports whether obj's first child's top margin reaches all
-// the way to obj's own top edge, which needs a new formatting context to be
-// absent and the top edge to carry no border or padding.
 func collapsesThroughTop(a *Arena, obj *Object) bool {
 	if obj.Style == nil || startsNewFC(a, obj) {
 		return false
@@ -2990,9 +2290,6 @@ func collapsesThroughTop(a *Arena, obj *Object) bool {
 	return !edgeDeclared(obj.Style.BorderTopWidth) && !edgeDeclared(obj.Style.PaddingTop)
 }
 
-// collapsesThroughBottom is the mirror image, with one extra condition: a box of
-// a definite height keeps its last child's margin inside as content that
-// overflows, so nothing carries out of the bottom edge.
 func collapsesThroughBottom(a *Arena, obj *Object) bool {
 	if obj.Style == nil || startsNewFC(a, obj) {
 		return false
@@ -3001,12 +2298,6 @@ func collapsesThroughBottom(a *Arena, obj *Object) bool {
 		!edgeDeclared(obj.Style.BorderBottomWidth) && !edgeDeclared(obj.Style.PaddingBottom)
 }
 
-// firstCollapsingChild is obj's first child that takes a vertical slot of its
-// own, when that child is a block whose top margin can collapse with the
-// container, and 0 otherwise. Whitespace between blocks generates no box and is
-// stepped over; real inline content ends the search without a match, because it
-// gets an anonymous block of its own and an anonymous block has no margin to
-// carry.
 func firstCollapsingChild(a *Arena, obj *Object) ObjectID {
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
@@ -3021,7 +2312,6 @@ func firstCollapsingChild(a *Arena, obj *Object) ObjectID {
 	return 0
 }
 
-// lastCollapsingChild is firstCollapsingChild read from the other end.
 func lastCollapsingChild(a *Arena, obj *Object) ObjectID {
 	var last ObjectID
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
@@ -3037,9 +2327,6 @@ func lastCollapsingChild(a *Arena, obj *Object) ObjectID {
 	return last
 }
 
-// outOfFlowForCollapse reports the children that take no part in their
-// container's flow, and so cannot collapse with it. display:none generates no box
-// at all, which the caller treats the same way.
 func outOfFlowForCollapse(k *Object) bool {
 	if k.Style == nil || k.Style.Display == style.DisplayNone {
 		return true
@@ -3047,12 +2334,6 @@ func outOfFlowForCollapse(k *Object) bool {
 	return isOutOfFlow(k.Style)
 }
 
-// carryMargin reads a vertical margin straight off the style rather than off the
-// box, because a carry walk looks at descendants that resolveBoxSizes has not
-// visited yet. `auto` and the percentage sentinel are not lengths: an auto
-// vertical margin is zero, and a percentage one is not supported yet. Negative
-// margins share the sentinel's encoding, so they read as zero here too and only
-// take effect where the box itself is placed.
 func carryMargin(v float32) float32 {
 	if v <= style.MarginAuto {
 		return 0
@@ -3060,11 +2341,6 @@ func carryMargin(v float32) float32 {
 	return v
 }
 
-// carryTop is the margin that ends up above id's border box once its first
-// child's has collapsed up through a transparent top edge. Containers place a box
-// with this instead of with the box's own margin-top, which is what stops a
-// heading's margin from being added to its grandparent's previous sibling rather
-// than collapsing with it.
 func carryTop(a *Arena, id ObjectID) float32 {
 	obj := a.Get(id)
 	if obj.Style == nil {
@@ -3080,9 +2356,6 @@ func carryTop(a *Arena, id ObjectID) float32 {
 	return m
 }
 
-// carryBottom is carryTop for the bottom edge: the margin a box presents to its
-// next sibling, which is its own once the last child's has collapsed down
-// through it.
 func carryBottom(a *Arena, id ObjectID) float32 {
 	obj := a.Get(id)
 	if obj.Style == nil {
@@ -3122,9 +2395,6 @@ func minF(a, b float32) float32 {
 	return b
 }
 
-// resolvePctLength resolves a style length value that may be a percentage
-// sentinel (encoded as -2-pct) against the containing width. Non-percentage
-// values pass through unchanged.
 func resolvePctLength(val, containingW float32) float32 {
 	if isPctLength(val) {
 		pct := -2 - val
@@ -3133,13 +2403,6 @@ func resolvePctLength(val, containingW float32) float32 {
 	return val
 }
 
-// The resolveBox* helpers resolve one box size against the containing length
-// the property speaks (width for widths, height for heights). A deferred
-// calc-with-percentage evaluates first, with the containing length as its
-// percentage base and the arena viewport for vw/vh terms; anything else falls
-// through to the plain percentage/length path. An unanswerable deferred value
-// reports -1, the same auto/unset sentinel the float carries while deferred,
-// so every existing auto-path keeps working.
 func resolveBoxWidth(a *Arena, s *style.ComputedStyle, containingW float32) float32 {
 	if s == nil {
 		return -1
@@ -3218,17 +2481,10 @@ func resolveBoxMaxHeight(a *Arena, s *style.ComputedStyle, containingH float32) 
 	return resolvePctLength(s.MaxHeight, containingH)
 }
 
-// isPctLength reports whether a style length carries the percentage sentinel
-// rather than a length or the -1 auto keyword.
 func isPctLength(val float32) bool {
 	return val <= -2 && val >= -102
 }
 
-// clearanceFloor returns the content-relative Y a clearing block's
-// border-top edge must reach: the deepest float bottom on the cleared
-// sides, or 0 when clearing is off. Callers compare against the
-// hypothetical position (cursor plus collapsed top margin) and shift down
-// only on overlap.
 func clearanceFloor(s *style.ComputedStyle, floatBottomL, floatBottomR float32) float32 {
 	if s == nil {
 		return 0

@@ -8,12 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// These tests pin the geometry the painter and the browser's pointer handling
-// share. They are the reason VideoControlLayout is a function rather than a few
-// expressions inside paintVideo: a control whose ink and whose click target are
-// computed in two places drift apart the first time either is edited, and the
-// failure is a button a user can see and cannot press.
-
 func TestVideoControlLayoutFitsTheBox(t *testing.T) {
 	box := frame.Rect4(100, 50, 420, 230)
 	c := paint.VideoControlLayout(box, 1)
@@ -37,9 +31,6 @@ func TestVideoControlLayoutFitsTheBox(t *testing.T) {
 	}
 }
 
-// TestVideoControlLayoutScalesWithDPR pins that the bar is laid out in device
-// pixels: a Retina video must get a Retina-sized control bar, or the buttons are
-// half the size the pointer expects.
 func TestVideoControlLayoutScalesWithDPR(t *testing.T) {
 	at1 := paint.VideoControlLayout(frame.Rect4(0, 0, 320, 180), 1)
 	at2 := paint.VideoControlLayout(frame.Rect4(0, 0, 640, 360), 2)
@@ -54,14 +45,11 @@ func TestVideoControlLayoutScalesWithDPR(t *testing.T) {
 	}
 }
 
-// TestVideoControlLayoutRefusesABoxTooSmallToUse pins that a cramped element gets
-// no bar at all rather than a bar whose parts overlap. A seek track two pixels
-// wide is worse than none: it is a target the user aims at and misses.
 func TestVideoControlLayoutRefusesABoxTooSmallToUse(t *testing.T) {
 	for _, box := range []frame.Rect{
-		frame.Rect4(0, 0, 60, 180),  // too narrow for the bar's own insets
-		frame.Rect4(0, 0, 320, 0),   // no height
-		frame.Rect4(0, 0, 320, -20), // inverted
+		frame.Rect4(0, 0, 60, 180),
+		frame.Rect4(0, 0, 320, 0),
+		frame.Rect4(0, 0, 320, -20),
 	} {
 		if c := paint.VideoControlLayout(box, 1); c.Has {
 			t.Fatalf("box %v produced a control bar %+v", box, c)
@@ -69,9 +57,6 @@ func TestVideoControlLayoutRefusesABoxTooSmallToUse(t *testing.T) {
 	}
 }
 
-// TestVideoControlsAtMatchesThePaintedRects pins the hit test against the
-// geometry, including the gaps: the bar's empty space is not a control, and
-// neither is anywhere outside it.
 func TestVideoControlsAtMatchesThePaintedRects(t *testing.T) {
 	c := paint.VideoControlLayout(frame.Rect4(100, 50, 420, 230), 1)
 	if !c.Has {
@@ -100,9 +85,6 @@ func TestVideoControlsAtMatchesThePaintedRects(t *testing.T) {
 	}
 }
 
-// TestVideoTrackFractionClamps pins that a pointer which drifts past either end
-// while the button is held seeks to the beginning or the end rather than to a
-// negative time or past the duration.
 func TestVideoTrackFractionClamps(t *testing.T) {
 	c := paint.VideoControlLayout(frame.Rect4(100, 50, 420, 230), 1)
 	if !c.Has || c.Track.Empty() {
@@ -123,13 +105,11 @@ func TestVideoTrackFractionClamps(t *testing.T) {
 			t.Errorf("TrackFraction(%d) = %v, want %v", tc.x, got, tc.want)
 		}
 	}
-	// A layout with no track has nowhere to seek, and must not divide by zero.
 	if got := (paint.VideoControls{}).TrackFraction(10); got != 0 {
 		t.Fatalf("TrackFraction on an empty layout = %v, want 0", got)
 	}
 }
 
-// TestVideoTimeLabel pins the clock the bar and the accessibility tree both read.
 func TestVideoTimeLabel(t *testing.T) {
 	for _, tc := range []struct {
 		in   float64
@@ -146,8 +126,6 @@ func TestVideoTimeLabel(t *testing.T) {
 			t.Errorf("VideoTimeLabel(%v) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
-	// An unknown duration and a negative position both read as the start rather
-	// than as a NaN, which is what a page shows a user before metadata arrives.
 	for _, in := range []float64{math.NaN(), -3, math.Inf(1)} {
 		if got := paint.VideoTimeLabel(in); got != "0:00" {
 			t.Errorf("VideoTimeLabel(%v) = %q, want 0:00", in, got)

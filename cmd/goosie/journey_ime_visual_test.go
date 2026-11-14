@@ -1,14 +1,5 @@
 package main
 
-// BR-111 visual journey: what a live Vietnamese composition inks on screen.
-//
-// The catalog row is about what the user sees while typing, and the two ways it
-// breaks are pixel failures: an empty editor that previews nothing until the
-// commit (the word only appears when the candidate window closes), and a preview
-// drawn on top of the value that already holds it (the word as "tiếngtiếng").
-// Both are measured here from the frame the browser presents, against the same
-// fixture Chromium was measured with by scripts/verify-br111-ime-visual.js.
-
 import (
 	"fmt"
 	"image/png"
@@ -22,9 +13,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// inkRegion counts the dark pixels inside one element's content box: the AX
-// rect inset by 2px so neither the 1px border nor the neighbouring box is
-// counted, the same rule the Chromium measurement uses.
 type inkRegion struct {
 	dark, columns int
 	x0, x1        int
@@ -84,8 +72,6 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 	pageURL := server.URL + "/ime"
 	browser.navigateViaAddressBar(t, pageURL)
 	browser.waitFor(t, "the fixture document is loaded", func() bool {
-		// The tree can publish a bare document root mid-reflow, so "non-empty"
-		// is not the loaded state; the node the test measures is.
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "i")
 		return browser.activeURL() == pageURL && ok
 	})
@@ -95,10 +81,6 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 	if !okI {
 		t.Fatalf("no accessibility node for #i; %s", browser.diagnostics())
 	}
-	// The fixture's #c is the only other editable and Goosie's accessibility
-	// tree carries no node for an empty contenteditable div, so its box comes
-	// from the stylesheet both engines load: #i{top:20;height:24} and
-	// #c{top:70;height:44}, both left:20;width:220.
 	editor := ax.Node{
 		X0: input.X0, Y0: input.Y0 + (70 - 20),
 		X1: input.X0 + 220, Y1: input.Y0 + (70 - 20) + 44,
@@ -107,9 +89,6 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 	shoot := func() {
 		t.Helper()
 		browser.waitFor(t, "a presented frame with tiles idle", func() bool {
-			// A plan-less tick commits a zero tally and presents nothing, so
-			// tile-idle alone can pass before the window has ever shown a
-			// frame; WritePNG needs one.
 			last := browser.f.loop.Stats().Last
 			return browser.window.Stats().Presents > 0 && last.Needed == 0 && last.PaintingBytes == 0
 		})
@@ -117,8 +96,6 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 			t.Fatalf("write presented frame: %v", err)
 		}
 	}
-	// Inset by 2px: a border box at x0..x1 with a 1px border leaves x0+2 the
-	// first interior column, and the same on every side.
 	measure := func(x0, y0, x1, y1 int) inkRegion {
 		return frameInk(t, snap, x0+2, y0+2, x1-1, y1-1)
 	}
@@ -143,11 +120,6 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 			sess := browser.f.tabMgr.Active().Session()
 			return sess != nil && sess.Marked() == steps[len(steps)-1]
 		})
-		// A composition that inserts a node is a DOM mutation, so the host
-		// defers its reflow to the pump turn that re-resolves styles for the
-		// new node. Waiting on pixels is the point: the user has to see the
-		// candidate before choosing it, and no internals are read from here
-		// while the loop owns the arena.
 		browser.waitFor(t, "the open composition is inked", func() bool {
 			if err := browser.window.WritePNG(snap); err != nil {
 				return false
@@ -172,12 +144,6 @@ func TestJourneyIMECompositionInksThePreviewOnce(t *testing.T) {
 	t.Logf("measured goosie ink  #i marked %+v committed %+v | #c marked %+v committed %+v",
 		iMarked, iCommitted, cMarked, cCommitted)
 
-	// Chromium 153, same fixture and the same inset rule, dpr 1: one committed
-	// copy of "tiếng" inks 27 columns spanning x=23..56 inside #i and 26 columns
-	// spanning x=22..54 inside #c. Goosie's own metrics differ by the engine-wide
-	// font difference, so the comparison is the span of ink rather than its
-	// pixels, and the bounds below are that difference plus the room a second,
-	// overlaid copy of the word would need (it doubles the span).
 	for _, c := range []struct {
 		what             string
 		marked, commited inkRegion

@@ -6,11 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// CSS Color 4 lets rgb()/hsl() take an alpha and be written space-separated
-// (`rgb(0 255 0 / 50%)`). Only the comma form parsed, and a value that fails
-// ParseColor discards the whole declaration - so a space-separated
-// `background: rgb(0 0 255 / 50%)` painted nothing while its text color still
-// applied, which reads as a blank band rather than a broken color.
 func TestParseColorColor4Syntax(t *testing.T) {
 	tests := []struct {
 		in string
@@ -46,8 +41,6 @@ func TestParseColorColor4Syntax(t *testing.T) {
 	}
 }
 
-// Malformed argument lists must stay unparseable: a permissive color parser
-// would turn an invalid declaration into an arbitrary painted color.
 func TestParseColorRejectsMalformedFunctions(t *testing.T) {
 	for _, in := range []string{
 		"rgb(255 0)",

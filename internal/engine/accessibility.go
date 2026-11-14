@@ -10,16 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// AccessibilityTree derives the document's accessibility tree from the layout
-// arena: one document node whose children mirror the laid-out elements. Links,
-// buttons, images, and text fields become their own nodes; a block whose
-// content is pure text becomes static text; everything else becomes a group.
-// Bounds are document coordinates in CSS pixels, matching the last Reflow. A
-// nil arena yields nil.
-//
-// The tree is built under opMu: it reads the arena and normalizes the live
-// selectedness of every select, both pipeline state shared with the pump and
-// with host queries arriving on another goroutine.
 func (s *Session) AccessibilityTree() []ax.Node {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -54,9 +44,6 @@ func (s *Session) accessibilityTreeLocked() []ax.Node {
 	return []ax.Node{doc}
 }
 
-// appendValidationBubbleAX exposes the blocked-submission message as static
-// text anchored to the offending control, so assistive technology and
-// automation can read the same constraint error the bubble paints.
 func (s *Session) appendValidationBubbleAX(doc *ax.Node) {
 	if s.validationAnchor == nil || s.validationMessage == "" {
 		return
@@ -184,9 +171,6 @@ func findAccessibilityNode(root *ax.Node, id uint64) *ax.Node {
 	return nil
 }
 
-// AccessibilityInfoForNode returns the current tree role/name for a DOM node.
-// The node identifier is carried by AX nodes so automation clients can query
-// dynamically created elements without relying on author-provided IDs.
 func (s *Session) AccessibilityInfoForNode(node *dom.Node) (role, label string, ok bool) {
 	if s == nil || node == nil {
 		return "", "", false
@@ -218,24 +202,17 @@ type axBuilder struct {
 	focused *dom.Node
 }
 
-// axBubble is the text a box contributes to its nearest emitted ancestor, with
-// the document-space rect that text occupies.
 type axBubble struct {
 	text           string
 	x0, y0, x1, y1 float32
 }
 
-// visit returns the accessible node the box at id contributes, or nil when the
-// box only carries text - word boxes and inline text bearers - plus that text
-// so it can join the nearest emitted ancestor.
 func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 	if id == 0 || int(id) >= len(b.objs) {
 		return nil, axBubble{}
 	}
 	obj := &b.objs[id]
 	if obj.Node == nil {
-		// Anonymous box layout invented to hold inline content: a single text
-		// run passes through as text, anything more structured stays a group.
 		kids, _ := b.collect(obj)
 		if len(kids) == 1 && kids[0].Role == ax.RoleStaticText {
 			k := kids[0]
@@ -322,8 +299,6 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		if !visible {
 			return nil, axBubble{text: label, x0: x0, y0: y0, x1: x1, y1: y1}
 		}
-		// A heading names its whole subtree, including text inside links and
-		// spans that emit their own nodes.
 		if text := optionTextValue(n.TextContent()); text != "" {
 			label = text
 		}
@@ -370,30 +345,11 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		}
 		selected := SelectedOption(n)
 		controlDisabled := dom.IsFormControlDisabled(n)
-		// Iterate dom.SelectOptions because an <optgroup>'s options belong to the
-		// control: Chromium flattens them into .options and nests them under a
-		// group in the tree (OPTGROUP and OPTGROUP-AX lines of
-		// scripts/verify-br101-option-dom.js).
 		options := make([]ax.Node, 0)
 		groupIdx := make(map[*dom.Node]int)
 		for _, option := range dom.SelectOptions(n) {
 			node := ax.Node{
 				Role: ax.RoleOption, RoleName: ax.RoleOption.String(), DOMNodeID: uint64(option.ID),
-				// The name Chromium announces, not the display string: a label
-				// content attribute names the option, a value attribute never
-				// does, and the label keeps one space at each edge where the
-				// control's value drops them (the two spellings of
-				// scripts/verify-optionax-surfaces.js section 1).
-				//
-				// No value: scripts/verify-optionax-roles.js reads
-				// "option nodes carry no value" in all seventeen of its cases,
-				// including the ones whose value attribute differs from the
-				// text. The submitted value stays in the form.
-				//
-				// Selected is the option's own selectedness, so a multiple
-				// control marks every selection it holds - measured
-				// [{Aye,true},{Bee,true},{Cee,false}] for two authored
-				// selections, which one selected option cannot express.
 				Label:    option.OptionAccessibleName(),
 				Selected: option.OptionSelected(), Disabled: option.OptionDisabled(),
 				Props: optionAXProps(option, controlDisabled),
@@ -416,15 +372,6 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			}
 			options[idx].Children = append(options[idx].Children, node)
 		}
-		// The control's name belongs to its author - aria-label, a label
-		// element, or a wrapped label - and never to the selected option,
-		// which is where this engine used to look.
-		// scripts/verify-optionax-surfaces.js section 2 measures
-		// {"role":"combobox","name":"","value":"Alpha Beta"} for
-		// <select><option value="v1" selected>Alpha Beta</option></select> with
-		// label[for] and aria-label cases naming the control instead, so the
-		// display string reaches assistive tech as the value while the form
-		// value stays in the form.
 		selectLabel := strings.TrimSpace(n.GetAttribute("aria-label"))
 		if selectLabel == "" {
 			selectLabel = b.associatedLabel(n)
@@ -432,12 +379,6 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		if selectLabel == "" {
 			selectLabel = strings.TrimSpace(label)
 		}
-		// Only the closed box spells its selection out. The role and the value
-		// answer are the same question - the used display size - and neither is
-		// `multiple`: scripts/verify-optionax-roles.js reads
-		// {"role":"listbox","name":""} with no value for size="2" and for
-		// multiple, and {"role":"combobox","value":"Mm One"} for the multiple
-		// control whose used size is 1.
 		listbox := dom.SelectAnnouncesListbox(n)
 		display := ""
 		if !listbox {
@@ -454,12 +395,6 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		combo := emit(role, selectLabel, display, "")
 		combo.Disabled = controlDisabled
 		combo.Children = options
-		// Which option the control names as its activedescendant: an open list
-		// answers one whenever something is selected - the first selection, and it
-		// keeps it even while disabled - while a closed box answers one only while
-		// it holds focus, and then names whatever it displays. With nothing
-		// selected, measured open-nothing-selected and focused-closed-all-disabled,
-		// no node answers one at all.
 		activeDescendant := selected
 		if !listbox && !combo.Focused {
 			activeDescendant = nil
@@ -468,9 +403,6 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		return combo, axBubble{}
 	}
 
-	// Generic element: an inline text bearer's words join the nearest block
-	// ancestor; a block keeps its own group even when it holds only text, so
-	// containers like body and paragraphs survive as structure.
 	hasKids := false
 	for _, k := range kids {
 		if k.Role != ax.RoleStaticText {
@@ -487,18 +419,6 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 	return emit(ax.RoleGroup, "", "", ""), axBubble{}
 }
 
-// optionAXProps answers the property list Chromium reports for an option node.
-// It is one pruning rule rather than a set of independent flags
-// (scripts/verify-optionax-props.js): `focusable` is present exactly when the
-// option itself is enabled, `selected` exactly when neither the option nor its
-// control is disabled, and `disabled` when either of them is. A disabled option
-// therefore answers {disabled:true} alone - not even the `selected` of the option
-// that IS the selection (open-option-disabled) - while an enabled option inside a
-// disabled control answers {disabled:true, focusable:true}, keeping focusable and
-// losing only selected (closed-disabled, open-disabled).
-//
-// The pruning is an accessibility answer, not a DOM change: Node.Selected keeps
-// the option's own selectedness, which is what the platform shims read today.
 func optionAXProps(option *dom.Node, controlDisabled bool) []ax.Prop {
 	optionDisabled := option.OptionDisabled()
 	var props []ax.Prop
@@ -514,16 +434,6 @@ func optionAXProps(option *dom.Node, controlDisabled bool) []ax.Prop {
 	return props
 }
 
-// selectAXProps answers the property list Chromium reports for a select control.
-// The two shapes answer disjoint sets, and which shape a control is was settled by
-// the previous slice (dom.SelectAnnouncesListbox): a closed box reports expanded
-// and hasPopup and never multiselectable, orientation or required - measured
-// closed-required-empty, which fails its constraint and still answers no required
-// key - while an open list reports the opposite set and always spells both
-// multiselectable and required out, false included.
-//
-// A disabled control loses `focusable` and keeps every other key of its shape,
-// including the activedescendant of an open list (open-disabled).
 func selectAXProps(n *dom.Node, listbox, disabled, focused bool, activeDescendant *dom.Node) []ax.Prop {
 	var props []ax.Prop
 	if disabled {
@@ -545,9 +455,6 @@ func selectAXProps(n *dom.Node, listbox, disabled, focused bool, activeDescendan
 	} else {
 		props = append(props, ax.BoolProp("expanded", false))
 		props = append(props, ax.StringProp("hasPopup", ariaHasPopupToken(n)))
-		// A closed box has no orientation of its own - measured closed-enabled,
-		// which answers no orientation key at all - so only an authored token can
-		// add one, and an unusable token adds nothing (closed-orientation-bogus).
 		if orientation := ariaOrientationToken(n, ""); orientation != "" {
 			props = append(props, ax.StringProp("orientation", orientation))
 		}
@@ -558,14 +465,6 @@ func selectAXProps(n *dom.Node, listbox, disabled, focused bool, activeDescendan
 	return props
 }
 
-// selectInvalidProp answers the `invalid` property, which is a STRING rather than
-// a boolean: measured invalid:"false" for a control whose constraint holds and
-// invalid:"true" for one whose constraint fails. aria-invalid overrides the
-// constraint, with two measured surprises - an EMPTY aria-invalid reads as absent
-// rather than as "false", so the same fixture answers "true" when the constraint
-// fails (closed-aria-invalid-empty) and "false" when it holds
-// (closed-aria-invalid-empty-valid) - and the two tokens that mean neither true
-// nor false drop the key entirely (open-aria-invalid-grammar, -spelling).
 func selectInvalidProp(n *dom.Node) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(n.GetAttribute("aria-invalid"))) {
 	case "":
@@ -582,18 +481,10 @@ func selectInvalidProp(n *dom.Node) (string, bool) {
 	}
 }
 
-// selectConstraintFails reports the constraint state the `invalid` property
-// answers for a select: an error set by script, or a required control whose value
-// is missing. aria-required does not participate - measured open-aria-required,
-// which answers required:true and invalid:"false" at the same time.
 func selectConstraintFails(n *dom.Node) bool {
 	return n.CustomValidityMessage != "" || dom.SelectValueMissing(n)
 }
 
-// ariaHasPopupToken answers the `hasPopup` property of a closed select. Only
-// ARIA's popup-kind tokens replace the native "menu": measured dialog, listbox,
-// tree and grid verbatim, while "true", "false" and an unusable token all leave
-// the answer at "menu" (closed-haspopup-true, -false, -bogus).
 func ariaHasPopupToken(n *dom.Node) string {
 	token := strings.ToLower(strings.TrimSpace(n.GetAttribute("aria-haspopup")))
 	switch token {
@@ -603,10 +494,6 @@ func ariaHasPopupToken(n *dom.Node) string {
 	return "menu"
 }
 
-// ariaOrientationToken answers the `orientation` property: the authored token when
-// it is one of the two ARIA orientations, otherwise the fallback the shape has of
-// its own - "vertical" for an open list, which keeps that default even for an
-// unusable token (open-orientation-bogus), and "" for a closed box, which has none.
 func ariaOrientationToken(n *dom.Node, fallback string) string {
 	token := strings.ToLower(strings.TrimSpace(n.GetAttribute("aria-orientation")))
 	switch token {
@@ -616,10 +503,6 @@ func ariaOrientationToken(n *dom.Node, fallback string) string {
 	return fallback
 }
 
-// ariaSaysTrue reports whether an aria attribute answers "true". `required` is a
-// disjunction of the content attribute and aria-required rather than an override:
-// measured open-aria-required-false-over-attr, where aria-required="false" leaves
-// the content attribute's required:true standing.
 func ariaSaysTrue(n *dom.Node, name string) bool {
 	return strings.EqualFold(strings.TrimSpace(n.GetAttribute(name)), "true")
 }
@@ -652,10 +535,6 @@ func elementInternalsAXRole(role string) (ax.Role, string, bool) {
 		case "option":
 			return ax.RoleOption, token, true
 		case "listbox":
-			// scripts/verify-optionax-roles.js answers an authored
-			// role="listbox" with {"role":"listbox","name":"Authored listbox"} and
-			// its option as a child, so the token resolves to the same role an open
-			// select gets rather than a group.
 			return ax.RoleListBox, token, true
 		case "heading":
 			return ax.RoleHeading, token, true
@@ -700,9 +579,6 @@ func (b *axBuilder) associatedLabel(n *dom.Node) string {
 	return ""
 }
 
-// collect walks obj's children in document order and returns the accessible
-// nodes they contribute with runs of bare text merged into static-text nodes
-// where they occurred, plus the bare text alone for labelling widgets.
 func (b *axBuilder) collect(obj *layout.Object) ([]ax.Node, string) {
 	var kids []ax.Node
 	var words []string
@@ -754,9 +630,6 @@ func (b *axBuilder) collect(obj *layout.Object) ([]ax.Node, string) {
 	return kids, strings.Join(words, " ")
 }
 
-// bounds returns the box's border rect, falling back to the union of the
-// children's rects: inline boxes carry no geometry of their own - their words
-// do - and so do unsized roots.
 func (b *axBuilder) bounds(obj *layout.Object, kids []ax.Node) (x0, y0, x1, y1 float32) {
 	x0, y0, x1, y1 = obj.BorderRect()
 	if x0 < x1 && y0 < y1 {
@@ -786,8 +659,6 @@ func (b *axBuilder) bounds(obj *layout.Object, kids []ax.Node) (x0, y0, x1, y1 f
 	return
 }
 
-// inlineBox reports whether the box is display:inline, whose text bubbles to
-// the nearest block-level ancestor instead of becoming its own static text.
 func (b *axBuilder) inlineBox(obj *layout.Object) bool {
 	return obj.Style != nil && obj.Style.Display == style.DisplayInline
 }

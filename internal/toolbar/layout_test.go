@@ -10,10 +10,6 @@ func rectsOverlap(a, b frame.Rect) bool {
 	return a.X0 < b.X1 && b.X0 < a.X1 && a.Y0 < b.Y1 && b.Y0 < a.Y1
 }
 
-// TestComputeLayoutNeverOverlapsOrInverts sweeps widths that break the old
-// fixed arithmetic (address inverts < 152, downloads overlaps < 144) and asserts
-// the responsive contract: menu always present, address non-inverted with a
-// minimum width, no pairwise overlap, everything on-screen.
 func TestComputeLayoutNeverOverlapsOrInverts(t *testing.T) {
 	for _, w := range []int32{120, 144, 152, 200, 320, 640, 1280} {
 		l := ComputeLayout(w)
@@ -59,8 +55,6 @@ func rectList(l Layout) []frame.Rect {
 	return out
 }
 
-// TestComputeLayoutKeepsAllControlsAtNormalWidth pins the desktop layout so the
-// responsive change does not regress the common case.
 func TestComputeLayoutKeepsAllControlsAtNormalWidth(t *testing.T) {
 	l := ComputeLayout(800)
 	for _, b := range []Button{ButtonBack, ButtonForward, ButtonReload, ButtonDownloads, ButtonMenu} {
@@ -76,8 +70,6 @@ func TestComputeLayoutKeepsAllControlsAtNormalWidth(t *testing.T) {
 	}
 }
 
-// TestComputeLayoutCollapsesIntoMenu verifies the overflow priority: Downloads
-// hides before the left cluster, then Reload, Forward, Back.
 func TestComputeLayoutCollapsesIntoMenu(t *testing.T) {
 	l := ComputeLayout(120)
 	for _, b := range []Button{ButtonBack, ButtonForward, ButtonReload, ButtonDownloads} {

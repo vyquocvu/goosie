@@ -10,7 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// png7x9DataURL builds the fixture pixel source the retention tests assign.
 func png7x9DataURL(t *testing.T) string {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 7, 9))
@@ -24,11 +23,6 @@ func png7x9DataURL(t *testing.T) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
-// The memory-only half of BR-252 (GOOSIE-LAZYIMG-001): a detached Image still
-// decodes, reports its intrinsic size and is charged to the document budget,
-// but is never retained for paint. A node with no box has no pixel oracle, so
-// this internal test inspects the retained/pending tables directly after one
-// pump, and checks that dropping the result refunded nothing.
 func TestDetachedScriptImageIsNeverRetained(t *testing.T) {
 	src := png7x9DataURL(t)
 
@@ -47,13 +41,10 @@ detached.src = '` + src + `';
 	}
 	defer s.Close()
 
-	// The detached element decoded and reports its intrinsic size.
 	if got, err := rt.Evaluate(`detached.naturalWidth + 'x' + detached.naturalHeight`); err != nil || got != "7x9" {
 		t.Fatalf("detached natural size = %q (err %v), want 7x9 (a detached Image still decodes and reports)", got, err)
 	}
 
-	// One pump reconciles the recorded result. The node is not connected, so
-	// the pixels are dropped instead of retained.
 	s.PumpJS(800)
 
 	s.imgMu.Lock()
@@ -65,8 +56,6 @@ detached.src = '` + src + `';
 		t.Errorf("detached Image: retained=%d pending=%d painted=%d, want 0/0/0 (never retained for paint)", retained, pending, painted)
 	}
 
-	// The drop refunds nothing: the decode stays charged to the document, so
-	// a src-cycling page cannot decode unbounded bytes.
 	s.imgReservation.mu.Lock()
 	reserved := s.imgReservation.reserved
 	s.imgReservation.mu.Unlock()
@@ -75,11 +64,6 @@ detached.src = '` + src + `';
 	}
 }
 
-// The release rule of TASK-057 §3.3: a retained entry that is dropped (here
-// the node is removed from the document) keeps its decoded-pixel charge. A
-// refund would let a src-cycling page decode unbounded bytes under a fixed
-// per-document ceiling, so this is a memory-only invariant with no pixel
-// oracle and is checked directly against the session tables.
 func TestScriptImageDropKeepsPixelReservation(t *testing.T) {
 	src := png7x9DataURL(t)
 

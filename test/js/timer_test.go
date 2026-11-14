@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// TestSetTimeoutFiresAfterDelay verifies that a setTimeout callback
-// executes when Tick is called after the delay has elapsed. The callback
-// sets a global variable; we read it back through the host API.
 func TestSetTimeoutFiresAfterDelay(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -17,14 +14,12 @@ func TestSetTimeoutFiresAfterDelay(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Before Tick the callback must not have run: setTimeout is
-	// asynchronous, it does not execute inline.
 	v, _ := r.Global("fired")
 	if v.Bool {
 		t.Fatal("setTimeout callback fired synchronously during Run, want it to wait for Tick")
 	}
 
-	time.Sleep(5 * time.Millisecond) // ensure the 0ms delay has elapsed
+	time.Sleep(5 * time.Millisecond)
 	r.Tick()
 
 	v, ok := r.Global("fired")
@@ -36,8 +31,6 @@ func TestSetTimeoutFiresAfterDelay(t *testing.T) {
 	}
 }
 
-// TestSetTimeoutWithDelay verifies that a timer with a real delay does
-// not fire before the delay has elapsed, and does fire after.
 func TestSetTimeoutWithDelay(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -45,7 +38,6 @@ func TestSetTimeoutWithDelay(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Tick immediately: the 50ms delay has not elapsed.
 	r.Tick()
 	v, _ := r.Global("fired")
 	if v.Bool {
@@ -61,8 +53,6 @@ func TestSetTimeoutWithDelay(t *testing.T) {
 	}
 }
 
-// TestClearTimeoutPreventsFiring verifies that clearTimeout cancels a
-// pending setTimeout so its callback never runs.
 func TestClearTimeoutPreventsFiring(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -83,8 +73,6 @@ func TestClearTimeoutPreventsFiring(t *testing.T) {
 	}
 }
 
-// TestSetIntervalFiresRepeatedly verifies that setInterval invokes its
-// callback on every Tick once the delay has elapsed, not just once.
 func TestSetIntervalFiresRepeatedly(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -113,8 +101,6 @@ func TestSetIntervalFiresRepeatedly(t *testing.T) {
 	}
 }
 
-// TestClearIntervalStopsRepetition verifies that clearInterval prevents
-// further invocations of a repeating timer.
 func TestClearIntervalStopsRepetition(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -134,7 +120,6 @@ func TestClearIntervalStopsRepetition(t *testing.T) {
 		t.Fatalf("count = %v after first Tick, want >= 1", first)
 	}
 
-	// Cancel the interval.
 	if err := r.Run(`clearInterval(id);`, "inline"); err != nil {
 		t.Fatalf("Run clearInterval: %v", err)
 	}
@@ -148,8 +133,6 @@ func TestClearIntervalStopsRepetition(t *testing.T) {
 	}
 }
 
-// TestMultipleTimersCoexist verifies that several independent ready timers
-// each run in their own event-loop turn without interfering with each other.
 func TestMultipleTimersCoexist(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -217,9 +200,6 @@ func TestTickDefersNestedZeroDelayTimerToNextTurn(t *testing.T) {
 	}
 }
 
-// TestTimerCallbackCanAccessGlobals verifies that a timer callback
-// executes in the same realm as the script that created it, so it can
-// read and write globals.
 func TestTimerCallbackCanAccessGlobals(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -243,8 +223,6 @@ func TestTimerCallbackCanAccessGlobals(t *testing.T) {
 	}
 }
 
-// TestSetTimeoutReturnsNumericID verifies that setTimeout returns a
-// number that can be passed to clearTimeout.
 func TestSetTimeoutReturnsNumericID(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -264,17 +242,13 @@ func TestSetTimeoutReturnsNumericID(t *testing.T) {
 	}
 }
 
-// TestClearTimeoutWithInvalidIDIsHarmless verifies that clearTimeout with
-// a non-existent or already-fired timer ID does not throw.
 func TestClearTimeoutWithInvalidIDIsHarmless(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
-	// Clear a never-scheduled ID.
 	if err := r.Run(`clearTimeout(9999);`, "inline"); err != nil {
 		t.Errorf("clearTimeout(9999) returned %v, want nil", err)
 	}
 
-	// Clear a timer that already fired.
 	if err := r.Run(`
 			var done = false;
 			var fid = setTimeout(function() { done = true; }, 0);
@@ -289,9 +263,6 @@ func TestClearTimeoutWithInvalidIDIsHarmless(t *testing.T) {
 	}
 }
 
-// TestSetTimeoutOnWindowObject verifies that window.setTimeout works the
-// same as the bare global setTimeout, matching the browser spec where
-// timer functions are properties of the Window interface.
 func TestSetTimeoutOnWindowObject(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -311,8 +282,6 @@ func TestSetTimeoutOnWindowObject(t *testing.T) {
 	}
 }
 
-// TestSetTimeoutOneShotDoesNotRepeat verifies that a setTimeout callback
-// fires exactly once, not on subsequent Ticks.
 func TestSetTimeoutOneShotDoesNotRepeat(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
@@ -331,7 +300,6 @@ func TestSetTimeoutOneShotDoesNotRepeat(t *testing.T) {
 		t.Fatalf("count = %v after first Tick, want 1", v.Num)
 	}
 
-	// Second Tick must not re-fire a one-shot timer.
 	time.Sleep(5 * time.Millisecond)
 	r.Tick()
 

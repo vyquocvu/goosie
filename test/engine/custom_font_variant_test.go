@@ -6,9 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// seqRegistry hands out 1-based indices in registration order, so a test can
-// name the face a document should resolve to by the order its @font-face rules
-// appear in.
 type seqRegistry struct{ n uint16 }
 
 func (r *seqRegistry) Register([]byte) (uint16, error) { r.n++; return r.n, nil }
@@ -35,10 +32,6 @@ func slotIdx(t *testing.T, s *engine.Session, id string) uint16 {
 	return st.FontSlot().CustomIdx
 }
 
-// TestCustomFontVariantSelection pins the weight and slant contract against a
-// real loaded face set: a bold run takes the bold file, and a run that asks for
-// a variant the document never declares falls back to that family's regular
-// face rather than to another family or to the built-in fonts.
 func TestCustomFontVariantSelection(t *testing.T) {
 	html := `<html><body>
 		<p id="reg">a</p>
@@ -46,7 +39,6 @@ func TestCustomFontVariantSelection(t *testing.T) {
 		<p id="ital" style="font-style: italic">c</p>
 		<p id="heavy" style="font-weight: 900">d</p>
 	</body></html>`
-	// @font-face only declares a face; the paragraphs ask for it by name.
 	use := `p { font-family: Face; }`
 	withVariants := use + `
 @font-face { font-family: Face; src: url(/r.ttf); }
@@ -65,7 +57,6 @@ func TestCustomFontVariantSelection(t *testing.T) {
 		}
 	}
 
-	// Only a regular face exists: every variant request must land on it.
 	regularOnly := use + `
 @font-face { font-family: Face; src: url(/r.ttf); }`
 	s2 := faceSession(t, html, regularOnly)
@@ -80,7 +71,6 @@ func TestCustomFontVariantSelection(t *testing.T) {
 		}
 	}
 
-	// A family the document never declares draws with the built-in fonts.
 	undeclared := faceSession(t, `<html><body><p id="reg" style="font-family: Nope">a</p></body></html>`, regularOnly)
 	if got := slotIdx(t, undeclared, "reg"); got != 0 {
 		t.Errorf("undeclared family resolved to face %d, want 0", got)

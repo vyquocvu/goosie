@@ -9,36 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// window.getComputedStyle, document.defaultView, and the lookup chain jQuery's
-// .css() runs through them.
-//
-// The count that puts this here: jQuery 3.6 calls getComputedStyle in three
-// places and one of them is every `.css()` read a page makes, reached through a
-// chain of four names, each of which has to be there:
-//
-//	Re = function (e) {
-//	  var t = e.ownerDocument.defaultView;
-//	  return t && t.opener || (t = C), t.getComputedStyle(e)
-//	}
-//	...
-//	(n = n || Re(e)) && ("" !== (a = n.getPropertyValue(t) || n[t]))
-//
-// element.ownerDocument -> document.defaultView -> window.getComputedStyle ->
-// an object answering BOTH getPropertyValue("font-size") and .fontSize. Miss
-// any one and jQuery does not throw: it concludes the property is unset and
-// keeps the page's `display:none`. A silent wrong answer is worse than a
-// TypeError, so the tests below pin the chain and the empty-string contract
-// separately.
-//
-// What the object reports is limited to what this engine can name: the cascade
-// result the session resolved for that node plus the node's own style
-// attribute. Nothing is derived, so an unmodelled property reads "" and the
-// tests assert that too.
-
-// styleProvider installs a stub cascade for a js.Runtime, keyed by the element
-// id the test markup gives the node. The engine supplies the real conversion
-// through the same hook; internal/js cannot import internal/style, so a test
-// that wants cascade behaviour has to be the cascade.
 func styleProvider(rt *js.Runtime, byID map[string]map[string]string) {
 	rt.SetComputedStyleProvider(func(node *dom.Node) map[string]string {
 		if node == nil {
@@ -83,9 +53,6 @@ var computedCascade = map[string]map[string]string{
 	},
 }
 
-// Both spellings of a property name are the same answer. jQuery reads
-// `styles.fontSize` first and only then `getPropertyValue("font-size")`, and a
-// page that finds neither reads "" and gives up.
 // qc:BR-205
 func TestGetComputedStyleAnswersKebabAndCamelNames(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
@@ -110,8 +77,6 @@ func TestGetComputedStyleAnswersKebabAndCamelNames(t *testing.T) {
 	}
 }
 
-// getPropertyValue also takes the camelCase spelling, because that is what
-// jQuery's `.css()` passes after running the name through its own cache.
 // qc:BR-205
 func TestGetComputedStylePropertyValueAcceptsCamelCase(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
@@ -122,25 +87,18 @@ func TestGetComputedStylePropertyValueAcceptsCamelCase(t *testing.T) {
 	}
 }
 
-// The node's own style attribute wins over the cascade map, and a node the
-// provider has no answer for still reports its inline declarations: a script
-// that writes `el.style.display = "none"` and reads it back in the same run is
-// asking about a declaration the engine holds.
 // qc:BR-205
 func TestGetComputedStyleMergesInlineOverCascade(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
 	if got := evalString(t, rt, `getComputedStyle(document.getElementById("art")).color`); got != "rgb(1, 2, 3)" {
 		t.Fatalf("inline color = %q, want the element's own declaration", got)
 	}
-	// A created element is not in the session's cascade map at all.
 	if got := evalString(t, rt, `
 		var d = document.createElement("div");
 		d.setAttribute("style", "display:none; font-size: 20px");
 		getComputedStyle(d).display + "/" + getComputedStyle(d).fontSize`); got != "none/20px" {
 		t.Fatalf("created element reads = %q, want none/20px", got)
 	}
-	// Writing through .style is visible to a later getComputedStyle, which is
-	// what makes jQuery's show/hide round trip work.
 	if got := evalString(t, rt, `
 		var p = document.getElementById("plain");
 		p.style.display = "none";
@@ -149,15 +107,6 @@ func TestGetComputedStyleMergesInlineOverCascade(t *testing.T) {
 	}
 }
 
-// Engine values only, in the two shapes "no value" actually has here.
-// getPropertyValue answers the empty string for a name the engine does not
-// carry, while the accessor for that same name is absent, so it reads
-// `undefined` - which is why the third element below is a `typeof`: a plain
-// `[..].join("|")` renders undefined as an empty cell and would not tell the
-// two apart. CSSOM would answer "" for both; the deviation is recorded as
-// GOOSIE-CSSOMTASK-001 in docs/tasks/TASK-047-DOM-JQUERY-APIS.md.
-// getPropertyPriority has no important flags to report. Inventing "initial"
-// values would make a missing cascade look like a resolved one.
 // qc:BR-205
 func TestGetComputedStyleOnlyReportsEngineValues(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
@@ -175,15 +124,11 @@ func TestGetComputedStyleOnlyReportsEngineValues(t *testing.T) {
 	if got := evalString(t, rt, `out`); got != "||undefined|" {
 		t.Fatalf("unmodelled properties = %q, want %q (two empty getPropertyValue reads, an absent accessor, no priority)", got, "||undefined|")
 	}
-	// Undefined reads stay undefined rather than becoming the string "initial".
 	if got := evalString(t, rt, `undef`); got != "undefined" {
 		t.Fatalf("an absent property reads %q, want %q", got, "undefined")
 	}
 }
 
-// A runtime with no provider at all - a host that never wired the engine's
-// cascade - still answers with the element's inline declarations and an empty
-// string for everything else, instead of throwing.
 // qc:BR-205
 func TestGetComputedStyleWithoutProviderFallsBackToInline(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, nil)
@@ -194,10 +139,6 @@ func TestGetComputedStyleWithoutProviderFallsBackToInline(t *testing.T) {
 	}
 }
 
-// The whole jQuery `.css()` lookup, quoted from the library, against a real
-// element. This is the test that says the four names fit together: a binding
-// that works when called directly but not through ownerDocument.defaultView is
-// the failure the page actually sees.
 // qc:BR-205
 func TestJQueryCssLookupChainResolves(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
@@ -237,14 +178,6 @@ func TestJQueryCssLookupChainResolves(t *testing.T) {
 	}
 }
 
-// defaultView is the window object, and window.top is itself, so Sizzle's
-// support probe
-//
-//	(n = C.defaultView) && n.top !== n && (n.addEventListener ? ... : ...)
-//
-// ends at the same place it does in a browser instead of taking the
-// iframe/opener branch. addEventListener on that object is what the next task
-// cluster pins.
 // qc:BR-205
 func TestDefaultViewIsTheWindowItself(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
@@ -266,9 +199,6 @@ func TestDefaultViewIsTheWindowItself(t *testing.T) {
 	}
 }
 
-// A missing or wrong-typed argument is a TypeError naming the parameter, the
-// same shape the browser gives, so a page that guards with try/catch learns
-// what failed instead of receiving an empty style object it will trust.
 // qc:BR-205
 func TestGetComputedStyleRejectsNonElementArguments(t *testing.T) {
 	rt := styleRuntime(t, computedDoc, computedCascade)
@@ -284,8 +214,6 @@ func TestGetComputedStyleRejectsNonElementArguments(t *testing.T) {
 			t.Fatalf("%s failed with %v, want a TypeError", src, err)
 		}
 	}
-	// A pseudo-element argument asks for a box the layout tree does not carry
-	// as a node: the object exists, and every property in it is empty.
 	if got := evalString(t, rt, `
 		var cs = getComputedStyle(document.getElementById("art"), "::before");
 		String(cs === null) + "/" + cs.getPropertyValue("content") + "/" + cs.display`); got != "false//block" {

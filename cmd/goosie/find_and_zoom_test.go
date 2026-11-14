@@ -27,7 +27,6 @@ func TestFindInPageLifecycle(t *testing.T) {
 		closeCalled = true
 	}
 
-	// 1. Open Find
 	f.toolbar.OpenFind()
 	active, total, idx := f.toolbar.FindCounts()
 	if !active {
@@ -37,7 +36,6 @@ func TestFindInPageLifecycle(t *testing.T) {
 		t.Errorf("initial find counts = (%d, %d), want (0, 0)", total, idx)
 	}
 
-	// 2. Type query
 	f.toolbar.HandleKeyEvent('t', 0)
 	f.toolbar.HandleKeyEvent('e', 0)
 	f.toolbar.HandleKeyEvent('s', 0)
@@ -47,21 +45,18 @@ func TestFindInPageLifecycle(t *testing.T) {
 		t.Errorf("queryReceived = %q, want 'test'", queryReceived)
 	}
 
-	// 3. Set match counts
 	f.toolbar.SetFindResult(5, 0)
 	active, total, idx = f.toolbar.FindCounts()
 	if !active || total != 5 || idx != 0 {
 		t.Errorf("FindCounts() = (%v, %d, %d), want (true, 5, 0)", active, total, idx)
 	}
 
-	// 4. Enter steps to next match
 	f.toolbar.HandleKeyEvent('\r', 0)
 	if !nextCalled {
 		t.Fatal("Enter should trigger OnFindNext")
 	}
 
-	// 5. Esc closes find
-	f.toolbar.HandleKeyEvent(0x1b, 0) // Esc
+	f.toolbar.HandleKeyEvent(0x1b, 0)
 	if !closeCalled {
 		t.Fatal("Esc should trigger OnFindClose")
 	}
@@ -147,7 +142,6 @@ func TestOpenFindRefocusesAndSelectsRestoredQuery(t *testing.T) {
 	for _, key := range "next" {
 		tb.HandleKeyEvent(key, 0)
 	}
-	// A click into the page leaves find mode open but moves focus away.
 	tb.Focus = toolbar.FocusNone
 
 	tb.OpenFind()
@@ -160,7 +154,6 @@ func TestOpenFindRefocusesAndSelectsRestoredQuery(t *testing.T) {
 	if tb.SelStart != 0 || tb.SelEnd != 4 {
 		t.Fatalf("restored query selection = [%d,%d), want [0,4)", tb.SelStart, tb.SelEnd)
 	}
-	// The selection is live: the next key replaces the whole query.
 	tb.HandleKeyEvent('x', 0)
 	if tb.Input != "x" {
 		t.Fatalf("typing over the selection left %q, want \"x\"", tb.Input)
@@ -177,7 +170,7 @@ func TestOpenFindRecomputesRestoredQuery(t *testing.T) {
 		t.Fatalf("empty first open reported %v", opened)
 	}
 	tb.HandleKeyEvent('a', 0)
-	tb.HandleKeyEvent(0x1b, 0) // close, query retained for the next open
+	tb.HandleKeyEvent(0x1b, 0)
 
 	tb.OpenFind()
 	if len(opened) != 1 || opened[0] != "a" {
@@ -219,20 +212,16 @@ func TestZoomBadgeIndicatorAndReset(t *testing.T) {
 		resetTriggered = true
 	}
 
-	// Initial zoom = 1.0, badge is not drawn
 	buf := frame.NewBitmap(800, toolbar.ToolbarHeight)
 	tb.Draw(buf, 0)
 
-	// Set Zoom to 1.25 (125%)
 	tb.SetZoom(1.25)
 	if tb.Zoom != 1.25 {
 		t.Errorf("tb.Zoom = %f, want 1.25", tb.Zoom)
 	}
 
-	// Badge should be drawn on toolbar
 	tb.Draw(buf, 0)
 
-	// In normal mode, badge background is frame.RGB(232, 240, 254)
 	hasBadgePixels := false
 	addrRect := toolbar.AddressBarRect(800)
 	for y := addrRect.Y0; y < addrRect.Y1; y++ {
@@ -251,7 +240,6 @@ func TestZoomBadgeIndicatorAndReset(t *testing.T) {
 		t.Error("expected light blue badge pixels frame.RGB(232, 240, 254) for 125% zoom")
 	}
 
-	// Hover over badge gives pointer cursor
 	badgeX := addrRect.X1 - 20
 	badgeY := (addrRect.Y0 + addrRect.Y1) / 2
 	cur := tb.CursorAt(frame.Point{X: badgeX, Y: badgeY})
@@ -259,7 +247,6 @@ func TestZoomBadgeIndicatorAndReset(t *testing.T) {
 		t.Errorf("CursorAt zoom badge = %v, want CursorPointer", cur)
 	}
 
-	// Click on badge resets zoom to 1.0
 	tb.HandleClick(frame.Point{X: badgeX, Y: badgeY}, surface.ButtonLeft)
 	if !resetTriggered {
 		t.Error("clicking zoom badge did not trigger OnResetZoom")
@@ -284,21 +271,18 @@ func TestZoomKeyboardShortcuts(t *testing.T) {
 		},
 	}
 
-	// Cmd++
 	zoomCalled = false
 	cw.handleTabShortcut('=', surface.ModCommand)
 	if !zoomCalled || zoomDelta != 0.1 {
 		t.Errorf("Cmd+= failed: called=%v, delta=%f", zoomCalled, zoomDelta)
 	}
 
-	// Cmd+-
 	zoomCalled = false
 	cw.handleTabShortcut('-', surface.ModCommand)
 	if !zoomCalled || zoomDelta != -0.1 {
 		t.Errorf("Cmd+- failed: called=%v, delta=%f", zoomCalled, zoomDelta)
 	}
 
-	// Cmd+0 (reset)
 	zoomCalled = false
 	cw.handleTabShortcut('0', surface.ModCommand)
 	if !zoomCalled || zoomDelta != 0 {
@@ -306,10 +290,6 @@ func TestZoomKeyboardShortcuts(t *testing.T) {
 	}
 }
 
-// TestZoomScopeIsWindowWideAcrossTabs documents the zoom policy: zoom is a
-// paint scale for the window, not state owned by a tab. Switching tabs keeps
-// the same factor, the same effective device scale, and the same toolbar badge
-// instead of restoring a different per-tab zoom.
 // qc:BR-132
 func TestZoomScopeIsWindowWideAcrossTabs(t *testing.T) {
 	f := newNavTestPath(t)
@@ -353,7 +333,6 @@ func TestFramePathHandleZoom(t *testing.T) {
 	f.config.height = 600
 	f.toolbar = toolbar.NewState(800, nil)
 
-	// Zoom in
 	f.handleZoom(0.2)
 	if f.zoom < 1.19 || f.zoom > 1.21 {
 		t.Errorf("f.zoom = %f, want ~1.2", f.zoom)
@@ -362,7 +341,6 @@ func TestFramePathHandleZoom(t *testing.T) {
 		t.Errorf("f.toolbar.Zoom = %f, want ~1.2", f.toolbar.Zoom)
 	}
 
-	// Reset zoom
 	f.handleZoom(0)
 	if f.zoom != 1.0 {
 		t.Errorf("f.zoom after reset = %f, want 1.0", f.zoom)

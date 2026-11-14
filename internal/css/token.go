@@ -6,7 +6,6 @@ import (
 	"unicode"
 )
 
-// TokenType identifies a CSS token.
 type TokenType uint8
 
 const (
@@ -39,7 +38,6 @@ const (
 	TokenEOF
 )
 
-// Token is one CSS token.
 type Token struct {
 	Type   TokenType
 	Value  string
@@ -49,19 +47,16 @@ type Token struct {
 	IsInt  bool
 }
 
-// Tokenizer splits CSS text into tokens.
 type Tokenizer struct {
 	input     string
 	pos       int
 	lastStart int
 }
 
-// NewTokenizer returns a tokenizer for the given CSS text.
 func NewTokenizer(input string) *Tokenizer {
 	return &Tokenizer{input: input}
 }
 
-// Next returns the next token.
 func (t *Tokenizer) Next() Token {
 	t.skipWhitespaceAndComments()
 	t.lastStart = t.pos
@@ -117,8 +112,6 @@ func (t *Tokenizer) Next() Token {
 		return Token{Type: TokenStar, Value: "*"}
 	case c == '.':
 		if t.pos+1 < len(t.input) && t.input[t.pos+1] >= '0' && t.input[t.pos+1] <= '9' {
-			// `.` followed by a digit starts a number: `.9em` is a dimension,
-			// not a class token.
 			return t.readNumber()
 		}
 		t.pos++
@@ -144,16 +137,6 @@ func (t *Tokenizer) Next() Token {
 		t.pos += 3
 		return Token{Type: TokenCDC, Value: "-->"}
 	case c == '-':
-		// A hyphen is three different tokens, and the order is the spec's
-		// (CSS Syntax L3 4.3.7, branch U+002D): it starts a number only when a
-		// digit, or a "." and a digit, follows it (4.3.11); it starts an ident
-		// when the next code point is another hyphen or an ident-start code
-		// point (4.3.10) - which is what makes every "--" custom property name
-		// one ident, digits and all; anything else is a delimiter. Sending the
-		// hyphen to the numeric scanner instead read `--8e8e8e` as
-		// Dimension("-8e8", unit "e8e") - eight hundred million CSS pixels - and
-		// the engine's geometry cap refused the whole page over a colour name
-		// (GOOSIE-LIVE-002, measured on cafef.vn).
 		if t.hyphenStartsNumber() {
 			return t.readNumber()
 		}
@@ -165,9 +148,6 @@ func (t *Tokenizer) Next() Token {
 	case c == '+' || c == '.' || (c >= '0' && c <= '9'):
 		return t.readNumber()
 	case isIdentStart(c) || c == '_':
-		// The hyphen's share of this branch ("-" followed by an ident-start code
-		// point) now lives in its own case above, which claims every U+002D the
-		// CDC check did not.
 		return t.readIdentOrFunc()
 	default:
 		t.pos++
@@ -175,8 +155,6 @@ func (t *Tokenizer) Next() Token {
 	}
 }
 
-// Offset reports the source byte offset of the token returned by the most
-// recent Next call. It is useful to associate tokens with their declaration.
 func (t *Tokenizer) Offset() int { return t.lastStart }
 
 func (t *Tokenizer) skipWhitespaceAndComments() {
@@ -278,7 +256,6 @@ func (t *Tokenizer) readNumber() Token {
 		}
 	}
 	if t.pos < len(t.input) && (t.input[t.pos] == 'e' || t.input[t.pos] == 'E') {
-		// Only treat as scientific notation if followed by digit or +/-
 		nextPos := t.pos + 1
 		if nextPos < len(t.input) {
 			nextChar := t.input[nextPos]
@@ -321,10 +298,6 @@ func (t *Tokenizer) readNumber() Token {
 	return Token{Type: TokenNumber, Value: numStr, NumVal: val}
 }
 
-// hyphenStartsNumber is the spec's "check if three code points would start a
-// number" for a U+002D at the read position (CSS Syntax L3 4.3.11): a digit, or
-// a "." followed by a digit. It is the only way a hyphen reaches the numeric
-// scanner, so `-5px` and `-.5em` stay lengths while `--8e8e8e` does not.
 func (t *Tokenizer) hyphenStartsNumber() bool {
 	if t.pos+1 >= len(t.input) {
 		return false
@@ -335,11 +308,6 @@ func (t *Tokenizer) hyphenStartsNumber() bool {
 	return isDigit(t.input[t.pos+1])
 }
 
-// hyphenStartsIdent is the spec's "check if three code points would start an
-// ident sequence" for a U+002D (4.3.10): a second hyphen - the form every custom
-// property name starts with - or an ident-start code point. A valid escape after
-// the hyphen would count too, but this tokenizer does not consume escapes inside
-// ident sequences at all, so that half of the rule is out of scope here.
 func (t *Tokenizer) hyphenStartsIdent() bool {
 	if t.pos+1 >= len(t.input) {
 		return false
@@ -381,9 +349,6 @@ func parseFloat(s string) float64 {
 			i++
 		}
 	}
-	// Scientific notation is part of the CSS number grammar (`1.2e2` is 120,
-	// and several WPT color swatches spell hues that way). Without it the
-	// exponent silently dropped and a green hue read as near-red.
 	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
 		j := i + 1
 		negExp := false

@@ -45,10 +45,6 @@ func TestNavControllerSerial(t *testing.T) {
 	}
 }
 
-// TestConcurrentTabAccessIsRaceFree hammers the pump/drain/Present sharing:
-// tab switches and collection reads, field writes and reads, and history ops
-// from several goroutines at once. Bare fields tripped the detector here
-// before privatization.
 func TestConcurrentTabAccessIsRaceFree(t *testing.T) {
 	mgr := NewManager(nil)
 	a := mgr.NewTab()

@@ -10,9 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// XMLHttpRequest is the transport dynamic pages still use for beacons and
-// data: Google's impression logger constructs one per ping. A missing XHR
-// takes those subsystems down with "XMLHttpRequest is not defined".
 func TestXHRConstructorExists(t *testing.T) {
 	r := newFetchRuntime(t, &mockFetcher{responses: map[string]*js.FetchResponse{}})
 	src := `
@@ -244,7 +241,6 @@ xhr.send();`
 	}
 	time.Sleep(200 * time.Millisecond)
 	r.Tick()
-	// Let the late response land: it must not fire load after a timeout.
 	r.Tick()
 	if err := r.Run(`var result = fired.join(",") + "/" + xhr.status;`, "inline"); err != nil {
 		t.Fatal(err)

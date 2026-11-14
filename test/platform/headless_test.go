@@ -15,16 +15,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// The headless window is what every v2 automated run presents through, so its
-// contract is the same surface.Window the macOS shim has to satisfy - and its
-// determinism is what lets a pacing test say "16ms" instead of "eventually".
-//
-// These tests share a package with platform_test.go because Go allows one test
-// package per directory, and the two are the two halves of one claim: the backend
-// that always works, and the choice that picks it.
-
-// hourPeriod is a vsync period long enough that no tick can arrive during a test
-// that is only interested in injected input.
 const hourPeriod = time.Hour
 
 func newWindow(t *testing.T, cfg headless.Config) (*headless.Window, *headless.ManualClock) {
@@ -42,10 +32,6 @@ func newWindow(t *testing.T, cfg headless.Config) (*headless.Window, *headless.M
 	return w, clk
 }
 
-// waitPending blocks until the window's vsync loop has armed its next timer, which
-// is the handshaking a manual clock needs: the loop re-arms only after taking the
-// previous tick, so a test that advanced immediately could be counting a tick that
-// was never scheduled.
 func waitPending(t *testing.T, clk *headless.ManualClock) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -76,8 +62,6 @@ func expectNoEvent(t *testing.T, w *headless.Window, within time.Duration) {
 	select {
 	case ev, ok := <-w.Events():
 		if !ok {
-			// A closed channel is the window saying the platform is gone, which is the
-			// orderly end of a shutdown rather than an event nobody asked for.
 			return
 		}
 		t.Fatalf("an event arrived within %v: %v", within, ev.Kind)
@@ -85,10 +69,6 @@ func expectNoEvent(t *testing.T, w *headless.Window, within time.Duration) {
 	}
 }
 
-// TestVsyncTicksAtRequestedRate is the pacing contract in both directions: a tick
-// per period, and no tick before the period is up. The second half matters as much
-// as the first - a window that emits vsyncs as fast as the loop drains them turns
-// every timing measurement in the project into a measurement of nothing.
 // qc:BR-175
 func TestVsyncTicksAtRequestedRate(t *testing.T) {
 	const period = 16 * time.Millisecond
@@ -101,8 +81,6 @@ func TestVsyncTicksAtRequestedRate(t *testing.T) {
 	}
 	expectNoEvent(t, w, 50*time.Millisecond)
 
-	// The other half of the same period, not a fresh one: a clock that reschedules
-	// rather than accumulates would be quietly wrong about every rate below.
 	if n := clk.Advance(period / 2); n != 1 {
 		t.Fatalf("a full period fired %d timers, want 1", n)
 	}
@@ -127,8 +105,6 @@ func TestVsyncTicksAtRequestedRate(t *testing.T) {
 	}
 }
 
-// TestScrollEventsDelivered is the input half of the window contract: what a driver
-// injects is what the loop reads, in order, with nothing invented in between.
 // qc:BR-175
 func TestScrollEventsDelivered(t *testing.T) {
 	w, _ := newWindow(t, headless.Config{Scale: 1})
@@ -149,16 +125,11 @@ func TestScrollEventsDelivered(t *testing.T) {
 	}
 	expectNoEvent(t, w, 50*time.Millisecond)
 
-	// A vsync is the clock's business, not a driver's: letting one be injected
-	// would let a test appear to drive pacing while actually just queueing events.
 	if err := w.Inject(surface.Event{Kind: surface.EvVsync}); !errors.Is(err, headless.ErrVsyncIsClocks) {
 		t.Fatalf("Inject(EvVsync) = %v, want ErrVsyncIsClocks", err)
 	}
 }
 
-// TestPresentWritesPNG checks the headless backend end to end, because a frame that
-// never leaves the process proves nothing: the pixels are decoded back out of the
-// file the run wrote.
 // qc:BR-175
 func TestPresentWritesPNG(t *testing.T) {
 	const (
@@ -178,9 +149,6 @@ func TestPresentWritesPNG(t *testing.T) {
 	if err := w.Present(buf, []frame.Rect{frame.Rect4(0, 0, 2, 2)}); err != nil {
 		t.Fatalf("Present: %v", err)
 	}
-	// The loop hands the same backing store to every frame, so a backend that kept
-	// the caller's buffer instead of copying it would report a later frame as the
-	// one it was shown.
 	buf.FillRect(buf.Bounds(), frame.RGB(255, 255, 255), nil)
 
 	dir := t.TempDir()
@@ -210,8 +178,6 @@ func TestPresentWritesPNG(t *testing.T) {
 	}
 }
 
-// TestScaleFactorHonored is the DPR plumbing at the only two points a platform can
-// get it wrong: what the window reports, and what it stamps on the events it emits.
 func TestScaleFactorHonored(t *testing.T) {
 	w, clk := newWindow(t, headless.Config{Scale: 2, VsyncPeriod: time.Millisecond})
 	if got := w.ScaleFactor(); got != 2 {
@@ -225,9 +191,6 @@ func TestScaleFactorHonored(t *testing.T) {
 		t.Fatalf("a vsync carried scale %v, want 2", got)
 	}
 
-	// An event built without a scale is the driver's mistake, and the fix has to
-	// happen before the loop sees it: a scroll read at DPR 1 moves the page half as
-	// far as the user's finger did.
 	if err := w.Inject(surface.Event{Kind: surface.EvScroll, Delta: frame.Point{Y: 10}}); err != nil {
 		t.Fatalf("Inject: %v", err)
 	}
@@ -235,7 +198,6 @@ func TestScaleFactorHonored(t *testing.T) {
 		t.Fatalf("an injected event arrived with scale %v, want the window's 2", got)
 	}
 
-	// A resize reports the platform's new ratio, and the window follows it.
 	if err := w.Inject(surface.Event{Kind: surface.EvResize, Size: frame.Size{W: 512, H: 256}, Scale: 3}); err != nil {
 		t.Fatalf("Inject resize: %v", err)
 	}
@@ -248,9 +210,6 @@ func TestScaleFactorHonored(t *testing.T) {
 	}
 }
 
-// TestCloseIsIdempotentAndStopsTheClock is the shutdown half of the contract. A
-// vsync goroutine that survives Close keeps sending into a channel nobody reads,
-// which turns a clean exit into a blocked sender.
 // qc:BR-175
 func TestCloseIsIdempotentAndStopsTheClock(t *testing.T) {
 	w, clk := newWindow(t, headless.Config{Scale: 1, VsyncPeriod: time.Millisecond})
@@ -275,9 +234,6 @@ func TestCloseIsIdempotentAndStopsTheClock(t *testing.T) {
 	}
 }
 
-// TestAccessibilityTreeRecorded covers the headless half of the accessibility
-// contract: whatever the frame path publishes is exactly what a test can read
-// back, which is how UI-level accessibility work gets compared headlessly.
 func TestAccessibilityTreeRecorded(t *testing.T) {
 	w, _ := newWindow(t, headless.Config{Scale: 1})
 	aw, ok := any(w).(surface.AccessibilityWindow)
@@ -306,17 +262,12 @@ func TestAccessibilityTreeRecorded(t *testing.T) {
 		t.Fatalf("the document's children did not survive: %+v", got[0].Children)
 	}
 
-	// A window whose reader has navigated away from a page must not keep showing
-	// the old page to an assistive client, so an empty publish clears the tree.
 	aw.SetAccessibility(nil)
 	if got := w.AccessibilityTree(); len(got) != 0 {
 		t.Fatalf("after clearing, AccessibilityTree() = %+v, want none", got)
 	}
 }
 
-// TestVsyncsDropRatherThanQueue covers the back-pressure rule. A queued vsync is a
-// frame the UI thread has already decided not to draw, so a full event queue has to
-// shed ticks rather than grow, and the count of what it shed has to be visible.
 func TestVsyncsDropRatherThanQueue(t *testing.T) {
 	w, clk := newWindow(t, headless.Config{Scale: 1, VsyncPeriod: time.Millisecond, EventBuffer: 2})
 	for i := 0; i < 10; i++ {

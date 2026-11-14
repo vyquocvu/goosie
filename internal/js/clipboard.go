@@ -13,16 +13,11 @@ import (
 	"github.com/dop251/goja"
 )
 
-// ClipboardProvider is the interface a platform clipboard must satisfy. The
-// browser host installs one through js.Options or SetClipboardProvider;
-// without it, the runtime keeps an in-memory clipboard for headless use.
 type ClipboardProvider interface {
 	Read() string
 	Write(string)
 }
 
-// RichClipboardProvider optionally transports the text/html clipboard flavor.
-// Providers that implement only ClipboardProvider still support text/plain.
 type RichClipboardProvider interface {
 	ClipboardProvider
 	ReadHTML() string
@@ -40,9 +35,6 @@ type clipboardItemData struct {
 	types           []string
 }
 
-// memoryClipboard is the in-memory fallback used when no platform clipboard
-// is available (headless, tests). It is per-runtime, so two tabs cannot
-// read each other's clipboard through this path.
 type memoryClipboard struct {
 	mu   sync.Mutex
 	text string
@@ -71,8 +63,6 @@ func (m *memoryClipboard) WriteRich(text, html string) {
 	m.text, m.html = text, html
 }
 
-// SetClipboardProvider installs a platform clipboard on the runtime.
-// Passing nil reverts to the in-memory fallback.
 func (r *Runtime) SetClipboardProvider(cp ClipboardProvider) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -85,11 +75,7 @@ func (r *Runtime) SetClipboardProvider(cp ClipboardProvider) {
 	}
 }
 
-// setupClipboard installs navigator.clipboard with writeText and readText.
-// Both methods return Promises. Without a platform clipboard the runtime
-// uses an in-memory fallback so the API always resolves.
 func (r *Runtime) setupClipboard() {
-	// Default to the in-memory clipboard when the host has no platform provider.
 	r.clipboardProvider = &memoryClipboard{}
 	if r.opts.ClipboardProvider != nil {
 		r.clipboardProvider = r.opts.ClipboardProvider

@@ -16,9 +16,6 @@ const (
 	statePlaceholderShown
 )
 
-// InteractiveResolution keeps the old immutable style pointers for the nodes
-// that were recomputed. The engine uses these to decide whether layout inputs
-// changed without comparing the whole document.
 type InteractiveResolution struct {
 	Nodes          []dom.NodeID
 	PreviousStyles map[dom.NodeID]*ComputedStyle
@@ -57,10 +54,6 @@ type treeInputSnapshot struct {
 	attributes []dom.Attribute
 }
 
-// ResolveInteractiveStates updates only the changed node subtrees when the
-// stylesheet consists of local interaction selectors. More complex selector
-// dependencies, DOM changes, and viewport changes return false so callers can
-// use the complete document resolver.
 func (r *Resolver) ResolveInteractiveStates(doc *dom.Document, vp Viewport, fonts *CustomFonts, styles map[dom.NodeID]*ComputedStyle, pseudos map[PseudoKey]*ComputedStyle) (InteractiveResolution, bool) {
 	var out InteractiveResolution
 	if r == nil || r.index == nil || doc == nil || styles == nil || pseudos == nil || !r.incrementalInteractiveSafe || !r.hasSnapshot {
@@ -254,8 +247,6 @@ func sameNodeStyleInput(a, b nodeStyleInput) bool {
 		a.attrCount != b.attrCount {
 		return false
 	}
-	// Ignore dataContent differences for whitespace-only text nodes
-	// These are often normalized during parsing/layout
 	if a.dataContent != b.dataContent {
 		aIsWhitespaceText := a.typeOf == dom.NodeText && strings.TrimSpace(a.dataContent) == ""
 		bIsWhitespaceText := b.typeOf == dom.NodeText && strings.TrimSpace(b.dataContent) == ""

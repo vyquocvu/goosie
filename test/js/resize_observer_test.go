@@ -8,9 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// resizeObserverRuntime builds a runtime whose document has one observed div
-// and records each callback as a comma-joined list of content-box sizes in
-// globalThis.deliveries.
 func resizeObserverRuntime(t *testing.T) (*js.Runtime, *dom.Node) {
 	t.Helper()
 	doc := observerTestDocument()
@@ -50,12 +47,6 @@ func resizeDeliveries(t *testing.T, r *js.Runtime) string {
 	return got
 }
 
-// TestResizeObserverDeliversEachChangeOnce is the BR-117 oracle for the
-// supported ResizeObserver path. A drain must report a target the first time
-// layout gives it a size, stay silent while the size is unchanged, and report a
-// later change exactly once. The previous implementation had no change
-// tracking, so every drain re-delivered every observed target forever.
-//
 // qc:BR-117
 func TestResizeObserverDeliversEachChangeOnce(t *testing.T) {
 	r, target := resizeObserverRuntime(t)
@@ -79,10 +70,6 @@ func TestResizeObserverDeliversEachChangeOnce(t *testing.T) {
 	}
 }
 
-// TestResizeObserverUnobserveAndDisconnectStopDelivery is the control for the
-// observer lifecycle: after unobserve or disconnect the callback must not fire,
-// and observing the target again starts a fresh initial delivery.
-//
 // qc:BR-117
 func TestResizeObserverUnobserveAndDisconnectStopDelivery(t *testing.T) {
 	r, target := resizeObserverRuntime(t)
@@ -121,12 +108,6 @@ func TestResizeObserverUnobserveAndDisconnectStopDelivery(t *testing.T) {
 	}
 }
 
-// TestMutationObserverBatchesEachTurnIntoOneCallback pins the supported
-// MutationObserver path: several mutations before the microtask checkpoint
-// reach the callback once with all records, and draining again delivers
-// nothing. This is the "callback receives changes exactly once" half of
-// BR-117 for the observer that already worked.
-//
 // qc:BR-117
 func TestMutationObserverBatchesEachTurnIntoOneCallback(t *testing.T) {
 	doc := observerTestDocument()

@@ -6,7 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// buildTree creates: doc -> html -> body -> div and returns all four nodes.
 func buildTree(t *testing.T) (doc *dom.Document, htmlNode, body, div *dom.Node) {
 	t.Helper()
 	doc = dom.NewDocument()
@@ -165,7 +164,6 @@ func TestEventCapturing(t *testing.T) {
 	event := dom.NewEvent("click", true, false)
 	dom.DispatchEvent(div, event)
 
-	// Capture fires top-down: doc, html, body. Then at-target: div.
 	if len(order) != 4 {
 		t.Fatalf("capture order length = %d, want 4: %v", len(order), order)
 	}
@@ -239,7 +237,7 @@ func TestPreventDefault(t *testing.T) {
 		e.PreventDefault()
 	}, false)
 
-	event := dom.NewEvent("click", true, true) // cancelable
+	event := dom.NewEvent("click", true, true)
 	result := dom.DispatchEvent(div, event)
 
 	if result {
@@ -257,7 +255,7 @@ func TestPreventDefaultOnNonCancelable(t *testing.T) {
 		e.PreventDefault()
 	}, false)
 
-	event := dom.NewEvent("click", true, false) // NOT cancelable
+	event := dom.NewEvent("click", true, false)
 	result := dom.DispatchEvent(div, event)
 
 	if !result {
@@ -333,9 +331,6 @@ func TestCaptureAndBubbleListeners(t *testing.T) {
 	event := dom.NewEvent("click", true, false)
 	dom.DispatchEvent(div, event)
 
-	// Capture phase: body-capture fires first (top-down).
-	// At-target: div-capture then div-bubble (registration order).
-	// Bubble phase: body-bubble fires last.
 	want := []string{"body-capture", "div-capture", "div-bubble", "body-bubble"}
 	if len(order) != len(want) {
 		t.Fatalf("order length = %d, want %d: %v", len(order), len(want), order)
@@ -375,12 +370,10 @@ func TestMouseEventFields(t *testing.T) {
 		t.Error("Cancelable() = false, want true")
 	}
 
-	// Test modifier keys default to false.
 	if me.AltKey || me.CtrlKey || me.ShiftKey || me.MetaKey {
 		t.Error("modifier keys should default to false")
 	}
 
-	// Test that MouseEvent can be dispatched as an Event.
 	_, _, _, div := buildTree(t)
 	called := false
 	dom.AddEventListener(div, "click", func(e *dom.Event) {
@@ -460,10 +453,9 @@ func TestNonBubblingEvent(t *testing.T) {
 		bodyCalled = true
 	}, false)
 	dom.AddEventListener(div, "custom", func(e *dom.Event) {
-		// target listener
 	}, false)
 
-	event := dom.NewEvent("custom", false, false) // does NOT bubble
+	event := dom.NewEvent("custom", false, false)
 	dom.DispatchEvent(div, event)
 
 	if bodyCalled {
@@ -478,7 +470,7 @@ func TestDispatchReturnsFalseWhenCancelled(t *testing.T) {
 		e.PreventDefault()
 	}, false)
 
-	event := dom.NewEvent("submit", false, true) // cancelable
+	event := dom.NewEvent("submit", false, true)
 	result := dom.DispatchEvent(div, event)
 
 	if result {
@@ -505,7 +497,7 @@ func TestDuplicateListenerRejected(t *testing.T) {
 		count++
 	}
 	dom.AddEventListener(div, "click", cb, false)
-	dom.AddEventListener(div, "click", cb, false) // duplicate
+	dom.AddEventListener(div, "click", cb, false)
 
 	event := dom.NewEvent("click", true, false)
 	dom.DispatchEvent(div, event)
@@ -522,7 +514,7 @@ func TestStopPropagationDoesNotAffectSameTarget(t *testing.T) {
 	secondCalled := false
 	dom.AddEventListener(div, "click", func(e *dom.Event) {
 		firstCalled = true
-		e.StopPropagation() // stops bubbling but NOT other listeners on same target
+		e.StopPropagation()
 	}, false)
 	dom.AddEventListener(div, "click", func(e *dom.Event) {
 		secondCalled = true
@@ -594,7 +586,7 @@ func TestRemoveNonexistentListenerIsNoop(t *testing.T) {
 	cb2 := func(e *dom.Event) {}
 
 	dom.AddEventListener(div, "click", cb1, false)
-	dom.RemoveEventListener(div, "click", cb2, false) // cb2 was never added
+	dom.RemoveEventListener(div, "click", cb2, false)
 
 	listeners := dom.GetNodeListeners(div)
 	if len(listeners) != 1 {
@@ -626,7 +618,7 @@ func TestRemoveEventListenerByKeyCaptureMismatch(t *testing.T) {
 	cb := func(e *dom.Event) { called = true }
 	key := "test-key-capture"
 	dom.AddEventListenerWithKey(div, "click", cb, true, key)
-	dom.RemoveEventListenerByKey(div, "click", key, false) // capture mismatch
+	dom.RemoveEventListenerByKey(div, "click", key, false)
 
 	event := dom.NewEvent("click", true, false)
 	dom.DispatchEvent(div, event)

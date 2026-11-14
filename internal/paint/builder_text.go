@@ -23,7 +23,6 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	if rect.Empty() {
 		return
 	}
-	// Apply overflow:hidden clip from an ancestor.
 	if clip != nil {
 		rect = rect.Intersection(*clip)
 		if rect.Empty() {
@@ -40,7 +39,6 @@ func (b *Builder) paintText(obj *layout.Object, rect frame.Rect, opacity float32
 	if sp, ok := b.selection[obj.Key]; ok {
 		b.paintSelectionHighlight(obj, rect, s, sp, opacity)
 	}
-	// Text shadows paint behind the main text as offset copies.
 	if len(s.TextShadow) > 0 {
 		b.paintTextShadow(text, rect, s, opacity, order, levels)
 	}
@@ -70,10 +68,6 @@ func (b *Builder) composeTextAtUTF16Offset(text string) string {
 	return string(out)
 }
 
-// composingTextareaText reports whether obj paints the first text child of the
-// focused textarea, the one text node a composition preview can splice into.
-// The inline pass paints word copies of the node (same NodeID, new pointer), so
-// match by ID rather than pointer identity.
 func (b *Builder) composingTextareaText(obj *layout.Object) bool {
 	if b.focus.object == nil || b.focus.marked == "" || obj.Node == nil || b.focus.object.Node == nil {
 		return false
@@ -92,21 +86,10 @@ func (b *Builder) composingTextareaText(obj *layout.Object) bool {
 	return false
 }
 
-// appendRun emits one line of glyphs across the box's content origin, spacing
-// them with the same advances layout measured the line with.
 func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32) {
 	b.appendRunOrdered(text, rect, s, color, opacity, nil, nil)
 }
 
-// appendRunOrdered draws visual slot k with the logical rune order[k],
-// advancing the pen by that rune's own advance. order is nil for identity,
-// which is every left-to-right word; layout stamps a reordered word with the
-// permutation and paint only ever reads it back. Reversing the slice instead
-// of placing it would move the advances with the wrong glyphs, and a word like
-// مرحبا has unequal per-rune advances, so the tail would drift. levels is
-// parallel to the visual slots: when levels[k] is odd the rune at that slot
-// sits in an RTL context and bidi-mirrored characters (brackets, guillemets)
-// draw their mirrored glyph instead (GOOSIE-BIDIMIRROR-001).
 func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32, order []int, levels []byte) {
 	fontSize := int32(s.FontSize * b.scale)
 	if fontSize <= 0 {
@@ -117,10 +100,6 @@ func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.Comput
 		return
 	}
 	slot := s.FontSlot()
-	// Layout positioned this box's content area, whose top is the line box top
-	// plus half the leading. The baseline is one ascent further down, read from
-	// the same face metrics layout used, so the glyph sits where the line box
-	// says it does instead of a guessed fraction of the em.
 	baseline := rect.Y0
 	if b.metrics != nil {
 		ascent, _, _ := b.metrics.LineMetrics(fontSize, slot)
@@ -132,9 +111,6 @@ func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.Comput
 	wordSpacing := int32(s.WordSpacing * b.scale)
 	glyphs := make([]GlyphRun, 0, len(runes))
 	if b.metrics != nil {
-		// The pen stays fractional across the run and only the glyph position
-		// rounds, the way a browser places text: rounding each advance instead
-		// loses a fraction of a pixel per character and drifts the line tail.
 		pen := int32(0)
 		for k := range runes {
 			logical := logicalRune(order, k)
@@ -176,8 +152,6 @@ func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.Comput
 		},
 		Opacity: opacity,
 	})
-	// Chromium puts the Times underline 2px below the baseline at 16px, one
-	// pixel thick, and scales both with the font.
 	if s.TextDecoration&style.TextDecorationUnderline != 0 && !isBlankText(text) {
 		thick := (s.FontSize * b.scale) / 16
 		if s.TextDecorationThickness > 0 {
@@ -209,10 +183,6 @@ func isBlankText(text string) bool {
 	return true
 }
 
-// logicalRune returns the logical rune index visual slot k draws. A slot with
-// no entry is identity: layout only stamps a word its bidi resolution actually
-// reorders, so an unrecorded run - or one paint replaced with composed text -
-// keeps its logical order.
 func logicalRune(order []int, k int) int {
 	if k >= len(order) {
 		return k
@@ -220,8 +190,6 @@ func logicalRune(order []int, k int) int {
 	return order[k]
 }
 
-// bidiLevel returns the bidi level for visual slot k. A nil levels slice
-// means pure LTR (level 0), the common case that layout does not annotate.
 func bidiLevel(levels []byte, k int) byte {
 	if k >= len(levels) {
 		return 0
@@ -229,8 +197,6 @@ func bidiLevel(levels []byte, k int) byte {
 	return levels[k]
 }
 
-// paintTextShadow draws each text-shadow layer as an offset copy of the text
-// in the shadow colour, painted before the main text so it appears behind.
 func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.ComputedStyle, opacity float32, order []int, levels []byte) {
 	for _, sh := range s.TextShadow {
 		dx := int32(sh.OffsetX * b.scale)

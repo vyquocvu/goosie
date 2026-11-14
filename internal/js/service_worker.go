@@ -7,9 +7,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// Service Workers API implementation.
-
-// ServiceWorker states.
 const (
 	SWParsed     = "parsed"
 	SWInstalling = "installing"
@@ -19,7 +16,6 @@ const (
 	SWRedundant  = "redundant"
 )
 
-// ServiceWorkerRegistration holds the state of a service worker registration.
 type serviceWorkerRegistration struct {
 	mu           sync.Mutex
 	scope        string
@@ -33,7 +29,6 @@ type serviceWorkerRegistration struct {
 	runner       *localWorkerRunner
 }
 
-// serviceWorkerObj holds the internal state of one ServiceWorker object.
 type serviceWorkerObj struct {
 	mu        sync.Mutex
 	state     string
@@ -48,14 +43,9 @@ type swState struct {
 	mu            sync.Mutex
 	registrations map[string]*serviceWorkerRegistration
 	runners       []*localWorkerRunner
-	// pending activations queued by background goroutines; drained on the
-	// VM thread where goja objects may be touched.
-	pending []swActivation
+	pending       []swActivation
 }
 
-// swActivation records one install→activate completion. The background
-// goroutine fills plain-Go state and appends this; DrainServiceWorkerEvents
-// performs the goja Sets on the main goroutine.
 type swActivation struct {
 	reg    *serviceWorkerRegistration
 	sw     *serviceWorkerObj
@@ -79,14 +69,12 @@ func swStateOf(r *Runtime) *swState {
 	return s
 }
 
-// setupServiceWorker installs the ServiceWorker API.
 func (r *Runtime) setupServiceWorker() {
 	state := &swState{
 		registrations: make(map[string]*serviceWorkerRegistration),
 	}
 	setSWState(r, state)
 
-	// navigator.serviceWorker.register(scriptURL, options)
 	navigator := r.vm.Get("navigator")
 	if navigator == nil || goja.IsUndefined(navigator) {
 		navigatorObj := r.vm.NewObject()
@@ -101,7 +89,6 @@ func (r *Runtime) setupServiceWorker() {
 
 	swContainer := r.vm.NewObject()
 
-	// register(scriptURL, options)
 	_ = swContainer.Set("register", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			panic(r.vm.NewTypeError("register requires a script URL argument"))
@@ -147,7 +134,6 @@ func (r *Runtime) setupServiceWorker() {
 		}
 		state.mu.Unlock()
 
-		// Create registration JS object.
 		regObj := r.vm.NewObject()
 		reg.obj = regObj
 		_ = regObj.Set("scope", scope)
@@ -155,7 +141,6 @@ func (r *Runtime) setupServiceWorker() {
 		_ = regObj.Set("installing", goja.Null())
 		_ = regObj.Set("waiting", goja.Null())
 
-		// unregister()
 		_ = regObj.Set("unregister", func(call goja.FunctionCall) goja.Value {
 			state.mu.Lock()
 			delete(state.registrations, scope)
@@ -174,12 +159,10 @@ func (r *Runtime) setupServiceWorker() {
 			return promise.obj
 		})
 
-		// update()
 		_ = regObj.Set("update", func(call goja.FunctionCall) goja.Value {
 			return goja.Undefined()
 		})
 
-		// Create service worker object.
 		sw := &serviceWorkerObj{
 			state:     SWInstalling,
 			scriptURL: scriptURL,
@@ -196,9 +179,6 @@ func (r *Runtime) setupServiceWorker() {
 		reg.mu.Unlock()
 		_ = regObj.Set("installing", swObj)
 
-		// Simulate install → activate lifecycle. The background goroutine
-		// touches only plain-Go fields and queues an activation; all goja
-		// Sets happen in DrainServiceWorkerEvents on the VM thread.
 		go func() {
 			sw.mu.Lock()
 			sw.state = SWInstalled
@@ -230,7 +210,6 @@ func (r *Runtime) setupServiceWorker() {
 		return regObj
 	})
 
-	// getRegistration(scope)
 	_ = swContainer.Set("getRegistration", func(call goja.FunctionCall) goja.Value {
 		scope := "/"
 		if len(call.Arguments) >= 1 {
@@ -247,7 +226,6 @@ func (r *Runtime) setupServiceWorker() {
 		return reg.obj
 	})
 
-	// getRegistrations()
 	_ = swContainer.Set("getRegistrations", func(call goja.FunctionCall) goja.Value {
 		state.mu.Lock()
 		regs := make([]*serviceWorkerRegistration, 0, len(state.registrations))
@@ -265,12 +243,10 @@ func (r *Runtime) setupServiceWorker() {
 		return arr
 	})
 
-	// ready property (returns a promise-like)
 	_ = swContainer.Set("ready", goja.Null())
 
 	_ = navigatorObj.Set("serviceWorker", swContainer)
 
-	// Also install on window.navigator.
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			nav := winObj.Get("navigator")
@@ -286,8 +262,6 @@ func (r *Runtime) setupServiceWorker() {
 	}
 }
 
-// DrainServiceWorkerEvents applies pending install→activate transitions on
-// the VM thread. Call this from Tick; background goroutines never touch goja.
 func (r *Runtime) DrainServiceWorkerEvents() {
 	state := swStateOf(r)
 	if state == nil {

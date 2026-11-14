@@ -247,8 +247,6 @@ func TestConfigDevSize(t *testing.T) {
 	}
 }
 
-// newNavTestPath builds just enough framePath for applyNavResult and the session
-// helpers: a real scheduler with an idle raster pool, and a one-tab manager.
 func newNavTestPath(t *testing.T) *framePath {
 	t.Helper()
 	spec := paint.SceneSpec{DocHeight: 256}
@@ -295,13 +293,13 @@ func TestContentKeyPageNavigationScrollsDocument(t *testing.T) {
 	if got := f.sched.Viewport().Offset.Y; got != 0 {
 		t.Fatalf("PageUp scroll offset = %d, want 0", got)
 	}
-	if !f.contentKey(0xF705, 0) { // End
+	if !f.contentKey(0xF705, 0) {
 		t.Fatal("End was not handled")
 	}
 	if got, want := f.sched.Viewport().Offset.Y, int32(1792); got != want {
 		t.Fatalf("End scroll offset = %d, want %d", got, want)
 	}
-	if !f.contentKey(0xF704, 0) { // Home
+	if !f.contentKey(0xF704, 0) {
 		t.Fatal("Home was not handled")
 	}
 	if got := f.sched.Viewport().Offset.Y; got != 0 {
@@ -569,9 +567,6 @@ func TestInterceptContentKeyConsumedWhenFocused(t *testing.T) {
 	}
 }
 
-// TestInterceptBareTabReachesContentKey asserts a bare Tab is routed to
-// onContentKey (for focus traversal) rather than being swallowed by the
-// browser-tab shortcut, which only fires for Cmd+Tab.
 func TestInterceptBareTabReachesContentKey(t *testing.T) {
 	cw := &chromeWindow{
 		toolbar: &toolbar.State{},
@@ -664,12 +659,6 @@ func TestInterceptResizeReportsLogicalContentSize(t *testing.T) {
 	var gotW, gotH int
 	cw.onResize = func(w, h int) { gotW, gotH = w, h }
 
-	// The shim reports the whole window surface in device pixels: the content
-	// viewport plus the chrome band chromeWindow composites on top. The host
-	// must see the logical content size, and the loop must see a resize that
-	// carries the content device size - forwarding the window size makes the
-	// scheduler size a buffer that Present then grows again by the chrome
-	// band, and the stretched bitmap puts every hover a line below its pixels.
 	resize := surface.Event{
 		Kind:  surface.EvResize,
 		Size:  frame.Size{W: 2880, H: 1800},
@@ -816,13 +805,8 @@ func TestBuildKeepsSyntheticSceneForPacedAndExplicitRuns(t *testing.T) {
 	}
 }
 
-// errTraversalBoom stands in for a failed traversal load.
 var errTraversalBoom = errors.New("boom")
 
-// TestApplyNavResultFailedTraversalKeepsCursor guards transactional
-// back/forward: the cursor moves only when the traversal's page displays. A
-// failed load used to strand it on a page that never rendered because Back()
-// moved it before the load started.
 func TestApplyNavResultFailedTraversalKeepsCursor(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -846,8 +830,6 @@ func TestApplyNavResultFailedTraversalKeepsCursor(t *testing.T) {
 	}
 }
 
-// TestApplyNavResultSuccessfulTraversalCommitsCursor pins the other half: a
-// peeked step lands when its page displays.
 func TestApplyNavResultSuccessfulTraversalCommitsCursor(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -866,9 +848,6 @@ func TestApplyNavResultSuccessfulTraversalCommitsCursor(t *testing.T) {
 	}
 }
 
-// TestApplyNavResultStaleTraversalDrops pins the interleave guard: a typed
-// URL landing first owns the cursor, and the older traversal must not yank
-// it back.
 func TestApplyNavResultStaleTraversalDrops(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -887,9 +866,6 @@ func TestApplyNavResultStaleTraversalDrops(t *testing.T) {
 	}
 }
 
-// TestApplyNavResultFreshNavResetsScroll guards navigation commitment: a new
-// page opens at the top instead of inheriting the old page's scroll offset.
-// Reloads and traversals keep their offset.
 func TestApplyNavResultFreshNavResetsScroll(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -908,10 +884,6 @@ func TestApplyNavResultFreshNavResetsScroll(t *testing.T) {
 	}
 }
 
-// tallNavTestPath is newNavTestPath with a scrollable document, so viewport
-// offsets survive the scheduler's clamp and scroll behavior is observable.
-// The scheduler clamps against its construction layer, so the height has to
-// be tall from the start rather than swapped in later.
 func tallNavTestPath(t *testing.T) *framePath {
 	t.Helper()
 	spec := paint.SceneSpec{DocHeight: 2048}
@@ -932,9 +904,6 @@ func tallNavTestPath(t *testing.T) *framePath {
 	return f
 }
 
-// TestApplyNavResultTraverseRestoresEntryScroll pins the traversal half: a
-// successful Back restores the offset the target entry was left at instead of
-// inheriting the departing page's position.
 func TestApplyNavResultTraverseRestoresEntryScroll(t *testing.T) {
 	f := tallNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -956,9 +925,6 @@ func TestApplyNavResultTraverseRestoresEntryScroll(t *testing.T) {
 	}
 }
 
-// TestApplyNavResultTraverseToTopClearsOffset covers the other direction: an
-// entry left at the top returns to the top even when the page it replaced was
-// scrolled far down.
 func TestApplyNavResultTraverseToTopClearsOffset(t *testing.T) {
 	f := tallNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -977,9 +943,6 @@ func TestApplyNavResultTraverseToTopClearsOffset(t *testing.T) {
 	}
 }
 
-// TestShutdownCancelsAndJoinsNavigations guards teardown ordering: in-flight
-// loads root at the run scope, so cancelling it aborts them, and the waiter
-// proves no loader still runs afterwards instead of leaking into teardown.
 func TestShutdownCancelsAndJoinsNavigations(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
@@ -1026,10 +989,6 @@ func TestShutdownCancelsAndJoinsNavigations(t *testing.T) {
 	}
 }
 
-// TestLoadURLCtxReportsFinalURLAfterRedirect pins what the address bar and
-// the history must record: the URL that displayed, not the one typed. A
-// redirect used to leave the requested URL committed while subresources
-// resolved against the final one.
 func TestLoadURLCtxReportsFinalURLAfterRedirect(t *testing.T) {
 	html := `<!DOCTYPE html><html><body><div style="width:64px;height:64px;background:red"></div></body></html>`
 	var final string
@@ -1062,9 +1021,6 @@ func TestLoadURLCtxReportsFinalURLAfterRedirect(t *testing.T) {
 	}
 }
 
-// TestApplyNavResultTraversalRewritesRedirectedEntry pins the history side:
-// traversing back to an entry that redirects replaces that entry with the
-// final URL instead of recording the requested one alongside it.
 func TestApplyNavResultTraversalRewritesRedirectedEntry(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -1087,10 +1043,6 @@ func TestApplyNavResultTraversalRewritesRedirectedEntry(t *testing.T) {
 	}
 }
 
-// TestCertFailureReachesAddressBar pins the Gate 3 security display for the
-// failure half: a TLS server whose certificate the default client does not
-// trust must fail the load with a certificate error, and that error must land
-// in the address bar (red text) with loading cleared — never a silent blank.
 // qc:BR-007
 func TestCertFailureReachesAddressBar(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1126,13 +1078,9 @@ func TestCertFailureReachesAddressBar(t *testing.T) {
 	}
 }
 
-// TestSlowImageAbortsAtFetchBudget pins in-flight cancellation: the engine's
-// image budget stops new spawns past its deadline, but a hung host must also
-// abort the workers already fetching instead of riding the 30s client
-// timeout. The page itself still builds; the stalled image is omitted.
 func TestSlowImageAbortsAtFetchBudget(t *testing.T) {
 	img := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done() // hang until the client gives up
+		<-r.Context().Done()
 	}))
 	defer img.Close()
 	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1161,9 +1109,6 @@ func TestSlowImageAbortsAtFetchBudget(t *testing.T) {
 	t.Logf("hung-image load settled in %v", elapsed)
 }
 
-// TestTabStripWheelScrollsWhenOverflowing pins wheel ownership: a scroll over
-// the tab bar moves the strip when tabs overflow, and is consumed so the
-// document underneath does not scroll too.
 func TestTabStripWheelScrollsWhenOverflowing(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	for i := 0; i < 40; i++ {
@@ -1190,7 +1135,6 @@ func TestTabStripWheelScrollsWhenOverflowing(t *testing.T) {
 	if got := mgr.TabScroll(); got != wantMax {
 		t.Fatalf("TabScroll() = %d, want %d (clamped to max)", got, wantMax)
 	}
-	// Over the document the same wheel must reach the loop, not the strip.
 	content := surface.Event{Kind: surface.EvScroll, Delta: frame.Point{Y: 120}, Pos: frame.Point{X: 500, Y: 200}}
 	if cw.intercept(content) {
 		t.Fatal("wheel over document consumed by tab strip")
@@ -1200,8 +1144,6 @@ func TestTabStripWheelScrollsWhenOverflowing(t *testing.T) {
 	}
 }
 
-// TestTabStripWheelFallsThroughWhenFitting: with no overflow the strip cannot
-// scroll, so the wheel always belongs to the document.
 func TestTabStripWheelFallsThroughWhenFitting(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	for i := 0; i < 3; i++ {
@@ -1219,9 +1161,6 @@ func TestTabStripWheelFallsThroughWhenFitting(t *testing.T) {
 	}
 }
 
-// TestSwitchTabScrollsActiveIntoView: switching to a clipped tab (keyboard,
-// session restore) must bring it on screen, since the pointer cannot reach
-// what the strip clipped away.
 func TestSwitchTabScrollsActiveIntoView(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config.width = 1000
@@ -1241,7 +1180,6 @@ func TestSwitchTabScrollsActiveIntoView(t *testing.T) {
 	}
 }
 
-// tickWin is a chromeWindow backend with a drivable event channel.
 type tickWin struct {
 	events chan surface.Event
 }
@@ -1253,9 +1191,6 @@ func (w *tickWin) SetIME(bool)                               {}
 func (w *tickWin) ScaleFactor() float32                      { return 1 }
 func (w *tickWin) Close() error                              { return nil }
 
-// TestChromePumpFiresTickCallbacks pins the pump's periodic hook: the tick
-// callback runs while events flow, and the pump still exits when the window
-// closes. A zero interval disables ticks (all existing constructions).
 func TestChromePumpFiresTickCallbacks(t *testing.T) {
 	evs := make(chan surface.Event, 8)
 	ticks := make(chan struct{}, 64)
@@ -1284,9 +1219,6 @@ func TestChromePumpFiresTickCallbacks(t *testing.T) {
 	}
 }
 
-// TestPumpJSRepaintsMutatedTab is the host half of the event loop: a timer
-// mutation applied by PumpJS must reach a fresh layer and a published plan,
-// and a quiescent tab must publish nothing further.
 func TestPumpJSRepaintsMutatedTab(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<html><body><p id="t">waiting</p><script>setTimeout(function(){document.getElementById('t').textContent='fired';},0);</script></body></html>`))
@@ -1323,9 +1255,6 @@ func TestPumpJSRepaintsMutatedTab(t *testing.T) {
 	}
 }
 
-// TestTabStripChevronClicksScrollByPage pins the last mouse-only path past
-// the minimum: the right chevron pages forward, the left pages back, both
-// clamped to the strip range. With no overflow the same points hit nothing.
 func TestTabStripChevronClicksScrollByPage(t *testing.T) {
 	mgr := tabs.NewManager(nil)
 	for i := 0; i < 40; i++ {
@@ -1368,8 +1297,6 @@ func TestTabStripChevronClicksScrollByPage(t *testing.T) {
 	switched, opened := false, false
 	cw.onSwitch = func(uint64) { switched = true }
 	cw.onNewTab = func() { opened = true }
-	// A press in an empty tab-bar region is still consumed (the strip owns
-	// its band), but it must fire nothing and move nothing.
 	cw.intercept(press(rx, ry))
 	if switched || opened {
 		t.Fatal("chevron-zone press with no chevrons switched or opened a tab")
@@ -1379,8 +1306,6 @@ func TestTabStripChevronClicksScrollByPage(t *testing.T) {
 	}
 }
 
-// TestLoadErrorsOmitQuerySecrets: navigation failures surface redacted URLs
-// (diagnostics must omit query secrets by default), keeping the host.
 // qc:BR-012
 func TestLoadErrorsOmitQuerySecrets(t *testing.T) {
 	client := net.DefaultClient()
@@ -1399,11 +1324,6 @@ func TestLoadErrorsOmitQuerySecrets(t *testing.T) {
 	}
 }
 
-// TestTabBarClicksFollowShrunkTabs pins draw/click agreement under overflow:
-// with ten tabs at 1000 logical pixels the strip shrinks every tab, so a press
-// at the drawn center of tab 5 must switch to tab 5 (not whichever fixed-200px
-// tab happens to cover that point), and a press on the drawn new-tab button
-// must open a tab (not fall past a button stranded off-screen).
 func TestTabBarClicksFollowShrunkTabs(t *testing.T) {
 	const tabCount, width = 10, 1000
 	mgr := tabs.NewManager(nil)
@@ -1449,9 +1369,6 @@ func TestTabBarClicksFollowShrunkTabs(t *testing.T) {
 	}
 }
 
-// TestTabBarDragReordersTabs pins pointer reordering: press switches (as
-// before), a motion past the threshold drags, and release commits the drop
-// slot. A press-release without motion leaves the order alone.
 func TestTabBarDragReordersTabs(t *testing.T) {
 	const tabCount, width = 4, 1000
 	mgr := tabs.NewManager(nil)
@@ -1477,7 +1394,6 @@ func TestTabBarDragReordersTabs(t *testing.T) {
 		return surface.Event{Kind: surface.EvPointer, Action: surface.PointerRelease, Button: surface.ButtonLeft, Pos: frame.Point{X: x, Y: y}}
 	}
 
-	// Drag tab 0 past tab 1: press, move well beyond the threshold, release.
 	r0 := tabs.TabRect(0, 0, tabCount, width)
 	cx, cy := (r0.X0+r0.X1)/2, int32(tabs.TabBarHeight)/2
 	cw.intercept(press(cx, cy))
@@ -1494,7 +1410,6 @@ func TestTabBarDragReordersTabs(t *testing.T) {
 		t.Fatal("active tab changed across a drag of itself")
 	}
 
-	// Plain press-release without motion keeps the order.
 	before := tabIDsOf(mgr.Tabs())
 	r1 := tabs.TabRect(1, 0, tabCount, width)
 	cw.intercept(press((r1.X0+r1.X1)/2, cy))
@@ -1512,9 +1427,6 @@ func tabIDsOf(list []*tabs.Tab) []uint64 {
 	return out
 }
 
-// TestClearDataRemovesTracesKeepsBookmarks pins the v1 clear-data contract:
-// cookies, history and session files go; starred bookmarks stay. Missing
-// files are fine (idempotent); anything else is an error, not a half-clear.
 // qc:BR-053
 func TestClearDataRemovesTracesKeepsBookmarks(t *testing.T) {
 	dir := t.TempDir()
@@ -1549,13 +1461,11 @@ func TestClearDataRemovesTracesKeepsBookmarks(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "bookmarks.json")); err != nil {
 		t.Fatalf("bookmarks.json missing after clear: %v (bookmarks are kept)", err)
 	}
-	// Idempotent: clearing twice is not an error.
 	if _, err := c.clearBrowsingData(); err != nil {
 		t.Fatalf("second clearBrowsingData: %v", err)
 	}
 }
 
-// TestParseClearDataFlag pins the CLI surface of the v1 clear-data control.
 // qc:BR-053
 func TestParseClearDataFlag(t *testing.T) {
 	c, err := parse([]string{"-clear-data"})
@@ -1574,9 +1484,6 @@ func TestParseClearDataFlag(t *testing.T) {
 	}
 }
 
-// TestRunClearDataEndToEnd pins the flag wiring: -clear-data with a scratch
-// HOME clears the default profile's traces and exits success without opening
-// anything.
 // qc:BR-053
 func TestRunClearDataEndToEnd(t *testing.T) {
 	home := t.TempDir()
@@ -1603,12 +1510,6 @@ func TestRunClearDataEndToEnd(t *testing.T) {
 	}
 }
 
-// TestRepaintTabReusesLayerOnSameExtent pins the incremental present path:
-// repainting the same document must keep the tab's layer (and its tile
-// cache and pool) instead of allocating afresh. Selection damage then
-// stales only the selection's tiles: the flicker proof below settles every
-// tile through real frames, drag-selects one word, and requires the rest
-// to be reused with only dirty tiles re-rasterized.
 func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<html><body><p>stable content for repaint</p>` +
@@ -1651,8 +1552,6 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 		t.Fatal("repaintTab allocated a new layer for an unchanged extent: tile cache discarded")
 	}
 
-	// Settle every tile through real frames (BeginFrame/Submit/drain until
-	// quiet), mirroring the raster harness drain.
 	f.sched.SetViewport(frame.Viewport{Size: frame.Size{W: 800, H: 600}})
 	settle := func(t *testing.T) {
 		t.Helper()
@@ -1669,8 +1568,6 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 				}
 				_ = f.sched.HandleDone(d)
 			}
-			// Give the pool worker a chance to pick up jobs before
-			// judging quiet, mirroring the raster harness drain.
 			runtime.Gosched()
 			if second.Grid.Stats().PaintingBytes == 0 {
 				_, check := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
@@ -1695,14 +1592,8 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 	sess.SelectTo(m.X1-1, midY)
 	f.repaintTab(tab, f.selectionDamage(tab, oldR, oldOK))
 
-	// repaintTab hands the new content to the scheduler rather than writing it
-	// into the layer here, because it runs on the chrome pump thread while the
-	// frame thread reads the same layer fields. One BeginFrame is what installs
-	// the swap; the assertions below then read the damage that frame scoped.
 	_, needed := f.sched.BeginFrame(surface.Event{Kind: surface.EvVsync})
 
-	// Damage scoping: the selection's tile is stale, a far tile in the same
-	// layer is still current.
 	selTile := frame.CoordFor(frame.Point{X: int32(m.X0) + 1, Y: int32(midY)}, frame.TileSize)
 	if !second.Needs(selTile) {
 		t.Fatal("selection tile not stale after a selection repaint")
@@ -1713,11 +1604,6 @@ func TestRepaintTabReusesLayerOnSameExtent(t *testing.T) {
 		t.Fatal("far tile stale after a word-sized selection change: damage escaped")
 	}
 
-	// The test document is one tile wide: one dirty tile is the whole
-	// damage, so Needed and the re-raster delta cap at one plus margin while
-	// any surviving reuse proves the cache lived. Layer identity above (same
-	// pointer across repaints) plus far-tile freshness below are what fail
-	// pre-fix, when every repaint allocated a cold layer.
 	w := f.sched.Submit(needed)
 	if w.Needed > 2 {
 		t.Fatalf("Needed = %d after a word-sized selection change, want only dirty tiles", w.Needed)

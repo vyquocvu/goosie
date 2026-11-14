@@ -30,11 +30,11 @@ func TestTextEncoder(t *testing.T) {
 		t.Errorf("length = %v, want 5", val.Num)
 	}
 	val, _ = r.Global("first")
-	if val.Num != 72 { // 'H'
+	if val.Num != 72 {
 		t.Errorf("first byte = %v, want 72", val.Num)
 	}
 	val, _ = r.Global("last")
-	if val.Num != 111 { // 'o'
+	if val.Num != 111 {
 		t.Errorf("last byte = %v, want 111", val.Num)
 	}
 }
@@ -77,7 +77,6 @@ func TestTextEncoderUnicode(t *testing.T) {
 	}
 
 	val, _ := r.Global("len")
-	// "Hello " = 6 bytes, "世界" = 6 bytes (3 each in UTF-8)
 	if val.Num != 12 {
 		t.Errorf("length = %v, want 12", val.Num)
 	}

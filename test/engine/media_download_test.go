@@ -10,8 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/media"
 )
 
-// failCode pumps until the controller reports failure and returns the code it
-// failed with, which is the part a page can act on.
 func failCode(t *testing.T, sess *engine.Session, c media.Controller) media.ErrorCode {
 	t.Helper()
 	pumpUntil(t, sess, func() bool { return c.Snapshot().State == media.StateFailed })
@@ -28,8 +26,6 @@ func failCode(t *testing.T, sess *engine.Session, c media.Controller) media.Erro
 	return code
 }
 
-// loadOne selects a source and waits for the element to either reach a
-// non-loading state or fail, returning the controller.
 func loadOne(t *testing.T, sess *engine.Session, b *fakeBackend, f *fakeFetcher, href string) media.Controller {
 	t.Helper()
 	c := sess.MediaController(videoNode(t, sess.Doc))
@@ -41,10 +37,6 @@ func loadOne(t *testing.T, sess *engine.Session, b *fakeBackend, f *fakeFetcher,
 	return c
 }
 
-// TestMediaSourceURLPolicy pins that a media source is judged by the same rule
-// as every other subresource. A video is the one resource the browser hands to
-// a native stack, so a URL that would have been refused for a stylesheet must
-// not slip through here.
 func TestMediaSourceURLPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -74,9 +66,6 @@ func TestMediaSourceURLPolicy(t *testing.T) {
 	}
 }
 
-// TestMediaResponseAdmission pins what a body has to look like to be handed to a
-// decoder. Each case is a way a server can answer a media request with
-// something that is not a playable file.
 func TestMediaResponseAdmission(t *testing.T) {
 	htmlPage := []byte("<!doctype html><title>404</title>not found")
 	for _, tc := range []struct {
@@ -112,8 +101,6 @@ func TestMediaResponseAdmission(t *testing.T) {
 	}
 }
 
-// TestMediaOversizedBodyIsRefused is kept out of the table above because it
-// allocates the limit rather than a fixture.
 func TestMediaOversizedBodyIsRefused(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	f.body = make([]byte, engine.MaxMediaBytes+1)
@@ -130,9 +117,6 @@ func TestMediaOversizedBodyIsRefused(t *testing.T) {
 	}
 }
 
-// TestMediaTempFilePermissions pins that the handoff file is readable only by
-// this process. A downloaded video can be anything the user was entitled to
-// see, and a world-readable temporary directory makes it everyone's.
 func TestMediaTempFilePermissions(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)
@@ -162,9 +146,6 @@ func TestMediaTempFilePermissions(t *testing.T) {
 	}
 }
 
-// TestMediaOpensOnlyAfterTheWholeBodyArrives pins the ordering the download-first
-// design rests on: the decoder is not pointed at a file until the fetch has
-// completed and the file is closed.
 func TestMediaOpensOnlyAfterTheWholeBodyArrives(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	f.gate = make(chan struct{})
@@ -193,10 +174,6 @@ func TestMediaOpensOnlyAfterTheWholeBodyArrives(t *testing.T) {
 	}
 }
 
-// TestMediaDownloadConcurrencyIsBounded pins that a page naming many sources
-// cannot open many sockets at once. The third request fails fast rather than
-// queueing behind the display, which is what keeps a hostile page from turning
-// a video element into a connection amplifier.
 func TestMediaDownloadConcurrencyIsBounded(t *testing.T) {
 	const html = `<html><body><video id="a" controls></video><video id="b" controls></video><video id="c" controls></video></body></html>`
 	b, f := newFakeBackend(), newFakeFetcher()
@@ -243,9 +220,6 @@ func TestMediaDownloadConcurrencyIsBounded(t *testing.T) {
 	}
 }
 
-// TestMediaFilesAreGoneAfterClose pins the whole-directory cleanup: a session
-// that goes away leaves nothing behind, including files whose leases were never
-// individually released.
 func TestMediaFilesAreGoneAfterClose(t *testing.T) {
 	b, f := newFakeBackend(), newFakeFetcher()
 	sess := newMediaSession(t, videoHTML, b, f)

@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// joinCollected joins the entries a page pushed into a global array during
-// dispatch. The array only fills while the gesture runs, so the join has to be a
-// second evaluation rather than part of the probe script.
 func joinCollected(t *testing.T, r *js.Runtime, name string) string {
 	t.Helper()
 	if err := r.Run("var __joined = "+name+".join('|');", "join collected"); err != nil {
@@ -22,9 +19,6 @@ func joinCollected(t *testing.T, r *js.Runtime, name string) string {
 	return v.Str
 }
 
-// WPT dom/events/non-cancelable-when-passive/synthetic-events-cancelable.html
-// asserts `TouchEvent in self` for touchstart, touchmove, touchend and
-// touchcancel, so the interface has to be reachable as a global constructor.
 func TestTouchInterfacesAreExposed(t *testing.T) {
 	r := newEventRuntime(t, eventDOM())
 	if err := r.Run(`
@@ -44,9 +38,6 @@ func TestTouchInterfacesAreExposed(t *testing.T) {
 	}
 }
 
-// The same file constructs `new TouchEvent(type)` and asserts the event is
-// non-cancelable, that its preventDefault() is ignored, and that dispatchEvent
-// returns true. A constructed touch event also carries all three lists, empty.
 func TestConstructedTouchEventIsNonCancelableWithEmptyLists(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -77,9 +68,6 @@ func TestConstructedTouchEventIsNonCancelableWithEmptyLists(t *testing.T) {
 	}
 }
 
-// TouchEventInit carries the three lists and TouchInit the contact itself, so a
-// page can build a gesture and read it back through item(), indexing, the
-// coordinates and the target.
 func TestConstructedTouchEventReadsBackItsTouchLists(t *testing.T) {
 	r := newEventRuntime(t, eventDOM())
 	if err := r.Run(`
@@ -117,11 +105,6 @@ func TestConstructedTouchEventReadsBackItsTouchLists(t *testing.T) {
 	}
 }
 
-// A generated touch event reports the dispatch-time answer derived from the
-// listeners of the type being dispatched: a listener registered passive leaves
-// the gesture non-cancelable for every listener of that dispatch, a non-passive
-// one makes it cancelable for all of them, and the default-passive globals get
-// the same treatment as any other node.
 func TestGeneratedTouchEventCancelableFollowsTheListenerOfItsOwnType(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -153,9 +136,6 @@ func TestGeneratedTouchEventCancelableFollowsTheListenerOfItsOwnType(t *testing.
 			div := doc.ElementByID("target")
 			touch := &dom.Touch{Identifier: 1, ClientX: 40, ClientY: 45, Target: div}
 			event := dom.NewTrustedTouchEvent("touchstart", div, []*dom.Touch{touch}, []*dom.Touch{touch})
-			// Nothing called preventDefault, so the gesture survives either way:
-			// the return value is whether the default action may run, not whether
-			// the page could have stopped it.
 			if !r.DispatchTrustedTouch(div, event) {
 				t.Errorf("gesture reported cancelled with no listener cancelling it (%s listener)", tc.name)
 			}
@@ -168,9 +148,6 @@ func TestGeneratedTouchEventCancelableFollowsTheListenerOfItsOwnType(t *testing.
 	}
 }
 
-// The return value flips only when a listener that may cancel the gesture
-// actually does: a non-passive touchstart that calls preventDefault stops the
-// scroll, which is what keeps a host from scrolling a page that asked not to be.
 func TestGeneratedTouchEventPreventDefaultCancelsTheGesture(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -196,9 +173,6 @@ func TestGeneratedTouchEventPreventDefaultCancelsTheGesture(t *testing.T) {
 	}
 }
 
-// The cancelable flag is one value per dispatch: a non-passive listener anywhere
-// in the path makes the gesture read cancelable even to a passive listener, and
-// that passive listener's preventDefault() is still ignored.
 func TestGeneratedTouchEventCancelableIsSharedAndPassivePreventIsIgnored(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -222,17 +196,12 @@ func TestGeneratedTouchEventCancelableIsSharedAndPassivePreventIsIgnored(t *test
 		t.Fatal("gesture reported cancelled, want the passive listener's preventDefault ignored")
 	}
 	got := joinCollected(t, r, "report")
-	// The div is the event target and Window is the last item in the path, so the
-	// target's listener runs first.
 	want := "divCancelable=true,prevented=false|windowCancelable=true"
 	if got != want {
 		t.Errorf("report = %q, want %q", got, want)
 	}
 }
 
-// touchend blocks no scroll, so a generated one keeps its own flag no matter how
-// passive the listeners are - and it reports the released contact in
-// changedTouches only.
 func TestGeneratedTouchEndStaysCancelableAndListsOnlyTheReleasedContact(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)

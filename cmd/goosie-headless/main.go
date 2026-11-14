@@ -1,20 +1,3 @@
-// Command goosie-headless renders an HTML file to a PNG image.
-//
-// This is the M2 front-end pipeline's file-to-pixels path: read HTML, parse DOM,
-// resolve styles, lay out boxes, paint a display list, rasterize tiles, and write
-// the result as a PNG. It exists so automated tests can compare rendered output
-// against baselines and against Chromium.
-//
-// Usage:
-//
-//	goosie-headless -in page.html -out page.png
-//	goosie-headless -in page.html -out page.png -width 1440 -height 900 -dpr 2
-//	goosie-headless -in page.html -out page.png -pump 500ms
-//
-// By default the document is painted after one synchronous parse/style/layout
-// pass, so timer and animation-frame callbacks never run. -pump opts into a
-// wall-clock budget of event-loop turns before the paint, for pages whose final
-// state is reached from setTimeout.
 package main
 
 import (
@@ -35,24 +18,12 @@ import (
 )
 
 const (
-	// rasterQueue is how many tile jobs may be offered at once. The same depth as
-	// the main binary, so a headless render never refuses work an interactive run
-	// would have taken.
-	rasterQueue = 4096
-	// glyphAtlasBudget is per layer and is not one of M2's criteria. A tile is
-	// 256px on a side, so 4 MiB holds more glyph masks than one screen of text needs.
+	rasterQueue      = 4096
 	glyphAtlasBudget = 4 << 20
-	// renderTimeout is how long to wait for the frame to be presented. A headless
-	// render should complete in milliseconds, but a slow machine or large page
-	// might need more.
-	renderTimeout = 10 * time.Second
-	// pumpStep is how long one event-loop turn sleeps before the next. Timer
-	// resolution is what a page's reveal is written against, so a turn every
-	// 10ms keeps a 100ms setTimeout honest without spinning the CPU.
-	pumpStep = 10 * time.Millisecond
+	renderTimeout    = 10 * time.Second
+	pumpStep         = 10 * time.Millisecond
 )
 
-// config is one parsed invocation.
 type config struct {
 	in     string
 	out    string
@@ -62,7 +33,6 @@ type config struct {
 	pump   time.Duration
 }
 
-// devSize is the surface in device pixels.
 func (c config) devSize() frame.Size {
 	return frame.Size{
 		W: int32(float64(c.width)*c.dpr + 0.5),
@@ -77,11 +47,6 @@ func main() {
 	}
 }
 
-// frameOutcome reports whether a headless render has finished, or failed. A
-// frame that wants nothing, has nothing on order, and was refused nothing is
-// settled. A visible tile that failed rasterization is terminal instead: the
-// scheduler will not retry it for this content, so the PNG would have a hole
-// that no later frame repairs and waiting would only run to renderTimeout.
 func frameOutcome(stats surface.LoopStats) (bool, error) {
 	if stats.Presents == 0 {
 		return false, nil
@@ -92,9 +57,6 @@ func frameOutcome(stats surface.LoopStats) (bool, error) {
 	return stats.Last.Needed == 0 && stats.Last.PaintingBytes == 0 && stats.Last.Refused == 0, nil
 }
 
-// mustJSRuntime builds the per-document runtime for classic scripts, or nil
-// when construction fails so the render degrades to no scripting instead of
-// failing. The session owns it afterwards via Close.
 func mustJSRuntime(docURL string) *js.Runtime {
 	rt, err := js.New(js.Options{URL: docURL})
 	if err != nil {
@@ -104,11 +66,6 @@ func mustJSRuntime(docURL string) *js.Runtime {
 	return rt
 }
 
-// pumpJSFor spends a wall-clock budget on the document's event loop before the
-// display list is built, so a reveal written against setTimeout has a chance to
-// run and reflow. A render is otherwise one synchronous pass - the shape every
-// existing gate, bench and parity number measures - so this is opt-in and the
-// default path is untouched.
 func pumpJSFor(sess *engine.Session, viewportW float32, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
 	for {
@@ -188,9 +145,6 @@ func run(args []string) error {
 	}
 
 	documentText, documentEncoding, _ := net.DecodeHTML(html, "")
-	// The invalidation batch is what lets PumpJS see a script's DOM writes. A
-	// one-shot render never asks, but -pump does, and without it a timer that
-	// changes style leaves the paint list on the load-time cascade.
 	sess, err := engine.NewSession(documentText, nil, float32(c.width), engine.WithMetrics(fonts), engine.WithViewportH(float32(c.height)), engine.WithDocumentEncoding(documentEncoding), engine.WithJS(mustJSRuntime(c.in)), engine.WithInvalidation(&engine.Invalidation{}))
 	if err != nil {
 		return fmt.Errorf("build session: %w", err)

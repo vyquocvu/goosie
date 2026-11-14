@@ -10,20 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// GOOSIE-LISTBOX-001's visual half, and the only one a headless host can give:
-// the listbox is rasterized by the same tile path the shipped browser uses
-// (raster.RasterizeTile over a Session.PaintChecked display list with real font
-// metrics), and the ink a press produces is compared with the ink the same page
-// paints closed. A closed select's native popup is not observable in a reference
-// browser on this host - scripts/verify-br101-listbox-viewport.js diffs a
-// before/after page.screenshot around a click on a select at y=540 of a 600px
-// viewport and measures CHANGED [40,540,219,560], the control's own rect - so
-// these oracles pin what the panel exists to guarantee instead of reproducing
-// pixels no reference can supply: the rows that reach the tiles are the rows the
-// engine handed out, and they are inside the viewport.
-
-// lbListboxFixture is the anchor script's select - left 40, width 180, 16px font -
-// at a chosen top, holding n options with `selected` authored selected.
 func lbListboxFixture(top float32, n, selected int) string {
 	html := fmt.Sprintf(`<html><head><style>html,body{margin:0}</style></head><body>`+
 		`<select id="sel" style="position:absolute;left:40px;top:%gpx;width:180px;font-size:16px">`, top)
@@ -37,7 +23,6 @@ func lbListboxFixture(top float32, n, selected int) string {
 	return html + fmt.Sprintf(`</select><div style="position:absolute;left:0;top:%gpx;width:1px;height:1px"></div></body></html>`, 3000+top)
 }
 
-// lbInk is one closed-vs-open rasterization of a listbox.
 type lbInk struct {
 	Open    *frame.Bitmap
 	Changed map[[2]int]struct{}
@@ -46,9 +31,6 @@ type lbInk struct {
 	Box     frame.Rect
 }
 
-// lbRasterInk renders a page, presses its select, renders it again, and reports
-// the pixels that differ. The press also focuses the control, so the control's
-// own box may repaint; oracles say which regions must not change.
 func lbRasterInk(t *testing.T, top float32, n, selected int) lbInk {
 	t.Helper()
 	fonts, err := raster.NewFonts()
@@ -96,7 +78,6 @@ func lbRasterTile(t *testing.T, s *engine.Session, fonts *raster.Fonts) *frame.B
 	return bitmap
 }
 
-// lbDiff is the set of device pixels a press changed - the popup's ink.
 func lbDiff(a, b *frame.Bitmap) map[[2]int]struct{} {
 	out := map[[2]int]struct{}{}
 	for y := 0; y < int(b.H); y++ {
@@ -133,10 +114,6 @@ func lbDeviceBox(t *testing.T, s *engine.Session) frame.Rect {
 	return frame.RectF4(x0, y0, x1, y1).ToDevice(1)
 }
 
-// lbPanelFill is the device rect the open listbox's panel fill covers, read back
-// out of the display list rather than trusted from the engine's row bounds: the
-// rows sit 1px inside the panel, and the border strips paint that 1px, so ink
-// has to be compared with the rect paint was actually handed.
 func lbPanelFill(t *testing.T, s *engine.Session) frame.Rect {
 	t.Helper()
 	dl, err := s.PaintChecked(1)
@@ -160,8 +137,6 @@ func lbPanelFill(t *testing.T, s *engine.Session) frame.Rect {
 	return *panel
 }
 
-// stray returns up to eight changed pixels that lie in neither the panel nor the
-// control's box - ink the engine never promised.
 func (ink lbInk) stray() [][2]int {
 	var bad [][2]int
 	for _, p := range lbSorted(ink.Changed) {
@@ -194,11 +169,6 @@ func lbInside(x, y int, r frame.Rect) bool {
 	return int32(x) >= r.X0 && int32(x) < r.X1 && int32(y) >= r.Y0 && int32(y) < r.Y1
 }
 
-// A select pushed against the viewport bottom has no room below the control, so
-// its rows must reach the tiles above it: a press may not leave ink under the
-// control's bottom edge, which is exactly where an unplaced panel painted rows
-// nobody could see.
-//
 // qc:BR-101
 func TestFlippedListboxRasterizesAboveTheControl(t *testing.T) {
 	ink := lbRasterInk(t, 540, 12, 3)
@@ -215,8 +185,6 @@ func TestFlippedListboxRasterizesAboveTheControl(t *testing.T) {
 	if ink.Panel.Y0 < 0 || ink.Panel.Y1 > 600 {
 		t.Errorf("the rasterized panel spans y [%v,%v], off the 600px viewport", ink.Panel.Y0, ink.Panel.Y1)
 	}
-	// Every row the pointer can hit is a row the tile path inked, sampled at the
-	// row's right end where no glyph goes.
 	for i, r := range ink.Rows {
 		d := r.Rect.ToDevice(1)
 		p := [2]int{int(d.X1) - 4, int((d.Y0 + d.Y1) / 2)}
@@ -226,11 +194,6 @@ func TestFlippedListboxRasterizesAboveTheControl(t *testing.T) {
 	}
 }
 
-// A 40-option list cannot be shown whole in a 600px viewport, so what the tile
-// path must ink is the window: the rows the engine handed out, the highlight on
-// the selected one, and nothing below the panel where the dropped rows would
-// have gone.
-//
 // qc:BR-101
 func TestWindowedListboxRasterizesExactlyTheRowsItShows(t *testing.T) {
 	const options = 40
@@ -267,8 +230,6 @@ func TestWindowedListboxRasterizesExactlyTheRowsItShows(t *testing.T) {
 			t.Errorf("row %d (%s) background rasterized as %v, want the panel %v", i, r.Label, got, paint.ListboxPanelColor)
 		}
 	}
-	// Below the panel the page keeps painting its own background: an option the
-	// window dropped must not have been inked at all.
 	for _, p := range lbSorted(ink.Changed) {
 		if p[1] >= int(ink.Panel.Y1) && !lbInside(p[0], p[1], ink.Box) {
 			t.Fatalf("ink at %v, below the panel that ends at y %v: the listbox painted rows it is not showing", p, ink.Panel.Y1)
@@ -276,10 +237,6 @@ func TestWindowedListboxRasterizesExactlyTheRowsItShows(t *testing.T) {
 	}
 }
 
-// The everyday shape: a short list under a control near the top of the page has
-// all the room it needs below, so the panel must ink downward and a press must
-// not turn it upward.
-//
 // qc:BR-101
 func TestListboxThatFitsBelowRasterizesBelowTheControl(t *testing.T) {
 	ink := lbRasterInk(t, 60, 12, 3)
@@ -319,11 +276,6 @@ func TestListboxThatFitsBelowRasterizesBelowTheControl(t *testing.T) {
 	}
 }
 
-// A long list under a control with more room above than below is the case neither
-// of the fixtures above reaches: the window has to flip upward and stay inside
-// the viewport, and the row carrying the selection has to be the one inked with
-// the highlight.
-//
 // qc:BR-101
 func TestWindowedListboxFlipsUpwardWhenTheRoomIsAbove(t *testing.T) {
 	const options = 40
@@ -355,8 +307,6 @@ func TestWindowedListboxFlipsUpwardWhenTheRoomIsAbove(t *testing.T) {
 	if got := ink.Open.At(int(d.X1)-4, int((d.Y0+d.Y1)/2)); got != paint.ListboxHighlightColor {
 		t.Errorf("the selected row's background rasterized as %v, want the highlight %v", got, paint.ListboxHighlightColor)
 	}
-	// Below the control's top edge only the control itself may have repainted: a
-	// row of the flipped window must not be inked into the space under it.
 	for _, p := range lbSorted(ink.Changed) {
 		if p[1] >= int(ink.Box.Y0) && !lbInside(p[0], p[1], ink.Box) {
 			t.Fatalf("ink at %v, at or below the control's top edge %v: the flipped window painted past the control",

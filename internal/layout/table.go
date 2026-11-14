@@ -7,9 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// tableCell is one cell placed in the table grid, with the column extents its
-// content asked for and the height that content took before the cell was
-// stretched over its rows.
 type tableCell struct {
 	id               ObjectID
 	row, col         int
@@ -18,20 +15,11 @@ type tableCell struct {
 	usedH            float32
 }
 
-// tableRow is a row as the grid sees it: the `<tr>` and the cells starting in it.
 type tableRow struct {
 	id    ObjectID
 	cells []ObjectID
 }
 
-// layoutTable lays out a table with the auto column algorithm.
-//
-// Columns start at the max-content width of their cells and are then stretched
-// or squeezed to the table's used width. Both border models are supported: a
-// separated table spaces its cells apart and each keeps four edges, while a
-// collapsing table has one line between neighbours, which it gets by letting
-// every cell draw only its left and top edge and handing the table the right and
-// bottom edges of its outermost cells.
 func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	obj := a.Get(id)
 	s := obj.Style
@@ -49,7 +37,6 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 		spacingH, spacingV = 0, 0
 	}
 
-	// The caption is a block of the table's own width above the grid.
 	captionH := float32(0)
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
@@ -69,19 +56,12 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	colCount := 0
 	cells := buildTableGrid(a, rows, &colCount)
 	if colCount == 0 {
-		// A table without columns has no content box, but it still paints
-		// its padding and borders: W/H stay content-sized (zero plus any
-		// caption) so BorderRect adds the padding exactly once. Zeroing
-		// here also repairs whatever containing-width placeholder the box
-		// sizing pass left behind.
 		obj = a.Get(id)
 		obj.W = 0
 		obj.H = captionH
 		return obj.H
 	}
 
-	// The space the columns share: everything inside the table's content box
-	// that the gaps between and around the cells leave over.
 	gaps := spacingH * float32(colCount+1)
 	available := contentW - gaps
 	if s.BorderCollapse {
@@ -90,10 +70,6 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	colMin, colMax := columnExtents(a, cells, colCount, spacingH, s.BorderCollapse, containingW)
 	colMin, colMax, colCount = floorColWidths(a, id, colMin, colMax, colCount, containingW)
 	if resolvePctLength(s.Width, containingW) < 0 {
-		// An auto width shrinks to the content, capped by what the container
-		// allows, which is why a narrow table does not fill the line. Column
-		// definitions still floor it: <col width=50> holds its column open
-		// even when every cell is empty.
 		natural := sumOf(colMax)
 		if natural > available {
 			natural = available
@@ -103,21 +79,12 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 			available = min
 		}
 	} else if min := sumOf(colMin); min > available {
-		// A specified width is only a wish: the used width is the greater of it
-		// and the table's minimum content width, so a table narrower than the
-		// cells it cannot shrink still makes room for them.
 		available = min
 	}
 	if available < 0 {
 		available = 0
 	}
 	colW := distributeColumns(colMin, colMax, available)
-	// Auto margins centre a shrink-to-fit table the way they centre any
-	// fixed-width block, but the width only exists now that the columns
-	// are dealt: shift the box before placing a single child, so the
-	// columns below land inside the centred box instead of the
-	// pre-centering one. The border box is the dealt content plus gaps,
-	// padding and borders; obj.W itself is only finalized below.
 	if s != nil {
 		leftAuto := s.MarginLeft == style.MarginAuto
 		rightAuto := s.MarginRight == style.MarginAuto
@@ -149,9 +116,6 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 		x += colW[i] + spacingH
 	}
 
-	// Rows stack top to bottom. A cell spanning rows reserves an equal share of
-	// its height in each row it covers, so a tall cell in the first of several
-	// rows keeps the later rows from riding over it.
 	type rowBox struct{ y, h float32 }
 	placed := make([]rowBox, len(rows))
 	reserved := make([]float32, len(rows))
@@ -162,9 +126,6 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	for ri := range rows {
 		rowY := cursor
 		rowH := reserved[ri]
-		// A row's own height is a floor on the row rather than a fixed size, and
-		// it holds even when the row brings no cell to prop it up: that is how a
-		// list separates its items with an empty spacer row.
 		if rs := a.Get(rows[ri].id).Style; rs != nil && rs.Height >= 0 && rs.Height > rowH {
 			rowH = rs.Height
 		}
@@ -181,16 +142,8 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 				cellW += colW[col] + spacingH
 			}
 			if s.BorderCollapse {
-				// The column width counts the cell's own left edge but not its
-				// right one, which the cell beside it draws. Hand the extra back
-				// to the content box, which is where the collapsed model puts it.
 				cellW += cell.Style.UsedBorderWidths()[1]
 			}
-			// A cell's declared width feeds column sizing only; once the column
-			// is dealt, every cell in it takes that width. Resolving a cell
-			// against its own declaration left a width:100px header at 100 while
-			// the cells beneath it filled the 228px column, so the two rows of
-			// one column disagreed on where it ended.
 			resolveBoxSizes(a, cell, cellW, definiteH(a, cell.Parent))
 			cell.W = cellW - (cell.BorderLeft + cell.PaddingLeft + cell.PaddingRight + cell.BorderRight)
 			if cell.W < 0 {
@@ -219,9 +172,6 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 		placed[ri] = rowBox{rowY, rowH}
 		if row := a.Get(rows[ri].id); row.Style != nil {
-			// The row's border box sits inside the table's border spacing:
-			// separated borders leave spacingH on each side, collapsed
-			// borders (spacing zero) span the full width as before.
 			row.X = contentX
 			row.W = available + gaps
 			if !s.BorderCollapse {
@@ -237,9 +187,6 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 		cursor = rowY + rowH + spacingV
 	}
 
-	// Every cell fills the rows it covers: a single-row one reaches its row's
-	// height, and a spanning one reaches the whole span. That is what makes a
-	// spanning cell's borders and background run the full height.
 	for i := range cells {
 		c := &cells[i]
 		last := c.row + c.rowSpan
@@ -267,18 +214,12 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 
 	height := cursor - contentY
-	// No trailing spacing: the per-row cursor already ends past the last
-	// row's bottom spacing (each iteration adds spacingV after its row),
-	// and the leading spacing went in at cursor init. Counting another one
-	// double-books it.
 
 	obj = a.Get(id)
 	obj.W = available + gaps
 	if s.BorderCollapse {
 		obj.BorderRight = outerBorder(a, id, cells, colCount)
 		obj.BorderBottom = lastRowBorder(a, id, cells, len(rows))
-		// The two lines the cells do not draw sit inside the table's box, so the
-		// grid and the border box end on the same pixel.
 		obj.W -= obj.BorderRight
 		if obj.W < 0 {
 			obj.W = 0
@@ -288,10 +229,6 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	return height
 }
 
-// centerCellContent reports whether a cell's content sits in the middle of its
-// box. A cell's vertical-align defaults to baseline, and the table model reads
-// that as middle, which is what centres a spanning cell's text in the rows it
-// covers.
 func centerCellContent(s *style.ComputedStyle) bool {
 	if s == nil {
 		return false
@@ -303,14 +240,6 @@ func centerCellContent(s *style.ComputedStyle) bool {
 	return false
 }
 
-// collectRows gathers a table's rows, descending through row groups and through
-// any anonymous box block flow wrapped stray content in.
-// wrapAnonymousTableBoxes generates the missing table structure CSS
-// requires: runs of non-row children (stray blocks, text, a bare body)
-// become anonymous rows, and runs of non-cell children inside every row
-// become anonymous cells. Whitespace-only text and display:none boxes hold
-// their slots but join no run. Without this a table whose content skips
-// the row/cell levels collects no grid at all and collapses to zero.
 func wrapAnonymousTableBoxes(a *Arena, id ObjectID) {
 	obj := a.Get(id)
 	if obj.Style == nil {
@@ -337,8 +266,6 @@ func wrapAnonymousTableBoxes(a *Arena, id ObjectID) {
 		}
 		run = nil
 	}
-	// Splicing reallocates the arena, so every step re-fetches through the
-	// stable kid IDs instead of holding object pointers across a flush.
 	for kid := a.Get(id).FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
 		if k.Style == nil || k.Style.Display == style.DisplayNone || isRow(k) {
@@ -348,8 +275,6 @@ func wrapAnonymousTableBoxes(a *Arena, id ObjectID) {
 		run = append(run, kid)
 	}
 	flushRow()
-	// Cells inside every row, real or just synthesized: a row's own style
-	// parents the anonymous cells the way the cascade would.
 	for kid := a.Get(id).FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
 		if k.Style == nil || k.Style.Display != style.DisplayTableRow {
@@ -375,9 +300,6 @@ func wrapAnonymousTableBoxes(a *Arena, id ObjectID) {
 	}
 }
 
-// isTableStructure reports whether display participates in table layout:
-// rows, cells, sections, columns and captions all take their anonymous
-// boxes from the table algorithm, never from the generic inline wrapper.
 func isTableStructure(s *style.ComputedStyle) bool {
 	if s == nil {
 		return false
@@ -392,10 +314,6 @@ func isTableStructure(s *style.ComputedStyle) bool {
 	return false
 }
 
-// tableRunHasContent is runGeneratesContent plus anonymous wrappers: the
-// generic inline pass may already have boxed stray table content (a block
-// holding cols and text), and that wrapper counts as content even though it
-// carries no DOM node of its own. Pure whitespace still joins no run.
 func tableRunHasContent(a *Arena, kids []ObjectID) bool {
 	for _, kid := range kids {
 		k := a.Get(kid)
@@ -431,8 +349,6 @@ func collectRows(a *Arena, id ObjectID, rows *[]tableRow) {
 	}
 }
 
-// buildTableGrid places every cell in the grid, honouring the spans its
-// attributes declare, and reports how many columns the table ended up with.
 func buildTableGrid(a *Arena, rows []tableRow, colCount *int) []tableCell {
 	var cells []tableCell
 	occupied := map[[2]int]bool{}
@@ -458,7 +374,6 @@ func buildTableGrid(a *Arena, rows []tableRow, colCount *int) []tableCell {
 	return cells
 }
 
-// tableSpan reads a colspan or rowspan attribute, which is always at least one.
 func tableSpan(a *Arena, id ObjectID, name string) int {
 	obj := a.Get(id)
 	if obj.Node == nil {
@@ -471,7 +386,6 @@ func tableSpan(a *Arena, id ObjectID, name string) int {
 	return v
 }
 
-// cellByRef finds the grid entry for a cell object.
 func cellByRef(cells []tableCell, id ObjectID) *tableCell {
 	for i := range cells {
 		if cells[i].id == id {
@@ -481,15 +395,6 @@ func cellByRef(cells []tableCell, id ObjectID) *tableCell {
 	return nil
 }
 
-// columnExtents reports the narrowest and widest each column can go. A spanning
-// cell adds its own share to the columns it covers, since those together have to
-// hold it.
-// floorColWidths folds <col> definitions into the column extents: a column
-// definition floors its column's minimum, so empty fixed-width columns hold
-// the grid open, and definitions past the cells' grid extend it, so a
-// colspan never outgrows the grid its COLs define. Cols nest directly under
-// the table or inside colgroups; span multiplies one definition across that
-// many columns.
 func floorColWidths(a *Arena, id ObjectID, colMin, colMax []float32, colCount int, containingW float32) ([]float32, []float32, int) {
 	var defs []float32
 	var walk func(pid ObjectID)
@@ -521,8 +426,6 @@ func floorColWidths(a *Arena, id ObjectID, colMin, colMax []float32, colCount in
 		if i >= len(colMin) || defs[i] < 0 {
 			continue
 		}
-		// A definition floors the minimum only: wider content still
-		// stretches the column past it.
 		if defs[i] > colMin[i] {
 			colMin[i] = defs[i]
 		}
@@ -571,9 +474,6 @@ func columnExtents(a *Arena, cells []tableCell, colCount int, spacingH float32, 
 	return colMin, colMax
 }
 
-// distributeColumns shares the width a table has to give its columns: at the
-// max-content widths when there is room to spare, otherwise squeezed toward the
-// min-content widths they cannot go below.
 func distributeColumns(colMin, colMax []float32, available float32) []float32 {
 	widths := make([]float32, len(colMin))
 	totalMax, totalMin := sumOf(colMax), sumOf(colMin)
@@ -620,10 +520,6 @@ func sumOf(v []float32) float32 {
 	return total
 }
 
-// cellExtents measures one cell's content, including the padding and the borders
-// it has to keep room for. A collapsing cell owns only its left edge, so its
-// right border belongs to the next column; a separated one also reserves the gap
-// after it.
 func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool, containingW float32) (float32, float32) {
 	obj := a.Get(id)
 	minW, maxW := measureInlineContent(a, id)
@@ -645,19 +541,12 @@ func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool, contain
 	if maxW > 0 {
 		maxW += chrome
 	}
-	// A specified cell width floors the column's max-content width: an empty
-	// fixed-width cell still holds its column open (CSS 2.1 §17.5.2.2 treats
-	// the used width as a minimum over the content measure). Percentage and
-	// calc widths resolve against the table's containing block; an
-	// unresolvable one contributes nothing rather than collapsing the column.
 	if w := cellSpecifiedWidth(a, s, containingW); w > maxW {
 		maxW = w
 	}
 	return minW, maxW
 }
 
-// cellSpecifiedWidth reports the cell's declared width as a definite length,
-// or -1 when it is auto or unresolvable here.
 func cellSpecifiedWidth(a *Arena, s *style.ComputedStyle, containingW float32) float32 {
 	if s.WidthCalc.Set {
 		if v, ok := s.WidthCalc.Resolve(containingW, a.ViewportW, a.ViewportH); ok && v >= 0 {
@@ -668,8 +557,6 @@ func cellSpecifiedWidth(a *Arena, s *style.ComputedStyle, containingW float32) f
 	return resolvePctLength(s.Width, containingW)
 }
 
-// outerBorder is the line a collapsing table draws on its right edge: the widest
-// right border among the table itself and the cells that end at that edge.
 func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) float32 {
 	best := float32(0)
 	if s := a.Get(id).Style; s != nil {
@@ -688,8 +575,6 @@ func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) float32
 	return best
 }
 
-// lastRowBorder is the bottom edge a collapsing table draws, taken from the cells
-// that reach its last row.
 func lastRowBorder(a *Arena, id ObjectID, cells []tableCell, rowCount int) float32 {
 	best := float32(0)
 	if s := a.Get(id).Style; s != nil {
@@ -708,17 +593,8 @@ func lastRowBorder(a *Arena, id ObjectID, cells []tableCell, rowCount int) float
 	return best
 }
 
-// measureInlineContent reports the narrowest and widest a box's content can get:
-// its longest word, and its whole run on a single line.
-//
-// The column algorithm needs both before any cell has a position, so this reads
-// the text's own advances rather than laying it out and measuring the result.
 func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 	cur := float32(0)
-	// A collapsible space joins the line only when content follows it:
-	// hanging end-of-line spaces are removed, so pending holds the
-	// advance until the next word (or inline-block) commits it, and a
-	// flush drops it.
 	pending := float32(0)
 	flush := func() {
 		if cur > maxW {
@@ -766,12 +642,6 @@ func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 		if isBlock(k) || k.Style.Display == style.DisplayInlineBlock {
 			chrome := k.Style.PaddingLeft + k.Style.PaddingRight + k.Style.BorderLeftWidth + k.Style.BorderRightWidth +
 				flexMargin(k.Style.MarginLeft) + flexMargin(k.Style.MarginRight)
-			// A box with a declared width brings that width to the column, whether
-			// or not it holds any text: the vote arrow on Hacker News is an empty
-			// 10px div with 8px of margin, and measuring only its absent words
-			// collapsed the column and slid every title left. A fixed width also
-			// floors the column, since a box that cannot shrink drags the table
-			// wider with it.
 			if own := declaredOuterW(k.Style); own >= 0 {
 				if own > subMax {
 					subMax = own
@@ -784,8 +654,6 @@ func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 				subMin = floor
 			}
 			if isBlock(k) && k.Style.Display != style.DisplayInlineBlock {
-				// A true block starts its own line: the column fits the
-				// widest one, not their sum.
 				flush()
 				if subMax+chrome > maxW {
 					maxW = subMax + chrome
@@ -795,10 +663,6 @@ func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 				}
 				continue
 			}
-			// An inline-block shares its line with whatever follows, so it
-			// accumulates into the running line like a long word: two
-			// siblings on one line measure their sum, not their max. It
-			// also commits any pending space before it.
 			if subMin+chrome > minW {
 				minW = subMin + chrome
 			}
@@ -815,10 +679,6 @@ func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 	return minW, maxW
 }
 
-// declaredOuterW is the content width a box states for itself - an explicit
-// width held between its own min- and max-width - or -1 when its width is auto.
-// Percentages are absent on purpose: an intrinsic measure runs before the
-// column has a width to resolve them against.
 func declaredOuterW(s *style.ComputedStyle) float32 {
 	if s == nil {
 		return -1

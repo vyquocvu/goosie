@@ -8,9 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// jsImportNode and jsAdoptNode implement the Document tree transfer methods.
-// They are shared by the active document and detached documents created by
-// DOMParser/createHTMLDocument, whose target owner document differs.
 func (r *Runtime) jsImportNode(call goja.FunctionCall, target *dom.Document) goja.Value {
 	if len(call.Arguments) == 0 {
 		panic(r.vm.NewTypeError("Failed to execute 'importNode': 1 argument required"))
@@ -27,9 +24,6 @@ func (r *Runtime) jsImportNode(call goja.FunctionCall, target *dom.Document) goj
 		for i, argument := range call.Arguments {
 			arguments[i] = owner.importParentValue(r, argument)
 		}
-		// An unresolved customized built-in stores its `is` value in the
-		// source runtime until a matching definition is registered. Transfer
-		// that candidate before cloning into the target document's runtime.
 		if candidate, exists := r.customElementCandidates[node]; exists {
 			if owner.customElementCandidates == nil {
 				owner.customElementCandidates = make(map[*dom.Node]string)
@@ -62,9 +56,6 @@ func (r *Runtime) jsImportNode(call goja.FunctionCall, target *dom.Document) goj
 	return r.wrapNode(clone)
 }
 
-// associateImportedCustomElementRegistries copies existing non-null registry
-// associations and applies the import fallback to nodes whose source registry
-// is null. Explicitly null declarative shadow roots remain registry boundaries.
 func (r *Runtime) associateImportedCustomElementRegistries(source, imported *dom.Node, fallback *CustomElementRegistry, target *dom.Document, targetRegistry *CustomElementRegistry) {
 	if source == nil || imported == nil {
 		return
@@ -204,44 +195,6 @@ func attributeLocalNameForEquality(qualifiedName string) string {
 	return qualifiedName
 }
 
-// This file is the Node-tree half of the DOM binding: the child-list mutation
-// and traversal API a real content script cannot avoid.
-//
-// The set is not a judgement about which APIs look important. It is what the
-// two pages this task measured actually call, plus what the library on those
-// pages calls on the way:
-//
-//	gov.vn   jQuery 3.6.0 support block, at offset 37,880 of the 89,501-byte
-//	           minified file and the first statement that touches the DOM at
-//	           all: `ce = E.createDocumentFragment().appendChild(
-//	           E.createElement("div"))`. It runs at library scope, before the
-//	           `return jQuery` export, so it died before this file existed and
-//	           `jQuery` was never defined at all on that page.
-//	vnexpress (page copy 201,234 bytes): `window.addEventListener(...)` 6 sites,
-//	           and 9 `parentNode.insertBefore(...)` sites - the
-//	           `<script>`/`<link>` loader idiom. None passes a literal null, but
-//	           two hand over `x.nextSibling` (offsets 113,261 and 195,744),
-//	           which is null exactly when the node lands after the last child, so
-//	           the append case is reachable on the page. jQuery proves it three
-//	           ways: `prepend` passes `t.firstChild`, null for an empty parent
-//	           (50,065); `after` passes `this.nextSibling`, null for a last child
-//	           (50,297); and `wrapAll`'s path calls `t.insertBefore(this[0])`
-//	           with the second argument absent (80,979). All three are the
-//	           standard's append case and all are load-bearing for a reveal, so
-//	           `insertBefore(x, null)` appends here too.
-//
-// Every name below was counted in that shipped jquery-3.6.0.min.js (89,501
-// bytes, sha1 b82d238d…): createDocumentFragment 2, insertBefore 5 (4 call
-// sites and the `insertBefore:"before"` alias-map key), replaceChild 1,
-// cloneNode 5, childNodes 11, firstChild 12, lastChild 5, nextSibling 10,
-// previousSibling 6, ownerDocument 24, parentNode 54, nodeValue 1, contains 13.
-// Names a page does not reach are deliberately absent and listed in
-// docs/tasks/TASK-047-DOM-JQUERY-APIS.md.
-
-// installNodeTreeMethods adds the child-list mutation API to Node.prototype,
-// so every wrapped node - element, text, comment and document fragment alike -
-// answers them. Called from setupDOM, next to the prototype's other methods;
-// wrappers inherit these through [[Prototype]] (see element_interfaces.go).
 func (r *Runtime) installNodeTreeMethods() {
 	moveBefore := func(call goja.FunctionCall) goja.Value { return r.jsMoveBefore(call) }
 	remove := func(call goja.FunctionCall) goja.Value { return r.jsRemove(call) }
@@ -408,10 +361,6 @@ func (r *Runtime) compareDocumentPosition(node, other *dom.Node) int {
 	return 2
 }
 
-// getRootNode returns the root of node's tree. When composed is true, shadow
-// root boundaries are crossed. Since this implementation links shadow children
-// to their host via Parent, the parent chain already crosses shadow boundaries,
-// so both modes return the same root.
 func (r *Runtime) getRootNode(node *dom.Node, composed bool) *dom.Node {
 	current := node
 	for current != nil && current.Parent != nil {
@@ -423,8 +372,6 @@ func (r *Runtime) getRootNode(node *dom.Node, composed bool) *dom.Node {
 	return node
 }
 
-// lookupNamespaceURI walks up the ancestor chain to find the namespace URI
-// bound to the given prefix. An empty prefix looks for the default namespace.
 func lookupNamespaceURI(node *dom.Node, prefix string) string {
 	for n := node; n != nil; n = n.Parent {
 		if !n.Element() {
@@ -450,8 +397,6 @@ func lookupNamespaceURI(node *dom.Node, prefix string) string {
 	return ""
 }
 
-// lookupPrefix walks up the ancestor chain to find the first prefix bound to
-// the given namespace URI.
 func lookupPrefix(node *dom.Node, namespace string) string {
 	for n := node; n != nil; n = n.Parent {
 		if !n.Element() {
@@ -469,10 +414,6 @@ func lookupPrefix(node *dom.Node, namespace string) string {
 	return ""
 }
 
-// jsMoveBefore implements ParentNode.moveBefore for elements. It preserves
-// connectedness and queues the custom-element connectedMoveCallback for the
-// moved shadow-including subtree; unlike insertBefore, it cannot adopt a node
-// from another tree or connect/disconnect it.
 func (r *Runtime) jsMoveBefore(call goja.FunctionCall) goja.Value {
 	parent := r.getNode(call.This)
 	if parent == nil || len(call.Arguments) == 0 {
@@ -560,12 +501,6 @@ func nodeTreeRoot(node *dom.Node) nodeTreeRootKey {
 	return nodeTreeRootKey{}
 }
 
-// insertCharge lists the nodes an insertion of newChild actually puts under its
-// parent, which is what the mutation budget must be charged for. A
-// DocumentFragment is the reason this is not just `[]*dom.Node{newChild}`: the
-// fragment itself never lands in the tree, its children do, so charging the
-// fragment would over-count by one node per jQuery `domManip` call and - worse -
-// would depth-check a subtree that is not the one being inserted.
 func insertCharge(newChild *dom.Node) []*dom.Node {
 	if newChild == nil {
 		return nil
@@ -576,9 +511,6 @@ func insertCharge(newChild *dom.Node) []*dom.Node {
 	return []*dom.Node{newChild}
 }
 
-// jsReplaceChildren implements ParentNode.replaceChildren(). It converts the
-// variadic Node-or-DOMString sequence before mutating, validates the complete
-// resulting child list, then replaces the target's children as one operation.
 func (r *Runtime) jsReplaceChildren(call goja.FunctionCall) goja.Value {
 	parent := r.getNode(call.This)
 	if parent == nil {
@@ -593,9 +525,6 @@ func (r *Runtime) jsReplaceChildren(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}
 
-	// convert nodes into a node: strings become Text nodes, fragments
-	// contribute their children, and repeating a Node moves it to the last
-	// occurrence in the resulting sequence.
 	children := r.childNodeArguments(doc, call.Arguments)
 	unique := make([]*dom.Node, 0, len(children))
 	for _, child := range children {
@@ -640,15 +569,9 @@ func (r *Runtime) jsReplaceChildren(call goja.FunctionCall) goja.Value {
 
 	fragment := doc.NewDocumentFragment()
 	r.admitInsert("replaceChildren", parent, children, func() {
-		// Move the requested nodes into a fragment first. This leaves a stable
-		// snapshot of the old children and handles nodes that are already under
-		// the target without duplicating them.
 		for _, child := range children {
 			oldParent := child.Parent
 			fragment.AppendChild(child)
-			// Staging a node in the fragment runs the removal steps for its
-			// original parent. Those are separate mutations (and must be queued
-			// before replace-all's record for the target parent).
 			if oldParent != nil && oldParent != parent {
 				r.queueMutationRecord(MutationRecord{
 					Type:         "childList",
@@ -694,8 +617,6 @@ func (r *Runtime) jsReplaceChildren(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// validateReplaceChildren applies the hierarchy constraints that can be
-// checked from the complete replacement sequence before any tree mutation.
 func (r *Runtime) validateReplaceChildren(parent *dom.Node, children []*dom.Node) {
 	if parent.Type != dom.NodeDocument {
 		for _, child := range children {
@@ -719,7 +640,6 @@ func (r *Runtime) validateReplaceChildren(parent *dom.Node, children []*dom.Node
 			}
 			hasDoctype = true
 		case dom.NodeComment, dom.NodeProcessingInstruction:
-			// These node types may appear around the document type and element.
 		case dom.NodeText, dom.NodeCDATASection:
 			panic(r.domError("HierarchyRequestError", "A document cannot contain text nodes."))
 		default:
@@ -728,9 +648,6 @@ func (r *Runtime) validateReplaceChildren(parent *dom.Node, children []*dom.Node
 	}
 }
 
-// validateParentNodeInsertion checks the complete child sequence ParentNode
-// append/prepend would produce. Validate before moving any nodes so a rejected
-// operation cannot leave a partially-mutated Document.
 func (r *Runtime) validateParentNodeInsertion(parent *dom.Node, kids []*dom.Node, prepend bool) {
 	if parent == nil {
 		return
@@ -766,22 +683,6 @@ func (r *Runtime) validateParentNodeInsertion(parent *dom.Node, kids []*dom.Node
 	r.validateReplaceChildren(parent, sequence)
 }
 
-// jsInsertBefore implements `parent.insertBefore(newNode, referenceNode)`.
-//
-// Semantics pinned here, each because a measured page depends on it:
-//   - referenceNode null/undefined/absent appends. vnexpress reaches it by
-//     passing `a.nextSibling` (113,261, 195,744) and jQuery by passing
-//     `t.firstChild`, `this.nextSibling` or nothing at all (50,065, 50,297,
-//     80,979); this is the DOM Standard's step 1 and the reason the second
-//     argument may even be missing.
-//   - a DocumentFragment argument moves its children in order and is left
-//     empty, so the same fragment can be refilled. jQuery's buildFragment
-//     returns one and hands it to appendChild/insertBefore.
-//   - a referenceNode that is not a child of this node throws NotFoundError,
-//     like browsers, rather than silently appending, because the silent
-//     version turns a page bug into content in the wrong place.
-//   - newNode === referenceNode is a no-op (see dom.Node.InsertBefore: the
-//     splice would otherwise create a sibling cycle).
 func (r *Runtime) jsInsertBefore(call goja.FunctionCall) goja.Value {
 	parent := r.getNode(call.This)
 	if parent == nil {
@@ -869,10 +770,6 @@ func (r *Runtime) jsInsertBefore(call goja.FunctionCall) goja.Value {
 	return call.Arguments[0]
 }
 
-// jsAfter implements ChildNode.after() by converting its arguments into a
-// fragment and inserting that fragment immediately after the receiver. The
-// admission and lifecycle hooks run once for the complete sequence, so a
-// rejected insertion cannot leave only part of the requested nodes moved.
 func (r *Runtime) jsAfter(call goja.FunctionCall) goja.Value {
 	target := r.getNode(call.This)
 	if target == nil || target.Parent == nil {
@@ -942,9 +839,6 @@ func (r *Runtime) jsAfter(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// childNodeArguments converts the ChildNode variadic arguments to the node
-// sequence used by before()/replaceWith(): Node arguments are retained,
-// fragments contribute their children, and other values become text nodes.
 func (r *Runtime) childNodeArguments(doc *dom.Document, args []goja.Value) []*dom.Node {
 	var nodes []*dom.Node
 	for _, value := range args {
@@ -961,8 +855,6 @@ func (r *Runtime) childNodeArguments(doc *dom.Document, args []goja.Value) []*do
 	return nodes
 }
 
-// jsBefore implements ChildNode.before() using one fragment insertion so node
-// moves and custom-element reactions observe the complete requested sequence.
 func (r *Runtime) jsBefore(call goja.FunctionCall) goja.Value {
 	target := r.getNode(call.This)
 	if target == nil || target.Parent == nil {
@@ -999,12 +891,6 @@ func (r *Runtime) jsBefore(call goja.FunctionCall) goja.Value {
 		for _, node := range inserted {
 			fragment.AppendChild(node)
 		}
-		// ChildNode.before() first converts its arguments into a fragment. If
-		// one argument is an ancestor of the insertion point, converting the
-		// sequence can disconnect that ancestor before pre-insert rejects the
-		// fragment. The custom-element reaction must still run when the method
-		// throws; validating before fragment construction loses that observable
-		// disconnection.
 		for _, node := range inserted {
 			for ancestor := parent; ancestor != nil; ancestor = ancestor.Parent {
 				if ancestor == node {
@@ -1029,10 +915,6 @@ func (r *Runtime) jsBefore(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// jsReplaceWith implements ChildNode.replaceWith(). When the receiver is also
-// an argument, converting multiple nodes moves it into the temporary fragment;
-// in that case the fragment is inserted at the first following sibling not in
-// the converted sequence, preserving the receiver at its argument position.
 func (r *Runtime) jsReplaceWith(call goja.FunctionCall) goja.Value {
 	target := r.getNode(call.This)
 	if target == nil || target.Parent == nil {
@@ -1062,9 +944,6 @@ func (r *Runtime) jsReplaceWith(call goja.FunctionCall) goja.Value {
 			break
 		}
 	}
-	// A single-node conversion returns that node directly. Replacing a node
-	// with itself is therefore a no-op; with multiple nodes, conversion creates
-	// a fragment and moves the receiver along with the other arguments.
 	if targetInNodes && len(nodes) == 1 {
 		return goja.Undefined()
 	}
@@ -1108,8 +987,6 @@ func (r *Runtime) jsReplaceWith(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
-// jsReplaceChild implements `parent.replaceChild(newChild, oldChild)`.
-// jQuery's `replaceWith` reaches it once, as `t.replaceChild(e, this)`.
 func (r *Runtime) jsReplaceChild(call goja.FunctionCall) goja.Value {
 	parent := r.getNode(call.This)
 	if parent == nil {
@@ -1126,8 +1003,6 @@ func (r *Runtime) jsReplaceChild(call goja.FunctionCall) goja.Value {
 	}
 	r.requireNoAncestorInsertion(parent, insertCharge(newChild))
 	r.requireChild(parent, oldChild, "replaceChild")
-	// The old subtree is credited on the same condition every other removal
-	// path uses: only nodes reachable from the document were ever charged.
 	oldWasLive := r.nodeIsLive(oldChild)
 	oldWasConnected := oldChild.IsConnected()
 	inserted := insertCharge(newChild)
@@ -1194,9 +1069,6 @@ func (r *Runtime) jsReplaceChild(call goja.FunctionCall) goja.Value {
 	return call.Arguments[1]
 }
 
-// requireNoAncestorInsertion enforces the DOM pre-insert constraint that a
-// node cannot be inserted into itself or one of its descendants. Without it,
-// the parent/child links form a cycle and ordinary DOM walks recurse forever.
 func (r *Runtime) requireNoAncestorInsertion(parent *dom.Node, inserted []*dom.Node) {
 	for _, node := range inserted {
 		for ancestor := parent; ancestor != nil; ancestor = ancestor.Parent {
@@ -1207,37 +1079,12 @@ func (r *Runtime) requireNoAncestorInsertion(parent *dom.Node, inserted []*dom.N
 	}
 }
 
-// requireChild throws the NotFoundError browsers throw when the reference node
-// of an insert or replace is not a child of the node being mutated. goja turns
-// the panic into a catchable exception at the script frame, so a page's own
-// try/catch sees it and the rest of the script still runs.
 func (r *Runtime) requireChild(parent, child *dom.Node, op string) {
 	if child.Parent != parent {
 		panic(r.domError("NotFoundError", "Failed to execute '"+op+"' on 'Node': The reference node is not a child of this node."))
 	}
 }
 
-// jsCloneNode implements `node.cloneNode(deep)`.
-//
-// `false` copies the node alone, `true` copies the whole subtree. jQuery needs
-// both shapes in its own support tests, run back to back:
-// `ce.cloneNode(!0).cloneNode(!0).lastChild.checked` - a deep clone of a clone,
-// then a child-list read. A shallow clone there would return a node with no
-// children and `lastChild` would be null, so `lastChild.checked` would throw
-// inside the library's feature probe.
-//
-// The clone is detached, so it is deliberately not charged against the
-// document's node budget: that is exactly how document.createElement already
-// behaves, and the eventual append charges the whole subtree through
-// measureSubtree. Deviations worth naming: internal/dom keeps form-control state
-// in attributes (js.go's __getChecked__/__setValue__ read and write them), and
-// CloneNode copies the attribute slice, so `checked` and a script-set `value`
-// both come across - which is what makes jQuery's checkClone chain answer true.
-// The cost is that there is no dirty-value flag: in a browser a script-set value
-// clones as the *default* value, here it clones as the value, and `defaultValue`
-// therefore has nothing to distinguish it. A cloned <script> keeps no listener
-// registrations - the realm's listeners are keyed by *dom.Node, and the clone is
-// a new one.
 func (r *Runtime) jsCloneNode(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil {
@@ -1374,9 +1221,6 @@ func (r *Runtime) cloneDocumentWrapper(source, cloneNode *dom.Node) *dom.Documen
 		}
 	}
 	clone.Node = *cloneNode
-	// CloneNode linked the copied children to cloneNode's address. This
-	// Document embeds its Node at a different address, so repair the first
-	// parent link or event paths stop at documentElement and omit Document.
 	for child := clone.Node.FirstChild; child != nil; child = child.NextSibling {
 		child.Parent = &clone.Node
 	}
@@ -1403,22 +1247,12 @@ func (r *Runtime) cloneDocumentWrapper(source, cloneNode *dom.Node) *dom.Documen
 	return clone
 }
 
-// jsContains implements `node.contains(other)`: true for the node itself and
-// for any descendant, false for null, foreign and detached nodes.
 func (r *Runtime) jsContains(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	other := r.getNode(call.Argument(0))
 	return r.vm.ToValue(node.Contains(other))
 }
 
-// jsCreateDocumentFragment implements `document.createDocumentFragment()`.
-//
-// The result is a real Node, so it carries the prototype methods like anything
-// else: jQuery's very first statement is
-// `E.createDocumentFragment().appendChild(E.createElement("div"))`, which only
-// works if appendChild exists on the fragment and returns its argument (the div
-// becomes the value of `ce`, the library's scratch container for the rest of
-// the boot).
 func (r *Runtime) jsCreateDocumentFragment(goja.FunctionCall) goja.Value {
 	if r.domDoc == nil {
 		return goja.Null()
@@ -1426,8 +1260,6 @@ func (r *Runtime) jsCreateDocumentFragment(goja.FunctionCall) goja.Value {
 	return r.wrapNode(r.domDoc.NewDocumentFragment())
 }
 
-// nodeStaticName is the DOM Standard's fixed nodeName for the node types that
-// have one. Elements are named by their tag, so they never reach here.
 func nodeStaticName(node *dom.Node) string {
 	if node == nil {
 		return ""
@@ -1451,11 +1283,6 @@ func nodeStaticName(node *dom.Node) string {
 	return ""
 }
 
-// notifyConnected runs custom-element connectedCallback for a node that was
-// just grafted into the document. It walks a fragment's children because that
-// is what actually landed. Appending through the parser never reaches here;
-// this is only the script-driven path, matching how appendChild already
-// behaved for a single element.
 func (r *Runtime) notifyConnected(newChild *dom.Node) {
 	if newChild == nil {
 		return
@@ -1511,9 +1338,6 @@ func (r *Runtime) notifyConnected(newChild *dom.Node) {
 				}
 			}
 		}
-		// Stage the whole shadow-including subtree before invoking the host's
-		// callback. A callback can synchronously remove/adopt a descendant whose
-		// own reaction queue already contains its pending connection reaction.
 		if node.Element() && node.ShadowRoot != nil {
 			for child := node.ShadowRoot.FirstChild; child != nil; child = child.NextSibling {
 				visit(child)

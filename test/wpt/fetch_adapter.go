@@ -14,10 +14,6 @@ import (
 	internalnet "github.com/vyquocvu/goosie/internal/net"
 )
 
-// wptFetchAdapter gives WPT fetch() calls a bounded transport to the local
-// checkout aliases. Browser-origin and CORS checks remain in Runtime.Fetch;
-// this adapter only chooses the local listener and never reaches arbitrary
-// network hosts.
 type wptFetchAdapter struct {
 	ctx       context.Context
 	client    *http.Client

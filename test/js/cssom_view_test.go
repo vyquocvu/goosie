@@ -8,13 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// CSSOM View layout measurement APIs: getBoundingClientRect, getClientRects,
-// offset properties, scroll properties, scrollIntoView, and window scroll
-// methods. These tests verify the JS binding layer; the engine supplies the
-// geometry through a LayoutGeometryProvider callback.
-
-// layoutProvider installs a stub geometry provider for a js.Runtime, keyed by
-// the element id the test markup gives the node.
 func layoutProvider(rt *js.Runtime, byID map[string]js.LayoutBoxInfo) {
 	rt.SetLayoutGeometryProvider(func(node *dom.Node) (js.LayoutBoxInfo, bool) {
 		if node == nil {
@@ -36,7 +29,6 @@ func offsetParentProvider(rt *js.Runtime, byID map[string]string) {
 		}
 		id := node.GetAttribute("id")
 		if parentID, ok := byID[id]; ok {
-			// Find the parent node by ID in the document
 			if node.Doc != nil {
 				return node.Doc.ElementByID(parentID)
 			}
@@ -74,10 +66,6 @@ var layoutGeometry = map[string]js.LayoutBoxInfo{
 	},
 }
 
-// ---------------------------------------------------------------------------
-// getBoundingClientRect
-// ---------------------------------------------------------------------------
-
 func TestGetBoundingClientRectReturnsDOMRect(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
 	result, err := rt.Evaluate(`
@@ -103,14 +91,12 @@ func TestGetBoundingClientRectEdges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// top=min(y,y+h)=20, right=max(x,x+w)=110, bottom=max(y,y+h)=70, left=min(x,x+w)=10
 	if result != "20,110,70,10" {
 		t.Errorf("getBoundingClientRect edges: got %q, want %q", result, "20,110,70,10")
 	}
 }
 
 func TestGetBoundingClientRectNoLayout(t *testing.T) {
-	// Without a layout provider, getBoundingClientRect returns zeros.
 	doc := domtest.Parse(layoutDoc)
 	rt := newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})
 	result, err := rt.Evaluate(`
@@ -140,10 +126,6 @@ func TestGetBoundingClientRectDetached(t *testing.T) {
 		t.Errorf("detached getBoundingClientRect: got %q, want %q", result, "0,0,0,0")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// getClientRects
-// ---------------------------------------------------------------------------
 
 func TestGetClientRectsReturnsList(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
@@ -176,10 +158,6 @@ func TestGetClientRectsNoLayout(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// DOMRect constructor
-// ---------------------------------------------------------------------------
-
 func TestDOMRectConstructor(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, nil)
 	result, err := rt.Evaluate(`
@@ -205,10 +183,6 @@ func TestDOMRectExists(t *testing.T) {
 		t.Errorf("DOMRect type: got %q, want %q", result, "function")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// offsetWidth / offsetHeight
-// ---------------------------------------------------------------------------
 
 func TestOffsetWidthHeight(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
@@ -239,10 +213,6 @@ func TestOffsetWidthHeightNoLayout(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// offsetTop / offsetLeft
-// ---------------------------------------------------------------------------
-
 func TestOffsetTopLeft(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
 	result, err := rt.Evaluate(`
@@ -252,19 +222,13 @@ func TestOffsetTopLeft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Without an offsetParent provider, these are the absolute position.
 	if result != "20,10" {
 		t.Errorf("offsetTop/Left: got %q, want %q", result, "20,10")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// offsetParent
-// ---------------------------------------------------------------------------
-
 func TestOffsetParentNull(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
-	// Without an offset parent provider, offsetParent is null.
 	result, err := rt.Evaluate(`
 		var el = document.getElementById('box');
 		el.offsetParent;
@@ -302,10 +266,6 @@ func TestOffsetParentWithProvider(t *testing.T) {
 		t.Errorf("offsetParent: got %q, want %q", result, "true")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// scrollTop / scrollLeft
-// ---------------------------------------------------------------------------
 
 func TestScrollTopDefault(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
@@ -384,10 +344,6 @@ func TestDocumentScrollingElementSharesWindowScrollOffset(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// scrollWidth / scrollHeight
-// ---------------------------------------------------------------------------
-
 func TestScrollWidthHeight(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
 	result, err := rt.Evaluate(`
@@ -402,8 +358,6 @@ func TestScrollWidthHeight(t *testing.T) {
 	}
 }
 
-// The travel an element accepts is its scrollable area minus its client box, so
-// the fixture's 200x200 extent over a 98x48 client box stops at 102 and 152.
 func TestScrollTopClampsToScrollableArea(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
 	result, err := rt.Evaluate(`
@@ -420,8 +374,6 @@ func TestScrollTopClampsToScrollableArea(t *testing.T) {
 	}
 }
 
-// A box whose content is not clipped or scrolled has nothing to scroll, so the
-// write is ignored even where its extent is larger than its client box.
 func TestScrollTopIgnoredOnNonScrollContainer(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
 	result, err := rt.Evaluate(`
@@ -438,10 +390,6 @@ func TestScrollTopIgnoredOnNonScrollContainer(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// clientWidth / clientHeight
-// ---------------------------------------------------------------------------
-
 func TestClientWidthHeight(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
 	result, err := rt.Evaluate(`
@@ -451,16 +399,10 @@ func TestClientWidthHeight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// clientWidth = border-box width - border-left - border-right = 100 - 1 - 1 = 98
-	// clientHeight = border-box height - border-top - border-bottom = 50 - 1 - 1 = 48
 	if result != "98,48" {
 		t.Errorf("clientWidth/Height: got %q, want %q", result, "98,48")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// scrollIntoView
-// ---------------------------------------------------------------------------
 
 func TestScrollIntoViewDoesNotThrow(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
@@ -486,10 +428,6 @@ func TestScrollIntoViewWithArg(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// window.scroll / scrollTo / scrollBy
-// ---------------------------------------------------------------------------
 
 func TestWindowScrollTo(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, nil)
@@ -565,10 +503,6 @@ func TestWindowScrollNegativeClamped(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// element.scroll / scrollTo / scrollBy
-// ---------------------------------------------------------------------------
-
 func TestElementScrollTo(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
 	result, err := rt.Evaluate(`
@@ -599,10 +533,6 @@ func TestElementScrollBy(t *testing.T) {
 		t.Errorf("element.scrollBy: got %q, want %q", result, "15,30")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// DOMRectList.item()
-// ---------------------------------------------------------------------------
 
 func TestDOMRectListItem(t *testing.T) {
 	rt := layoutRuntime(t, layoutDoc, layoutGeometry)

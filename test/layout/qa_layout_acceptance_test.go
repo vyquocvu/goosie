@@ -77,8 +77,6 @@ func TestBoxModelSizesContentAndBorderBoxes(t *testing.T) {
 		t.Fatal("fixture boxes not found")
 	}
 
-	// content-box: the declared width is the content area, and padding plus
-	// border ride outside it.
 	if content.W != 100 || content.H != 50 {
 		t.Errorf("content box = %vx%v, want 100x50", content.W, content.H)
 	}
@@ -89,8 +87,6 @@ func TestBoxModelSizesContentAndBorderBoxes(t *testing.T) {
 		t.Errorf("content origin = (%v,%v), want (7,7) from the margin", content.X, content.Y)
 	}
 
-	// border-box: the declared width includes padding and border, so the content
-	// area shrinks by 2*(10+5) on each axis.
 	if border.W != 70 || border.H != 30 {
 		t.Errorf("border box content = %vx%v, want 70x30", border.W, border.H)
 	}
@@ -120,7 +116,6 @@ func TestFontSizeWeightAndLineHeightDriveWrappingAndHeight(t *testing.T) {
 	if large.H <= small.H {
 		t.Errorf("large.H = %v, want taller than small.H = %v (bigger font and line-height)", large.H, small.H)
 	}
-	// Wrapping must keep the text inside the declared width on both.
 	for _, tc := range []struct {
 		name string
 		w    float32
@@ -212,22 +207,18 @@ func TestGridTracksAndGapsPlaceItemsInTheirCells(t *testing.T) {
 	if g1 == nil || g2 == nil || g3 == nil || g4 == nil {
 		t.Fatal("grid items not found")
 	}
-	// Column tracks: 100px at 0, 20px gap, 180px at 120.
 	if !almostEqual(g1.X, 0) || !almostEqual(g1.W, 100) {
 		t.Errorf("g1 = x%v w%v, want x0 w100", g1.X, g1.W)
 	}
 	if !almostEqual(g2.X, 120) || !almostEqual(g2.W, 180) {
 		t.Errorf("g2 = x%v w%v, want x120 w180", g2.X, g2.W)
 	}
-	// The second row starts after the 30px row plus the 20px row gap, and each
-	// item stays in its own column.
 	if !almostEqual(g3.X, 0) || !almostEqual(g3.Y, 50) {
 		t.Errorf("g3 = (%v,%v), want (0,50)", g3.X, g3.Y)
 	}
 	if !almostEqual(g4.X, 120) || !almostEqual(g4.Y, 50) {
 		t.Errorf("g4 = (%v,%v), want (120,50)", g4.X, g4.Y)
 	}
-	// No track may spill past the 300px container.
 	if right := g2.X + g2.W; right > 300 {
 		t.Errorf("last column ends at %v, want <= 300", right)
 	}
@@ -264,7 +255,6 @@ func TestTableColumnsRowsAndBordersStayAligned(t *testing.T) {
 		t.Fatalf("found %d cells, want 6", len(boxes))
 	}
 
-	// Each body cell sits in the column its header opened.
 	for _, pair := range [][2]string{{"h1", "c1"}, {"h1", "c3"}, {"h2", "c2"}, {"h2", "c4"}} {
 		a, b := cells[pair[0]], cells[pair[1]]
 		if !almostEqual(a.x, b.x) {
@@ -274,11 +264,9 @@ func TestTableColumnsRowsAndBordersStayAligned(t *testing.T) {
 			t.Errorf("%s w = %v, want %s w = %v", pair[1], b.w, pair[0], a.w)
 		}
 	}
-	// Rows advance downward without abandoning the first row.
 	if cells["h1"].y >= cells["c1"].y || cells["c1"].y >= cells["c3"].y {
 		t.Errorf("row Y = %v,%v,%v, want strictly increasing", cells["h1"].y, cells["c1"].y, cells["c3"].y)
 	}
-	// No text was dropped by the table layout.
 	for _, w := range []string{"H1", "H2", "A", "B", "C", "D"} {
 		if findWordObject(arena, w) == nil {
 			t.Errorf("word %q missing from the laid-out table", w)

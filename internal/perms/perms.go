@@ -1,4 +1,3 @@
-// Package perms manages granular per-origin site permissions and content settings.
 package perms
 
 import (
@@ -11,48 +10,35 @@ import (
 	"sync"
 )
 
-// Permission identifies a controllable browser capability for an origin.
 type Permission string
 
 const (
-	// PermissionJavaScript controls execution of author and inline scripts.
-	PermissionJavaScript Permission = "javascript"
-	// PermissionImages controls loading and decoding of web images.
-	PermissionImages Permission = "images"
-	// PermissionCookies controls persistent cookie storage for an origin.
-	PermissionCookies Permission = "cookies"
-	// PermissionClipboardRead controls script access to clipboard contents.
-	PermissionClipboardRead Permission = "clipboard-read"
-	// PermissionClipboardWrite controls script writes to the system clipboard.
+	PermissionJavaScript     Permission = "javascript"
+	PermissionImages         Permission = "images"
+	PermissionCookies        Permission = "cookies"
+	PermissionClipboardRead  Permission = "clipboard-read"
 	PermissionClipboardWrite Permission = "clipboard-write"
 )
 
-// PermissionState defines whether a permission is allowed, blocked, or using default.
 type PermissionState string
 
 const (
-	// StateDefault indicates the permission inherits the global browser policy.
 	StateDefault PermissionState = "default"
-	// StateAllow explicitly permits the capability for the origin.
-	StateAllow PermissionState = "allow"
-	// StateBlock explicitly forbids the capability for the origin.
-	StateBlock PermissionState = "block"
+	StateAllow   PermissionState = "allow"
+	StateBlock   PermissionState = "block"
 )
 
-// OriginSettings holds the set of configured permissions for a single origin.
 type OriginSettings struct {
 	Origin      string                         `json:"origin"`
 	Permissions map[Permission]PermissionState `json:"permissions"`
 }
 
-// Manager stores and manages per-origin permissions with thread-safe persistence.
 type Manager struct {
 	mu       sync.RWMutex
 	filePath string
 	origins  map[string]map[Permission]PermissionState
 }
 
-// NormalizeOrigin extracts the canonical scheme://host[:port] origin from a raw URL.
 func NormalizeOrigin(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -65,7 +51,6 @@ func NormalizeOrigin(raw string) string {
 	return strings.ToLower(u.Scheme + "://" + u.Host)
 }
 
-// NewManager creates a Manager bound to filePath.
 func NewManager(filePath string) *Manager {
 	return &Manager{
 		filePath: filePath,
@@ -73,7 +58,6 @@ func NewManager(filePath string) *Manager {
 	}
 }
 
-// State returns the explicit permission state for an origin and permission.
 func (m *Manager) State(origin string, perm Permission) PermissionState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -86,14 +70,11 @@ func (m *Manager) State(origin string, perm Permission) PermissionState {
 	return StateDefault
 }
 
-// IsAllowed reports whether perm is allowed for origin.
-// In StateDefault, all built-in capabilities (JS, Images, Cookies) are allowed.
 func (m *Manager) IsAllowed(origin string, perm Permission) bool {
 	st := m.State(origin, perm)
 	return st != StateBlock
 }
 
-// Set updates the permission state for an origin.
 func (m *Manager) Set(origin string, perm Permission, state PermissionState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -116,7 +97,6 @@ func (m *Manager) Set(origin string, perm Permission, state PermissionState) {
 	}
 }
 
-// Clear removes all custom permissions for an origin.
 func (m *Manager) Clear(origin string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -124,7 +104,6 @@ func (m *Manager) Clear(origin string) {
 	delete(m.origins, canonical)
 }
 
-// All returns all customized origin settings sorted by origin.
 func (m *Manager) All() []OriginSettings {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -145,7 +124,6 @@ func (m *Manager) All() []OriginSettings {
 	return out
 }
 
-// Load loads permissions from disk.
 func (m *Manager) Load() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -167,7 +145,6 @@ func (m *Manager) Load() error {
 	return nil
 }
 
-// Save atomically writes permissions to disk.
 func (m *Manager) Save() error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

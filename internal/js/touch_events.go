@@ -7,13 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// installTouchEvents exposes the TouchEvent, Touch and TouchList interfaces.
-// WPT's dom/events corpus needs them twice over: synthetic-events-cancelable.html
-// asserts `TouchEvent in self` for all four touch types and constructs one, and
-// the non-cancelable-when-passive files read the lists off a generated gesture.
-//
-// Touch lists are read-only array-likes: length plus item(), indexable, and never
-// writable, so a page cannot fake a contact into or out of a live gesture.
 func (r *Runtime) installTouchEvents() {
 	isTrustedGetter := r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		return call.This.ToObject(r.vm).Get("__isTrusted")
@@ -112,10 +105,6 @@ func (r *Runtime) installTouchEvents() {
 		return obj
 	})))
 
-	// TouchEvent derives from UIEvent which derives from Event; Touch and
-	// TouchList stand on their own. The toStringTag brands are what
-	// Object.prototype.toString.call reports, so a constructed event and a
-	// dispatched one read identically.
 	_, _ = r.vm.RunString(`
 		for (const name of ["TouchEvent", "Touch", "TouchList"]) {
 			Object.defineProperty(globalThis[name].prototype, Symbol.toStringTag, { value: name, configurable: true });
@@ -124,18 +113,11 @@ func (r *Runtime) installTouchEvents() {
 	`)
 }
 
-// writeTouchFields fills one Touch object with a contact's state. The caller owns
-// the object - the constructor passes `this`, the list builder passes a fresh one
-// - so a Touch built by a page and one delivered in a generated event are the same
-// shape.
 func (r *Runtime) writeTouchFields(obj *goja.Object, identifier int, clientX, clientY float64, target goja.Value) {
 	obj.SetPrototype(r.interfacePrototype("Touch"))
 	_ = obj.Set("identifier", int64(identifier))
 	_ = obj.Set("clientX", clientX)
 	_ = obj.Set("clientY", clientY)
-	// TouchInit leaves page and screen coordinates unset and the interface mirrors
-	// the client position for both, so a page reading any of the three sees one
-	// place.
 	_ = obj.Set("pageX", clientX)
 	_ = obj.Set("pageY", clientY)
 	_ = obj.Set("screenX", clientX)
@@ -152,8 +134,6 @@ func (r *Runtime) writeTouchFields(obj *goja.Object, identifier int, clientX, cl
 	_ = obj.Set("__goosieTouch", true)
 }
 
-// writeTouchListFields turns items into a TouchList on obj: indexable, with a
-// length and item(), and no mutation path.
 func (r *Runtime) writeTouchListFields(obj *goja.Object, items []*goja.Object) {
 	if obj == nil {
 		return
@@ -179,7 +159,6 @@ func (r *Runtime) writeTouchListFields(obj *goja.Object, items []*goja.Object) {
 	_ = obj.Set("__goosieTouchList", true)
 }
 
-// newTouchList builds a TouchList from host contacts for a dispatched event.
 func (r *Runtime) newTouchList(touches []*dom.Touch) *goja.Object {
 	items := make([]*goja.Object, 0, len(touches))
 	for _, touch := range touches {
@@ -194,16 +173,10 @@ func (r *Runtime) newTouchList(touches []*dom.Touch) *goja.Object {
 		items = append(items, item)
 	}
 	list := r.vm.NewObject()
-	// The index properties, length and item() are all written together, so the
-	// wrapped contacts have to exist before the list is shaped.
 	r.writeTouchListFields(list, items)
 	return list
 }
 
-// interfacePrototype returns the prototype object of a global constructor, so a
-// list or contact built outside `new` still answers `instanceof`. A missing or
-// non-object global leaves the value at Object.prototype rather than breaking the
-// property reads a page depends on.
 func (r *Runtime) interfacePrototype(name string) *goja.Object {
 	value := r.vm.Get(name)
 	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
@@ -220,8 +193,6 @@ func (r *Runtime) interfacePrototype(name string) *goja.Object {
 	return prototype
 }
 
-// touchItems reads a JS array-like of Touch objects into a slice. The corpus
-// passes array literals; a TouchList also has a numeric length, so both work here.
 func touchItems(value *goja.Object) []*goja.Object {
 	lengthValue := value.Get("length")
 	if lengthValue == nil || goja.IsUndefined(lengthValue) || goja.IsNull(lengthValue) {
@@ -241,14 +212,6 @@ func touchItems(value *goja.Object) []*goja.Object {
 	return items
 }
 
-// TouchCancelableByListener reports whether the touch listeners a gesture
-// starting at target can reach may still cancel the scroll it causes. Only the
-// type being dispatched decides - touchstart and touchmove cancel a scroll, so
-// each derives its own flag - and a listener registered without options on a
-// default-passive target already stores passive=true.
-//
-// Like a wheel gesture, the answer is one value for the whole dispatch, which
-// every listener of it reads.
 func (r *Runtime) TouchCancelableByListener(target *dom.Node, typ string) bool {
 	matches := func(listenerType string, passive bool) bool {
 		return listenerType == typ && !passive
@@ -270,11 +233,6 @@ func (r *Runtime) TouchCancelableByListener(target *dom.Node, typ string) bool {
 	return false
 }
 
-// DispatchTrustedTouch delivers one action of a touch gesture raised by the host
-// rather than by the page. It derives the event's cancelable flag from the
-// listeners this dispatch reaches - which is why the event arrives already built
-// with its touch lists - and returns whether the gesture survived, i.e. whether
-// the scroll it caused may run.
 func (r *Runtime) DispatchTrustedTouch(target *dom.Node, ev *dom.Event) bool {
 	if r == nil || ev == nil {
 		return true

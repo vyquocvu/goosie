@@ -4,12 +4,6 @@ import (
 	"testing"
 )
 
-// TestInlineFlexJoinsLineFlow guards atomic inline-level flex containers: an
-// inline-flex box is one unbreakable word on its parent's line, so text-align
-// centers it like any inline-block. Before, only inline-block took the atomic
-// path and an inline-flex fell through to the blockified-children skip -
-// never joining a line - which left a centered 300px figure box at X 0 instead
-// of X 250 and cost the semantic-html parity fixture most of its mismatch.
 func TestInlineFlexJoinsLineFlow(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <figure style="margin: 15px 0; text-align: center;">

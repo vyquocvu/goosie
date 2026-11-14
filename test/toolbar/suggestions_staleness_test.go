@@ -13,9 +13,6 @@ func fakeSuggest(_ string) []toolbar.Suggestion {
 	}
 }
 
-// TestNavigateClearsStaleSuggestions pins that committing a navigation ends
-// the dropdown: a suggestion list produced for the typed query must not
-// survive into the next page.
 func TestNavigateClearsStaleSuggestions(t *testing.T) {
 	s := toolbar.NewState(800, nil)
 	s.URL = "golang"
@@ -30,9 +27,6 @@ func TestNavigateClearsStaleSuggestions(t *testing.T) {
 	}
 }
 
-// TestSyncFromTabClearsStaleSuggestions pins that a tab switch (which syncs
-// the new tab's state into the shared toolbar) drops the previous tab's
-// suggestions, so a fast switch never shows a stale dropdown.
 func TestSyncFromTabClearsStaleSuggestions(t *testing.T) {
 	s := toolbar.NewState(800, nil)
 	s.URL = "golang"

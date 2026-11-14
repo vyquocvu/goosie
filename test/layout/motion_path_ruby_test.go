@@ -8,7 +8,6 @@ import (
 )
 
 func TestMotionPathTranslation(t *testing.T) {
-	// Ray 90deg points right (dx = distance, dy = 0)
 	arena := positionedSession(t, `<html><body style="margin: 0;">
 <div id="target" style="width: 50px; height: 50px; offset-path: ray(90deg); offset-distance: 60px;">Box</div>
 </body></html>`, 800)
@@ -29,7 +28,6 @@ func TestMotionPathTranslation(t *testing.T) {
 		t.Errorf("expected target.X to be 60 after ray(90deg) 60px offset, got %v", target.X)
 	}
 
-	// Path translation: M 0 0 L 100 0 with 40px distance
 	arena2 := positionedSession(t, `<html><body style="margin: 0;">
 <div id="target2" style="width: 50px; height: 50px; offset-path: path('M 0 0 L 100 0'); offset-distance: 40px;">Box2</div>
 </body></html>`, 800)
@@ -91,7 +89,6 @@ func TestRubyAnnotationLayout(t *testing.T) {
 		t.Errorf("<rp> parenthesis text should not be laid out, got W=%v", rpText.W)
 	}
 
-	// Ruby annotation text should sit above the base text (rtText.Y < baseText.Y)
 	if rtText.Y >= baseText.Y {
 		t.Errorf("expected ruby rtText.Y (%v) to be above baseText.Y (%v)", rtText.Y, baseText.Y)
 	}

@@ -8,8 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// selectorIndexFixture is the TASK-051 §1 document: html, head, body, div#o,
-// p.a, span.s, p.b, p.c.
 const selectorIndexFixture = `<!DOCTYPE html><html><head></head><body><div id="o" data-x="y"><p class="a">1</p><span class="s"><p class="b">2</p></span></div><p class="c">3</p></body></html>`
 
 func newSelectorRuntime(t *testing.T) (*Runtime, *dom.Document) {
@@ -27,11 +25,6 @@ func newSelectorRuntime(t *testing.T) (*Runtime, *dom.Document) {
 	return r, doc
 }
 
-// TestSelectorFastPathPredicate is the §3.2 "tighten the predicate" proof: the
-// index may answer exactly one compound holding exactly one tag, class, or id
-// condition. Everything else must decline so the general walk runs. This is
-// package js (white-box) because indexKind and querySelectorAllIndexed are
-// unexported; the doc names this package.
 // qc:BR-225
 func TestSelectorFastPathPredicate(t *testing.T) {
 	cases := []struct {
@@ -43,13 +36,7 @@ func TestSelectorFastPathPredicate(t *testing.T) {
 		{"p", 'T', "p"},
 		{".a", '.', "a"},
 		{"#o", '#', "o"},
-		// Uppercase in a tag name must keep the walk: the index keys parsed
-		// documents by their stored lowercase tag, and this is isLowerTag's
-		// original purpose. The parser lowercases the condition value, so the
-		// check has to read the raw spelling.
 		{"DIV", 0, ""},
-		// The pre-fix fast path sent every one of these to the tag index,
-		// where they found nothing and reported success.
 		{"div > p", 0, ""},
 		{"div span", 0, ""},
 		{"p.a", 0, ""},
@@ -75,10 +62,6 @@ func TestSelectorFastPathPredicate(t *testing.T) {
 	}
 }
 
-// TestSelectorComplexSelectorDeclinesIndex proves the second half of the
-// requirement: a complex selector is declined by querySelectorAllIndexed and
-// still answered, by the walk. Results are compared to the measured Chromium
-// counts.
 // qc:BR-226
 func TestSelectorComplexSelectorDeclinesIndex(t *testing.T) {
 	r, doc := newSelectorRuntime(t)
@@ -98,7 +81,6 @@ func TestSelectorComplexSelectorDeclinesIndex(t *testing.T) {
 		}
 	}
 
-	// The general path answers them, with the measured counts.
 	want := map[string]int{
 		"div > p":       1,
 		"p.a":           1,
@@ -117,7 +99,6 @@ func TestSelectorComplexSelectorDeclinesIndex(t *testing.T) {
 		}
 	}
 
-	// A simple selector still takes the index, and answers the same nodes.
 	p := compileSelectorPlan("p")
 	nodes, ok := r.querySelectorAllIndexed(root, p)
 	if !ok {
@@ -131,9 +112,6 @@ func TestSelectorComplexSelectorDeclinesIndex(t *testing.T) {
 	}
 }
 
-// TestSelectorPlanCacheReusesAndBounds pins the two counter-shaped cache
-// properties M05 and §3.2's "cache compiled selectors per document" require:
-// the same string compiles once, and the cache never grows past its cap.
 // qc:BR-227
 func TestSelectorPlanCacheReusesAndBounds(t *testing.T) {
 	r, _ := newSelectorRuntime(t)
@@ -154,8 +132,6 @@ func TestSelectorPlanCacheReusesAndBounds(t *testing.T) {
 		}
 	}
 
-	// An invalid selector is cached too: the page must not pay for re-parsing
-	// the same bad string, and the error must survive reuse.
 	bad := r.selectorPlanFor("p:not()")
 	if bad.syntaxErr == "" {
 		t.Fatalf("invalid selector produced no syntax error")

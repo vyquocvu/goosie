@@ -5,15 +5,10 @@ import (
 	"unicode/utf16"
 )
 
-// MaxLength parses an element's maxlength content attribute using HTML's
-// non-negative-integer rules. The boolean distinguishes an absent or
-// unparsable attribute from the valid value zero.
 func MaxLength(n *Node) (int, bool) {
 	return parseNonNegativeIntegerAttribute(n, "maxlength")
 }
 
-// MinLength parses an element's minlength content attribute using HTML's
-// non-negative-integer rules.
 func MinLength(n *Node) (int, bool) {
 	return parseNonNegativeIntegerAttribute(n, "minlength")
 }
@@ -60,14 +55,10 @@ func parseNonNegativeIntegerAttribute(n *Node, name string) (int, bool) {
 	return parsed, true
 }
 
-// UTF16Length returns the number of UTF-16 code units in value, the length
-// unit used by HTML form-control maxlength and minlength.
 func UTF16Length(value string) int {
 	return len(utf16.Encode([]rune(value)))
 }
 
-// IsTooLong reports whether n's current value is too long due to a user edit.
-// Script-set values do not cause the tooLong validity state.
 func IsTooLong(n *Node) bool {
 	if n == nil || !n.ValueChangedByUser {
 		return false
@@ -80,8 +71,6 @@ func IsTooLong(n *Node) bool {
 	return UTF16Length(value) > max
 }
 
-// IsTooShort reports whether a nonempty value last changed by the user is
-// shorter than the element's minlength limit.
 func IsTooShort(n *Node) bool {
 	if n == nil || !n.ValueChangedByUser {
 		return false

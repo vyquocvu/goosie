@@ -11,11 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// TestGlyphAdvancesFromMetrics pins the anti-ghosting contract: with a metrics
-// source wired in, paint spaces glyphs by the font's real advance, not by the
-// len*0.5em estimate. "WWWW" is the sharpest probe because W is one of the
-// widest glyphs in every family this engine loads, so the estimate under-spaces
-// it by nearly half and used to draw visibly overlapping glyphs.
 func TestGlyphAdvancesFromMetrics(t *testing.T) {
 	fonts, err := raster.NewFonts()
 	if err != nil {
@@ -30,9 +25,6 @@ func TestGlyphAdvancesFromMetrics(t *testing.T) {
 
 	list := sess.Paint(1)
 	dl := list.Build(1)
-	// A document that names no family draws in the standard font, and the
-	// advance below has to come from that same face or the run's own spacing
-	// contradicts the box layout measured.
 	slot := frame.FontSlot{Family: frame.FontTimes}
 	wantFixed := fonts.GlyphAdvanceFixed(16, 'W', slot)
 	if wantFixed <= 0 {
@@ -52,8 +44,6 @@ func TestGlyphAdvancesFromMetrics(t *testing.T) {
 		}
 		found = true
 		for i := 1; i < len(g); i++ {
-			// Positions accumulate the fractional advance and round only at
-			// each glyph, so the spacing between any two glyphs is not constant.
 			want := (int32(i)*wantFixed + 32) >> 6
 			if got := g[i].X - g[0].X; got != want {
 				t.Errorf("glyph %d offset = %d, want %d (fractional advance accumulation)", i, got, want)
@@ -65,10 +55,6 @@ func TestGlyphAdvancesFromMetrics(t *testing.T) {
 	}
 }
 
-// TestLayoutWordWidthFromMetrics checks the same metrics source reaches the
-// inline pass: a word object's width must be the sum of real glyph advances,
-// not len*0.5em. Layout and paint must agree or words overlap their neighbors
-// even when each word's own glyphs are spaced correctly.
 func TestLayoutWordWidthFromMetrics(t *testing.T) {
 	fonts, err := raster.NewFonts()
 	if err != nil {

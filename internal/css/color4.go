@@ -1,27 +1,10 @@
 package css
 
-// CSS Color 4 predefined spaces, resolved one way into sRGB.
-//
-// Every function below answers "what sRGB does this color display as": the
-// test and reference renders the WPT suite compares are both sRGB, so the
-// engine converts each foreign space through XYZ (adapting D50 sources to
-// D65) into linear sRGB and applies the sRGB transfer curve. General CSS
-// gamut mapping is still incomplete: most out-of-gamut colors are clipped per
-// channel instead of using the spec's OkLCh chroma-reduction algorithm. Lab
-// and Oklab lightness endpoints are handled explicitly because the spec
-// requires them to display as black or white after gamut mapping.
-//
-// Not here yet, by design: color-mix() and contrast-color(), which need the
-// inverse direction (sRGB back into working spaces) and, for contrast, style
-// query support in the cascade.
-
 import (
 	"math"
 	"strings"
 )
 
-// parseColor4Like resolves hwb(), lab(), lch(), oklab() and oklch(). The
-// caller already matched the function name; body holds its arguments.
 func parseColor4Like(fn, body string) (Color, bool) {
 	vals, alpha, hasAlpha, ok := colorComponents(body)
 	if !ok {
@@ -90,9 +73,6 @@ func parseColor4Like(fn, body string) (Color, bool) {
 	return Color{R: clampByte(r * 255), G: clampByte(g * 255), B: clampByte(b * 255), A: a}, true
 }
 
-// parseColor4Channel converts a numeric color component while applying the
-// percentage reference range for its color space. CSS Color 4 defines these
-// ranges independently for Lab, LCH, Oklab, and OkLCh.
 func parseColor4Channel(s string, percentScale float64) float64 {
 	s = strings.TrimSpace(strings.ToLower(s))
 	if s == "none" {
@@ -104,7 +84,6 @@ func parseColor4Channel(s string, percentScale float64) float64 {
 	return parseFloat(s)
 }
 
-// parseColorFunc resolves color(<space> <c1> <c2> <c3> [/ alpha]).
 func parseColorFunc(body string) (Color, bool) {
 	alpha := ""
 	hasAlpha := false
@@ -145,7 +124,6 @@ func parseColorFunc(body string) (Color, bool) {
 	return Color{R: clampByte(r * 255), G: clampByte(g * 255), B: clampByte(b * 255), A: a}, true
 }
 
-// parseLabLightness reads an L in 0..100, as number or percent.
 func parseLabLightness(s string) float64 {
 	s = strings.TrimSpace(strings.ToLower(s))
 	if s == "none" {
@@ -157,7 +135,6 @@ func parseLabLightness(s string) float64 {
 	return parseFloat(s)
 }
 
-// parseOKLightness reads an Oklab L in 0..1, as number or percent.
 func parseOKLightness(s string) float64 {
 	s = strings.TrimSpace(strings.ToLower(s))
 	if s == "none" {
@@ -168,8 +145,6 @@ func parseOKLightness(s string) float64 {
 	}
 	return parseFloat(s)
 }
-
-// --- transfer curves and matrices (CSS Color 4, D65 unless noted) ---
 
 func srgbEncode(linear float64) float64 {
 	if linear <= 0.0031308 {
@@ -185,14 +160,12 @@ func srgbDecode(encoded float64) float64 {
 	return math.Pow((encoded+0.055)/1.055, 2.4)
 }
 
-// xyzD65ToLinearSRGB is the CSS Color 4 XYZ-D65 to linear-sRGB matrix.
 func xyzD65ToLinearSRGB(x, y, z float64) (float64, float64, float64) {
 	return 3.2404542*x - 1.5371385*y - 0.4985314*z,
 		-0.9692660*x + 1.8760108*y + 0.0415560*z,
 		0.0556434*x - 0.2040259*y + 1.0572252*z
 }
 
-// bradfordD50ToD65 adapts a D50 tristimulus to D65.
 func bradfordD50ToD65(x, y, z float64) (float64, float64, float64) {
 	return 0.9555766*x - 0.0230393*y + 0.0631636*z,
 		-0.0282895*x + 1.0099416*y + 0.0210077*z,
@@ -209,7 +182,6 @@ func clip01(v float64) float64 {
 	return v
 }
 
-// hwbToRGB follows CSS Color 4 §10: pure hue, then whiten then blacken.
 func hwbToRGB(hueDeg, w, b float64) (uint8, uint8, uint8) {
 	rr, gg, bb := hslToRGB(hueDeg, 1, 0.5)
 	r, g, bl := float64(rr)/255, float64(gg)/255, float64(bb)/255
@@ -224,7 +196,6 @@ func hwbToRGB(hueDeg, w, b float64) (uint8, uint8, uint8) {
 	return clampByte(r * 255), clampByte(g * 255), clampByte(bl * 255)
 }
 
-// labToSRGB converts CIE L*a*b* (D50) to gamma-encoded sRGB 0..1.
 func labToSRGB(l, a, b float64) (float64, float64, float64) {
 	fy := (l + 16) / 116
 	fx := fy + a/500
@@ -245,13 +216,11 @@ func labFInv(t float64) float64 {
 	return 3 * 6.0 / 29.0 * 6.0 / 29.0 * (t - 4.0/29.0)
 }
 
-// lchToSRGB converts CIE L*C*h (D50) via Lab.
 func lchToSRGB(l, c, hueDeg float64) (float64, float64, float64) {
 	rad := hueDeg * math.Pi / 180
 	return labToSRGB(l, c*math.Cos(rad), c*math.Sin(rad))
 }
 
-// oklabToSRGB converts Oklab to gamma-encoded sRGB 0..1.
 func oklabToSRGB(l, a, b float64) (float64, float64, float64) {
 	l_ := l + 0.3963377774*a + 0.2158037573*b
 	m_ := l - 0.1055613458*a - 0.0638541728*b
@@ -263,15 +232,11 @@ func oklabToSRGB(l, a, b float64) (float64, float64, float64) {
 	return clip01(srgbEncode(lr)), clip01(srgbEncode(lg)), clip01(srgbEncode(lb))
 }
 
-// oklchToSRGB converts Oklch via Oklab.
 func oklchToSRGB(l, c, hueDeg float64) (float64, float64, float64) {
 	rad := hueDeg * math.Pi / 180
 	return oklabToSRGB(l, c*math.Cos(rad), c*math.Sin(rad))
 }
 
-// colorSpaceToSRGB resolves a color() colorspace id with components already
-// normalized (percentages as 0..1 fractions, per the space's reference
-// range). Unknown spaces report false and the declaration drops, as before.
 func colorSpaceToSRGB(space string, c1, c2, c3 float64) (float64, float64, float64, bool) {
 	var x, y, z float64
 	switch space {
@@ -285,7 +250,6 @@ func colorSpaceToSRGB(space string, c1, c2, c3 float64) (float64, float64, float
 		y = 0.2289746*r + 0.6917385*g + 0.0792869*b
 		z = 0.0000000*r + 0.0451134*g + 1.0439444*b
 	case "display-p3-linear":
-		// Same primaries as display-p3, but the components arrive linear.
 		x = 0.4865709*c1 + 0.2656677*c2 + 0.1982173*c3
 		y = 0.2289746*c1 + 0.6917385*c2 + 0.0792869*c3
 		z = 0.0000000*c1 + 0.0451134*c2 + 1.0439444*c3
@@ -316,7 +280,6 @@ func colorSpaceToSRGB(space string, c1, c2, c3 float64) (float64, float64, float
 	return clip01(srgbEncode(lr)), clip01(srgbEncode(lg)), clip01(srgbEncode(lb)), true
 }
 
-// prophotoDecode inverts the ProPhoto RGB transfer curve.
 func prophotoDecode(v float64) float64 {
 	v = clip01(v)
 	if v < 16.0/512.0 {
@@ -325,7 +288,6 @@ func prophotoDecode(v float64) float64 {
 	return math.Pow(v, 1.8)
 }
 
-// rec2020Decode inverts the Rec.2020 OETF.
 func rec2020Decode(v float64) float64 {
 	v = clip01(v)
 	if v < 0.08145 {

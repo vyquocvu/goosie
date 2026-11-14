@@ -111,7 +111,6 @@ func TestAspectRatioLayoutResolution(t *testing.T) {
 	if cardObj.W != 160 {
 		t.Errorf("card width = %v, want 160", cardObj.W)
 	}
-	// 160 / (16/9) = 90
 	if cardObj.H != 90 {
 		t.Errorf("card height = %v, want 90", cardObj.H)
 	}
@@ -129,8 +128,6 @@ func TestAspectRatioLayoutResolution(t *testing.T) {
 	}
 }
 
-// TestAspectRatioAcceptanceValues verifies the exact acceptance criteria:
-// aspect-ratio: 16/9 with width: 320px → height: 180px.
 func TestAspectRatioAcceptanceValues(t *testing.T) {
 	htmlStr := `<!DOCTYPE html>
 <html>
@@ -172,7 +169,6 @@ func TestAspectRatioAcceptanceValues(t *testing.T) {
 	if wideObj.W != 320 {
 		t.Errorf("wide width = %v, want 320", wideObj.W)
 	}
-	// 320 / (16/9) = 180
 	if wideObj.H != 180 {
 		t.Errorf("wide height = %v, want 180", wideObj.H)
 	}
@@ -189,14 +185,11 @@ func TestAspectRatioAcceptanceValues(t *testing.T) {
 	if sqObj.W != 100 {
 		t.Errorf("square2 width = %v, want 100", sqObj.W)
 	}
-	// 100 / (1/1) = 100
 	if sqObj.H != 100 {
 		t.Errorf("square2 height = %v, want 100", sqObj.H)
 	}
 }
 
-// TestAspectRatioIgnoredWhenBothDimensionsSet verifies that when both width
-// and height are explicitly specified, aspect-ratio has no effect.
 func TestAspectRatioIgnoredWhenBothDimensionsSet(t *testing.T) {
 	htmlStr := `<!DOCTYPE html>
 <html>
@@ -231,7 +224,6 @@ func TestAspectRatioIgnoredWhenBothDimensionsSet(t *testing.T) {
 		t.Fatal("box layout object not found")
 	}
 	boxObj := arena.Get(boxID)
-	// Both width and height are explicit: aspect-ratio: 1/1 must NOT override.
 	if boxObj.W != 200 {
 		t.Errorf("box width = %v, want 200", boxObj.W)
 	}

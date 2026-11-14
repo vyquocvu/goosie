@@ -9,10 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// TestDocumentStyleApplied verifies that <style> blocks inside the document
-// reach the style resolver: a background-color rule must produce a fill
-// command in the display list. Without this, the -url path renders documents
-// with no author colors at all.
 func TestDocumentStyleApplied(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head>
 <style>
@@ -38,8 +34,6 @@ div { background-color: #336699; }
 	}
 }
 
-// TestLinkPseudoClassApplied verifies that a:link and a:visited selector rules
-// match anchor tags with href attributes and apply their styles (like color).
 func TestLinkPseudoClassApplied(t *testing.T) {
 	sess, err := engine.NewSession(`<html><head>
 <style>
@@ -66,9 +60,6 @@ a:link, a:visited { color: #38488f; }
 	}
 }
 
-// TestEmMarginResolution verifies that em-based margins resolve relative to the
-// element's own computed font size, so that h1 with 2em (32px) font size has
-// margin-top: 0.67em resolve to 0.67 * 32 ≈ 21.44px rather than 0.67 * 16.
 func TestEmMarginResolution(t *testing.T) {
 	sess, err := engine.NewSession(`<html><body>
 <h1>Title</h1>
@@ -82,7 +73,6 @@ func TestEmMarginResolution(t *testing.T) {
 			if obj.Style.FontSize != 32 {
 				t.Fatalf("h1 font size = %v, want 32", obj.Style.FontSize)
 			}
-			// 0.67 * 32 = 21.44. With hardcoded 16 it was 10.72.
 			if obj.MarginTop < 20 || obj.MarginTop > 23 {
 				t.Fatalf("h1 MarginTop = %v, want ~21.44", obj.MarginTop)
 			}
@@ -92,11 +82,6 @@ func TestEmMarginResolution(t *testing.T) {
 	t.Fatal("h1 object not found")
 }
 
-// TestExampleDotComRender verifies the end-to-end layout and styling of example.com:
-// - Body has background-color #f0f0f2 which becomes the session BackgroundColor
-// - Div card has 600px width and is horizontally centered (margin: 5em auto)
-// - Div card has background-color #fdfdff and 2em padding
-// - Link a:link has color #38488f
 func TestExampleDotComRender(t *testing.T) {
 	exampleHTML := `<!doctype html>
 <html>
@@ -139,13 +124,11 @@ func TestExampleDotComRender(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Check canvas background color
 	bg := sess.BackgroundColor()
 	if bg.R() != 0xf0 || bg.G() != 0xf0 || bg.B() != 0xf2 {
 		t.Errorf("sess.BackgroundColor = %v, want #f0f0f2", bg)
 	}
 
-	// 2. Check div card box
 	var divObj *layout.Object
 	for i := range sess.Arena.Objects {
 		obj := &sess.Arena.Objects[i]
@@ -158,22 +141,15 @@ func TestExampleDotComRender(t *testing.T) {
 		t.Fatal("div not found")
 	}
 
-	// The UA sheet leaves div at box-sizing: content-box, as Chromium does, so the
-	// 600px declared width is the content width and the 2*32px padding sits outside
-	// it: the border box is 664px.
 	if divObj.W != 600 {
 		t.Errorf("div.W = %v, want 600", divObj.W)
 	}
-	// padding is 2em = 32px
 	if divObj.PaddingLeft != 32 || divObj.PaddingRight != 32 {
 		t.Errorf("div padding = %v, %v, want 32, 32", divObj.PaddingLeft, divObj.PaddingRight)
 	}
-	// margin-top is 5em = 80px
 	if divObj.MarginTop != 80 {
 		t.Errorf("div.MarginTop = %v, want 80", divObj.MarginTop)
 	}
-	// Border box = 664px. Remaining space = 1440 - 664 = 776.
-	// MarginLeft = MarginRight = 776 / 2 = 388.
 	wantMargin := float32(388)
 	if math.Abs(float64(divObj.MarginLeft-wantMargin)) > 1 {
 		t.Errorf("div.MarginLeft = %v, want %v", divObj.MarginLeft, wantMargin)
@@ -182,16 +158,13 @@ func TestExampleDotComRender(t *testing.T) {
 		t.Errorf("div.X = %v, want %v", divObj.X, wantMargin)
 	}
 
-	// 3. Check paint commands
 	list := sess.Paint(1)
 	dl := list.Build(1)
 
-	// Check div background fill #fdfdff
 	foundDivFill := false
 	for _, c := range dl.All() {
 		if c.Kind == paint.CmdFill && c.Color.R() == 0xfd && c.Color.G() == 0xfd && c.Color.B() == 0xff {
 			foundDivFill = true
-			// The fill rect X should match div.X
 			if c.Rect.X0 < int32(wantMargin-2) || c.Rect.X0 > int32(wantMargin+2) {
 				t.Errorf("div fill rect X0 = %v, want %v", c.Rect.X0, wantMargin)
 			}
@@ -202,7 +175,6 @@ func TestExampleDotComRender(t *testing.T) {
 		t.Error("no div fill command with #fdfdff found")
 	}
 
-	// Check link text color #38488f
 	foundLinkColor := false
 	for _, c := range dl.All() {
 		if c.Kind == paint.CmdText && c.Text.Color.R() == 0x38 && c.Text.Color.G() == 0x48 && c.Text.Color.B() == 0x8f {

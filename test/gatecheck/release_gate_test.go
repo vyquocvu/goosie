@@ -1,14 +1,3 @@
-// BR-179 asks for a release gate: run the full suite, go vet -all, archtest and the gate
-// suite on the candidate commit, require every command to exit 0, and keep the logs.
-// Until scripts/release-gate.sh existed, that instruction was carried out by whoever was
-// doing the release, from memory - which is not a test, and produces no evidence either.
-//
-// These are the tests for the checker, not for the browser: the gate is CI code with no
-// assertions of its own, so it is tested the way scripts/v2-gate-check.sh and
-// scripts/release-smoke.sh are. The exit-status contract is the same as theirs - 0 pass,
-// 1 a command failed, 2 no verdict - and the interesting cases are the ones where a gate
-// could report the wrong thing: a cached test run, a command that never started, a list
-// someone quietly shortened.
 package gatecheck
 
 import (
@@ -56,8 +45,6 @@ func gateScript(t *testing.T) string {
 	return path
 }
 
-// runGate returns the script's combined output and exit code. A non-zero code is an
-// expected result here, so it is returned rather than treated as a test failure.
 func runGate(t *testing.T, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command("bash", append([]string{gateScript(t)}, args...)...)
@@ -93,8 +80,6 @@ func readGateReport(t *testing.T, outDir string) gateReport {
 	return rep
 }
 
-// The point of BR-179 is the set of commands, so the set is asserted rather than trusted:
-// shorten scripts/release-gate.sh's built-in list by one line and this fails.
 // qc:BR-179
 func TestReleaseGateDefaultListIsTheQCGate(t *testing.T) {
 	out, code := runGate(t, "-list")
@@ -118,13 +103,9 @@ func TestReleaseGateDefaultListIsTheQCGate(t *testing.T) {
 			t.Errorf("built-in gate list is missing %q; got:\n%s", want, got)
 		}
 	}
-	// -count=1 is not decoration: a release run that reuses cached "ok" lines from an
-	// earlier tree has not tested this commit.
 	if !strings.Contains(got, "go test -count=1 ./...") {
 		t.Errorf("the full suite must run with -count=1 so cached results cannot pass a release; got:\n%s", got)
 	}
-	// Same reasoning for the gate suite: without -run TestGate the package's other tests
-	// are not the gate, and a stale binary could otherwise be blamed on the gate.
 	if !strings.Contains(got, "-run TestGate ./test/gate/") {
 		t.Errorf("gate suite command must select TestGate; got:\n%s", got)
 	}
@@ -143,9 +124,6 @@ func TestReleaseGatePassesWhenEveryCommandPasses(t *testing.T) {
 	}
 }
 
-// A failing command has to make the gate fail *and* stay on disk: BR-179 asks for the logs
-// as evidence, and a gate that exits 1 without saying which command broke is not much help
-// at 2am.
 // qc:BR-179
 func TestReleaseGateFailsWhenOneCommandFails(t *testing.T) {
 	out := t.TempDir()
@@ -166,9 +144,6 @@ func TestReleaseGateFailsWhenOneCommandFails(t *testing.T) {
 	}
 }
 
-// Later commands must still run after an early failure: "vet was clean on this commit" is
-// worth knowing even when a test failed, and re-running the whole gate to find out is how
-// people start skipping it.
 func TestReleaseGateKeepsRunningAfterAFailure(t *testing.T) {
 	out := t.TempDir()
 	list := writeGateCommands(t, "exit 1", "echo gate-third-ran")
@@ -192,8 +167,6 @@ func TestReleaseGateKeepsRunningAfterAFailure(t *testing.T) {
 	}
 }
 
-// 127 means the command never started, which is not a browser bug and must not be reported
-// as a pass either. This is the case a hand-run gate gets wrong most often.
 func TestReleaseGateHasNoVerdictWhenACommandCannotRun(t *testing.T) {
 	out := t.TempDir()
 	list := writeGateCommands(t, "definitely-not-a-real-binary-xyz")

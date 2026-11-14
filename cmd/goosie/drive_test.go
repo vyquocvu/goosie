@@ -23,13 +23,9 @@ func newTestDriver() *steadyDriver {
 	return newSteadyDriver(f, 8)
 }
 
-// The frame ceiling must not fire while raster work is still landing: under
-// parallel load the vsyncs pass in microseconds (a screenshot sweep observed
-// 64 frames in 8ms with 26 tiles still on order), so a raw frame budget
-// exits before the first rows finish and the PNG shows background.
 func TestSteadyCeilingWaitsForProgress(t *testing.T) {
 	d := newTestDriver()
-	d.stallBudget = time.Hour // stall must not matter while progressing
+	d.stallBudget = time.Hour
 	d.watchIdle(func() bool { return false })
 	done := int64(0)
 	d.watchProgress(func() (int64, int64) { return done, 1 })
@@ -38,7 +34,7 @@ func TestSteadyCeilingWaitsForProgress(t *testing.T) {
 		d.mu.Lock()
 		d.sent++
 		d.mu.Unlock()
-		done++ // every frame lands more raster work
+		done++
 		if d.ready(started) {
 			t.Fatalf("ceiling fired at sent=%d while raster was progressing", d.sent)
 		}
@@ -49,7 +45,7 @@ func TestSteadyCeilingFiresOnStall(t *testing.T) {
 	d := newTestDriver()
 	d.stallBudget = time.Millisecond
 	d.watchIdle(func() bool { return false })
-	d.watchProgress(func() (int64, int64) { return 42, 1 }) // stuck, work outstanding
+	d.watchProgress(func() (int64, int64) { return 42, 1 })
 	started := time.Now()
 	for i := 0; i < 8; i++ {
 		d.mu.Lock()
@@ -61,7 +57,7 @@ func TestSteadyCeilingFiresOnStall(t *testing.T) {
 	}
 	time.Sleep(5 * time.Millisecond)
 	d.mu.Lock()
-	d.sent = 1000000 // past any frame ceiling; only stall logic may decide
+	d.sent = 1000000
 	d.mu.Unlock()
 	if !d.ready(started) {
 		t.Fatal("stalled run with outstanding work did not exit past the stall budget")
@@ -88,11 +84,6 @@ func TestSteadyIdleStillExits(t *testing.T) {
 	}
 }
 
-// The per-vsync hook must run before the settle decision, on every vsync, and a
-// hook that publishes work must restart that decision: the idle count is read
-// from the loop's last frame, so without the reset a screenshot could exit on a
-// vsync whose pump had just changed the page - the frame it settles on must be
-// the frame that shows the change (BR-253, BR-255).
 func TestSteadyVsyncHookRunsBeforeReadyAndRestartsSettling(t *testing.T) {
 	win := &stubWindow{events: make(chan surface.Event)}
 	d := newSteadyDriver(&framePath{window: win}, 8)
@@ -100,8 +91,6 @@ func TestSteadyVsyncHookRunsBeforeReadyAndRestartsSettling(t *testing.T) {
 	d.watchProgress(func() (int64, int64) { return 0, 0 })
 
 	var calls int32
-	// The ninth vsync is the one that would settle an idle run (floor 8 plus
-	// two idle frames needs a tenth, so publish on the ninth to observe it).
 	d.watchVsync(func() bool {
 		n := atomic.AddInt32(&calls, 1)
 		return n == 9

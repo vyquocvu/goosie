@@ -6,14 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// The eleventh round fixed the box shorthands, not the class. The class is any property whose
-// value is a whitespace-separated list of lengths: `strings.Fields` counts the spaces inside
-// `calc(10vh - 4px)`, so one value becomes four and every slot after it shifts. What is left in
-// that class is the properties that read a length out of a split list rather than a whole
-// declaration - `border-spacing`, `background-size`, `background-position`.
-//
-// Same geometry as the shorthand tests: 1440x900 viewport, 16px root, so `10vh` is 90.
-
 const lengthSplitDoc = "<html><body><div>x</div></body></html>"
 
 func TestBorderSpacingKeepsAFunctionArgumentTogether(t *testing.T) {
@@ -81,7 +73,6 @@ func TestBackgroundPositionKeepsAFunctionArgumentTogether(t *testing.T) {
 		{"background-position: 10px 20px", style.BgPosLength, style.BgPosLength, 10, 20, false, false},
 		{"background-position: calc(10vh - 4px) 20px", style.BgPosLength, style.BgPosLength, 86, 20, false, false},
 		{"background-position: 20px calc(10vh - 4px)", style.BgPosLength, style.BgPosLength, 20, 86, false, false},
-		// A single value is one axis only, and CSS centres the other.
 		{"background-position: calc(10vh - 4px)", style.BgPosLength, style.BgPosCenter, 86, 0, false, false},
 	} {
 		cs := styleAtViewport(t, lengthSplitDoc, "div { "+c.decl+" }", "div", vp)
@@ -98,9 +89,6 @@ func TestBackgroundPositionKeepsAFunctionArgumentTogether(t *testing.T) {
 	}
 }
 
-// An unclosed function is not a value that happens to be long; it is no value at all. The
-// fallback these properties document is "leave the image at its natural size" and "keep the
-// initial edge", never "read the fragment beside the function".
 func TestUnclosedFunctionLeavesTheseLengthListsAlone(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 	baseline := styleAtViewport(t, lengthSplitDoc, "", "div", vp)
@@ -125,10 +113,6 @@ func TestUnclosedFunctionLeavesTheseLengthListsAlone(t *testing.T) {
 	}
 }
 
-// The `background` shorthand used to veto any token containing a `(` from being a position or a
-// size, which is a syntactic guess at "this cannot be a length". Now that the length reader is
-// type-aware the veto is what drops `background: url(x) calc(10vh - 4px)`: the function is a
-// length, and `url(x)`/`rgba(…)` fail on their own type instead.
 func TestBackgroundShorthandAcceptsALengthFunction(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 	for _, c := range []struct{ decl string }{
@@ -150,9 +134,6 @@ func TestBackgroundShorthandAcceptsALengthFunction(t *testing.T) {
 			t.Errorf("%q size = %v/%v, want length 86", c.decl, cs.BackgroundSize, cs.BgSizeW)
 		}
 	}
-	// The other half of the same decision: a function that is not a length stays
-	// out of the position axis. Dropping the syntactic veto buys nothing if every
-	// function then reads as zero.
 	baseline := styleAtViewport(t, lengthSplitDoc, "", "div", vp)
 	for _, decl := range []string{
 		"background: linear-gradient(red, blue)",
@@ -167,11 +148,6 @@ func TestBackgroundShorthandAcceptsALengthFunction(t *testing.T) {
 	}
 }
 
-// An unmatched `)` is the mirror image of the defect this round fixes. `splitTopLevelSpace`
-// counts depth to decide where a value ends, and a `)` with no `(` in front of it takes the
-// count negative - after which no whitespace is at depth zero, so the rest of the declaration
-// never splits. `padding: 7px) 3px` therefore becomes one unparseable token and the perfectly
-// good `3px` beside it is lost, which is what the old `strings.Fields` split did not do.
 func TestUnbalancedCloseParenDoesNotSwallowTheNextArgument(t *testing.T) {
 	vp := style.Viewport{W: 1440, H: 900}
 	cs := styleAtViewport(t, lengthSplitDoc, "div { padding: 7px) 3px }", "div", vp)
@@ -183,8 +159,6 @@ func TestUnbalancedCloseParenDoesNotSwallowTheNextArgument(t *testing.T) {
 	if cs.BorderSpacingV != 5 {
 		t.Errorf("`border-spacing: 2px) 5px` = v %v, want 5", cs.BorderSpacingV)
 	}
-	// The nesting the splitter exists for still nests: a `)` inside an argument must not be
-	// the one that closes it.
 	cs = styleAtViewport(t, lengthSplitDoc, "div { padding: calc(max(1em, 2px) + 4px) 3px }", "div", vp)
 	if cs.PaddingTop != 20 || cs.PaddingRight != 3 {
 		t.Errorf("`padding: calc(max(1em, 2px) + 4px) 3px` = %v/%v, want 20/3", cs.PaddingTop, cs.PaddingRight)

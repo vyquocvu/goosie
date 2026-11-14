@@ -8,21 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// driver is a window that scrolls itself.
-//
-// A paced run cannot wait for a finger, and the measurement it is here for is a frame
-// drawn in answer to a real vsync - so the driver invents no frames. It sits between
-// the window and surface.Loop and stamps a scroll delta onto the ticks the display
-// already produced, which is what a trackpad does to a vsync-carried event in every
-// backend's own accounting. The loop, the scheduler, the composer, and the present
-// path are then the ones an interactive run exercises, on the same channel and the
-// same pacing, and that identity is the reason this file is a window decorator rather
-// than a second frame loop.
-//
-// The channel to the loop is unbuffered and the loop draws before it receives again,
-// so the driver learns a frame is finished by being allowed to hand over the next one.
-// It reports completion one tick after the last measured delta, which is why a
-// 600-frame run forwards 601 ticks.
 type driver struct {
 	surface.Window
 	s    *raster.Scheduler
@@ -33,18 +18,13 @@ type driver struct {
 	out  chan surface.Event
 	done chan struct{}
 
-	// dir is the travel direction, reversed at the ends of the document.
-	dir  int32
-	mu   sync.Mutex
-	sent int
-	once sync.Once
-	// vsyncFn is one event-loop turn the pump runs for every vsync before the
-	// frame count is consulted. See watchVsync.
+	dir     int32
+	mu      sync.Mutex
+	sent    int
+	once    sync.Once
 	vsyncFn func() bool
 }
 
-// newDriver starts a driver over f's window. The window has to exist first: dropping
-// frames the display never produced would be a gate that measured nothing.
 func newDriver(f *framePath, frames int) *driver {
 	dev := f.devSize()
 	d := &driver{
@@ -64,30 +44,12 @@ func newDriver(f *framePath, frames int) *driver {
 	return d
 }
 
-// watchVsync tells the driver what to run once per vsync, before it stamps the
-// frame and before anything asks whether the run may end. It exists because a
-// paced run builds no chrome window, so the tick that pumps the page's event
-// loop in an interactive run (chromeWindow.setTick -> pumpChrome) has no
-// counterpart here: a gate run that measured frames of a page whose timers
-// never fired would be measuring a page no browser shows.
-//
-// The hook reports whether it changed anything. The gate driver does not use
-// that answer - it has no settle decision - but the screenshot driver does, and
-// one hook type keeps the two paced drivers wired the same way. The hook runs
-// on the pump's own goroutine, the one that consumes the display's ticks, so
-// the JS runtime still has exactly one Run/Tick thread. Attached after
-// construction because the loop is built from the driver.
 func (d *driver) watchVsync(pump func() bool) {
 	d.mu.Lock()
 	d.vsyncFn = pump
 	d.mu.Unlock()
 }
 
-// turn runs the registered per-vsync hook, if any, outside the driver's lock:
-// the hook repaints and publishes plans, and a driver that held its own lock
-// across that would make the frame path wait on the producer that feeds it.
-// After finish the shutdown may already be closing the session, and a tick that
-// lands then has nothing left to pump.
 func (d *driver) turn() bool {
 	d.mu.Lock()
 	pump := d.vsyncFn
@@ -103,12 +65,8 @@ func (d *driver) turn() bool {
 	return pump()
 }
 
-// Events implements surface.Window, replacing the wrapped window's channel with the
-// transformed one. surface.Loop calls it exactly once, which is why the pump is
-// started here rather than lazily.
 func (d *driver) Events() <-chan surface.Event { return d.out }
 
-// Frames reports how many vsyncs left the driver carrying a scroll delta.
 func (d *driver) Frames() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -121,10 +79,6 @@ func (d *driver) pump() {
 	for ev := range d.Window.Events() {
 		measured := false
 		if ev.Kind == surface.EvVsync {
-			// One event-loop turn per vsync, before this tick is stamped:
-			// whatever the page's timers, RAF callbacks or image completions do
-			// here is already published when the loop draws the frame this
-			// event carries.
 			d.turn()
 			d.mu.Lock()
 			if d.sent < d.n {
@@ -139,18 +93,12 @@ func (d *driver) pump() {
 		case <-d.done:
 			return
 		}
-		// The send returning is the proof: the loop took this tick, so it had already
-		// returned from drawing the frame before it.
 		if measured {
 			d.finish()
 		}
 	}
 }
 
-// next returns one frame's scroll delta and reverses at the ends of the document, so a
-// long run walks the page rather than spending its last frames pressed against a
-// clamp. A clamped frame damages nothing and presents the same pixels, and a gate that
-// averaged those would be averaging an idle vsync and calling it a scroll.
 func (d *driver) next() int32 {
 	step := d.step * d.dir
 	at := d.s.Viewport().Offset.Y
@@ -161,78 +109,36 @@ func (d *driver) next() int32 {
 	return step
 }
 
-// finish ends the run once. Closing done both releases the pump's send and tells
-// run() to cancel the context and close the window.
 func (d *driver) finish() {
 	d.once.Do(func() { close(d.done) })
 }
 
 var _ surface.Window = (*driver)(nil)
 
-// steadyFloorFrames is the screenshot floor: enough vsyncs for the document
-// to load and name its tiles. The gate's 600-frame sweep is pacing
-// measurement, not a render requirement - the -frames flag help says as much
-// ("frames to draw with -gate and -bench"), and completeness past the floor
-// comes from two consecutive idle frames, the same readiness goosie-headless
-// gets from two presents. A 600 floor made every parity fixture pay ~10s.
 const steadyFloorFrames = 8
 
-// steadyRevealHorizon bounds the wait a screenshot run will spend on a page's
-// own startup timers, in both directions: a timer further ahead than this is
-// not waited for, and the whole wait costs the run no more than this much wall
-// time. The number is measured. Chromium 131.0.6778.33 at viewport 1280x800
-// (2026-11-13), with setTimeout/setInterval hooked from document start and the
-// sum of visible element areas sampled at 0/200/300/500/800/1200/2000/3000ms
-// after navigation start: https://www.gov.vn queues 81 timers before its load
-// event and its area never moves (148,269,173 px² throughout);
-// https://vnexpress.net queues 938 and moves once, between 200ms and 300ms
-// (156,858,060 to 159,597,862); https://tuoitre.vn queues 327 and moves at
-// 200ms and 300ms (351,555,917 to 355,378,465), then holds to 3s. Every one of
-// those moves came from a timer of 300ms or less. What is queued past that is
-// polling - vnexpress carries 187 timers at 1s and five at 24h, gov.vn boots a
-// 24h one - and bought no new pixels in 3s of watching, so waiting for it
-// would only make every screenshot of the page later, not truer. Half a second
-// is the widest observed reveal window doubled.
 const steadyRevealHorizon = 500 * time.Millisecond
 
-// steadyDriver is a window that passes vsyncs through without scrolling and
-// signals done once the surface has nothing left to draw. It is the screenshot
-// mode's driver: the page loads in the background, the loop presents frames, and
-// the run exits when a frame is complete enough to write as a PNG.
 type steadyDriver struct {
 	surface.Window
 	out  chan surface.Event
 	done chan struct{}
 	n    int
 
-	// floor frames: the document needs them to load and to name its tiles.
-	// ceiling frames and deadline bound the wait for a page that never settles.
-	ceiling   int
-	deadline  time.Duration
-	settledFn func() bool
-	settled   int
-	// progressFn reports rasterized-work totals so the ceiling can tell a
-	// progressing run from a stuck one (see ready). Set alongside watchIdle.
-	progressFn func() (done, outstanding int64)
-	// stallBudget bounds a run that stops making raster progress. Only
-	// consulted while tile work is still on order; the absolute deadline
-	// above caps everything regardless.
+	ceiling      int
+	deadline     time.Duration
+	settledFn    func() bool
+	settled      int
+	progressFn   func() (done, outstanding int64)
 	stallBudget  time.Duration
 	lastProgress int64
 	lastMove     time.Time
 
-	// vsyncFn is one event-loop turn the pump runs for every vsync before
-	// readiness is decided. See watchVsync.
 	vsyncFn func() bool
 
-	// revealFn asks how soon the page still owes a timer it queued during its
-	// own load. See steadyRevealHorizon and revealPending.
 	revealFn    func() (time.Duration, bool)
 	revealStart time.Time
 
-	// seqFn is a capture sequence's hold: it is consulted only on a frame the
-	// ordinary law already called worth writing, and it answers whether the run
-	// still owes captures. See watchSequence.
 	seqFn func(time.Time) bool
 
 	mu   sync.Mutex
@@ -253,41 +159,24 @@ func newSteadyDriver(f *framePath, frames int) *steadyDriver {
 	return d
 }
 
-// watchReveal tells the driver how to ask the page when it next owes itself a
-// timer it queued during its own load. Like the other watchers it can only be
-// attached after the loop is built, and the getter runs on the pump's
-// goroutine, the same single thread that already ticks the session, so it reads
-// the runtime's timer queue without a second lock discipline.
 func (d *steadyDriver) watchReveal(reveal func() (time.Duration, bool)) {
 	d.mu.Lock()
 	d.revealFn = reveal
 	d.mu.Unlock()
 }
 
-// watchProgress tells the driver how to ask how much raster work has landed
-// and how much is still on order. Loop.Stats is the only thing the getter
-// may touch, for the same reason as watchIdle.
 func (d *steadyDriver) watchProgress(progress func() (done, outstanding int64)) {
 	d.mu.Lock()
 	d.progressFn = progress
 	d.mu.Unlock()
 }
 
-// watchIdle tells the driver how to ask whether the frame path is idle. The loop
-// is built from the driver, so it can only be attached afterwards, and the getter
-// runs on the pump's thread, which is why Loop.Stats is the only thing it may use.
 func (d *steadyDriver) watchIdle(idle func() bool) {
 	d.mu.Lock()
 	d.settledFn = idle
 	d.mu.Unlock()
 }
 
-// watchVsync attaches one event-loop turn to the driver. Like watchIdle it can
-// only be attached after the loop is built, and it runs on the pump's single
-// goroutine: whatever it publishes to the session is therefore already visible
-// to the loop when the loop handles the same vsync. The hook reports whether it
-// changed anything; a change resets the settle decision in pump, because the
-// frame about to be drawn is not the quiet frame that decision measured.
 func (d *steadyDriver) watchVsync(pump func() bool) {
 	d.mu.Lock()
 	d.vsyncFn = pump
@@ -304,15 +193,6 @@ func (d *steadyDriver) turn() bool {
 	return pump()
 }
 
-// watchSequence installs the capture sequence a -screenshot-seq run records and
-// buys it the wall clock: the sequence's own horizon goes on top of the
-// screenshot deadline, because a five-frame, one-second sweep needs six seconds
-// of run and the single-PNG deadline is spent deciding one frame, not holding a
-// sequence. The hold can only ever delay the end of a run that the ordinary law
-// already wanted to end; it never makes an unsettled frame look settled, so the
-// settle law the screenshots depend on is untouched. Like the other watchers
-// this one runs on the pump's goroutine, and it is called with no lock held
-// because it writes files.
 func (d *steadyDriver) watchSequence(seq func(time.Time) bool, horizon time.Duration) {
 	d.mu.Lock()
 	d.seqFn = seq
@@ -327,15 +207,8 @@ func (d *steadyDriver) pump() {
 	started := time.Now()
 	for ev := range d.Window.Events() {
 		if ev.Kind == surface.EvVsync {
-			// One event-loop turn per vsync, before readiness is consulted: a
-			// page whose timer or image completion only fires after the first
-			// few frames must still get the chance to run, and whatever that
-			// turn changes is visible to the loop when it draws this frame.
 			if d.turn() {
 				d.mu.Lock()
-				// The idle count is read from the loop's last frame, so a
-				// repaint published now would otherwise still be measured on
-				// the quiet frames before it; restart the settle wait.
 				d.settled = 0
 				d.mu.Unlock()
 			}
@@ -345,8 +218,6 @@ func (d *steadyDriver) pump() {
 			d.sent++
 			d.mu.Unlock()
 			if d.ready(started) {
-				// Forward the frame that settled the run, then end: the PNG is
-				// written from what the loop presents for this last vsync.
 				select {
 				case d.out <- ev:
 				case <-d.done:
@@ -366,11 +237,6 @@ func (d *steadyDriver) pump() {
 	}
 }
 
-// ready is the run's last question: is this the frame to end on? A capture
-// sequence gets first refusal on any frame the ordinary law would have ended
-// the run with, so a -screenshot-seq sweep records the frames it was asked for
-// before it stops, and an ordinary screenshot run answers nil and stops exactly
-// where it always did.
 func (d *steadyDriver) ready(started time.Time) bool {
 	if !d.frameReady(started) {
 		return false
@@ -381,8 +247,6 @@ func (d *steadyDriver) ready(started time.Time) bool {
 	if seq == nil {
 		return true
 	}
-	// The ordinary law has just called this frame worth writing, so this is the
-	// moment a sequence run records. Its answer can only postpone the end.
 	if seq(time.Now()) {
 		return false
 	}
@@ -392,14 +256,6 @@ func (d *steadyDriver) ready(started time.Time) bool {
 	return true
 }
 
-// frameReady decides whether the run has a frame worth writing. Ending on the
-// frame count alone truncated the viewport: under the parallel load a screenshot
-// sweep puts on the machine, the vsyncs pass while whole 256px tile blocks are
-// still un-rasterized, and the PNG shows the layer background through them. So
-// the count is only the floor, and past it the run waits for frames that need no
-// tile work and hold none on order - twice in a row, because the pump sees the
-// vsync before the loop has composed the frame it names. A ceiling and a deadline
-// keep a page that never settles from hanging the run.
 func (d *steadyDriver) frameReady(started time.Time) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -409,18 +265,8 @@ func (d *steadyDriver) frameReady(started time.Time) bool {
 	if d.settledFn == nil || time.Since(started) >= d.deadline {
 		return true
 	}
-	// The frame ceiling only counts stalled frames: under parallel load the
-	// vsyncs pass in microseconds while whole tile blocks are still queued
-	// at workers, so a raw frame budget exits before the first rows finish
-	// (a screenshot sweep showed 64 frames in 8ms with 26 tiles still on
-	// order). As long as rasterized work is still landing, the run is
-	// progressing and the ceiling must not fire; only a run making no
-	// progress waits out the stall budget, and the deadline caps everything.
 	if d.progressFn != nil {
 		done, outstanding := d.progressFn()
-		// The clock starts on the first observation past the floor, not at
-		// construction: document load happens before the loop runs, and must
-		// not count as raster stall.
 		if d.lastMove.IsZero() || done != d.lastProgress {
 			d.lastProgress = done
 			d.lastMove = time.Now()
@@ -429,20 +275,12 @@ func (d *steadyDriver) frameReady(started time.Time) bool {
 			return time.Since(d.lastMove) > d.stallBudget
 		}
 	}
-	// Nothing in the tile accounting can see a page that has promised to show
-	// itself shortly: every tile is drawn, nothing is on order, and no callback
-	// has repainted yet because no callback has run. Waiting for a startup
-	// timer is what keeps `setTimeout(reveal, 200)` out of the PNG as a blank
-	// page, and it is deliberately the page's own load-phase queue rather than
-	// the whole timer list - see steadyRevealHorizon for what that costs.
 	if d.revealPending() {
 		return false
 	}
 	if d.sent >= d.ceiling {
 		return true
 	}
-	// Loop.Stats takes the loop's own lock and never calls back into the driver,
-	// so holding d.mu across it fixes the order in one direction only by design.
 	if d.settledFn() {
 		d.settled++
 	} else {
@@ -451,18 +289,6 @@ func (d *steadyDriver) frameReady(started time.Time) bool {
 	return d.settled >= 2
 }
 
-// revealPending reports whether the page still owes startup work worth waiting
-// a frame for, and spends the run's share of the wait while doing so. The
-// caller holds d.mu.
-//
-// Two bounds keep this from becoming a licence to wait indefinitely. A timer
-// further away than the horizon is not waited for at all, so a page that boots
-// a polling interval or a delayed redirect settles as fast as it did before.
-// And the whole wait is capped at one horizon measured from the first frame
-// that wanted it, which costs any screenshot at most ~500ms even on a page that
-// keeps queueing zero-delay startup tasks. Waiting restarts the settle count
-// because the frame the run would have written is not the frame the reveal
-// paints: the two idle frames have to come after it.
 func (d *steadyDriver) revealPending() bool {
 	if d.revealFn == nil {
 		return false

@@ -13,9 +13,6 @@ const selParagraphHTML = `<html><body style="margin: 0;">` +
 const selBreakHTML = `<html><body style="margin: 0;">` +
 	`<p style="font-size: 16px;">first line<br>second line</p></body></html>`
 
-// selWord returns the border rect of the last laid-out word box holding text.
-// Document order puts later occurrences lower on the page, so repeated words
-// (e.g. "line" on two lines) resolve to the last one.
 func selWord(t *testing.T, s *engine.Session, text string) (x0, y0, x1, y1 float32) {
 	t.Helper()
 	found := false
@@ -75,7 +72,6 @@ func TestSelectAcrossLineBreak(t *testing.T) {
 	s := newFocusSession(t, selBreakHTML)
 	fx0, fy0, _, fy1 := selWord(t, s, "first")
 	_, sy0, sx1, sy1 := selWord(t, s, "line")
-	// The second "line" is the last word on line two; pick it by y band.
 	s.SelectAt(fx0-1, (fy0+fy1)/2)
 	s.SelectTo(sx1+1, (sy0+sy1)/2+1)
 	if got := s.SelectionText(); got != "first line\nsecond line" {
@@ -140,8 +136,6 @@ func TestPaintWithoutSelectionNoHighlight(t *testing.T) {
 	}
 }
 
-// TestSelectionBoundsUnion pins the damage source repaints use: the union of
-// selected word boxes in document pixels, or ok=false with no selection.
 func TestSelectionBoundsUnion(t *testing.T) {
 	s := newFocusSession(t, selParagraphHTML)
 	if _, ok := s.SelectionBounds(); ok {
@@ -161,10 +155,6 @@ func TestSelectionBoundsUnion(t *testing.T) {
 }
 
 // qc:BR-108
-//
-// Shift+Arrow grows and shrinks the page selection from a fresh document, and a
-// vertical step carries the column into the neighbouring visual line, so the
-// painted range follows the keyboard the way it follows the mouse.
 func TestShiftArrowExtendsPageSelectionByRuneAndLine(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin:0;">`+
 		`<p style="font-size:16px;">alpha beta<br>gamma delta</p></body></html>`)

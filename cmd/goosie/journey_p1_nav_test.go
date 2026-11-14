@@ -42,8 +42,6 @@ func TestJourneyURLWithPathQueryFragment(t *testing.T) {
 		return ok && browser.activeURL() == targetURL && path == "/search/items" && query == "category=books&sort=desc"
 	})
 
-	// Post-condition assertions:
-	// 1. HTTP request sent to server preserved path and query, but fragment was not sent over wire
 	reqMu.Lock()
 	gotPath, gotQuery := receivedPath, receivedQuery
 	reqMu.Unlock()
@@ -54,7 +52,6 @@ func TestJourneyURLWithPathQueryFragment(t *testing.T) {
 		t.Errorf("request query = %q, want category=books&sort=desc", gotQuery)
 	}
 
-	// 2. Active URL and address bar in browser retain the full URL with fragment
 	if browser.activeURL() != targetURL {
 		t.Errorf("activeURL = %q, want %q", browser.activeURL(), targetURL)
 	}
@@ -63,7 +60,6 @@ func TestJourneyURLWithPathQueryFragment(t *testing.T) {
 		t.Errorf("address bar value = %q, want %q (found: %v)", addrNode.Value, targetURL, ok)
 	}
 
-	// 3. Document retained fragment and target element exists in AX tree
 	if _, ok := findAXNode(browser.window.AccessibilityTree(), "target-frag"); !ok {
 		t.Errorf("AX node 'target-frag' missing; %s", browser.diagnostics())
 	}
@@ -93,30 +89,25 @@ func TestJourneyRedirectAndBack(t *testing.T) {
 	redirectURL := server.URL + "/redirect"
 	destURL := server.URL + "/destination"
 
-	// 1. Navigate to initial page
 	browser.navigateViaAddressBar(t, startURL)
 	browser.waitFor(t, "initial page loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "start-heading")
 		return ok && browser.activeURL() == startURL
 	})
 
-	// 2. Navigate to redirecting page
 	browser.navigateViaAddressBar(t, redirectURL)
 	browser.waitFor(t, "redirect followed to destination", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "dest-heading")
 		return ok && browser.activeURL() == destURL
 	})
 
-	// Assert address bar displays final destination URL, not requested redirect URL
 	addrNode, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 	if !ok || addrNode.Value != destURL {
 		t.Errorf("address bar = %q, want %q", addrNode.Value, destURL)
 	}
 
-	// 3. User clicks Back
 	browser.clickToolbarButton(t, toolbar.ButtonBack)
 
-	// 4. Back reaches start page without looping back to redirect
 	browser.waitFor(t, "back returns to initial page without loop", func() bool {
 		active := browser.f.tabMgr.Active()
 		if active == nil {
@@ -160,17 +151,14 @@ func TestJourneySlowPageStopKeepsDocument(t *testing.T) {
 	initialURL := server.URL + "/initial"
 	slowURL := server.URL + "/slow"
 
-	// 1. Load initial page
 	browser.navigateViaAddressBar(t, initialURL)
 	browser.waitFor(t, "initial page loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "init-heading")
 		return ok && browser.activeURL() == initialURL
 	})
 
-	// 2. Navigate to slow page
 	browser.navigateViaAddressBar(t, slowURL)
 
-	// Wait until the slow request starts in the background and tab is loading
 	browser.waitFor(t, "slow navigation in flight", func() bool {
 		select {
 		case <-reqStarted:
@@ -180,10 +168,8 @@ func TestJourneySlowPageStopKeepsDocument(t *testing.T) {
 		}
 	})
 
-	// 3. User clicks Stop button (which is ButtonReload while loading)
 	browser.clickToolbarButton(t, toolbar.ButtonReload)
 
-	// 4. Assert tab stops loading and currently displayed document is kept
 	browser.waitFor(t, "stop completes and keeps displayed document", func() bool {
 		active := browser.f.tabMgr.Active()
 		if active == nil || active.Loading() {
@@ -221,10 +207,8 @@ func TestJourneyLinkNavigationInSameTab(t *testing.T) {
 		return ok && browser.activeURL() == startURL
 	})
 
-	// Click link to advance
 	browser.clickNode(t, "nav-link")
 
-	// Post-condition: URL, document, and history synchronize exactly once, with no duplicate or spurious entries
 	browser.waitFor(t, "destination loaded and history synchronized", func() bool {
 		active := browser.f.tabMgr.Active()
 		if active == nil {
@@ -274,7 +258,6 @@ func TestJourneyAnchorNavigation(t *testing.T) {
 	otherURL := server.URL + "/other"
 	targetURL := docURL + "#bottom-target"
 
-	// 1. Same-page anchor jump
 	browser.navigateViaAddressBar(t, docURL)
 	browser.waitFor(t, "same-page anchor document loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "same-anchor")
@@ -290,7 +273,6 @@ func TestJourneyAnchorNavigation(t *testing.T) {
 		return browser.activeURL() == targetURL && active.ScrollY() > 0
 	})
 
-	// 2. Cross-page anchor jump from another document
 	browser.navigateViaAddressBar(t, otherURL)
 	browser.waitFor(t, "other document loaded with cross anchor link", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "cross-anchor")
@@ -344,10 +326,8 @@ func TestJourneyReloadPageWithQueryFragment(t *testing.T) {
 			len(entries) == 1
 	})
 
-	// User clicks reload
 	browser.clickToolbarButton(t, toolbar.ButtonReload)
 
-	// Post-condition: reloaded URL keeps query and fragment, history retains exactly 1 entry (no fake entry added)
 	browser.waitFor(t, "reloaded page with query and fragment preserves history", func() bool {
 		active := browser.f.tabMgr.Active()
 		if active == nil {
@@ -405,10 +385,8 @@ func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 
 	targetURL := server.URL + "/supersede"
 
-	// 1. Start first navigation
 	browser.navigateViaAddressBar(t, targetURL)
 
-	// Wait for request 1 to be in-flight
 	browser.waitFor(t, "first request pending", func() bool {
 		select {
 		case <-req1Started:
@@ -418,10 +396,8 @@ func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 		}
 	})
 
-	// 2. Trigger new navigation/refresh while request 1 is still pending
 	browser.navigateViaAddressBar(t, targetURL)
 
-	// Wait for second fresh navigation result to be applied
 	browser.waitFor(t, "second fresh navigation result applied", func() bool {
 		active := browser.f.tabMgr.Active()
 		if active == nil || active.Loading() {
@@ -431,7 +407,6 @@ func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 		return ok && browser.activeURL() == targetURL
 	})
 
-	// Release request 1 so its goroutine completes
 	doRelease()
 	browser.waitFor(t, "stale response fully served", func() bool {
 		select {
@@ -442,20 +417,11 @@ func TestJourneyRefreshWithPendingResponse(t *testing.T) {
 		}
 	})
 
-	// navResults is buffered, so a completed send says nothing about the chrome
-	// having read the result, and the load's goroutine has only just woken.
-	// Asserting here would grade a race the test started rather than a decision
-	// the chrome made: deleting both the previous-navigation cancel
-	// (navigation.go:117) and the serial guard (navigation.go:209) - so the stale
-	// document really was applied - left the version without this settle passing
-	// 6/6. Waiting for frames the chrome draws after the stale result was served
-	// is what makes the assertion below mean "rejected", not "had not arrived".
 	settled := browser.window.Stats().Presents
 	browser.waitFor(t, "two frames drawn after the stale response was served", func() bool {
 		return browser.window.Stats().Presents >= settled+2
 	})
 
-	// Post-condition: stale response 1 must never be applied
 	if _, ok := findAXNode(browser.window.AccessibilityTree(), "resp1"); ok {
 		t.Errorf("stale response 1 was applied over newer response 2; %s", browser.diagnostics())
 	}
@@ -491,33 +457,28 @@ func TestJourneyAddressBarFocusTypingDoesNotLeakToDocument(t *testing.T) {
 		return ok && browser.activeURL() == firstURL
 	})
 
-	// 1. Focus the document input element
 	browser.clickNode(t, "doc-text")
 	browser.waitFor(t, "doc input focused", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "doc-text")
 		return ok && node.Focused
 	})
 
-	// 2. Focus address bar via Cmd+L
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 'l', Mods: surface.ModCommand})
 	browser.waitFor(t, "address bar focused after Cmd+L", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "goosie.address")
 		return ok && node.Focused
 	})
 
-	// 3. Type new URL by keyboard events
 	for _, ch := range secondURL {
 		browser.pressKey(t, ch)
 	}
 	browser.pressKey(t, '\r')
 
-	// 4. Second page loads
 	browser.waitFor(t, "second page loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "second-page")
 		return ok && browser.activeURL() == secondURL
 	})
 
-	// 5. Navigate Back to first page and verify no typed characters leaked into doc input
 	browser.clickToolbarButton(t, toolbar.ButtonBack)
 	browser.waitFor(t, "returned to first page", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "doc-text")

@@ -6,30 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// The two `vertical-align` values that resolve against the containing font
-// rather than against an edge of the line box: `middle`, which centres a box
-// half an x-height above the baseline, and `super`/`sub`, which shift the box's
-// own baseline by the parent's script offset. Both were the last two values
-// GOOSIE-VALIGNMIDDLE-001 and GOOSIE-VALIGNSUB-001 named, and both are scored
-// here on numbers taken from Chromium rather than on the fallbacks that used to
-// stand in for them - the line's bottom edge for `middle`, and a proportion of
-// the box for the script pair, which moved the box without growing the line.
-//
-// The reference numbers come from three probes on 2026-11-12/13 (viewport
-// 800x600, standards mode, sans-serif). Face: 16px 14/4/18, 24px 22/6/28, 32px
-// 30/7/37, 64px 59/15/74.
-//
-// The x-height a fake face has to report is not a guess either: a fourth probe
-// put a 4px chip on the same line at sixteen font sizes, each measured twice -
-// once with `vertical-align: baseline`, which pins the line's baseline exactly,
-// and once `middle`. The offsets are reproduced at all sixteen sizes by
-// `baseline - size*r/2 - extent/2` rounded to 1/64 px with r in
-// [0.52294922, 0.52304688] - 0.523em, the same number the ink box of a lowercase
-// 'x' measures at every size - so this arena's face answers 0.5234375em, the
-// nearest value the 1/64 currency can carry. Fifteen of the sixteen sizes come
-// out the same under either; 64px does not, by 1/64 px, and those two rows are
-// pinned to the arithmetic the harness face gives.
-
 const middleScriptHTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
   body { margin: 8px; font: 16px sans-serif; }
@@ -104,12 +80,6 @@ func checkMiddleScript(t *testing.T, cases []middleScriptCase) {
 	}
 }
 
-// alignOffsets reads the three numbers controlOffsets reads, but from the box
-// the line actually placed. An atomic inline-block is that box; a span of text
-// is not, because in this arena a `<span>` carries no rect of its own and the
-// run it generates does - and the run is what the reference's inline box
-// answers for too, so a 40px line-height run centred on a 50px line reads
-// 16.8125 down the line in both engines.
 func alignOffsets(t *testing.T, arena *layout.Arena, row string) (lineH, top, text float32) {
 	t.Helper()
 	r := findByID(arena, row)
@@ -143,13 +113,6 @@ func alignOffsets(t *testing.T, arena *layout.Arena, row string) (lineH, top, te
 }
 
 // qc:BR-275
-//
-// TestMiddleCentersAnAtomicBoxOnTheParentsXHeight is the value that used to
-// fall through to the line's bottom edge. The centre of the box goes half the
-// containing font's x-height above the baseline, so both of the box's sides
-// move: a small box leaves the line alone and sits inside it, a tall one
-// stretches the line on whichever side reaches further and carries the block's
-// own text down with it.
 func TestMiddleCentersAnAtomicBoxOnTheParentsXHeight(t *testing.T) {
 	checkMiddleScript(t, []middleScriptCase{
 		{"m16a", 18, 7.8125, 0, "base 14 - xh/2 4.1875 - extent/2 2 on an 18px line that the box does not reach past; the bottom-edge fallback answered 14"},
@@ -166,12 +129,6 @@ func TestMiddleCentersAnAtomicBoxOnTheParentsXHeight(t *testing.T) {
 }
 
 // qc:BR-275
-//
-// TestMiddleCentersARunOfTextTheSameWay is the half of GOOSIE-VALIGNMIDDLE-001
-// BR-273 left open: a run's alignment box is its line-height box, so the centre
-// that moves is the box's, and the content area starts half-leading inside it.
-// The number is the parent's x-height even when the run is a different face -
-// which is what a stand-in for either engine's own metric would not show.
 func TestMiddleCentersARunOfTextTheSameWay(t *testing.T) {
 	checkMiddleScript(t, []middleScriptCase{
 		{"t40", 50, 16.8125, 16, "box 40 tall centred on 30 - 4.1875 puts its top at 5.8125, and the content area starts 11px of half-leading inside it"},
@@ -180,13 +137,6 @@ func TestMiddleCentersARunOfTextTheSameWay(t *testing.T) {
 }
 
 // qc:BR-275
-//
-// TestScriptShiftMovesTheBaselineOfEveryKindOfBox covers the seam the two
-// defects were arguing about: `super` and `sub` are a shift of the box's own
-// baseline exactly like a length, so the line grows rather than the box being
-// lifted out of one that stays put - and the amount belongs to the containing
-// font, not to the box. The mixed-size rows are what prove the second half: a
-// 24px run in a 64px block moves by the 64px number.
 func TestScriptShiftMovesTheBaselineOfEveryKindOfBox(t *testing.T) {
 	checkMiddleScript(t, []middleScriptCase{
 		{"aS4", 18, 3.671875, 0, "10 where its bottom edge sits on the baseline, minus the 16px shift 6.328125; the line does not grow because 4+6.328125 stays under the strut's 14"},
@@ -203,12 +153,6 @@ func TestScriptShiftMovesTheBaselineOfEveryKindOfBox(t *testing.T) {
 }
 
 // qc:BR-275
-//
-// TestScriptShiftScalesWithTheParentSize pins the arithmetic over five sizes.
-// The shift is the size over 3 raised and over 5 lowered, one pixel on each,
-// truncated to the 1/64 px the reference works in: the truncation is visible at
-// 16px (16/3 is 5.333333, the answer is 5.328125 + 1) and vanishes at 12 and 24
-// where the division is exact, so a rounded or clamped variant shows up here.
 func TestScriptShiftScalesWithTheParentSize(t *testing.T) {
 	checkMiddleScript(t, []middleScriptCase{
 		{"x12s", 19, 0, 5, "12/3 + 1 = 5 exactly; the line is the 14px face plus the shift"},

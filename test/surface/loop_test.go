@@ -14,23 +14,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// ---------------------------------------------------------------------------
-// platform stand-in
-// ---------------------------------------------------------------------------
-
-// presentRecord is what the loop handed the platform. The top-left pixel
-// identifies which plan produced the frame, which is enough to prove that a
-// superseded plan never reaches the window.
 type presentRecord struct {
 	color  frame.Color
 	size   frame.Size
 	damage []frame.Rect
 }
 
-// fakeWindow is the platform side of the loop tests. headless.Window arrives in
-// Task 11, and the plan asks for these tests to run against it; until that exists
-// the loop needs a Window a second goroutine can drive, because Run always assumes
-// its events arrive from somewhere else.
 type fakeWindow struct {
 	events chan surface.Event
 
@@ -84,8 +73,6 @@ func (w *fakeWindow) send(t *testing.T, ev surface.Event) {
 	}
 }
 
-// vsync queues one pacing tick stamped now, so the frame recorder has something
-// real to measure against.
 func (w *fakeWindow) vsync(t *testing.T) {
 	t.Helper()
 	w.send(t, surface.Event{Kind: surface.EvVsync, At: time.Now()})
@@ -112,18 +99,6 @@ func (w *fakeWindow) last(t *testing.T) presentRecord {
 	return w.presents[len(w.presents)-1]
 }
 
-// ---------------------------------------------------------------------------
-// Scheduler over real frame and raster types
-// ---------------------------------------------------------------------------
-
-// tileScheduler plays the loop's counterpart over a real layer, a real tile grid,
-// and a real raster pool. Its production equivalent is raster.Scheduler, which
-// surface cannot name: the import graph puts raster above surface. Testing against
-// the same data structures through the same three calls means a change that breaks
-// the real scheduler's contract has to break this one too.
-//
-// A nil layer means "content exists, tiles do not", which the plan-handoff tests
-// use to identify a frame by its background colour alone.
 type tileScheduler struct {
 	mu    sync.Mutex
 	slot  *frame.Plan
@@ -143,17 +118,13 @@ type tileScheduler struct {
 	submitted int64
 	refused   int64
 	writes    int64
-	gate      chan struct{} // when non-nil, a raster parks here before painting
+	gate      chan struct{}
 }
 
-// tileColor stamps a coordinate and a content version into four bytes, so a test
-// can tell a fresh raster from a stale one and one tile from its neighbour.
 func tileColor(c frame.TileCoord, version uint64) frame.Color {
 	return frame.RGB(byte(version*37+1), byte(c.Col*11+7), byte(c.Row*13+3))
 }
 
-// paintTile is the test's rasterizer. It reads the version off the job's own
-// display list, so the pixels say which content version produced them.
 func (s *tileScheduler) paintTile(j raster.Job) error {
 	if s.gate != nil {
 		<-s.gate
@@ -180,9 +151,6 @@ func (s *tileScheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.
 	if !ok {
 		return nil, nil
 	}
-	// The plan is authoritative about the surface's size and scale, because that is
-	// what the composer's buffer has to match. The scroll offset is the scheduler's
-	// own state, folded in here.
 	vp := p.Viewport
 	if s.layer != nil {
 		b := s.layer.Bounds
@@ -191,8 +159,6 @@ func (s *tileScheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.
 			Y: clamp32(s.scroll.Y, 0, max(0, b.Y1-vp.Size.H)),
 		}
 	} else {
-		// No layer means no document to clamp against, so the offset is the raw
-		// scroll. A test watching only for coalescing still sees its deltas arrive.
 		vp.Offset = frame.Point{X: s.scroll.X, Y: s.scroll.Y}
 	}
 	s.cur = frame.FramePlan{
@@ -217,9 +183,6 @@ func (s *tileScheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.
 			reused++
 			continue
 		}
-		// A tile with a job already on order is being painted right now. Queueing
-		// it again pays for a second raster of pixels already arriving, and under
-		// budget pressure the duplicate evicts the original.
 		if g.InFlight(c) {
 			continue
 		}
@@ -250,9 +213,6 @@ func (s *tileScheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
 			Out:    pixels,
 		})
 		if err != nil {
-			// A refused tile keeps its own buffer - the grid still owns it - so
-			// Release only clears the in-flight mark. The next frame asks again and
-			// Acquire hands out the same memory instead of allocating.
 			g.Release(c, pixels)
 			if errors.Is(err, raster.ErrQueueFull) {
 				w.Refused++
@@ -263,17 +223,12 @@ func (s *tileScheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
 		w.Submitted++
 		s.submitted++
 	}
-	// Everything that has finished is collected and nothing waits for the rest.
-	// This is the one place the loop could accidentally block on rasterization,
-	// which is why the only receive here is a non-blocking Poll.
 	for {
 		d, ok := s.pool.Poll()
 		if !ok {
 			break
 		}
 		if d.Err != nil {
-			// Whether to retry is the real scheduler's policy; here a failure only
-			// has to be reported rather than fatal.
 			g.MarkFailed(d.Coord)
 			g.Release(d.Coord, d.Out)
 			continue
@@ -296,9 +251,6 @@ func (s *tileScheduler) ComposeInto(backing *frame.Bitmap, c *surface.Composer, 
 		vp := plan.Viewport
 		for _, coord := range s.vis {
 			t := g.Peek(coord)
-			// Stale tiles are blitted exactly as much as valid ones. That is the
-			// mechanism behind "present now, fix next vsync": a version bump costs a
-			// re-raster, never a blank rectangle.
 			if t == nil || t.Pixels == nil {
 				continue
 			}
@@ -306,14 +258,9 @@ func (s *tileScheduler) ComposeInto(backing *frame.Bitmap, c *surface.Composer, 
 			s.blits = append(s.blits, surface.TileBlit{Pixels: t.Pixels, Dst: dst})
 		}
 	}
-	// Whole-surface damage. The real scheduler narrows this to the exposed band
-	// plus the prefetch ring; the loop only carries the list to the platform, so a
-	// superset is correct here and cheaper to keep honest.
 	s.damage[0] = frame.Rect4(0, 0, plan.Viewport.Size.W, plan.Viewport.Size.H)
 	return c.Compose(plan.Background, s.blits, s.damage[:], &s.writes)
 }
-
-// accessors for assertions, taking the same lock the loop's calls take
 
 func (s *tileScheduler) offsetY() int32 {
 	s.mu.Lock()
@@ -337,11 +284,6 @@ func clamp32(v, lo, hi int32) int32 {
 	return v
 }
 
-// newScene returns a layer of cols x rows tiles holding one whole-extent fill at
-// content version 1. The budget is twice the document's own tiles rather than
-// exactly them, because a redraw holds both the pixels being presented and the
-// replacement on order: a grid sized to the document to the byte cannot survive
-// invalidating all of it at once, and eviction would eat the visible tiles.
 func newScene(t *testing.T, cols, rows int32) (*frame.Layer, *paint.LayerDL) {
 	t.Helper()
 	bounds := frame.Rect4(0, 0, cols*frame.TileSize, rows*frame.TileSize)
@@ -352,10 +294,6 @@ func newScene(t *testing.T, cols, rows int32) (*frame.Layer, *paint.LayerDL) {
 	return l, dl
 }
 
-// fillList returns a frozen whole-extent fill at the given content version. One
-// solid colour per tile is all these tests need to tell a fresh raster from a
-// stale one, and a second version of it is how a content change is expressed
-// without an engine.
 func fillList(bounds frame.Rect, version uint64) *paint.LayerDL {
 	lis := paint.NewList(1)
 	lis.Append(paint.DisplayCmd{Kind: paint.CmdFill, Rect: bounds, Color: frame.RGB(200, 200, 200)})
@@ -372,9 +310,6 @@ func newSlot(p frame.FramePlan) *frame.Plan {
 	return slot
 }
 
-// newScheduler returns a scheduler with no pool. A pool is started separately
-// because a test that wants a warm grid must not have workers competing for the
-// tiles it paints itself.
 func newScheduler(layer *frame.Layer, dl *paint.LayerDL, vp frame.Viewport) *tileScheduler {
 	return &tileScheduler{
 		slot:  newSlot(published(1, vp, frame.RGB(9, 9, 9), layer)),
@@ -383,10 +318,6 @@ func newScheduler(layer *frame.Layer, dl *paint.LayerDL, vp frame.Viewport) *til
 	}
 }
 
-// startPool gives the scheduler a raster pool running s.paintTile. Anything the
-// rasterizer reads - the gate, above all - must be set before this call, because
-// launching the workers is the point at which another thread starts reading the
-// scheduler's fields.
 func (s *tileScheduler) startPool(t *testing.T, workers, queueDepth int) *raster.Pool {
 	t.Helper()
 	pool := raster.New(workers, queueDepth, s.paintTile)
@@ -398,10 +329,6 @@ func (s *tileScheduler) startPool(t *testing.T, workers, queueDepth int) *raster
 	return pool
 }
 
-// warm rasterizes every tile in the layer synchronously. That is what "cache
-// warm" means for a gate test: the pixels exist before measurement starts and no
-// worker is involved. Pairing Acquire with MarkValid also checks that the grid's
-// in-flight bookkeeping balances on the happy path.
 func (s *tileScheduler) warm(t *testing.T) {
 	t.Helper()
 	s.mu.Lock()
@@ -431,12 +358,6 @@ func (s *tileScheduler) warm(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// harness helpers
-// ---------------------------------------------------------------------------
-
-// start runs the loop on its own goroutine and returns a join that reports why it
-// stopped.
 func start(t *testing.T, loop *surface.Loop) func() error {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -455,14 +376,6 @@ func start(t *testing.T, loop *surface.Loop) func() error {
 	}
 }
 
-// waitFor blocks until cond holds or the deadline passes.
-//
-// The condition may only read state that is safe to touch from a second goroutine:
-// the fake window and the scheduler counters, both mutex-guarded, and Loop.Stats.
-// A tile grid, a composer's backing store, and the frame recorder belong to
-// whichever thread runs the loop, so a test reads them after joining it - the same
-// rule production has. Asserting on the grid mid-frame would be a data race
-// wearing a test's clothes.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -475,12 +388,6 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// waitForCommitted waits until the loop has committed at least n frames.
-//
-// Present reaches the window before draw's deferred commit publishes the tally,
-// so a test that waits only on w.count() can read Stats a frame behind. Anything
-// asserting on a counter for a frame it just saw presented has to wait for the
-// commit as well.
 func waitForCommitted(t *testing.T, loop *surface.Loop, n int64) {
 	t.Helper()
 	waitFor(t, "the loop counters to catch up", func() bool { return loop.Stats().Frames >= n })
@@ -489,10 +396,6 @@ func waitForCommitted(t *testing.T, loop *surface.Loop, n int64) {
 func newComposerFor(vp frame.Viewport) *surface.Composer {
 	return surface.NewComposer(vp.Size, frame.NewBitmapPool(vp.Size, 4))
 }
-
-// ---------------------------------------------------------------------------
-// tests
-// ---------------------------------------------------------------------------
 
 func TestVsyncFrameCountEqualsPresentCount(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 512, H: 512}}
@@ -512,8 +415,6 @@ func TestVsyncFrameCountEqualsPresentCount(t *testing.T) {
 	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// Read the counters after joining the loop: Present happens before draw
-	// commits its tally, so Stats may still be one frame behind the window.
 	got := loop.Stats()
 	if got.Frames != ticks || got.Presents != ticks {
 		t.Fatalf("frames/presents = %d/%d, want %d/%d: a vsync that does not present is a dropped frame",
@@ -522,7 +423,6 @@ func TestVsyncFrameCountEqualsPresentCount(t *testing.T) {
 	if got := loop.Composer().Backing.Size(); got != vp.Size {
 		t.Fatalf("backing store = %v, want %v", got, vp.Size)
 	}
-	// Twelve frames needed four tiles once. Everything else was a reuse.
 	if got := l.Stats(); got.Valid != 4 || got.Failed != 0 {
 		t.Fatalf("grid = %+v, want 4 valid tiles and no failures", got)
 	}
@@ -533,9 +433,6 @@ func TestVsyncFrameCountEqualsPresentCount(t *testing.T) {
 
 func TestWarmScrollRasterizesNoTiles(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 512, H: 512}}
-	// 26 rows: the whole run below - down 24 tiles and back up 6000px - stays inside
-	// the document, so what is measured is the cache rather than a scroll off the end
-	// of it.
 	l, dl := newScene(t, 2, 26)
 	s := newScheduler(l, dl, vp)
 	s.warm(t)
@@ -545,8 +442,6 @@ func TestWarmScrollRasterizesNoTiles(t *testing.T) {
 	loop := surface.NewLoop(w, s, newComposerFor(vp), nil)
 	stop := start(t, loop)
 
-	// Phase 1, one tile per tick: every frame lands on a tile boundary, so the
-	// visible set is exactly four tiles and the reuse count is an exact number.
 	const down = 24
 	for i := 0; i < down; i++ {
 		w.scroll(t, frame.TileSize)
@@ -562,10 +457,6 @@ func TestWarmScrollRasterizesNoTiles(t *testing.T) {
 			got.Reused, down, int64(down)*4)
 	}
 
-	// Phase 2, the plan's own numbers: 60 ticks of 100px deltas, back up so no
-	// offset is tile-aligned and a viewport straddles three rows. The invariant is
-	// what has to hold there, not the count, so the reuse total only gets a floor -
-	// phase 1 already pinned it exactly.
 	const up = 60
 	for i := 0; i < up; i++ {
 		w.scroll(t, -100)
@@ -590,9 +481,6 @@ func TestWarmScrollRasterizesNoTiles(t *testing.T) {
 		t.Fatalf("Reused = %d over %d frames, want at least the four minimum visible tiles per frame",
 			got.Reused, down+up)
 	}
-	// The structural form of the same claim: not one worker ran and not one job was
-	// queued. A scheduler that re-rasterized and then reported zero would pass the
-	// loop's counter and fail here.
 	if st := pool.Stats(); st.Rasterized != 0 || st.Queued != 0 || st.DroppedResults != 0 {
 		t.Fatalf("the pool did %d rasters with %d queued and %d results dropped on warm content",
 			st.Rasterized, st.Queued, st.DroppedResults)
@@ -648,21 +536,10 @@ func TestLateTileNeverBlocksPresent(t *testing.T) {
 	at := frame.TileCoord{Col: 0, Row: 0}
 	wantStale := tileColor(at, l.ContentVersion)
 
-	// A content change makes every visible tile stale while it keeps the pixels it
-	// already had, and one worker that never gets to finish: every job parks on the
-	// gate. If the loop waited on a completion, the first vsync would hang and this
-	// test would fail on its deadline rather than on an assertion, which is a
-	// stronger proof than any latency budget.
 	gate := make(chan struct{})
 	s.gate = gate
-	// The rasterizer stamps the version of the display list it was handed, so new
-	// content has to be a version-2 list: a layer bump over the same frozen list
-	// would repaint exactly the pixels the stale tiles already hold.
 	s.dl = fillList(l.Bounds, 2)
 	pool := s.startPool(t, 1, 64)
-	// Registered after the pool's own cleanup so it runs first: a worker still
-	// parked on the gate would otherwise strand pool.Close and the failure would
-	// read as a timeout instead of as whatever this test actually asserts.
 	t.Cleanup(func() {
 		select {
 		case <-gate:
@@ -704,8 +581,6 @@ func TestLateTileNeverBlocksPresent(t *testing.T) {
 			got.Rasterize, got.Presents, ticks)
 	}
 
-	// The other half: the late tiles do arrive, and the same coordinate is still
-	// only rasterized once.
 	close(gate)
 	wantFresh := tileColor(at, 2)
 	for i := 0; i < 20; i++ {
@@ -718,8 +593,6 @@ func TestLateTileNeverBlocksPresent(t *testing.T) {
 	if got := pool.Stats(); got.Rasterized != 4 {
 		t.Fatalf("workers ran %d jobs, want the 4 tiles once each", got.Rasterized)
 	}
-	// The four off-screen tiles stay stale: the content change dirtied the whole
-	// document and only what the viewport can show was worth re-rasterizing.
 	if got := l.Stats(); got.Valid != 4 || got.Stale != 4 || got.Failed != 0 {
 		t.Fatalf("grid after the late tiles reported = %+v, want 4 valid and 4 stale off screen", got)
 	}
@@ -738,9 +611,6 @@ func TestPresentUsesLatestPlanAndDropsSuperseded(t *testing.T) {
 	red := frame.RGB(255, 0, 0)
 	green := frame.RGB(0, 255, 0)
 	blue := frame.RGB(0, 0, 255)
-	// Three content versions with no vsync between them and nothing consumed yet:
-	// a depth-1 slot means the display sees the newest, and the two it replaced are
-	// counted as superseded rather than queued up and presented in turn.
 	for i, bg := range []frame.Color{red, green, blue} {
 		slot.Publish(published(uint64(i+1), vp, bg))
 	}
@@ -774,8 +644,6 @@ func TestScrollDeltasCoalesceIntoOneFrame(t *testing.T) {
 	loop := surface.NewLoop(w, s, newComposerFor(vp), nil)
 	stop := start(t, loop)
 
-	// A flick: six deltas between two vsyncs. The document moves by their sum and
-	// the surface is composited once.
 	for i := 0; i < 6; i++ {
 		w.scroll(t, 100)
 	}
@@ -811,8 +679,6 @@ func TestNonVsyncEventsDoNotDraw(t *testing.T) {
 	waitFor(t, "the frame after 41 queued inputs", func() bool { return w.count() == 1 })
 	waitForCommitted(t, loop, 1)
 
-	// The vsync itself carries no delta, so what reached BeginFrame is the sum of
-	// the ten scrolls that preceded it.
 	if got := s.offsetY(); got != 50 {
 		t.Fatalf("coalesced offset = %d, want 50", got)
 	}
@@ -827,7 +693,7 @@ func TestNonVsyncEventsDoNotDraw(t *testing.T) {
 func TestIdleVsyncWithoutAPlanPresentsNothing(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 256, H: 256}}
 	s := newScheduler(nil, nil, vp)
-	s.slot = &frame.Plan{} // nothing published yet: a cold start
+	s.slot = &frame.Plan{}
 	w := newFakeWindow(8)
 	loop := surface.NewLoop(w, s, newComposerFor(vp), frame.NewFrameRecorder(8))
 	stop := start(t, loop)
@@ -854,14 +720,9 @@ func TestQueueFullIsRefusedNotBlocked(t *testing.T) {
 	vp := frame.Viewport{Size: frame.Size{W: 512, H: 512}}
 	l, dl := newScene(t, 2, 4)
 	s := newScheduler(l, dl, vp)
-	// One tile per job against a queue two deep, with the single worker parked:
-	// every frame has to be told no at least twice, and being told no has to cost
-	// the loop nothing and cost the tile nothing but a delay.
 	gate := make(chan struct{})
 	s.gate = gate
 	pool := s.startPool(t, 1, 2)
-	// Same as in TestLateTileNeverBlocksPresent: unblock the worker before the pool
-	// is closed, or a mid-test failure hangs the whole package.
 	t.Cleanup(func() {
 		select {
 		case <-gate:
@@ -884,8 +745,6 @@ func TestQueueFullIsRefusedNotBlocked(t *testing.T) {
 		t.Fatal("Refused = 0 with a 2-deep queue and 4 tiles needed: nothing was turned away, so this proved nothing")
 	}
 
-	// A refused tile must stay requestable, or a refusal would have become a
-	// permanent blank. Open the gate and the whole viewport has to fill in.
 	close(gate)
 	for i := 0; i < 40; i++ {
 		w.vsync(t)
@@ -897,11 +756,6 @@ func TestQueueFullIsRefusedNotBlocked(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// A refused tile is asked for again next frame, so the jobs that reached the
-	// queue are exactly the four tiles - one successful submission each - and
-	// everything else the frames asked for was turned away. A fifth submission
-	// would mean a tile was painted twice, which is what the in-flight mark exists
-	// to prevent.
 	_, submitted, refused := s.counters()
 	if submitted != 4 {
 		t.Fatalf("submitted %d jobs, want the 4 tiles exactly once each", submitted)
@@ -924,9 +778,6 @@ func TestStatsIsSafeToReadWhileTheLoopRuns(t *testing.T) {
 	loop := surface.NewLoop(w, s, newComposerFor(vp), nil)
 	stop := start(t, loop)
 
-	// The counters exist for a gate harness and an inspector, both of which read
-	// them from another thread while a frame is in flight. Under -race this is the
-	// test that says so.
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -974,8 +825,6 @@ func TestLoopResizesTheBackingForAChangedViewport(t *testing.T) {
 	if got := w.last(t).size; got != bigger {
 		t.Fatalf("presented %v after a resize to %v: the window was handed the old buffer", got, bigger)
 	}
-	// A swapped buffer is garbage everywhere, so a resize frame must damage the
-	// whole new surface rather than only the rows the new size exposes.
 	if got := w.last(t).damage; len(got) != 1 || got[0] != frame.Rect4(0, 0, 320, 200) {
 		t.Fatalf("damage after a resize = %v, want the whole new surface", got)
 	}
@@ -1003,14 +852,9 @@ func TestFrameMarkRecordsFiveTimestamps(t *testing.T) {
 		w.vsync(t)
 		waitFor(t, "a present", func() bool { return w.count() == i+1 })
 	}
-	// Which frame the four rasters are accepted on is the workers' business, so the
-	// cold tiles are counted across the marks rather than pinned to one of them. One
-	// extra frame runs after everything is warm, so the last mark is a pure reuse.
 	waitFor(t, "the four tiles to be accepted", func() bool { return loop.Stats().Rasterize == 4 })
 	w.vsync(t)
 	waitFor(t, "the warm frame", func() bool { return w.count() == ticks+1 })
-	// The recorder belongs to the thread that runs the loop, so it is read after
-	// joining it.
 	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1019,10 +863,6 @@ func TestFrameMarkRecordsFiveTimestamps(t *testing.T) {
 	if len(marks) != ticks+1 {
 		t.Fatalf("recorder holds %d marks, want %d", len(marks), ticks+1)
 	}
-	// Five timestamps per frame are the gate's raw material, and they are only five
-	// because plan, submit, compose, and present are separate calls. One
-	// do-everything scheduler method would collapse them into a single measurement
-	// and make a stall impossible to attribute.
 	for i, m := range marks {
 		if m.VsyncAt.IsZero() {
 			t.Fatalf("mark %d has no vsync stamp", i)
@@ -1096,7 +936,6 @@ func TestPresentErrorEndsRunWithContext(t *testing.T) {
 	if !strings.Contains(err.Error(), "present frame 1") {
 		t.Fatalf("error %q does not say which frame failed", err)
 	}
-	// A frame that failed to present is still a frame, and not a present.
 	if got := loop.Stats(); got.Frames != 1 || got.Presents != 0 {
 		t.Fatalf("a failed frame counted %d frames and %d presents, want 1 and 0", got.Frames, got.Presents)
 	}
@@ -1140,8 +979,6 @@ func TestCancelEndsRun(t *testing.T) {
 	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// A loop that had already exited on its own would also return nil, so check
-	// that cancellation is what ended it: nothing further is presented.
 	w.vsync(t)
 	time.Sleep(50 * time.Millisecond)
 	if got := w.count(); got != 5 {

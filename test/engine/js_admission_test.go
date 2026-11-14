@@ -10,9 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// jsFetchFetcher is a js.HTTPFetcher double for the engine-level fetch test. It
-// returns one canned response so the test can assert the shared subresource
-// budget is charged through the real Session wiring.
 type jsFetchFetcher struct {
 	resp *js.FetchResponse
 }
@@ -21,13 +18,6 @@ func (f *jsFetchFetcher) Fetch(ctx context.Context, url, method string, headers 
 	return f.resp, nil
 }
 
-// TestEngineJSDeepNestingStoppedAtBoundary proves the engine wires the document
-// mutation budget into a caller-supplied runtime BEFORE scripts run. A script
-// that builds a chain deeper than MaxDocumentDepth must be stopped at the
-// boundary with a catchable QuotaExceededError: the offending appendChild
-// throws, the tree stays within the cap, and NewSession still succeeds. Without
-// admission the flood is only caught later by walkDocument, which fails the
-// whole document after the nodes are already allocated.
 // qc:BR-210
 func TestEngineJSDeepNestingStoppedAtBoundary(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
@@ -61,19 +51,14 @@ func TestEngineJSDeepNestingStoppedAtBoundary(t *testing.T) {
 	if n := sess.JSLiveNodeCount(); n <= 0 || n > engine.MaxDocumentNodes {
 		t.Errorf("JSLiveNodeCount = %d, want in (0, %d]", n, engine.MaxDocumentNodes)
 	}
-	// The session must remain paintable: admission stops the flood, it does not
-	// corrupt the document.
 	if _, err := sess.PaintChecked(1); err != nil {
 		t.Errorf("PaintChecked after admission: %v", err)
 	}
 }
 
-// TestEngineJSFetchChargesSharedBudget proves the engine wires the JS network
-// APIs onto the same subresource pool CSS, fonts and images use. A small fetch
-// must succeed and charge its response body to Session.SubresourceBytesUsed.
 // qc:BR-210
 func TestEngineJSFetchChargesSharedBudget(t *testing.T) {
-	body := []byte("0123456789abcde") // 15 bytes
+	body := []byte("0123456789abcde")
 	rt, err := js.New(js.Options{
 		URL:        "https://example.test/",
 		HTTPClient: &jsFetchFetcher{resp: &js.FetchResponse{Status: 200, StatusText: "OK", Body: body, OK: true}},
@@ -94,8 +79,6 @@ func TestEngineJSFetchChargesSharedBudget(t *testing.T) {
 	}
 	defer sess.Close()
 
-	// The fetch runs on a goroutine; give it a moment, then drain callbacks on
-	// the VM thread so the .then (and the budget charge that precedes it) land.
 	time.Sleep(50 * time.Millisecond)
 	rt.Tick()
 
@@ -107,7 +90,6 @@ func TestEngineJSFetchChargesSharedBudget(t *testing.T) {
 	}
 }
 
-// jsAdmissionTreeDepth measures the deepest node under the document node (0).
 func jsAdmissionTreeDepth(doc *dom.Document) int {
 	if doc == nil {
 		return 0
@@ -134,21 +116,6 @@ func jsAdmissionTreeDepth(doc *dom.Document) int {
 	return maxD
 }
 
-// TestEngineJSCloneOfDeepDetachedSubtreeIsCheckedAtInsertion pins the route
-// TASK-047 opened: `cloneNode(true)` is now reachable from script, so a page can
-// build a chain that no gate ever saw. Reserve's contract is that a detached
-// parent is neither charged nor depth-checked (the nodes are not reachable from
-// the document yet - the same rule `createElement` follows), so the 140-step
-// chain below is built for free and only the *insertion* of the copy is
-// measured: the whole cloned subtree's height is charged against
-// MaxDocumentDepth, the append throws a catchable QuotaExceededError, the
-// document stays inside the cap, and the session still paints. A shallow clone
-// is the control: one node, admitted immediately.
-//
-// Without the subtree depth check in the insert path this test would let a
-// 140-deep copy into the live tree and the failure would surface later as
-// walkDocument rejecting the document - after the allocation, which is exactly
-// what the admission design in internal/engine/jsadmission.go refuses to allow.
 // qc:BR-210
 func TestEngineJSCloneOfDeepDetachedSubtreeIsCheckedAtInsertion(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
@@ -168,10 +135,6 @@ func TestEngineJSCloneOfDeepDetachedSubtreeIsCheckedAtInsertion(t *testing.T) {
 		`var shallowCaught = '';` +
 		`try { document.body.appendChild(host.cloneNode(false)); } catch (e) { shallowCaught = (e && e.name) ? e.name : String(e); }` +
 		`var grewByOne = (document.body.childNodes.length === kidsBefore + 1);` +
-		// Phase 2 isolates the *second* gate: a subtree that is legal on its own
-		// (99 levels, under the 128 cap) but does not fit at the depth it is
-		// being inserted at. Only `pd+1+height > MaxDocumentDepth` can refuse
-		// this one, so removing that comparison shows up here.
 		`var cur2 = document.body;` +
 		`for (var j = 0; j < 40; j++) { var pd2 = document.createElement('div'); cur2.appendChild(pd2); cur2 = pd2; }` +
 		`var host2 = document.createElement('div'); var c2 = host2;` +

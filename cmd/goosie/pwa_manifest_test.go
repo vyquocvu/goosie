@@ -128,20 +128,17 @@ func TestPWAStandaloneModeWindowPresentation(t *testing.T) {
 		events:  make(chan surface.Event, 10),
 	}
 
-	// Normal browser mode: chromeHeight > 0
 	normalH := cw.chromeHeight()
 	if normalH <= 0 {
 		t.Fatalf("expected positive chromeHeight in browser mode, got %d", normalH)
 	}
 
-	// Standalone mode: chromeHeight == 0
 	tab.SetStandaloneApp(true)
 	standaloneH := cw.chromeHeight()
 	if standaloneH != 0 {
 		t.Fatalf("expected chromeHeight == 0 in standalone mode, got %d", standaloneH)
 	}
 
-	// Present in standalone mode should present buf directly without adding chrome height
 	buf := frame.NewBitmap(800, 600)
 	buf.FillRect(frame.Rect4(0, 0, 800, 600), frame.RGB(40, 50, 60), nil)
 	damage := []frame.Rect{frame.Rect4(0, 0, 800, 600)}
@@ -157,7 +154,6 @@ func TestPWAStandaloneModeWindowPresentation(t *testing.T) {
 		t.Errorf("presented height = %d, want 600 (chromeless)", fakeWin.lastBitmap.H)
 	}
 
-	// Pointer event at y=10 should NOT be consumed by tab bar in standalone mode
 	clickEv := surface.Event{
 		Kind:   surface.EvPointer,
 		Action: surface.PointerPress,
@@ -187,7 +183,6 @@ func TestPWAInspectorPageCardAndToggle(t *testing.T) {
 
 	tabQuery := strconv.FormatUint(tab.ID(), 10)
 
-	// 1. Without manifest: shows no manifest state and toggle link
 	title, htmlContent := buildInspectPageHTML(f, "goosie://inspect?tab="+tabQuery)
 	if title != "Web Inspector" {
 		t.Errorf("title = %q, want 'Web Inspector'", title)
@@ -199,7 +194,6 @@ func TestPWAInspectorPageCardAndToggle(t *testing.T) {
 		t.Errorf("expected No manifest text")
 	}
 
-	// 2. Set manifest on tab: inspector shows manifest metadata
 	tab.SetManifest(&manifest.Manifest{
 		Name:            "Sample Progressive App",
 		ShortName:       "SampleApp",
@@ -220,7 +214,6 @@ func TestPWAInspectorPageCardAndToggle(t *testing.T) {
 		t.Errorf("expected theme color in manifest card")
 	}
 
-	// 3. Toggle standalone action
 	if tab.IsStandaloneApp() {
 		t.Errorf("expected initially not standalone")
 	}

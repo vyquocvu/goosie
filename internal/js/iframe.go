@@ -21,9 +21,6 @@ type iframeFormRequest struct {
 	body        []byte
 }
 
-// SetIFrameLoader supplies a document loader used when a connected iframe
-// navigates. The callback receives the src attribute; base-aware hosts should
-// use SetIFrameLoaderWithBase so nested frames resolve against their own URL.
 func (r *Runtime) SetIFrameLoader(loader func(string) (*dom.Document, error)) {
 	if loader == nil {
 		r.iframeLoader = nil
@@ -32,37 +29,22 @@ func (r *Runtime) SetIFrameLoader(loader func(string) (*dom.Document, error)) {
 	r.iframeLoader = func(_, src string) (*dom.Document, error) { return loader(src) }
 }
 
-// SetIFrameLoaderWithBase supplies a child-document loader that resolves each
-// frame's src against the active document URL. The host owns transport policy
-// and input admission; the runtime owns the browsing-context URL.
 func (r *Runtime) SetIFrameLoaderWithBase(loader func(base, src string) (*dom.Document, error)) {
 	r.iframeLoader = loader
 }
 
-// SetIFrameFormSubmitter supplies the host-owned transport for POST form
-// navigations targeting a child browsing context. The runtime creates the
-// encoded form body; the host applies origin policy and response limits.
 func (r *Runtime) SetIFrameFormSubmitter(submit func(base, target, contentType string, body []byte) (*dom.Document, error)) {
 	r.iframeFormSubmitter = submit
 }
 
-// SetIFrameScriptFetcher supplies the same-origin classic-script transport to
-// srcdoc child realms. base is the inherited document URL and src is resolved
-// by the child runtime before this callback is invoked.
 func (r *Runtime) SetIFrameScriptFetcher(fetcher func(base, src string) ([]byte, error)) {
 	r.iframeScriptFetcher = fetcher
 }
 
-// SetDynamicScriptFetcher supplies bounded transport for classic scripts
-// inserted into a live document. Fetch and execution happen at a later event
-// loop turn, followed by the element's load or error event.
 func (r *Runtime) SetDynamicScriptFetcher(fetcher func(base, src string) ([]byte, error)) {
 	r.dynamicScriptFetcher = fetcher
 }
 
-// SetIFrameModuleRunner supplies the host's bounded module-script executor for
-// iframe document realms. The host controls dependency fetching and admission;
-// the runtime invokes it after the child document's classic parser scripts.
 func (r *Runtime) SetIFrameModuleRunner(run func(runtime *Runtime, doc *dom.Document, documentURL string)) {
 	r.iframeModuleRunner = run
 }
@@ -152,9 +134,6 @@ func (r *Runtime) iframeIsSameOrigin(frame *dom.Node) bool {
 	if child := r.iframeChildRuntimes[frame]; child != nil {
 		return sameOriginDomain(r, child)
 	}
-	// A live non-blank child that has not acquired a Runtime has not relaxed
-	// its origin. A parent that has set document.domain is therefore not
-	// same-origin-domain with it, even if their URL tuples still match.
 	if r.documentDomains[r.domDoc] != "" {
 		return false
 	}
@@ -166,10 +145,6 @@ func (r *Runtime) iframeIsSameOrigin(frame *dom.Node) bool {
 		strings.EqualFold(base.Hostname(), targetURL.Hostname()) && originPort(base) == originPort(targetURL)
 }
 
-// sameOriginDomain applies the same-origin-domain comparison used for
-// synchronous WindowProxy and Document access. document.domain only relaxes
-// this comparison when both documents set it; APIs that explicitly require
-// tuple-origin equality (such as input.showPicker()) keep their own check.
 func sameOriginDomain(a, b *Runtime) bool {
 	if a == nil || b == nil {
 		return false
@@ -291,10 +266,6 @@ func (r *Runtime) iframeWindow(frame *dom.Node) goja.Value {
 		}
 		return "about:blank"
 	}
-	// Location is stringifier-backed in the platform. WPT load handlers compare
-	// it with "about:blank", and URL constructors consume it as a USVString.
-	// Keeping the conversion tied to this live getter preserves navigation
-	// updates without replacing the stable Location object.
 	_ = location.DefineDataProperty("toString", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(locationHref())
 	}), goja.FLAG_TRUE, goja.FLAG_FALSE, goja.FLAG_TRUE)
@@ -486,10 +457,6 @@ func (r *Runtime) iframeWindow(frame *dom.Node) goja.Value {
 			}
 			child := r.iframeChildRuntimes[frame]
 			if child == nil && property == "Node" {
-				// Interface constructors belong to the iframe's realm even while
-				// it is still on its initial document. Establish that realm before
-				// exposing Node/Element constructors so wrappers returned from the
-				// iframe's Document can share its interface prototypes.
 				child = r.ensureIFrameInitialRuntime(frame, locationHref())
 			}
 			if child == nil && property != "Node" && r.ifaceCtors[property] != nil {
@@ -547,11 +514,6 @@ func (r *Runtime) iframeWindow(frame *dom.Node) goja.Value {
 						return r.importChildValue(child, childValue, make(map[*goja.Object]*goja.Object), 0)
 					}
 				}
-				// Before an iframe has a script Runtime, its initial about:blank
-				// WindowProxy still exposes the HTML interface constructors. The
-				// parent Runtime already owns the shared interface prototypes used
-				// by wrappers for that initial document; use those constructors
-				// until a child Runtime can provide its own globals.
 				if constructor := r.ifaceCtors[property]; constructor != nil {
 					return r.iframeInterfaceConstructor(frame, property)
 				}
@@ -1081,12 +1043,6 @@ func (r *Runtime) defineOwnSymbolProperty(target *goja.Object, symbol *goja.Symb
 	return true
 }
 
-// iframeInterfaceConstructor gives an initial about:blank WindowProxy its own
-// HTML interface constructor/prototype identity without replacing the frame's
-// already exposed CustomElementRegistry. Its prototype extends the embedding
-// realm's native interface prototype, so existing interface checks and methods
-// remain available while NewTarget fallback identity stays per browsing
-// context.
 func (r *Runtime) iframeInterfaceConstructor(frame *dom.Node, name string) goja.Value {
 	constructor := r.ifaceCtors[name]
 	if constructor == nil {
@@ -1126,9 +1082,6 @@ func (r *Runtime) iframeInterfaceConstructor(frame *dom.Node, name string) goja.
 	return wrapper
 }
 
-// iframeProxyConstructor exposes Proxy on an initial WindowProxy. GetFunctionRealm
-// follows a Proxy's target, so constructing through this wrapper preserves the
-// target function's realm while keeping the WindowProxy property distinct.
 func (r *Runtime) iframeProxyConstructor(frame *dom.Node) goja.Value {
 	if r.iframeInterfaceConstructors == nil {
 		r.iframeInterfaceConstructors = make(map[*dom.Node]map[string]*goja.Object)
@@ -1226,10 +1179,6 @@ func (r *Runtime) iframeRegistryHasDefinitions(frame *dom.Node) bool {
 	return defined
 }
 
-// alignIFrameWrapperPrototypes updates parent-runtime wrappers that escaped
-// before a lazily-created child Runtime existed. Those wrappers still represent
-// nodes in the same active Document, so their interface prototype must follow
-// the newly established realm just as newly-created wrappers do.
 func (r *Runtime) alignIFrameWrapperPrototypes(doc *dom.Document, child *Runtime) {
 	if doc == nil || child == nil {
 		return
@@ -1240,10 +1189,6 @@ func (r *Runtime) alignIFrameWrapperPrototypes(doc *dom.Document, child *Runtime
 			prototypeInterfaces[prototype] = name
 		}
 	}
-	// Nodes can be wrapped before their child Runtime exists. In that window,
-	// iframeInterfacePrototype gives them a per-frame prototype that inherits
-	// from the parent interface prototype. Recognize those prototypes too so a
-	// later child Runtime can align escaped wrappers to the active realm.
 	for _, constructors := range r.iframeInterfaceConstructors {
 		for name, constructor := range constructors {
 			if name != "HTMLHtmlElement" {
@@ -1259,8 +1204,6 @@ func (r *Runtime) alignIFrameWrapperPrototypes(doc *dom.Document, child *Runtime
 			continue
 		}
 		if child.customElementInstances[node] != nil || child.isFailedCustomElement(node) {
-			// Custom-element construction owns its prototype, including the
-			// destination interface retained after a failed constructor.
 			continue
 		}
 		wrapper := r.nodeWrappers[id]
@@ -1269,8 +1212,6 @@ func (r *Runtime) alignIFrameWrapperPrototypes(doc *dom.Document, child *Runtime
 		}
 		name := prototypeInterfaces[wrapper.Prototype()]
 		if name == "" {
-			// A custom constructor can leave an element with its own prototype;
-			// only native interface prototypes have an equivalent in this realm.
 			continue
 		}
 		child.ensureHTMLInterfaceConstructor(name)
@@ -1392,9 +1333,6 @@ func (r *Runtime) iframeForDocument(doc *dom.Document) *dom.Node {
 	return r.iframeFormerDocuments[doc]
 }
 
-// installWindowFrameProperties exposes the child browsing contexts through
-// Window.frames and its indexed properties. The accessors resolve the current
-// frame tree on each read, so removing or reordering an iframe is observable.
 func (r *Runtime) installWindowFrameProperties() {
 	if r.domDoc == nil || r.vm == nil {
 		return
@@ -1439,8 +1377,6 @@ func (r *Runtime) windowFrameNodes() []*dom.Node {
 }
 
 func (r *Runtime) wrapIFrameDocument(frame *dom.Node) goja.Value {
-	// Creating a same-origin Document also creates its initial about:blank
-	// Window and per-document custom element registry.
 	_ = r.iframeWindow(frame)
 	doc := r.iframeDocument(frame)
 	if child := r.iframeChildRuntimes[frame]; child != nil {
@@ -1458,10 +1394,6 @@ func (r *Runtime) wrapIFrameDocument(frame *dom.Node) goja.Value {
 	return r.wrapDetachedDocument(doc)
 }
 
-// setIFrameDocument installs a new active Document and the per-document
-// CustomElementRegistry exposed by its browsing context's stable WindowProxy.
-// Keep the prior association for wrappers that still reference the old
-// Document; navigation replaces the active registry without changing Window.
 func (r *Runtime) setIFrameDocument(frame *dom.Node, doc *dom.Document) {
 	if frame == nil || doc == nil {
 		return
@@ -1585,10 +1517,6 @@ func (r *Runtime) parseSrcdoc(frame *dom.Node, markup string) (*dom.Document, er
 		r.iframeChildRuntimes[frame] = child
 		r.iframeGlobalBaseline[frame] = baseline
 		r.installPendingIFrameWindowListeners(frame, child)
-		// The caller installs doc as the frame's active Document immediately
-		// after parseSrcdoc returns. setIFrameDocument then synchronizes globals
-		// with the final document mapping in place, so child Node values nested
-		// in exported objects share identity with contentDocument wrappers.
 	}
 	return doc, nil
 }
@@ -1724,9 +1652,6 @@ func (r *Runtime) installExternalIFrameRuntime(frame *dom.Node, doc *dom.Documen
 	}
 	r.installPendingIFrameWindowListeners(frame, child)
 	if doc.IsXML && doc.ParserInput != "" {
-		// The host loader admits and validates the XML source before handing us
-		// the document. Reparse it into the same document now that its realm and
-		// custom-element registry exist, preserving XML parser pauses.
 		for doc.Node.FirstChild != nil {
 			doc.Node.RemoveChild(doc.Node.FirstChild)
 		}
@@ -1765,8 +1690,6 @@ func (r *Runtime) installExternalIFrameRuntime(frame *dom.Node, doc *dom.Documen
 		if parseErr == nil {
 			child.RefreshDocumentTreeReferences()
 		} else {
-			// The source was already admitted by the host parser. Keep the
-			// validated document if a parser callback unexpectedly rejects it.
 			return
 		}
 	}
@@ -1896,20 +1819,12 @@ func (r *Runtime) syncIFrameGlobals(frame *dom.Node, child *Runtime, baseline ma
 	if twin == nil {
 		return
 	}
-	// `open` is installed when the child Runtime is created, so it is part of
-	// the child's baseline and the ordinary changed-global sync below skips it.
-	// WindowProxy still needs to expose it to callers in the parent realm.
 	_ = twin.Set("open", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		opened := child.openWindowCall(call)
 		return r.importChildValue(child, opened, make(map[*goja.Object]*goja.Object), 0)
 	}))
 	global := child.vm.GlobalObject()
 	for _, key := range global.Keys() {
-		// The WindowProxy's onmessage accessor reads the child's current value
-		// and forwards writes from the parent into the child. Writing a child
-		// handler back through that setter would import it into the parent and
-		// then re-import it into the child, wrapping MessageEvent.ports in plain
-		// cross-realm proxies.
 		if key == "document" || key == "window" || key == "self" || key == "parent" || key == "top" || key == "frameElement" || key == "opener" || key == "close" || key == "onmessage" || key == "event" {
 			continue
 		}
@@ -1958,10 +1873,6 @@ func (r *Runtime) importChildNode(child *Runtime, source *goja.Object, node *dom
 				}
 			}
 			if property == "attributes" && node.Element() {
-				// NamedNodeMap is a dynamic object whose indexed and length
-				// properties are supplied by goja.DynamicObject. Copying the
-				// child object through importChildValue loses those dynamic keys;
-				// expose the same DOM node's live collection in this realm instead.
 				return r.attributesObject(node)
 			}
 			return r.importChildValue(child, source.Get(property), make(map[*goja.Object]*goja.Object), depth+1)
@@ -2010,10 +1921,6 @@ func (r *Runtime) importChildNode(child *Runtime, source *goja.Object, node *dom
 	return proxyObject
 }
 
-// existingParentNodeWrapper keeps one parent-visible wrapper for a DOM node
-// reached through both contentDocument and the same-origin WindowProxy. The
-// wrapper's prototype is aligned to the child realm when that Runtime exists,
-// and its bridged operations translate the receiver back to the child node.
 func (r *Runtime) existingParentNodeWrapper(child *Runtime, source *goja.Object, node *dom.Node) goja.Value {
 	if child == nil || source == nil || node == nil {
 		return nil
@@ -2027,18 +1934,10 @@ func (r *Runtime) existingParentNodeWrapper(child *Runtime, source *goja.Object,
 		wrapper = r.nodeWrappers[nid]
 	}
 	if wrapper == nil {
-		// Native nodes with no per-instance JS state can use the parent
-		// Runtime's wrapper. This makes `contentWindow.node.parentNode` and
-		// `contentDocument.head` return the same object. Keep custom elements
-		// and wrappers with own state on the source-backed proxy path so their
-		// child-realm prototype and per-instance behavior remain intact.
 		if child.customElementInstances[node] != nil || child.isFailedCustomElement(node) {
 			return nil
 		}
 		if source.Prototype() != child.protoForNode(node) {
-			// Script may replace a node's prototype without registering it as a
-			// custom element. Preserve the source-backed proxy in that case so
-			// later prototype changes remain observable through WindowProxy.
 			return nil
 		}
 		value, ok := r.wrapNodeLocal(node).(*goja.Object)
@@ -2093,9 +1992,6 @@ func inheritedSymbolValue(object *goja.Object, property *goja.Symbol) goja.Value
 	return goja.Undefined()
 }
 
-// importedObjectRealm returns the Window realm that originally owns object.
-// Imported iframe wrappers retain this separately from the realm of methods
-// stored on the object, which may themselves come from another frame.
 func (r *Runtime) importedObjectRealm(object *goja.Object) *Runtime {
 	if object == nil {
 		return r
@@ -2129,8 +2025,6 @@ func (r *Runtime) withEventListenerInvocation(run func()) {
 	run()
 }
 
-// importRuntimeValue moves a value through the shared browsing-context tree,
-// preserving the identity bridges installed at each WindowProxy boundary.
 func importRuntimeValue(source, destination *Runtime, value goja.Value) goja.Value {
 	if source == nil || destination == nil || source == destination || value == nil {
 		return value
@@ -2233,9 +2127,6 @@ func (r *Runtime) importChildValue(child *Runtime, value goja.Value, seen map[*g
 			}
 			return r.importChildNode(child, object, node, seen, depth)
 		}
-		// Same-origin WindowProxy access preserves an exception's source realm.
-		// In particular, an exception thrown by a child document must remain an
-		// instance of that document's DOMException, not the receiving window's.
 		if code := object.Get("code"); code != nil && !goja.IsUndefined(code) && code.ToInteger() != 0 {
 			target := r.vm.NewObject()
 			if prototype := r.importChildValue(child, object.Prototype(), seen, depth+1); prototype != nil && !goja.IsUndefined(prototype) && !goja.IsNull(prototype) {
@@ -2256,10 +2147,6 @@ func (r *Runtime) importChildValue(child *Runtime, value goja.Value, seen map[*g
 			r.iframeChildObjects[object] = proxyValue
 			return proxyValue
 		}
-		// Error constructors also have a `name` and a `message` property. Only
-		// convert Error instances here; callable Error/TypeError/etc. constructors
-		// must reach the function bridge below so WindowProxy keeps their
-		// [[Call]]/[[Construct]] behavior.
 		if _, callable := goja.AssertFunction(value); !callable && object.ClassName() == "Error" {
 			if errorValue := object.Get("name"); errorValue != nil && !goja.IsUndefined(errorValue) {
 				switch errorValue.String() {
@@ -2380,9 +2267,6 @@ func (r *Runtime) importChildValue(child *Runtime, value goja.Value, seen map[*g
 					errorRealm.reportWindowException(err)
 					return goja.Undefined()
 				}
-				// A child-realm operation may change a DOM wrapper's prototype.
-				// When both access paths share the parent-visible wrapper, mirror
-				// that change before returning from the WindowProxy call.
 				for _, argument := range arguments {
 					r.syncImportedNodePrototype(child, argument)
 				}
@@ -2392,11 +2276,6 @@ func (r *Runtime) importChildValue(child *Runtime, value goja.Value, seen map[*g
 				}
 				return r.importChildValue(child, result, make(map[*goja.Object]*goja.Object), 0)
 			}
-			// A WindowProxy import must preserve both [[Call]] and [[Construct]].
-			// In particular, Function-created constructors are valid arguments to
-			// CustomElementRegistry.define(). A callable and constructible native
-			// Function is used only as the proxy target; all operations execute in
-			// the source realm and values cross through the existing import bridge.
 			functionConstructor, ok := goja.AssertConstructor(r.vm.Get("Function"))
 			if !ok {
 				return goja.Undefined()
@@ -2417,14 +2296,8 @@ func (r *Runtime) importChildValue(child *Runtime, value goja.Value, seen map[*g
 				},
 				Get: func(_ *goja.Object, property string, _ goja.Value) goja.Value {
 					if property == "prototype" {
-						// Keep the proxy result identical to its own fixed target
-						// property. The imported source prototype was installed when
-						// the bridge was created; re-importing it can allocate a
-						// second wrapper and violate Proxy [[Get]] invariants.
 						return target.Get(property)
 					}
-					// Read other function properties through the source realm while
-					// keeping the restricted legacy properties pinned to the target.
 					if property == "arguments" || property == "caller" {
 						return target.Get(property)
 					}
@@ -2553,9 +2426,6 @@ func (r *Runtime) importChildValue(child *Runtime, value goja.Value, seen map[*g
 			}
 		}
 		r.importChildOwnProperties(child, object, copy, seen, depth+1)
-		// Error.name is inherited from the realm's Error prototype and is
-		// therefore absent from Object.keys(). Preserve the standard error
-		// identity when crossing a WindowProxy boundary.
 		if object.ClassName() == "Error" {
 			name := object.Get("name")
 			if name != nil && !goja.IsUndefined(name) {
@@ -2643,10 +2513,6 @@ func (r *Runtime) importChildAccessorFunction(child *Runtime, value goja.Value, 
 	return imported
 }
 
-// importChildOwnProperties preserves property descriptors without evaluating
-// source getters. This includes non-enumerable DOM IDL attributes on interface
-// prototypes; copying only Object.keys() drops members such as Node.childNodes
-// from iframe-owned elements.
 func (r *Runtime) importChildOwnProperties(child *Runtime, source, target *goja.Object, seen map[*goja.Object]*goja.Object, depth int) {
 	if child == nil || source == nil || target == nil {
 		return
@@ -2695,13 +2561,7 @@ func (r *Runtime) importChildOwnProperties(child *Runtime, source, target *goja.
 		name := child.vm.ToValue(key)
 		copyProperty(name, r.vm.ToValue(key), nil)
 	}
-	// Live collection proxies expose indexed own keys through a custom ownKeys
-	// trap that omits their non-enumerable length property. Preserve that
-	// descriptor explicitly for them and arrays.
 	copyProperty(child.vm.ToValue("length"), r.vm.ToValue("length"), nil)
-	// Preserve well-known symbols used by platform objects and collections.
-	// Symbols from separate realms are distinct objects, but the standard's
-	// well-known symbols are shared by name across realms.
 	childSymbols := child.vm.Get("Symbol").ToObject(child.vm)
 	parentSymbols := r.vm.Get("Symbol").ToObject(r.vm)
 	for _, symbol := range source.Symbols() {
@@ -2723,9 +2583,6 @@ func (child *Runtime) importParentValue(parent *Runtime, value goja.Value) goja.
 	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
 		return value
 	}
-	// A proxy imported from this child carries the child's __nid__ property.
-	// Resolve that established bridge before consulting the parent's node ID
-	// map, where the same integer may name an unrelated node.
 	if object, ok := value.(*goja.Object); ok {
 		if imported := child.iframeImportedParentValues[object]; imported != nil {
 			return imported
@@ -2747,12 +2604,6 @@ func (child *Runtime) importParentValue(parent *Runtime, value goja.Value) goja.
 		return child.iframeParentWindow
 	}
 	if source, ok := value.(*goja.Object); ok {
-		// A function imported from a sibling iframe is represented in the
-		// parent realm by a callable proxy. Re-import it through the generic
-		// constructor bridge would recursively wrap that proxy's synthetic
-		// Function prototype, which can fail before the receiving API is called.
-		// Preserve the original callback realm and bridge invocation values via
-		// the shared browsing-context tree instead.
 		if _, callable := goja.AssertFunction(source); callable {
 			if sourceRealm, original := findImportedFunctionSource(parent, source); sourceRealm != nil {
 				if _, originalCallable := goja.AssertFunction(original); originalCallable {
@@ -2848,10 +2699,6 @@ func (child *Runtime) importParentValue(parent *Runtime, value goja.Value) goja.
 				target = wrapped.ToObject(child.vm)
 			}
 		} else if prototype := object.Prototype(); prototype != nil {
-			// The target's prototype must mirror the source object's chain. A
-			// plain proxy target would otherwise make imported class prototypes
-			// inherit from the receiving realm's Object.prototype, breaking
-			// interface checks such as customized-built-in constructor matching.
 			if importedPrototype, ok := child.importParentValue(parent, prototype).(*goja.Object); ok {
 				_ = target.SetPrototype(importedPrototype)
 			}
@@ -3010,10 +2857,6 @@ func (child *Runtime) importSiblingFunction(sourceRuntime *Runtime, source *goja
 	return importedValue
 }
 
-// importParentConstructor creates a callable and constructible WindowProxy
-// bridge for a constructor supplied by the parent realm. A plain Go function
-// wrapper loses [[Construct]], which makes cross-realm customElements.define()
-// reject valid class constructors.
 func (child *Runtime) importParentConstructor(parent *Runtime, source *goja.Object) goja.Value {
 	if imported := child.iframeImportedParentValues[source]; imported != nil {
 		return imported
@@ -3227,9 +3070,6 @@ func (r *Runtime) importCrossRealmException(source *Runtime, err error) *goja.Ob
 	return r.vm.NewGoError(err)
 }
 
-// reportWindowException surfaces an uncaught exception from a callback in
-// its owning window. The resulting ErrorEvent runs while the original event
-// context remains available to outer realms.
 func (r *Runtime) reportWindowException(err error) {
 	r.reportWindowExceptionFrom(nil, err)
 }
@@ -3310,17 +3150,10 @@ func (r *Runtime) queueExistingIFrames() {
 	walk(&r.domDoc.Node)
 }
 
-// QueueExistingIFrames queues loads for parser-created iframe elements after
-// parsing has advanced since SetDOM. It preserves the runtime's wrapper and
-// image state caches, which SetDOM intentionally rebuilds for a new document.
 func (r *Runtime) QueueExistingIFrames() {
 	r.queueExistingIFrames()
 }
 
-// RefreshDocumentTreeReferences updates the body/head/documentElement/doctype
-// references after an incremental parser step. SetDOM normally runs only once
-// per document, so these node-valued properties need refreshing as the parser
-// creates the document's structural elements.
 func (r *Runtime) RefreshDocumentTreeReferences() {
 	if r.domDoc == nil {
 		return
@@ -3350,10 +3183,6 @@ func (r *Runtime) flushIFrameLoads() {
 		if frame == nil {
 			continue
 		}
-		// An iframe's initial about:blank load must not win the load event
-		// race against a form navigation already planned for this browsing
-		// context. Keep that initial event suppressed; the queued form task will
-		// install the destination and flush its real navigation below.
 		if r.iframeLoadedSources[frame] != iframeSourceKey(frame) &&
 			r.plannedIFrameGETURLs[frame] != "" {
 			continue
@@ -3372,9 +3201,6 @@ func (r *Runtime) flushIFrameLoads() {
 				}
 			}
 		} else if frame.HasAttribute("srcdoc") {
-			// srcdoc is parsed as a child HTML document and takes precedence over
-			// src. Bound both source bytes and the resulting tree because markup is
-			// page supplied and can be much larger than the parent element.
 			markup := frame.GetAttribute("srcdoc")
 			if len(markup) <= 1<<20 {
 				if doc, err := r.parseSrcdoc(frame, markup); err == nil && doc != nil {
@@ -3417,14 +3243,7 @@ func (r *Runtime) flushIFrameLoads() {
 		if r.iframeLoadedSources[frame] == "" {
 			r.markIFrameSourceLoaded(frame)
 		}
-		// Establish the stable WindowProxy for the active Document before load
-		// listeners run. A listener may synchronously resolve a Promise that then
-		// reads window.customElements; creating the proxy from that continuation
-		// would otherwise expose a registry allocated against the previous
-		// about:blank Document.
 		_ = r.iframeWindow(frame)
-		// Frame load events are queued until the current script task completes,
-		// giving the page the opportunity to register onload after insertion.
 		r.dispatchWithWindowStep(frame, dom.NewTrustedEvent("load", false, false))
 	}
 }
@@ -3440,9 +3259,6 @@ func (r *Runtime) navigateIFrameLocation(frame *dom.Node, reference string) {
 	if frame == nil || !frame.IsConnected() {
 		return
 	}
-	// This Location object is the parent realm's WindowProxy view of the child.
-	// The href setter parses against the caller's entry settings object, which
-	// is this Runtime's document URL, rather than the child's current URL.
 	base := r.documentURL()
 	ref, err := url.Parse(reference)
 	if err != nil {
@@ -3507,8 +3323,6 @@ func (r *Runtime) scheduleIFrameNavigation(frame *dom.Node, target string) {
 			}
 		}
 		if wrapper, ok := r.wrapNode(frame).(*goja.Object); ok {
-			// Once a browsing context navigates away from srcdoc, the embedding
-			// attribute must not keep overriding the newly selected URL.
 			frame.RemoveAttribute("srcdoc")
 			_ = wrapper.Set("src", target)
 			r.queueIFrameLoad(frame)
@@ -3517,9 +3331,6 @@ func (r *Runtime) scheduleIFrameNavigation(frame *dom.Node, target string) {
 	})
 }
 
-// FlushIFrameLoads processes queued iframe navigations and their load events.
-// The engine calls this between DOMContentLoaded and document load, when iframe
-// completion is a load-delaying step for the parent document.
 func (r *Runtime) FlushIFrameLoads() {
 	r.flushIFrameLoads()
 }

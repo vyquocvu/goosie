@@ -1,9 +1,3 @@
-// Package engine_test verifies that user interactions flow through the full
-// pipeline: engine action → DOM event dispatch → JS listener callback.
-//
-// These are the highest-ROI tests in the suite: they catch the cross-layer
-// wiring bugs that unit tests at each layer miss. A click that never reaches
-// the JS runtime, or a scroll event with wrong coordinates, shows up here.
 package engine_test
 
 import (
@@ -16,12 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// newJSSession builds a session with a JS runtime wired to the document.
-// The runtime's console output is discarded; scripts run during construction.
 func newJSSession(t *testing.T, html string) (*engine.Session, *js.Runtime) {
 	t.Helper()
 	rt, err := js.New(js.Options{
@@ -44,8 +32,6 @@ func newJSSession(t *testing.T, html string) (*engine.Session, *js.Runtime) {
 	return sess, rt
 }
 
-// clickCenter finds the center of the laid-out box for an element ID and
-// clicks it. Returns false if the element was not found in the arena.
 func clickCenter(t *testing.T, s *engine.Session, id string) bool {
 	t.Helper()
 	if s.Arena == nil {
@@ -61,8 +47,6 @@ func clickCenter(t *testing.T, s *engine.Session, id string) bool {
 	return false
 }
 
-// focusCenter finds the center of the laid-out box for an element ID and
-// focuses it.
 func focusCenter(t *testing.T, s *engine.Session, id string) bool {
 	t.Helper()
 	if s.Arena == nil {
@@ -78,30 +62,20 @@ func focusCenter(t *testing.T, s *engine.Session, id string) bool {
 	return false
 }
 
-// pressTab moves focus to the next tabbable control, mirroring a Tab keypress.
 func pressTab(t *testing.T, s *engine.Session) {
 	t.Helper()
 	s.FocusNext()
 }
 
-// pressShiftTab moves focus to the previous tabbable control, mirroring a
-// Shift+Tab keypress.
 func pressShiftTab(t *testing.T, s *engine.Session) {
 	t.Helper()
 	s.FocusPrev()
 }
 
-// pressTabKey drives a real Tab keypress through the engine's key-event path
-// (keydown → focus-move default action → keyup), unlike pressTab which only
-// moves focus. Mirrors Playwright's keyboard.press('Tab').
 func pressTabKey(t *testing.T, s *engine.Session) {
 	t.Helper()
 	s.PressKey("Tab", false, false, false, false)
 }
-
-// ---------------------------------------------------------------------------
-// Click → JS listener
-// ---------------------------------------------------------------------------
 
 func TestInteraction_ClickFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -310,10 +284,6 @@ func TestRadioGroupResetPreservesExclusivityThroughEngine(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Focus / blur → JS listener
-// ---------------------------------------------------------------------------
-
 func TestInteraction_FocusBlurFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -332,7 +302,6 @@ inp.addEventListener('blur', function() { __blurred = true; });
 		t.Error("focus listener did not fire")
 	}
 
-	// Click outside to blur.
 	sess.FocusControl(790, 590)
 
 	v, ok = rt.Global("__blurred")
@@ -340,10 +309,6 @@ inp.addEventListener('blur', function() { __blurred = true; });
 		t.Error("blur listener did not fire")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Text input → JS listener
-// ---------------------------------------------------------------------------
 
 func TestInteraction_TextInputFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -358,7 +323,6 @@ document.getElementById('inp').addEventListener('input', function(event) {
 
 	focusCenter(t, sess, "inp")
 
-	// Type characters.
 	sess.Edit(engine.EditRune, 'h')
 	sess.Edit(engine.EditRune, 'i')
 
@@ -367,10 +331,6 @@ document.getElementById('inp').addEventListener('input', function(event) {
 		t.Error("input listener did not fire")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Checkbox toggle → JS listener
-// ---------------------------------------------------------------------------
 
 func TestInteraction_CheckboxToggleFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -391,13 +351,6 @@ document.getElementById('cb').addEventListener('change', function(event) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Scroll → JS listener
-// ---------------------------------------------------------------------------
-
-// The viewport scroll event is queued and coalesced, the way Chromium delivers
-// it: several moves in one turn reach the page as a single event at the frame
-// flush, not once per move.
 func TestInteraction_ScrollFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -431,10 +384,6 @@ document.addEventListener('scroll', function() {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Hover → JS listener (mouseenter/mouseleave)
-// ---------------------------------------------------------------------------
-
 func TestInteraction_HoverFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -452,7 +401,6 @@ target.addEventListener('mouseleave', function() { __left = true; });
 				x0, y0, x1, y1 := obj.BorderRect()
 				cx, cy := (x0+x1)/2, (y0+y1)/2
 
-				// Move into the element.
 				sess.SetHover(cx, cy)
 
 				v, ok := rt.Global("__entered")
@@ -460,7 +408,6 @@ target.addEventListener('mouseleave', function() { __left = true; });
 					t.Error("mouseenter listener did not fire")
 				}
 
-				// Move outside.
 				sess.SetHover(0, 0)
 
 				v, ok = rt.Global("__left")
@@ -473,10 +420,6 @@ target.addEventListener('mouseleave', function() { __left = true; });
 	}
 	t.Fatal("hover-target not found in arena")
 }
-
-// ---------------------------------------------------------------------------
-// Form submit → JS listener
-// ---------------------------------------------------------------------------
 
 func TestInteraction_FormSubmitFiresJSListener(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -501,10 +444,6 @@ document.getElementById('form').addEventListener('submit', function(event) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Multiple listeners on same element
-// ---------------------------------------------------------------------------
-
 func TestInteraction_MultipleListeners(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -528,10 +467,6 @@ btn.addEventListener('click', function() { __second = true; });
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Event target correctness
-// ---------------------------------------------------------------------------
-
 func TestInteraction_EventTargetIsCorrect(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -554,13 +489,6 @@ document.getElementById('btn').addEventListener('click', function(event) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Stop propagation
-// ---------------------------------------------------------------------------
-
-// A stopPropagation() in the clicked descendant must let the listener that
-// called it run while suppressing the ancestor listener, through the engine's
-// real click path rather than a bare DOM dispatch.
 // qc:BR-095
 func TestInteraction_StopPropagation(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
@@ -591,10 +519,6 @@ document.getElementById('inner').addEventListener('click', function(event) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// DOM mutation from click handler
-// ---------------------------------------------------------------------------
-
 func TestInteraction_ClickMutatesDOM(t *testing.T) {
 	sess, rt := newJSSession(t, `<!DOCTYPE html>
 <html><body>
@@ -609,18 +533,11 @@ document.getElementById('btn').addEventListener('click', function() {
 
 	clickCenter(t, sess, "btn")
 
-	// The JS runtime mutated the DOM. The engine's invalidation would pick
-	// this up on the next Reflow. For this test, we just verify the JS side
-	// executed without error.
 	v, ok := rt.Global("__mutationError")
 	if ok && v.Bool {
 		t.Error("DOM mutation from click handler threw")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Drag-select → selection state
-// ---------------------------------------------------------------------------
 
 func TestInteraction_DragSelect(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html>
@@ -629,16 +546,11 @@ func TestInteraction_DragSelect(t *testing.T) {
 </body></html>`)
 
 	if s := sess.Arena; s != nil {
-		// Find the text box.
 		for _, obj := range s.Objects {
 			if obj.Node != nil && obj.Node.GetAttribute("id") == "text" {
 				x0, y0, x1, y1 := obj.BorderRect()
-				// Drag from left to right.
 				sess.SelectAt(x0+5, (y0+y1)/2)
 				sess.SelectTo(x1-5, (y0+y1)/2)
-				// No JS assertion here — the engine's selection state is
-				// verified in test/engine/selection_test.go. This test
-				// verifies the path doesn't panic with JS enabled.
 				return
 			}
 		}
@@ -646,17 +558,12 @@ func TestInteraction_DragSelect(t *testing.T) {
 	t.Fatal("text element not found in arena")
 }
 
-// ---------------------------------------------------------------------------
-// Verify dom.Event dispatch directly (no JS)
-// ---------------------------------------------------------------------------
-
 func TestInteraction_DirectEventDispatch(t *testing.T) {
 	sess, _ := newJSSession(t, `<!DOCTYPE html>
 <html><body>
 <button id="btn">Click</button>
 </body></html>`)
 
-	// Find the button node.
 	var btnNode *dom.Node
 	if s := sess.Arena; s != nil {
 		for _, obj := range s.Objects {
@@ -670,13 +577,11 @@ func TestInteraction_DirectEventDispatch(t *testing.T) {
 		t.Fatal("button node not found")
 	}
 
-	// Register a Go-level listener.
 	var fired bool
 	dom.AddEventListener(btnNode, "click", func(ev *dom.Event) {
 		fired = true
 	}, false)
 
-	// Click via engine.
 	clickCenter(t, sess, "btn")
 
 	if !fired {
@@ -693,7 +598,6 @@ func TestFormSubmitOnEnter(t *testing.T) {
 </body></html>`
 	sess, _ := newJSSession(t, html)
 
-	// Focus the input
 	focused := false
 	for _, obj := range sess.Arena.Objects {
 		if obj.Node != nil && obj.Node.GetAttribute("id") == "q" {
@@ -706,13 +610,11 @@ func TestFormSubmitOnEnter(t *testing.T) {
 		t.Fatal("failed to focus input")
 	}
 
-	// Press Enter (EditEnter)
 	changed := sess.Edit(engine.EditEnter, 0)
 	if !changed {
 		t.Fatal("expected EditEnter on input to trigger submit")
 	}
 
-	// Pop submitted form
 	sub, ok := sess.PopSubmittedForm()
 	if !ok || sub == nil {
 		t.Fatal("expected pending form submission")
@@ -727,7 +629,6 @@ func TestFormSubmitOnEnter(t *testing.T) {
 		t.Errorf("expected encoded query=goosie+browser, got %q", sub.Encoded)
 	}
 
-	// Verify pop cleared the submission
 	if _, ok := sess.PopSubmittedForm(); ok {
 		t.Error("expected PopSubmittedForm to clear pending submission")
 	}
@@ -744,7 +645,6 @@ func TestFormSubmitButtonClick(t *testing.T) {
 </body></html>`
 	sess, _ := newJSSession(t, html)
 
-	// Click submit button
 	if !clickCenter(t, sess, "btn-submit") {
 		t.Fatal("failed to click submit button")
 	}
@@ -791,7 +691,6 @@ func TestFormReset(t *testing.T) {
 		t.Fatal("nodes not found")
 	}
 
-	// Focus inp and edit it with EditRune
 	for _, obj := range sess.Arena.Objects {
 		if obj.Node == inpNode {
 			x0, y0, x1, y1 := obj.BorderRect()
@@ -801,7 +700,6 @@ func TestFormReset(t *testing.T) {
 	}
 	sess.Edit(engine.EditRune, 'X')
 
-	// Click checkbox to toggle off
 	clickCenter(t, sess, "chk")
 
 	if inpNode.InputControlValue() == "Initial" {
@@ -811,14 +709,11 @@ func TestFormReset(t *testing.T) {
 		t.Errorf("expected checkbox to be unchecked before reset")
 	}
 
-	// Reset form
 	sess.ResetForm(formNode)
 
-	// Inp should be restored to Initial
 	if inpNode.InputControlValue() != "Initial" {
 		t.Errorf("expected input to reset to 'Initial', got %q", inpNode.InputControlValue())
 	}
-	// Chk should be restored to checked
 	if !engine.IsChecked(chkNode) {
 		t.Errorf("expected checkbox to reset to checked")
 	}

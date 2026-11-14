@@ -9,10 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// loadFixture is the document the load path is measured against. It is a real
-// 186 KB page rather than a synthetic scene: the synthetic generator never touches
-// the HTML tokenizer, the selector matcher, or the box tree, which is where a load
-// regression would land.
 const loadViewportW, loadViewportH = 1440, 900
 
 func loadFixture(tb testing.TB) string {
@@ -28,10 +24,6 @@ func loadFixture(tb testing.TB) string {
 	return string(data)
 }
 
-// loadOnce runs the whole pipeline the browser runs for a page: parse, style, lay
-// out, and build the display list the frame path is handed. It returns the document's
-// height in device pixels, which is how the tests below check that the fixture was
-// really laid out rather than silently parsed into an empty document.
 func loadOnce(tb testing.TB, fonts *raster.Fonts, html string) int32 {
 	tb.Helper()
 	sess, err := engine.NewSession(html, nil, loadViewportW,
@@ -61,19 +53,11 @@ func BenchmarkDocumentLoad(b *testing.B) {
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1e6, "ms/op")
 }
 
-// The fence is a bracket, not a ceiling alone: the low end says the load path is
-// still doing the work it is supposed to do, and the high end says it is not doing
-// ever more of it. Both ends are set from the same measurement, so a change that
-// made loading allocate nothing - by short-circuiting the pipeline, say - would fail
-// here rather than being read as a win.
 const (
 	loadAllocsFloor   = 250_000
 	loadAllocsCeiling = 400_000
 )
 
-// TestDocumentLoadAllocationFence is the regression fence §G asks for on the load
-// path. The benchmark above cannot fail a build, so this asserts the same quantity in
-// a plain test, which `go test ./...` runs everywhere the rest of the suite does.
 func TestDocumentLoadAllocationFence(t *testing.T) {
 	fonts, err := raster.NewFonts()
 	if err != nil {
@@ -81,8 +65,6 @@ func TestDocumentLoadAllocationFence(t *testing.T) {
 	}
 	html := loadFixture(t)
 
-	// The first load pays for caches - the UA rule index among them - that every
-	// later load shares, and those are not a per-load regression.
 	loadOnce(t, fonts, html)
 	h := loadOnce(t, fonts, html)
 	if h < 4000 {

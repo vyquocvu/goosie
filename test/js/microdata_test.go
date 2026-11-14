@@ -7,14 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// HTML microdata (HTML Living Standard §5.2) is the structured-data
-// vocabulary built into HTML itself. These tests pin the DOM side: the five
-// attribute reflections, the properties collection, and document.getItems.
-
-// The reflections read their content attributes; the IDL names are reachable
-// in both the content-attribute spelling (itemscope, itemprop) and the spec's
-// camelCase IDL spelling (itemScope, itemProp). An element without the
-// attributes reflects empty/false.
 func TestMicrodataReflectionReads(t *testing.T) {
 	doc := domtest.Parse(`<html><body>
 		<div id="a" itemscope itemtype="http://schema.org/Person" itemid="https://example.test/alice"
@@ -37,9 +29,6 @@ var out = a.itemscope + "/" + a.itemtype + "/" + a.itemid + "/" + a.itemprop + "
 	}
 }
 
-// Writing the reflections writes the content attributes: itemscope as a
-// boolean reflects presence (false removes the attribute), the string
-// reflections spell the value back, and either spelling drives the write.
 func TestMicrodataReflectionWrites(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="a"></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -61,10 +50,6 @@ var out = wrote + "/" + a.hasAttribute("itemscope") + "/" + a.getAttribute("item
 	}
 }
 
-// properties is the item's properties collection: every descendant with an
-// itemprop attribute in tree order, with length, item(index), indexed access,
-// and names in first-encounter order. Properties outside the item's subtree
-// do not belong to it.
 func TestMicrodataProperties(t *testing.T) {
 	doc := domtest.Parse(`<html><body>
 		<div id="item" itemscope itemtype="http://schema.org/Person">
@@ -89,8 +74,6 @@ var out = props.length + "/" + props[0].itemprop + "/" + props.item(1).itemprop 
 	}
 }
 
-// properties is live: it re-queries the tree on every read, so a property
-// appended after the first read shows up in the next one.
 func TestMicrodataPropertiesLive(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="item" itemscope></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})
@@ -108,8 +91,6 @@ var out = before + "/" + item.properties.length + "/" + item.properties[0].itemp
 	}
 }
 
-// The walk stops at a nested item: the inner element's own properties belong
-// to that item, not to the outer one.
 func TestMicrodataPropertiesStopAtNestedItems(t *testing.T) {
 	doc := domtest.Parse(`<html><body>
 		<div id="outer" itemscope>
@@ -199,10 +180,6 @@ var out = props.length + "/" + props.names.length + "/" + props.names[0] + "/" +
 	}
 }
 
-// getItems returns the document's top-level items: elements with itemscope
-// that are not themselves a property of another item. A space-separated
-// argument requires every named type among the item's itemtype tokens; an
-// absent or empty argument returns every top-level item.
 func TestMicrodataGetItems(t *testing.T) {
 	doc := domtest.Parse(`<html><body>
 		<div id="p1" itemscope itemtype="http://schema.org/Person"></div>
@@ -229,8 +206,6 @@ var out = all.length + "/" + people.length + "/" + people[0].id + "/" + both.len
 	}
 }
 
-// properties is a read-only accessor: a sloppy-mode assignment neither
-// replaces it nor throws.
 func TestMicrodataPropertiesReadOnly(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div id="item" itemscope><span itemprop="name">x</span></div></body></html>`)
 	r := newRuntime(t, js.Options{URL: "https://example.test/", DOM: doc})

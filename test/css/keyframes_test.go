@@ -6,7 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestParseKeyframesFromTo verifies that from/to selectors parse to 0.0 and 1.0.
 func TestParseKeyframesFromTo(t *testing.T) {
 	stops, err := css.ParseKeyframes("from { opacity: 0 } to { opacity: 1 }")
 	if err != nil {
@@ -29,7 +28,6 @@ func TestParseKeyframesFromTo(t *testing.T) {
 	}
 }
 
-// TestParseKeyframesPercentages verifies that percentage selectors parse correctly.
 func TestParseKeyframesPercentages(t *testing.T) {
 	stops, err := css.ParseKeyframes("0% { opacity: 0 } 50% { opacity: 0.5 } 100% { opacity: 1 }")
 	if err != nil {
@@ -52,8 +50,6 @@ func TestParseKeyframesPercentages(t *testing.T) {
 	}
 }
 
-// TestParseKeyframesMultipleSelectors verifies that multiple selectors sharing
-// a block produce stops at each offset.
 func TestParseKeyframesMultipleSelectors(t *testing.T) {
 	stops, err := css.ParseKeyframes("0%, 100% { opacity: 0 } 50% { opacity: 1 }")
 	if err != nil {
@@ -62,7 +58,6 @@ func TestParseKeyframesMultipleSelectors(t *testing.T) {
 	if len(stops) != 3 {
 		t.Fatalf("got %d stops, want 3", len(stops))
 	}
-	// Should be sorted: 0%, 50%, 100%.
 	if stops[0].Offset != 0.0 {
 		t.Errorf("stops[0].Offset = %v, want 0.0", stops[0].Offset)
 	}
@@ -80,8 +75,6 @@ func TestParseKeyframesMultipleSelectors(t *testing.T) {
 	}
 }
 
-// TestParseKeyframesMultipleProperties verifies that a keyframe block with
-// multiple declarations captures all of them.
 func TestParseKeyframesMultipleProperties(t *testing.T) {
 	stops, err := css.ParseKeyframes("from { opacity: 0; background-color: red } to { opacity: 1; background-color: blue }")
 	if err != nil {
@@ -104,8 +97,6 @@ func TestParseKeyframesMultipleProperties(t *testing.T) {
 	}
 }
 
-// TestParseKeyframesUnsorted verifies that stops given out of order are sorted
-// by offset.
 func TestParseKeyframesUnsorted(t *testing.T) {
 	stops, err := css.ParseKeyframes("100% { opacity: 1 } 0% { opacity: 0 } 50% { opacity: 0.5 }")
 	if err != nil {
@@ -125,7 +116,6 @@ func TestParseKeyframesUnsorted(t *testing.T) {
 	}
 }
 
-// TestParseKeyframesInvalidOffset verifies that a bad percentage returns an error.
 func TestParseKeyframesInvalidOffset(t *testing.T) {
 	_, err := css.ParseKeyframes("abc { opacity: 0 }")
 	if err == nil {
@@ -133,8 +123,6 @@ func TestParseKeyframesInvalidOffset(t *testing.T) {
 	}
 }
 
-// TestParseKeyframesInStylesheet verifies that @keyframes rules parse correctly
-// when embedded in a full stylesheet.
 func TestParseKeyframesInStylesheet(t *testing.T) {
 	sheet := css.Parse(`
 		@keyframes fadeIn {
@@ -159,13 +147,11 @@ func TestParseKeyframesInStylesheet(t *testing.T) {
 	if kf.Stops[1].Offset != 1.0 {
 		t.Errorf("Stops[1].Offset = %v, want 1.0", kf.Stops[1].Offset)
 	}
-	// Regular rules should still parse.
 	if len(sheet.Rules) != 1 {
 		t.Fatalf("got %d rules, want 1", len(sheet.Rules))
 	}
 }
 
-// TestParseKeyframesWebkitPrefix verifies that -webkit-keyframes is also parsed.
 func TestParseKeyframesWebkitPrefix(t *testing.T) {
 	sheet := css.Parse(`
 		@-webkit-keyframes slide {
@@ -181,7 +167,6 @@ func TestParseKeyframesWebkitPrefix(t *testing.T) {
 	}
 }
 
-// TestParseKeyframesEmpty verifies that an empty body returns no stops.
 func TestParseKeyframesEmpty(t *testing.T) {
 	stops, err := css.ParseKeyframes("")
 	if err != nil {

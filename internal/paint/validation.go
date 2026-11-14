@@ -5,16 +5,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// ValidationBubble is the message a blocked form submission shows beside the
-// offending control. Obj is the control's layout box in document CSS pixels.
 type ValidationBubble struct {
 	Obj     *layout.Object
 	Message string
 }
 
-// SetValidationBubble marks the constraint-validation message to paint next to
-// the control. It paints after the document walk, so an ancestor's overflow
-// never clips it.
 func (b *Builder) SetValidationBubble(bubble *ValidationBubble) {
 	b.validation = bubble
 }
@@ -30,9 +25,6 @@ const (
 	validationMargin   = 2
 )
 
-// paintValidationBubble draws the bubble above the control, or below it when
-// the control sits too close to the top of the page. It is appended after the
-// whole document so it always lands on top.
 func (b *Builder) paintValidationBubble() {
 	v := b.validation
 	if v == nil || v.Obj == nil || v.Message == "" || b.scale <= 0 {
@@ -131,8 +123,6 @@ func (b *Builder) paintValidationBubble() {
 	})
 }
 
-// paintValidationArrow joins the bubble to the control with a small triangle:
-// pointing down when the bubble sits above, up when it sits below.
 func (b *Builder) paintValidationArrow(cx, x0, x1, y0, y1, w, h int32, above bool) {
 	if cx-w/2 < x0 {
 		cx = x0 + w/2

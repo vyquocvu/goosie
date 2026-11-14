@@ -1,17 +1,3 @@
-// Command goosie is v2's browser binary: the document engine behind a window.
-//
-// An interactive run opens a window on a blank new tab and draws whatever the
-// address bar or -url loads into it. The synthetic scenes in paint are test
-// documents: a checkerboard page with positioned text over it, whose contents
-// are known analytically, which is what makes the frame path's criteria about
-// tiles, budgets, and pacing measurable. A paced run always draws one, and
-// -scene names one for an interactive demo; nothing else in the shape of the
-// command changes.
-//
-// Two modes share one code path. Interactive mode opens a window and draws frames as
-// the display asks for them. Gate mode (-gate) drives a fixed number of scroll frames
-// through the same surface.Loop and reports the timings, which is how the nightly
-// macOS job measures real vsync pacing without a finger on the glass.
 package main
 
 import (
@@ -51,54 +37,22 @@ import (
 )
 
 const (
-	// gateScrollStep is -gate's per-frame scroll delta, in device pixels. It is the
-	// same 100px the warm criterion in test/gate walks with, so the two runs
-	// measure the same travel.
-	gateScrollStep = 100
-	// The Darwin shim maps PageUp/PageDown to these private-use runes alongside
-	// the existing arrow, Home, and End mappings.
-	keyPageUp   rune = 0xF706
-	keyPageDown rune = 0xF707
-	// defaultFrames is -frames' default: the gate's 600-frame sweep.
-	defaultFrames = 600
-	// displayPeriod stands in for a 60Hz panel when the backend is paced by a clock
-	// rather than by a display. A headless gate run measures the frame path against
-	// the same interval the macOS shim will be held to.
-	displayPeriod = 16 * time.Millisecond
-	// benchPeriod is -bench's clock. It is not zero because the headless window paces
-	// itself with a timer, and a period of zero means the default rather than as fast
-	// as possible.
-	benchPeriod = time.Microsecond
-	// rasterQueue is how many tile jobs may be offered at once. The gate suite uses
-	// the same depth, so a CLI run never refuses work a test run would have taken.
-	rasterQueue = 4096
-	// interactiveDocHeight is the document an interactive run scrolls, in device
-	// pixels: the 20,000 px procedural page M1's first criterion names.
-	interactiveDocHeight = 20_000
-	// glyphAtlasBudget is per layer and is not one of M1's criteria. A tile is 256px
-	// on a side, so 4 MiB holds more glyph masks than one screen of text needs.
-	glyphAtlasBudget = 4 << 20
-	// ringFrames is how many frame marks an interactive run keeps for its final
-	// report: two seconds at 60Hz, which is the window the report is read against.
-	ringFrames = 120
+	gateScrollStep            = 100
+	keyPageUp            rune = 0xF706
+	keyPageDown          rune = 0xF707
+	defaultFrames             = 600
+	displayPeriod             = 16 * time.Millisecond
+	benchPeriod               = time.Microsecond
+	rasterQueue               = 4096
+	interactiveDocHeight      = 20_000
+	glyphAtlasBudget          = 4 << 20
+	ringFrames                = 120
 )
 
-// processStart is the instant this process began its own work. Package
-// initialisation runs before main, so it is closer to exec than any timestamp taken
-// inside main() can be, and it is what the report's startup_ms measures against:
-// "sub-second cold start" as one number a gate can read. What sits outside it is
-// kernel exec, dynamic loading and the runtime's own start-up.
 var processStart = time.Now()
 
-// errUsage marks a bad invocation, which the shell should see as exit status 2 rather
-// than as a failure deep inside a run.
 var errUsage = errors.New("usage")
 
-// blankLayer is the new-tab document: one white fill the size of the viewport.
-// The synthetic scene builder has no empty setting - every zero field means a
-// default, so even a bare spec builds cells, borders, and text - and a blank
-// page therefore gets its own one-command list. The tile budget covers the
-// viewport once over, plus the slack a scrolled page would want.
 func blankLayer(dev frame.Size) (*paint.LayerDL, *frame.Layer) {
 	list := paint.NewList(1)
 	list.Append(paint.DisplayCmd{
@@ -116,83 +70,51 @@ func blankLayer(dev frame.Size) (*paint.LayerDL, *frame.Layer) {
 	return dl, layer
 }
 
-// framePath is the assembled pipeline: everything between a vsync and a Present, with
-// the pieces a report has to name kept reachable.
 type framePath struct {
-	window   surface.Window
-	loop     *surface.Loop
-	sched    *raster.Scheduler
-	pool     *raster.Pool
-	composer *surface.Composer
-	layer    *frame.Layer
-	rec      *frame.FrameRecorder
-	spec     paint.SceneSpec
-	config   config
-	// newWindow opens another window through the owning manager. spawn installs
-	// it; the legacy paced/screenshot/private path leaves it nil, so Cmd+N and
-	// the New Window menu item no-op there.
-	newWindow func()
-	// sizeMu guards config.width/height, the live content viewport. The chrome
-	// pump writes them on resize and zoom while navigation and prompt goroutines
-	// read them to size a load, so both sides go through the accessors.
-	sizeMu        sync.RWMutex
-	toolbar       *toolbar.State
-	tabMgr        *tabs.TabManager
-	client        net.HTTP
-	privateClient net.HTTP
-	fonts         *raster.Fonts
-	bookmarks     *bookmarks.Store
-	history       *history.Store
-	downloads     *download.Manager
-	started       time.Time
-	navResults    chan navResult
-	imgResults    chan imgResult
-	drainWG       sync.WaitGroup
-	zoom          float64
-	// runCtx roots navigation contexts so shutdown cancels in-flight loads
-	// (they used to hang off context.Background and outlive the window);
-	// navWg joins them before the window closes. closeTab still cancels a
-	// tab's own load immediately without waiting on the network.
-	runCtx    context.Context
-	runCancel context.CancelFunc
-	navWg     sync.WaitGroup
-	// sessionSnapshotEvery overrides the crash-journal cadence; zero means the
-	// production interval.
-	sessionSnapshotEvery time.Duration
-	crashedMu            sync.RWMutex
-	// sessionDisabled is set when the user clears browsing data. Without it the
-	// clean-exit save and the crash journal would recreate the session files the
-	// clear just removed. sessionMu serializes a snapshot write with that clear,
-	// so a journal already being written cannot land after the files are gone.
-	sessionDisabled atomic.Bool
-	sessionMu       sync.Mutex
-	// resubmitMu guards the per-tab POST confirmations. A prompt shows instead
-	// of a page, so it owns the document it replaced until the user chooses;
-	// resubmits is keyed by tab because switching tabs must not lose it.
-	resubmitMu sync.Mutex
-	resubmits  map[uint64]*pendingResubmit
-	// scriptTimeout overrides js.DefaultTimeout for this run. Zero keeps the
-	// default; tests shorten it so a 5-second watchdog does not cost 5 seconds.
-	scriptTimeout time.Duration
-	// document and docHeight say what the run depicts: the page's URL or "" for a synthetic
-	// scene, and its laid-out height in device pixels. Both go into the artifact, which
-	// otherwise carries timings with no statement of what they were taken on.
-	document  string
-	docHeight int32
-	// findMu guards the find session below. The chrome pump refreshes matches
-	// from its own goroutine while the window event thread edits, steps, or
-	// closes find, and navigation may close it from a drain goroutine.
-	findMu            sync.Mutex
-	findMatches       []engine.Match
-	findIdx           int
-	findQuery         string
-	findSignature     findSignature
-	selDrag           bool
-	contentDrag       *contentDragGesture
-	restoredActiveURL string
-	// restoredScrollTabID/restoredScrollY carry the offset a session restore
-	// recorded for the active tab, so the restore's own load can re-apply it
-	// after the fresh-navigation top-of-page reset. 0 means no pending intent.
+	window                surface.Window
+	loop                  *surface.Loop
+	sched                 *raster.Scheduler
+	pool                  *raster.Pool
+	composer              *surface.Composer
+	layer                 *frame.Layer
+	rec                   *frame.FrameRecorder
+	spec                  paint.SceneSpec
+	config                config
+	newWindow             func()
+	sizeMu                sync.RWMutex
+	toolbar               *toolbar.State
+	tabMgr                *tabs.TabManager
+	client                net.HTTP
+	privateClient         net.HTTP
+	fonts                 *raster.Fonts
+	bookmarks             *bookmarks.Store
+	history               *history.Store
+	downloads             *download.Manager
+	started               time.Time
+	navResults            chan navResult
+	imgResults            chan imgResult
+	drainWG               sync.WaitGroup
+	zoom                  float64
+	runCtx                context.Context
+	runCancel             context.CancelFunc
+	navWg                 sync.WaitGroup
+	sessionSnapshotEvery  time.Duration
+	crashedMu             sync.RWMutex
+	sessionDisabled       atomic.Bool
+	sessionMu             sync.Mutex
+	resubmitMu            sync.Mutex
+	resubmits             map[uint64]*pendingResubmit
+	scriptTimeout         time.Duration
+	document              string
+	docHeight             int32
+	findMu                sync.Mutex
+	findMatches           []engine.Match
+	findIdx               int
+	findQuery             string
+	findSignature         findSignature
+	selDrag               bool
+	contentDrag           *contentDragGesture
+	restoredActiveURL     string
 	restoredScrollTabID   uint64
 	restoredScrollY       int32
 	storage               *js.OriginStorageRegistry
@@ -200,38 +122,20 @@ type framePath struct {
 	broadcastHub          *js.BroadcastHub
 	incognitoBroadcastHub *js.BroadcastHub
 	emulationPreset       *DevicePreset
-	// pacedSession is the document a screenshot or gate run loaded
-	// synchronously, and pacedBG the canvas colour its plan was published with.
-	// Both are set once before the loop starts and afterwards touched only by
-	// the driver's pump goroutine (see pumpPaced), which is the same single
-	// thread that ticks the JS runtime. The interactive path keeps its
-	// documents in tabMgr instead.
-	pacedSession *engine.Session
-	pacedBG      frame.Color
-	// mediaBackend plays this run's video, and is nil when the window that was
-	// opened has no way to: a headless run, or a platform with no decoder. It
-	// comes from the window rather than from the machine so a headless run on a
-	// Mac does not claim a capability it is not using.
-	mediaBackend   media.Backend
-	theme          string
-	crashedSession *session.State
-	userscripts    *userscript.Manager
-	flags          *flags.Manager
-	perms          *perms.Manager
-	preferences    preferences.Settings
-	preferencesMu  sync.RWMutex
-	// inspectRepaintPending holds background tabs whose inspector highlight
-	// changed. The page builder runs on a navigation worker before the inspector
-	// tab commits, so it queues a repaint here instead of painting synchronously;
-	// the chrome tick drains it (drainInspectRepaints) once the navigation has
-	// committed. Guarded by inspectRepaintMu, which is never held across a
-	// repaint.
+	pacedSession          *engine.Session
+	pacedBG               frame.Color
+	mediaBackend          media.Backend
+	theme                 string
+	crashedSession        *session.State
+	userscripts           *userscript.Manager
+	flags                 *flags.Manager
+	perms                 *perms.Manager
+	preferences           preferences.Settings
+	preferencesMu         sync.RWMutex
 	inspectRepaintMu      sync.Mutex
 	inspectRepaintPending []*tabs.Tab
 }
 
-// build wires a scene, a grid, a pool, a composer, a scheduler, and a window into a
-// frame path sized for c.
 func build(c config) (*framePath, error) {
 	p, err := buildProfile(c)
 	if err != nil {
@@ -240,10 +144,6 @@ func build(c config) (*framePath, error) {
 	return buildWindow(c, p)
 }
 
-// buildWindow assembles the per-window machinery over a shared profile: the
-// scene/layer, worker pool, recorder, composer, scheduler, toolbar and tab
-// manager. The profile stores (clients, fonts, bookmarks, history, downloads,
-// storage, prefs) come from p so every window of one invocation shares them.
 func buildWindow(c config, p *profile) (*framePath, error) {
 	dev := c.devSize()
 	scale := float32(c.dpr)
@@ -253,11 +153,6 @@ func buildWindow(c config, p *profile) (*framePath, error) {
 	var spec paint.SceneSpec
 	var err error
 
-	// The synthetic scenes are test documents: a paced run measures the frame
-	// path against them, and an explicit -scene asks for one by name. An
-	// interactive run with no URL opens on the same blank page the new-tab
-	// button creates, and one with a URL starts on a placeholder layer so the
-	// user sees the toolbar immediately, not a blank wait.
 	if c.url == "" && (c.paced() || c.sceneSet) {
 		spec, err = sceneSpec(c.scene)
 		if err != nil {
@@ -290,9 +185,6 @@ func buildWindow(c config, p *profile) (*framePath, error) {
 		capacity = c.frames
 	}
 	rec := frame.NewFrameRecorder(capacity)
-	// The recorder writes the artifact the pacing gate reads, so the cold start it
-	// reports has to be measured by the same instrument that measured the frames -
-	// and the one fact it cannot observe is when the process began.
 	rec.SetStartupReference(processStart)
 	f := &framePath{
 		sched:                 raster.NewScheduler(layer, wp, frame.Viewport{Size: dev}, scale, raster.Pref{}),
@@ -371,10 +263,6 @@ func buildWindow(c config, p *profile) (*framePath, error) {
 			}
 		}
 		f.syncTabToToolbar()
-		// Wire persistence only after startup has inspected and applied the
-		// previous active-session journal. NewTab fires OnChange immediately;
-		// installing the callback first would overwrite the crash journal with
-		// the empty startup tab before it can be read.
 		f.tabMgr.OnChange = func() {
 			f.syncTabToToolbar()
 			f.saveActiveSession()
@@ -396,8 +284,6 @@ func buildWindow(c config, p *profile) (*framePath, error) {
 		f.toolbar.OnFindChanged = func(query string) {
 			f.runFind(query)
 		}
-		// Reopening find restores the last query; recompute its count instead
-		// of showing 0/0 until the next keystroke.
 		f.toolbar.OnFindOpen = f.runFind
 		f.toolbar.OnFindNext = func(backward bool) {
 			f.findStep(backward)
@@ -435,7 +321,6 @@ func buildWindow(c config, p *profile) (*framePath, error) {
 	return f, nil
 }
 
-// isDarkMode reports whether dark appearance mode is active.
 func (f *framePath) isDarkMode() bool {
 	if f == nil {
 		return false
@@ -450,7 +335,6 @@ func (f *framePath) isDarkMode() bool {
 	}
 }
 
-// isHighContrast reports whether high contrast appearance mode is active.
 func (f *framePath) isHighContrast() bool {
 	if f == nil {
 		return false
@@ -458,9 +342,6 @@ func (f *framePath) isHighContrast() bool {
 	return strings.ToLower(f.theme) == "high-contrast"
 }
 
-// chromeTabBG is the page background a non-incognito tab paints for the
-// active appearance theme. It matches the toolbar background so the tab and
-// the chrome below it read as one surface.
 func (f *framePath) chromeTabBG() frame.Color {
 	switch {
 	case f.isDarkMode():
@@ -472,7 +353,6 @@ func (f *framePath) chromeTabBG() frame.Color {
 	}
 }
 
-// setTheme updates the browser appearance theme.
 func (f *framePath) setTheme(theme string) {
 	if f == nil {
 		return
@@ -526,7 +406,6 @@ func shouldRestoreSession(private bool, startupMode string) bool {
 	return !private && startupMode != preferences.StartupNewTab
 }
 
-// querySuggestions searches bookmarks, visit history, and search engine completions for omnibox query.
 func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 	q := strings.TrimSpace(query)
 	if q == "" {
@@ -536,7 +415,6 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 	var out []toolbar.Suggestion
 	seen := make(map[string]bool)
 
-	// 1. Search suggestion using the profile's configured engine.
 	searchURL, err := preferences.SearchURL(f.currentPreferences().SearchURLTemplate, q)
 	if err != nil {
 		searchURL = "https://www.google.com/search?q=" + url.QueryEscape(q)
@@ -548,7 +426,6 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 	})
 	seen[searchURL] = true
 
-	// Internal system pages (goosie://)
 	internalPages := []struct {
 		Title string
 		URL   string
@@ -575,10 +452,6 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 		}
 	}
 
-	// 2. Bookmarks and history visits from the profile ranked by Frecency. A
-	// private tab must never read either store; the -private run loads no
-	// stores at startup, but the gate holds regardless. Search suggestions and
-	// internal pages are profile-independent and stay available.
 	if !f.omniboxIsPrivate() {
 		if f.bookmarks != nil {
 			for _, bm := range f.bookmarks.List() {
@@ -593,8 +466,6 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 		}
 		if f.history != nil {
 			entries := f.history.Entries()
-			// Older stores recorded no per-entry Visits; the number of entries
-			// sharing a URL is the same frequency.
 			counts := make(map[string]int, len(entries))
 			for _, h := range entries {
 				counts[h.URL]++
@@ -643,13 +514,8 @@ func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
 	return out
 }
 
-// bookmarkFrecency is the score a saved page earns without any visit: the
-// same as one visit from the last week, so a deliberate save still outranks a
-// stale one-off but yields to a page the user actually returns to.
 const bookmarkFrecency = 1.0
 
-// suggestionCandidate is one URL in the omnibox ranking before the dropdown
-// trims to its eight rows.
 type suggestionCandidate struct {
 	suggestion toolbar.Suggestion
 	score      float64
@@ -657,9 +523,6 @@ type suggestionCandidate struct {
 	order      int
 }
 
-// addSuggestionCandidate merges one match into the ranked pool. A URL seen as
-// both a bookmark and a visit keeps the bookmark's label and kind—saving it is
-// the stronger signal—while earning the higher of the two scores.
 func addSuggestionCandidate(pool map[string]*suggestionCandidate, s toolbar.Suggestion, score float64, recent time.Time, order *int) {
 	if c, ok := pool[s.URL]; ok {
 		if score > c.score {
@@ -683,8 +546,6 @@ func addSuggestionCandidate(pool map[string]*suggestionCandidate, s toolbar.Sugg
 	}
 }
 
-// omniboxIsPrivate reports whether the omnibox must behave privately: the
-// active tab is incognito, or the whole run started with -private.
 func (f *framePath) omniboxIsPrivate() bool {
 	if f.config.private {
 		return true
@@ -697,18 +558,11 @@ func (f *framePath) omniboxIsPrivate() bool {
 	return false
 }
 
-// suggestionMatches reports whether one profile entry matches the lowered
-// omnibox query by URL or title.
 func suggestionMatches(lowerQ, entryURL, title string) bool {
 	return strings.Contains(strings.ToLower(entryURL), lowerQ) || strings.Contains(strings.ToLower(title), lowerQ)
 }
 
-// openWindow picks the window last, because a backend that cannot open one is a
-// property of the machine the report has to state rather than a construction error.
 func (f *framePath) openWindow() error {
-	// The surface is the whole window: the content viewport plus the chrome the
-	// chromeWindow composites on top of it. config.devSize is the content size
-	// alone, so the chrome band is added back here.
 	size := f.devSize()
 	if f.toolbar != nil && f.tabMgr != nil {
 		size.H += int32(totalChromeHeight) * int32(f.config.dpr+0.5)
@@ -723,9 +577,6 @@ func (f *framePath) openWindow() error {
 	if err != nil {
 		return fmt.Errorf("goosie: %w", err)
 	}
-	// Asked of the window rather than of the platform: a headless run on a Mac
-	// would otherwise be told the machine can play video, and every <video> in it
-	// would report a position no frame ever followed.
 	f.mediaBackend = platform.MediaBackend(w)
 	if f.toolbar != nil && f.tabMgr != nil {
 		cw := newChromeWindow(w, f.toolbar, f.tabMgr,
@@ -750,12 +601,6 @@ func (f *framePath) openWindow() error {
 		cw.onContentDrag = f.pointerDrag
 		cw.onCancelDrag = f.cancelPointerDrag
 		f.window = cw
-		// The JS pump rides the chrome event thread at display cadence: one
-		// event-loop turn per tick for the active tab, so timers, fetch
-		// completions and RAF callbacks fire in a living browser instead of
-		// only in unit tests. Same thread as every input callback, so no new
-		// thread touches sessions; shutdown needs no join (the pump dies with
-		// the window's event stream).
 		if cw, ok := f.window.(*chromeWindow); ok {
 			cw.setTick(f.config.vsyncPeriod(), f.pumpChrome)
 			cw.onContentHover = f.hoverContent
@@ -803,21 +648,8 @@ func (f *framePath) openWindow() error {
 	return nil
 }
 
-// programLabel is the prefix this command puts on every line it writes to
-// stderr. The wrappers inside cmd/goosie carry it too, so printing one of them
-// verbatim put it on the line twice: measured on a document whose CSS width is
-// `8e8e8px`, the refusal arrived as
-//
-//	goosie: goosie: build session: CSS numeric value outside safe geometry range
-//
-// which reads like two programs reporting and makes the useful half stop being
-// the start of the line.
 const programLabel = "goosie: "
 
-// programErrorLine returns the line main prints for err: the label exactly once,
-// then whatever context the wrappers hold. Repeated wrapping can stack the label
-// more than once, so it is dropped as often as it appears at the front; a label
-// anywhere else in the message is someone else's context and stays.
 func programErrorLine(err error) string {
 	msg := err.Error()
 	for strings.HasPrefix(msg, programLabel) {
@@ -826,9 +658,6 @@ func programErrorLine(err error) string {
 	return programLabel + msg
 }
 
-// main pins this goroutine to the process's main thread before anything can open a
-// window, because AppKit requires the main thread and says so by aborting the process
-// rather than by returning an error.
 func main() {
 	runtime.LockOSThread()
 	if err := run(os.Args[1:]); err != nil {
@@ -840,11 +669,6 @@ func main() {
 	}
 }
 
-// clearBrowsingData removes browsing traces (cookies, history, open-tab
-// session) for the v1 clear-data control. Starred bookmarks are user-curated
-// and stay, matching what clear-history means everywhere else. Missing files
-// are fine (idempotent); any other failure aborts with what was removed so
-// far so a half-clear is visible, not silent.
 func (c config) clearBrowsingData() ([]string, error) {
 	var removed []string
 	for _, path := range []string{c.cookieFile, c.historyFile, c.sessionFile, c.sessionActiveFile} {
@@ -862,10 +686,6 @@ func (c config) clearBrowsingData() ([]string, error) {
 	return removed, nil
 }
 
-// run drives one invocation to completion. The return value is named because a
-// capture sequence writes its record on the way out: a -screenshot-seq run that
-// never got its PNGs has no evidence to grade, and that has to reach the exit
-// code rather than only the stderr line.
 func run(args []string) (runErr error) {
 	c, err := parse(args)
 	if err != nil {
@@ -924,26 +744,13 @@ func run(args []string) (runErr error) {
 	}
 	defer func() { _ = f.window.Close() }()
 
-	// If a URL was provided, start loading it now that the window is visible.
-	// The user sees the toolbar immediately while the page fetches in the background.
-	// A paced run - a screenshot or a measured burst - has nobody to watch that
-	// background load: its fixed frame count would present the placeholder tiles before
-	// the document lands, so it loads synchronously and the run depicts, and reports, the
-	// page it was asked for.
 	if c.url != "" {
 		if c.paced() {
 			layer, docSpec, bgColor, sess, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
 			if err != nil {
 				return err
 			}
-			// The driver's scroll range comes from f.layer, so a paced document run that
-			// swapped the plan but not this field would scroll a one-viewport page.
 			f.layer = layer
-			// The session is kept, not discarded: a paced run has no chrome window to
-			// tick the page's event loop, so the driver pumps this session once per
-			// vsync (see the watchVsync wiring below). The colour is what the plan was
-			// published with, which pumpPaced compares against to notice a script that
-			// changed the page background.
 			f.pacedSession = sess
 			f.pacedBG = bgColor
 			f.sched.SetPlan(frame.FramePlan{
@@ -959,36 +766,19 @@ func run(args []string) (runErr error) {
 		f.navigateTabNoHistory(f.restoredActiveURL)
 	}
 
-	// A paced run cannot wait for a finger, so the driver stamps the scroll onto the
-	// ticks the display already produces. Everything downstream of it - the loop, the
-	// scheduler, the composer, the present - is the code an interactive run executes.
 	var d *driver
 	var finish chan struct{}
 	if c.gate || c.bench {
 		d = newDriver(f, c.frames)
 		f.loop = surface.NewLoop(d, f.sched, f.composer, f.rec)
-		// A paced run builds no chrome window, so the tick that pumps the page's
-		// event loop in an interactive run (chromeWindow.setTick -> pumpChrome)
-		// has no counterpart here. The driver's pump is that counterpart: one
-		// event-loop turn per vsync, on its single goroutine. Attached before
-		// Run so no measured frame sees an unpumped page.
 		d.watchVsync(f.pumpJS)
 		finish = d.done
 	} else if c.screenshot || c.screenshotSeq != "" {
 		sd := newSteadyDriver(f, steadyFloorFrames)
 		f.loop = surface.NewLoop(sd, f.sched, f.composer, f.rec)
-		// Same seam as the gate driver: every vsync pumps the page before the run
-		// asks whether it may settle, so a timer or image completion that lands
-		// mid-run is drawn rather than truncated.
 		sd.watchVsync(f.pumpJS)
-		// Idle tiles are not an idle page: a document that queued its own reveal
-		// while it loaded has drawn nothing yet, so the run asks the page before
-		// it decides the frame is worth writing.
 		sd.watchReveal(f.pendingReveal)
 		sd.watchIdle(func() bool {
-			// Idle is not "nothing needed": a frame can want no tiles while the
-			// tiles it is waiting on are still on order at a worker. Both halves
-			// have to be clear before the pixels in the PNG are all there.
 			st := f.loop.Stats()
 			return st.Last.Needed == 0 && st.Last.PaintingBytes == 0
 		})
@@ -998,11 +788,6 @@ func run(args []string) (runErr error) {
 			return st.Rasterize, outstanding
 		})
 		finish = sd.done
-		// A sequence asks the same question the screenshot answers - is this
-		// frame worth writing - and then asks it again a second later, five
-		// times, from the one page session. It is attached to the settle law
-		// rather than to a clock of its own so that no capture can be a frame
-		// the engine would not have written.
 		var seq *frameSequence
 		if c.screenshotSeq != "" {
 			writer, ok := f.window.(interface{ WritePNG(string) error })
@@ -1023,7 +808,6 @@ func run(args []string) (runErr error) {
 			sd.watchSequence(seq.capture, seq.horizon())
 		}
 		defer func() {
-			// After the loop exits, write the PNG from the headless window.
 			if hw, ok := f.window.(interface{ WritePNG(string) error }); ok {
 				if c.out != "" {
 					if err := hw.WritePNG(c.out); err != nil {
@@ -1046,13 +830,8 @@ func run(args []string) (runErr error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Navigation loads root here so shutdown cancels them; navWg joins them
-	// before the window closes rather than leaking blocked sends into a
-	// torn-down frame path.
 	f.runCtx, f.runCancel = context.WithCancel(context.Background())
 	defer f.runCancel()
-	// A crash journal on a fixed cadence bounds what an abrupt kill can lose;
-	// navigation completions still write it immediately.
 	go f.runSessionSnapshots(f.runCtx)
 
 	loopErr := make(chan error, 1)
@@ -1064,33 +843,16 @@ func run(args []string) (runErr error) {
 		close(stopped)
 	}()
 
-	// Whoever ends the run says so here, and it cannot be the main thread's own
-	// goroutine: on a platform with a run loop the main thread is busy turning it, and
-	// closing the window is what stops that loop. An interactive run has no frame
-	// count to finish on, so its finish channel stays nil and never readies.
 	go func() {
 		select {
-		case <-stopped: // the window's events ran out, which is an orderly shutdown
+		case <-stopped:
 		case <-sig:
-		case <-finish: // the paced run reached its frame count
+		case <-finish:
 		}
-		// Cancel, then wait for the loop to leave the frame it is drawing, then close.
-		// Closing first would put a Present against a closed window in front of the
-		// loop's next look at the context, and a run that ended because it finished its
-		// frames would exit non-zero for a present nobody asked for.
 		cancel()
 		<-stopped
-		// Stop navigation loads first so their results cannot land mid-teardown,
-		// then join them: a result send into the drain is harmless, but only a
-		// join proves no loader still touches the scheduler or tabs.
 		f.runCancel()
 		f.navWg.Wait()
-		// Every document goes before the window does. Stopping a video means
-		// stopping audio on the process main thread, and the window closing is what
-		// stops the loop that services that thread — so after this point there is
-		// nothing left that could answer. Doing it here is also what makes "the app
-		// quit" mean "the video stopped", rather than relying on process exit to
-		// take the audio device with it.
 		f.closeAllSessions()
 		_ = f.window.Close()
 		if f.privateClient != nil {
@@ -1099,8 +861,6 @@ func run(args []string) (runErr error) {
 	}()
 
 	if r, ok := f.window.(platform.Runner); ok {
-		// A backend that owns a run loop gets this thread, which is the one pinned to
-		// the process's main thread. Returning from Run means the window is gone.
 		r.Run()
 	}
 	<-stopped

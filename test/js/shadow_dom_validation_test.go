@@ -7,11 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// TestAttachShadowValidatesHostAndOptions is the BR-118 oracle for the parts of
-// the Shadow DOM surface this engine does not implement: an invalid call must
-// fail with the standard exception, leave host.shadowRoot null, and leave the
-// element usable instead of creating a half-attached root.
-//
 // qc:BR-118
 func TestAttachShadowValidatesHostAndOptions(t *testing.T) {
 	doc := domtest.Parse(`<!doctype html><html><body><div id="host"></div></body></html>`)

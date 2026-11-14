@@ -67,9 +67,6 @@ func TestFrameOutcome(t *testing.T) {
 	}
 }
 
-// revealPage paints a blue box at the viewport origin and turns it red from a
-// timer. Its final paint therefore exists only if the JS event loop ran before
-// the display list was built.
 const revealPage = `<!DOCTYPE html><html><head><style>
 html,body{margin:0;padding:0}
 #box{position:absolute;left:0;top:0;width:100px;height:100px;background:#0000ff}
@@ -78,7 +75,6 @@ html,body{margin:0;padding:0}
 setTimeout(function(){ document.getElementById("box").style.backgroundColor = "#ff0000"; }, 120);
 </script></body></html>`
 
-// renderPNG runs one headless render and returns the decoded image.
 func renderPNG(t *testing.T, html string, extra ...string) image.Image {
 	t.Helper()
 	dir := t.TempDir()
@@ -104,18 +100,12 @@ func renderPNG(t *testing.T, html string, extra ...string) image.Image {
 	return img
 }
 
-// rgb reports the colour at a pixel as 8-bit channels.
 func rgb(t *testing.T, img image.Image, x, y int) (uint32, uint32, uint32) {
 	t.Helper()
 	r, g, b, _ := img.At(x, y).RGBA()
 	return r >> 8, g >> 8, b >> 8
 }
 
-// A render is one synchronous pass by default, so a timer never gets a turn and
-// the PNG shows the pre-reveal paint. -pump spends a wall-clock budget on the
-// event loop first, which is what lets a page that reveals on setTimeout appear.
-// Both halves are asserted: the opt-in must work, and the default must not
-// silently change what every existing baseline compares against.
 // qc:BR-261
 func TestPumpRunsTimersBeforePainting(t *testing.T) {
 	img := renderPNG(t, revealPage, "-pump", "400ms")
@@ -134,9 +124,6 @@ func TestWithoutPumpTimersDoNotRun(t *testing.T) {
 	}
 }
 
-// A pump budget longer than the render timeout would fail the run anyway, and a
-// negative one would be read as "off". Both are usage errors rather than a
-// silently different measurement.
 // qc:BR-261
 func TestPumpRejectsOutOfRangeBudget(t *testing.T) {
 	for _, budget := range []string{"-1ms", "11s"} {

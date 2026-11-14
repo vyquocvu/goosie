@@ -8,7 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// animDOM creates a minimal DOM with a <div> for animation tests.
 func animDOM(t *testing.T) *dom.Document {
 	t.Helper()
 	doc := dom.NewDocument()
@@ -41,10 +40,6 @@ func newAnimRuntime(t *testing.T) *js.Runtime {
 	t.Cleanup(func() { r.Close() })
 	return r
 }
-
-// ---------------------------------------------------------------------------
-// Element.prototype.animate
-// ---------------------------------------------------------------------------
 
 func TestElementAnimateExists(t *testing.T) {
 	r := newAnimRuntime(t)
@@ -150,10 +145,6 @@ func TestElementAnimateWithOptionsObject(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// playState
-// ---------------------------------------------------------------------------
-
 func TestAnimationPlayStateRunning(t *testing.T) {
 	r := newAnimRuntime(t)
 	err := r.Run(`
@@ -205,10 +196,6 @@ func TestAnimationFinishSetsFinished(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// play/pause roundtrip
-// ---------------------------------------------------------------------------
-
 func TestAnimationPlayAfterPause(t *testing.T) {
 	r := newAnimRuntime(t)
 	err := r.Run(`
@@ -223,10 +210,6 @@ func TestAnimationPlayAfterPause(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// playbackRate
-// ---------------------------------------------------------------------------
 
 func TestAnimationPlaybackRateDefault(t *testing.T) {
 	r := newAnimRuntime(t)
@@ -265,10 +248,6 @@ func TestAnimationReverse(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// effect and KeyframeEffect
-// ---------------------------------------------------------------------------
 
 func TestAnimationEffect(t *testing.T) {
 	r := newAnimRuntime(t)
@@ -315,10 +294,6 @@ func TestAnimationEffectGetKeyframes(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// timeline
-// ---------------------------------------------------------------------------
-
 func TestAnimationTimeline(t *testing.T) {
 	r := newAnimRuntime(t)
 	err := r.Run(`
@@ -330,10 +305,6 @@ func TestAnimationTimeline(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// finished promise
-// ---------------------------------------------------------------------------
 
 func TestAnimationFinishedPromise(t *testing.T) {
 	r := newAnimRuntime(t)
@@ -360,13 +331,7 @@ func TestAnimationFinishedResolvesOnFinish(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// Drain microtasks to let the promise resolve.
-	// The resolved flag should be set after microtask drain.
 }
-
-// ---------------------------------------------------------------------------
-// onfinish handler
-// ---------------------------------------------------------------------------
 
 func TestAnimationOnFinishHandler(t *testing.T) {
 	r := newAnimRuntime(t)
@@ -382,10 +347,6 @@ func TestAnimationOnFinishHandler(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// currentTime
-// ---------------------------------------------------------------------------
 
 func TestAnimationCurrentTimeNotNull(t *testing.T) {
 	r := newAnimRuntime(t)
@@ -414,10 +375,6 @@ func TestAnimationCurrentTimeNullWhenIdle(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Animation constructor
-// ---------------------------------------------------------------------------
-
 func TestAnimationConstructorExists(t *testing.T) {
 	r := newAnimRuntime(t)
 	err := r.Run(`
@@ -438,10 +395,6 @@ func TestAnimationConstructorCreatesIdle(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// KeyframeEffect constructor
-// ---------------------------------------------------------------------------
 
 func TestKeyframeEffectConstructorExists(t *testing.T) {
 	r := newAnimRuntime(t)
@@ -468,10 +421,6 @@ func TestKeyframeEffectConstructor(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Multiple animations on same element
-// ---------------------------------------------------------------------------
-
 func TestMultipleAnimationsOnSameElement(t *testing.T) {
 	r := newAnimRuntime(t)
 	err := r.Run(`
@@ -487,10 +436,6 @@ func TestMultipleAnimationsOnSameElement(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Duration as number
-// ---------------------------------------------------------------------------
-
 func TestAnimateDurationAsNumber(t *testing.T) {
 	r := newAnimRuntime(t)
 	err := r.Run(`
@@ -505,10 +450,6 @@ func TestAnimateDurationAsNumber(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TickAnimations
-// ---------------------------------------------------------------------------
-
 func TestTickAnimationsAdvancesState(t *testing.T) {
 	d := animDOM(t)
 	r, err := js.New(js.Options{
@@ -521,7 +462,6 @@ func TestTickAnimationsAdvancesState(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Create a short animation and tick past its duration.
 	if err := r.Run(`
 		var el = document.getElementById('target');
 		var anim = el.animate({opacity: [0, 1]}, 100);
@@ -529,21 +469,15 @@ func TestTickAnimationsAdvancesState(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Wait past the animation duration and tick.
 	time.Sleep(150 * time.Millisecond)
 	r.TickAnimations()
 
-	// The animation should have finished.
 	val, ok := r.Global("anim")
 	if !ok {
 		t.Fatal("anim not found")
 	}
-	_ = val // animation should be finished after tick
+	_ = val
 }
-
-// ---------------------------------------------------------------------------
-// HasPendingRAF with active animations
-// ---------------------------------------------------------------------------
 
 func TestHasPendingRAFWithAnimations(t *testing.T) {
 	d := animDOM(t)
@@ -573,10 +507,6 @@ func TestHasPendingRAFWithAnimations(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Inline style is modified by animation
-// ---------------------------------------------------------------------------
-
 func TestAnimationModifiesInlineStyle(t *testing.T) {
 	d := animDOM(t)
 	r, err := js.New(js.Options{
@@ -589,7 +519,6 @@ func TestAnimationModifiesInlineStyle(t *testing.T) {
 	}
 	defer r.Close()
 
-	// Create animation and tick to force application of values.
 	if err := r.Run(`
 		var el = document.getElementById('target');
 		var anim = el.animate({opacity: [0, 1]}, 1000);
@@ -597,10 +526,8 @@ func TestAnimationModifiesInlineStyle(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Tick once to apply initial values.
 	r.TickAnimations()
 
-	// The element's inline style should have opacity set.
 	if err := r.Run(`
 		var el = document.getElementById('target');
 		var style = el.getAttribute('style');
@@ -611,10 +538,6 @@ func TestAnimationModifiesInlineStyle(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Cancel clears animated style
-// ---------------------------------------------------------------------------
 
 func TestCancelClearsAnimatedStyle(t *testing.T) {
 	d := animDOM(t)
@@ -637,9 +560,6 @@ func TestCancelClearsAnimatedStyle(t *testing.T) {
 
 	r.TickAnimations()
 
-	// Cancel and check style is cleared.
-	// `anim` was set in the first Run and is still accessible since Run calls
-	// share the same VM.
 	if err := r.Run(`
 		anim.cancel();
 		if (anim.playState !== 'idle') throw new Error('should be idle after cancel');
@@ -648,13 +568,8 @@ func TestCancelClearsAnimatedStyle(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Edge cases
-// ---------------------------------------------------------------------------
-
 func TestAnimateWithEmptyKeyframes(t *testing.T) {
 	r := newAnimRuntime(t)
-	// Should not throw with empty keyframes.
 	err := r.Run(`
 		var el = document.getElementById('target');
 		var anim = el.animate({}, 1000);

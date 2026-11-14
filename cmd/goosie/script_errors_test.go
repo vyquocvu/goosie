@@ -10,11 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/net"
 )
 
-// The sweep's report has one field for "what the engine said" and for nine real
-// pages it was empty while the engine held 21 exceptions it had thrown away.
-// reportScriptErrors is the place that line gets written, so that is where the
-// contract is pinned: a page that broke names the script, a page that did not
-// breaks the silence of its own stderr.
 // qc:BR-190
 func TestReportScriptErrorsNamesTheFailingScript(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
@@ -76,10 +71,6 @@ func TestReportScriptErrorsIsSilentOnACleanDocument(t *testing.T) {
 	}
 }
 
-// The other half of the silence: a server that refuses the request answers with
-// a small interstitial document, the pipeline renders it as any other page, and
-// the run looks exactly like a page that is genuinely empty. The status is the
-// only fact that tells the two apart, and it was recorded nowhere.
 // qc:BR-190
 func TestReportRefusedDocumentNamesTheStatusAndTheBody(t *testing.T) {
 	var buf bytes.Buffer
@@ -101,8 +92,3 @@ func TestReportRefusedDocumentNamesTheStatusAndTheBody(t *testing.T) {
 		}
 	}
 }
-
-// A 200 answer is not a refusal. The ">= 400" decision lives at the call site
-// in loadURLCtx, not in the helper, so it is pinned end to end in
-// ./test/entrypoints against a server that answers both ways; re-implementing
-// the threshold here would only test the test.

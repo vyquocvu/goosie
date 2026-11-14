@@ -11,7 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// NavController tracks per-tab navigation state: cancellation, serial, and loading.
 type NavController struct {
 	Mu      sync.Mutex
 	Cancel  context.CancelFunc
@@ -19,14 +18,6 @@ type NavController struct {
 	Loading bool
 }
 
-// Tab is one browser tab with fully independent state.
-//
-// All mutable fields are private to the package: tabs are shared between the
-// event pump, the navigation drain and the presentation loop, and bare fields
-// let every one of those threads read half-written state. Accessors take the
-// mutex; Nav keeps its own (it is driven independently of the rest), History
-// keeps its (it is a locked type already), and the ID never changes after
-// creation.
 type Tab struct {
 	mu              sync.RWMutex
 	id              uint64
@@ -58,56 +49,48 @@ func newTab(id uint64) *Tab {
 	}
 }
 
-// ShieldsEnabled reports whether ad and tracker blocking shields are active for this tab.
 func (t *Tab) ShieldsEnabled() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return !t.shieldsDisabled
 }
 
-// SetShieldsEnabled toggles ad and tracker blocking shields for this tab.
 func (t *Tab) SetShieldsEnabled(enabled bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.shieldsDisabled = !enabled
 }
 
-// BlockedTrackers returns the number of requests blocked by shields on this tab.
 func (t *Tab) BlockedTrackers() int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.blockedTrackers
 }
 
-// IncrementBlockedTrackers increments the blocked request counter.
 func (t *Tab) IncrementBlockedTrackers() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.blockedTrackers++
 }
 
-// ResetBlockedTrackers resets the blocked request counter.
 func (t *Tab) ResetBlockedTrackers() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.blockedTrackers = 0
 }
 
-// Incognito reports whether the tab is running in private incognito mode.
 func (t *Tab) Incognito() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.incognito
 }
 
-// SetIncognito configures the tab's private incognito mode.
 func (t *Tab) SetIncognito(incognito bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.incognito = incognito
 }
 
-// ID identifies the tab; it never changes after creation.
 func (t *Tab) ID() uint64 { return t.id }
 
 func (t *Tab) URL() string {
@@ -218,58 +201,48 @@ func (t *Tab) SetBGColor(c frame.Color) {
 	t.bgColor = c
 }
 
-// Pinned reports whether the tab is pinned.
 func (t *Tab) Pinned() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.pinned
 }
 
-// SetPinned sets whether the tab is pinned.
 func (t *Tab) SetPinned(pinned bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.pinned = pinned
 }
 
-// Manifest returns the parsed PWA web app manifest for this tab, or nil if none.
 func (t *Tab) Manifest() *manifest.Manifest {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.manifest
 }
 
-// SetManifest sets the parsed PWA web app manifest for this tab.
 func (t *Tab) SetManifest(m *manifest.Manifest) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.manifest = m
 }
 
-// IsStandaloneApp reports whether this tab is presented in standalone PWA application mode.
 func (t *Tab) IsStandaloneApp() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.standaloneApp
 }
 
-// SetStandaloneApp configures whether this tab is in standalone PWA application mode.
 func (t *Tab) SetStandaloneApp(standalone bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.standaloneApp = standalone
 }
 
-// Favicon returns the tab's decoded site icon, or nil when the site supplied
-// none (or it is still loading). The image is immutable once stored, so the
-// draw path may resample it without holding the tab lock.
 func (t *Tab) Favicon() image.Image {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.favicon
 }
 
-// SetFavicon stores the tab's decoded site icon; nil restores the placeholder.
 func (t *Tab) SetFavicon(icon image.Image) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

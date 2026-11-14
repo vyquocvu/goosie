@@ -12,19 +12,6 @@ import (
 	"testing"
 )
 
-// The other branch of GOOSIE-LIVE-001's silence, and the bigger one: six of the
-// eight zero-output pages were never a layout failure at all. The server refused
-// Goosie - 403 for apnews.com, nytimes.com, japantimes.co.jp, etsy.com and
-// newegg.com, 401 for reuters.com - and answered with a small interstitial
-// document that the pipeline renders like any other page. rc 0, no stderr, and a
-// sweep label that says "the engine laid out nothing" when the truth is "the
-// source would not send the page".
-//
-// The status is on the response the loader already holds. These two cases pin
-// both ends: a refusal names the status and the size of what was rendered
-// instead of the page, and an accepted answer stays silent so the line keeps
-// meaning something.
-
 // qc:BR-190
 func TestGoosieScreenshotReportsARefusedDocument(t *testing.T) {
 	bin := buildBinary(t, "goosie")
@@ -46,8 +33,6 @@ func TestGoosieScreenshotReportsARefusedDocument(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("screenshot run failed: %v\nstderr: %s", err, stderr.String())
 	}
-	// Reporting a refusal must not turn the run into a failure or cost the
-	// interstitial its pixels: what is rendered is unchanged.
 	if _, err := os.Stat(png); err != nil {
 		t.Fatalf("no PNG written for a refused document: %v", err)
 	}

@@ -5,9 +5,6 @@ import (
 	"testing"
 )
 
-// The menu icon (three bars) is pure paths: without <path> support every
-// icon-shaped SVG decodes to a blank transparent tile, and masked UI icons
-// vanish from pages.
 func TestSVGPathFill(t *testing.T) {
 	data := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><g fill="#000"><path d="M1 3h18v2H1zm0 6h18v2H1zm0 6h18v2H1z"/></g></svg>`)
 	img, err := Decode(data)
@@ -24,7 +21,6 @@ func TestSVGPathFill(t *testing.T) {
 			}
 		}
 	}
-	// Three 18x2 bars = 108 opaque pixels (give or take AA).
 	if opaque < 80 {
 		t.Errorf("opaque pixels = %d, want >= 80", opaque)
 	}

@@ -17,7 +17,6 @@ func TestIncognitoTabCreationAndToolbarSync(t *testing.T) {
 	f.config.height = 600
 	f.toolbar = toolbar.NewState(800, nil)
 
-	// Create incognito tab
 	tab := f.newIncognitoTab()
 	if !tab.Incognito() {
 		t.Fatal("tab.Incognito() should be true")
@@ -29,7 +28,6 @@ func TestIncognitoTabCreationAndToolbarSync(t *testing.T) {
 		t.Errorf("bgColor = %v, want frame.RGB(40, 44, 52)", tab.BGColor())
 	}
 
-	// Toolbar should have received incognito mode update
 	if !f.toolbar.Incognito {
 		t.Fatal("f.toolbar.Incognito should be true after switching to incognito tab")
 	}
@@ -46,7 +44,7 @@ func TestIncognitoSessionSuppression(t *testing.T) {
 	incogTab.SetTitle("Secret")
 
 	st := sessionState(f)
-	if len(st.Tabs) != 2 { // firstTab + regTab
+	if len(st.Tabs) != 2 {
 		t.Fatalf("expected 2 non-incognito tabs in sessionState, got %d", len(st.Tabs))
 	}
 	for _, ts := range st.Tabs {
@@ -66,7 +64,6 @@ func TestIncognitoHistorySuppression(t *testing.T) {
 	f := newNavTestPath(t)
 	f.history = histStore
 
-	// 1. Regular tab navigation records history
 	regTab := f.tabMgr.NewTab()
 	f.switchTab(regTab.ID())
 	f.applyNavResult(navResult{
@@ -81,7 +78,6 @@ func TestIncognitoHistorySuppression(t *testing.T) {
 		t.Fatalf("regular visit not recorded in history: %v", entries)
 	}
 
-	// 2. Incognito tab navigation must NOT record history
 	incogTab := f.newIncognitoTab()
 	f.switchTab(incogTab.ID())
 	f.applyNavResult(navResult{
@@ -114,13 +110,11 @@ func TestIncognitoShortcuts(t *testing.T) {
 		},
 	}
 
-	// Cmd+Shift+N
 	consumed := cw.handleTabShortcut('n', surface.ModCommand|surface.ModShift)
 	if !consumed || !incognitoTriggered {
 		t.Errorf("Cmd+Shift+N failed to trigger incognito: consumed=%v, triggered=%v", consumed, incognitoTriggered)
 	}
 
-	// Cmd+Shift+P
 	incognitoTriggered = false
 	consumed = cw.handleTabShortcut('p', surface.ModCommand|surface.ModShift)
 	if !consumed || !incognitoTriggered {
@@ -135,7 +129,6 @@ func TestIncognitoToolbarThemeDrawing(t *testing.T) {
 	buf := frame.NewBitmap(800, toolbar.ToolbarHeight)
 	tb.Draw(buf, 0)
 
-	// In incognito mode, toolbar background is frame.RGB(40, 44, 52)
 	hasDarkBg := false
 	for x := 0; x < 50; x++ {
 		c := buf.At(x, 5).RGBA()

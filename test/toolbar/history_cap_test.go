@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// FR-NAV-05: one tab's back/forward trail is capped at 50 navigation entries
-// per session. Pushing past the cap drops the oldest visit, not the newest.
 func TestHistoryCapsTrailAtFiftyEntries(t *testing.T) {
 	h := toolbar.NewHistory()
 	for i := 1; i <= 60; i++ {
@@ -41,8 +39,6 @@ func TestHistoryCapsTrailAtFiftyEntries(t *testing.T) {
 	}
 }
 
-// A restored trail is also subject to the cap: saved state from an older
-// build (or a hand-edited file) must not smuggle in more than fifty entries.
 func TestRestoreHistoryClampsToCap(t *testing.T) {
 	saved := make([]string, toolbar.MaxHistoryEntries+20)
 	for i := range saved {
@@ -64,9 +60,6 @@ func TestRestoreHistoryClampsToCap(t *testing.T) {
 	}
 }
 
-// The cap must not resurrect truncated forward entries: a back-then-push
-// discards the forward trail first, and the trimmed trail keeps its cursor on
-// the newly pushed visit.
 func TestHistoryCapKeepsCursorAfterForwardTruncation(t *testing.T) {
 	h := toolbar.NewHistory()
 	for i := 1; i <= toolbar.MaxHistoryEntries; i++ {

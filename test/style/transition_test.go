@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestTransitionShorthandComputedStyle verifies that the transition shorthand
-// is parsed and stored on the ComputedStyle.
 func TestTransitionShorthandComputedStyle(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,
@@ -28,7 +26,6 @@ func TestTransitionShorthandComputedStyle(t *testing.T) {
 	}
 }
 
-// TestTransitionMultipleComputedStyle verifies multiple comma-separated transitions.
 func TestTransitionMultipleComputedStyle(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,
@@ -47,7 +44,6 @@ func TestTransitionMultipleComputedStyle(t *testing.T) {
 	}
 }
 
-// TestTransitionNoneComputedStyle verifies that "none" produces no transitions.
 func TestTransitionNoneComputedStyle(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,
@@ -57,7 +53,6 @@ func TestTransitionNoneComputedStyle(t *testing.T) {
 	}
 }
 
-// TestTransitionWithDelayComputedStyle verifies the delay parameter.
 func TestTransitionWithDelayComputedStyle(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,
@@ -77,7 +72,6 @@ func TestTransitionWithDelayComputedStyle(t *testing.T) {
 	}
 }
 
-// TestTransitionDefaultProperty verifies that omitting the property defaults to "all".
 func TestTransitionDefaultProperty(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,
@@ -90,7 +84,6 @@ func TestTransitionDefaultProperty(t *testing.T) {
 	}
 }
 
-// TestTransitionMsUnitComputedStyle verifies millisecond time units.
 func TestTransitionMsUnitComputedStyle(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,
@@ -106,7 +99,6 @@ func TestTransitionMsUnitComputedStyle(t *testing.T) {
 	}
 }
 
-// TestTransitionEaseInOutComputedStyle verifies the ease-in-out timing function.
 func TestTransitionEaseInOutComputedStyle(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,
@@ -119,8 +111,6 @@ func TestTransitionEaseInOutComputedStyle(t *testing.T) {
 	}
 }
 
-// TestNoTransitionDefault verifies that elements without transition declarations
-// have no transitions.
 func TestNoTransitionDefault(t *testing.T) {
 	s := styleFor(t,
 		`<html><body><div class="box">x</div></body></html>`,

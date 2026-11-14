@@ -11,32 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/surface"
 )
 
-// BR-074's frame-path half: an idle page must not move a pixel, and the pixels
-// a scrolled page shows must not depend on how the viewport got there. The
-// reference behaviour is measured by scripts/verify-br074-color-idle-scroll.js
-// (Chromium 1.63, this host, 2026-11-04):
-//
-//	IDLE   three captures 300ms apart on an unattended page: byte-identical
-//	SCROLL scrollY 160 reached in one jump, in eight steps of 20, and after
-//	       going to 320 and back: three byte-identical captures; returning to
-//	       the top reproduces the very first capture byte for byte
-//
-// and the colour of a document point is the same at every offset:
-//
-//	SCROLL-PIXELS at scrollY 0   tall@10px=rgb(1,168,0) tall@100px=rgb(10,159,0) tall@250px=rgb(26,143,0) tall@390px=rgb(41,128,0)
-//	SCROLL-PIXELS at scrollY 160 the same four values
-//
-// This file drives the same path the shipped browser does - a real display list
-// from Session.PaintChecked, the real tile rasterizer, the real worker pool, the
-// damage-blit composer - because flicker is a property of that path, not of the
-// painter alone: a scroll memmoves backing-store rows and reuses tiles, and
-// either can leave a pixel drawn for a different offset or a different content
-// version. The fixture is the one test/paint/color_idle_scroll_test.go samples
-// against Chromium, so a pixel checked here is the same pixel scored there.
-
-// flkFixture: flat fills, one faded group, a hard-stop band whose stop positions
-// use CSS's unitless zero, and a 1600px ramp that spans every scroll offset
-// these tests visit.
 const flkFixture = `<!doctype html><html><head><style>
 html,body{margin:0;padding:0;background:#fff}
 .box{position:absolute}
@@ -57,12 +31,8 @@ const (
 	flkVW  = 800
 )
 
-// flkPages is the page background the composer paints behind the layer - the
-// same white the anchor's captures and test/paint's rasters start from.
 var flkPages = frame.RGB(255, 255, 255)
 
-// flkHarness is one frame path over a real page, driven the way surface.Loop
-// drives its scheduler: BeginFrame, Submit, ComposeInto.
 type flkHarness struct {
 	t      *testing.T
 	s      *raster.Scheduler
@@ -89,8 +59,6 @@ func flkPage(t *testing.T, html string) *flkHarness {
 		t.Fatalf("PaintChecked: %v", err)
 	}
 	content := dl.Build(1).Publish()
-	// The layer starts at the document's own origin, so a viewport offset of y
-	// puts document row y on backing row 0 and the two stay comparable.
 	ext := content.Extent()
 	budget := int64(64) * frame.TileSizeBytes()
 	pool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, 4096)
@@ -108,8 +76,6 @@ func flkPage(t *testing.T, html string) *flkHarness {
 	return &flkHarness{t: t, s: s, l: l, pool: wp, c: c, fonts: fonts}
 }
 
-// frame draws one vsync, scrolling by dy device pixels, and keeps the damage
-// the composer reported for that frame.
 func (h *flkHarness) frame(dy int32) surface.FrameWork {
 	h.t.Helper()
 	plan, needed := h.s.BeginFrame(surface.Event{Kind: surface.EvVsync,
@@ -123,11 +89,6 @@ func (h *flkHarness) frame(dy int32) surface.FrameWork {
 	return work
 }
 
-// settle leaves a surface that actually shows the document. Submit only puts
-// tiles in the grid; ComposeInto is what writes them onto the backing store, so
-// a snapshot taken after a pump-only wait can be missing rows that settled
-// happily in the cache. A frame that wants no tile and reports no damage is the
-// frame an idle browser draws, so that is where settle stops.
 func (h *flkHarness) settle() {
 	h.t.Helper()
 	if !pollUntil(func() bool {
@@ -138,9 +99,6 @@ func (h *flkHarness) settle() {
 	}
 }
 
-// scrollTo lands exactly on a document offset. It fails rather than clamping:
-// a stop that came up short would compare the pixels of two different offsets
-// and call the difference a scroll artefact.
 func (h *flkHarness) scrollTo(y int32) {
 	h.t.Helper()
 	if dy := y - h.s.Viewport().Offset.Y; dy != 0 {
@@ -152,8 +110,6 @@ func (h *flkHarness) scrollTo(y int32) {
 	h.settle()
 }
 
-// snapshot copies the composited surface, which the next frame rewrites in
-// place.
 func (h *flkHarness) snapshot() *frame.Bitmap {
 	cp := frame.NewBitmap(int(h.c.Backing.W), int(h.c.Backing.H))
 	copy(cp.RGBA, h.c.Backing.RGBA)
@@ -162,8 +118,6 @@ func (h *flkHarness) snapshot() *frame.Bitmap {
 
 func (h *flkHarness) rasterized() int64 { return h.s.Stats().Rasterized }
 
-// flkChanged lists the pixels two surfaces disagree about, capped so a failure
-// names a few rather than flooding the log.
 func flkChanged(a, b *frame.Bitmap) [][2]int {
 	var out [][2]int
 	for y := 0; y < int(b.H); y++ {
@@ -178,9 +132,6 @@ func flkChanged(a, b *frame.Bitmap) [][2]int {
 	return out
 }
 
-// The idle half of "colour does not flicker": frames that change nothing must
-// ask for no tile, report no damage, and leave no pixel moved.
-//
 // qc:BR-074
 func TestIdleFramesMoveNoColourAndDrawNoTile(t *testing.T) {
 	h := flkPage(t, flkFixture)
@@ -205,11 +156,6 @@ func TestIdleFramesMoveNoColourAndDrawNoTile(t *testing.T) {
 	}
 }
 
-// The scroll half, as the anchor states it: the surface at an offset is the
-// same surface however the viewport arrived, and the top of the page survives a
-// round trip through the rows a scroll memmoved and the tiles the cache dropped
-// on the way down.
-//
 // qc:BR-074
 func TestTheSameOffsetLooksTheSameHoweverTheScrollGotThere(t *testing.T) {
 	const y = 160
@@ -220,16 +166,12 @@ func TestTheSameOffsetLooksTheSameHoweverTheScrollGotThere(t *testing.T) {
 	h.scrollTo(y)
 	jump := h.snapshot()
 
-	// Eight steps of 20: every intermediate row is composited, and the
-	// destination is reached by memmoves rather than by one big shift.
 	h.scrollTo(0)
 	for cur := int32(20); cur <= y; cur += 20 {
 		h.scrollTo(cur)
 	}
 	stepped := h.snapshot()
 
-	// Past it and back: the tiles that were on screen at 160 have been off
-	// screen, in another offset's company, and must come back as themselves.
 	h.scrollTo(320)
 	h.scrollTo(y)
 	there := h.snapshot()
@@ -248,19 +190,12 @@ func TestTheSameOffsetLooksTheSameHoweverTheScrollGotThere(t *testing.T) {
 	}
 }
 
-// A gradient's colour belongs to the document, not to the viewport: the ramp
-// must answer the same value at a document point whatever the scroll offset
-// paints it at, which is what the anchor's SCROLL-PIXELS pair measures and
-// what a tile whose ramp was computed against its own rect would break.
-//
 // qc:BR-074
 func TestGradientColourIsAnchoredToTheDocumentNotTheViewport(t *testing.T) {
 	const y = 160
 	h := flkPage(t, flkFixture)
 	h.settle()
 
-	// Document points inside the 1600px ramp, with the values the reference
-	// browser prints at the same points.
 	pts := []struct {
 		docY    int
 		r, g, b int
@@ -287,8 +222,6 @@ func TestGradientColourIsAnchoredToTheDocumentNotTheViewport(t *testing.T) {
 		}
 	}
 
-	// The hard-stop band keeps its edge too, and it is the syntax that painted
-	// nothing before this slice read the unitless zero as a position.
 	h.scrollTo(0)
 	before := h.snapshot()
 	if c := before.At(100, 145); c != frame.RGB(17, 17, 17) {

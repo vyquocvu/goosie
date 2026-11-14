@@ -8,12 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// TestHeadLevelElementInBodyDoesNotSwallowContent pins HTML5's insertion point
-// for style/link/meta/title. Those tags belong in a head only while the head is
-// the live insertion point; after the body has begun they are inserted where
-// they appear. Synthesizing a head there leaves it open on the stack, so every
-// later element becomes a child of a display:none subtree and the whole page
-// renders blank - not a wrong colour or a shifted box, but nothing at all.
 func TestHeadLevelElementInBodyDoesNotSwallowContent(t *testing.T) {
 	cases := []struct{ name, html string }{
 		{"style in body, no head tag", `<html><body><style>.x{color:red}</style><div class="content">A</div></body></html>`},
@@ -53,9 +47,6 @@ func TestHeadLevelElementInBodyDoesNotSwallowContent(t *testing.T) {
 	}
 }
 
-// TestHeadKeepsContentBeforeTheBody is the other half of the pin: a head-level
-// element before any body content must still land in the head, so a document's
-// own <style> does not become a rendered child of the body.
 func TestHeadKeepsContentBeforeTheBody(t *testing.T) {
 	doc := domtest.Parse(`<html><head><style>.x{color:red}</style><link rel="stylesheet" href="a.css"></head><body><div class="content">A</div></body></html>`)
 	if doc.Head == nil {

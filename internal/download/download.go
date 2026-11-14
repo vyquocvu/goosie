@@ -1,5 +1,3 @@
-// Package download decides whether a response must be saved instead of
-// rendered and writes it under a collision-free name.
 package download
 
 import (
@@ -17,24 +15,16 @@ import (
 	"unicode"
 )
 
-// Digest is the SHA-256 of a download's bytes. It is computed as the stream is
-// written, so verification needs no second pass over the file.
 type Digest [sha256.Size]byte
 
-// String returns the lowercase hexadecimal form used in download metadata.
 func (d Digest) String() string {
 	return hex.EncodeToString(d[:])
 }
 
-// Sum returns the SHA-256 digest of an already-buffered response body.
 func Sum(body []byte) Digest {
 	return Digest(sha256.Sum256(body))
 }
 
-// ShouldDownload reports whether a main-document response must be saved to
-// disk instead of rendered: an attachment disposition always downloads, and
-// any content type the engine cannot render downloads too. An absent content
-// type preserves the historical render behavior.
 func ShouldDownload(contentType, disposition string) bool {
 	if strings.Contains(strings.ToLower(disposition), "attachment") {
 		return true
@@ -53,8 +43,6 @@ func ShouldDownload(contentType, disposition string) bool {
 	}
 }
 
-// FileName picks a save name from the disposition's filename parameter, then
-// the URL path, then a fallback, reduced to one safe path component.
 func FileName(disposition, rawURL string) string {
 	if name := sanitize(dispositionParam(disposition)); name != "" {
 		return name
@@ -70,8 +58,6 @@ func FileName(disposition, rawURL string) string {
 	return "download"
 }
 
-// dispositionParam extracts filename="value" (or bare value) from a
-// Content-Disposition header value.
 func dispositionParam(disposition string) string {
 	for _, part := range strings.Split(disposition, ";") {
 		part = strings.TrimSpace(part)
@@ -82,9 +68,6 @@ func dispositionParam(disposition string) string {
 	return ""
 }
 
-// sanitize strips control characters and keeps only the last path segment.
-// Both separators are treated as path boundaries regardless of host OS, and
-// the only names that reduce to a directory are discarded rather than joined.
 func sanitize(name string) string {
 	name = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
@@ -103,10 +86,6 @@ func sanitize(name string) string {
 	return last
 }
 
-// Save writes body under dir with the given name, appending (1), (2), ... to
-// the base when the name is taken. It returns the written path. The name is
-// reduced to a single component here as well as in FileName: an exported
-// writer must not be the one call that trusts its caller with a path.
 func Save(dir, name string, body []byte) (string, error) {
 	name = sanitize(name)
 	if name == "" {
@@ -132,13 +111,8 @@ func Save(dir, name string, body []byte) (string, error) {
 	return full, os.WriteFile(full, body, 0o644)
 }
 
-// ErrPaused reports that a transfer stopped because the user paused it. The
-// partial file is preserved so the transfer can resume with a Range request.
 var ErrPaused = errors.New("goosie: download paused")
 
-// StreamResult describes where a streamed download landed. On success Path is
-// the final file. When ErrPaused is returned TempPath names the preserved
-// partial file and Bytes holds how much of it was written.
 type StreamResult struct {
 	Path     string
 	TempPath string
@@ -146,18 +120,11 @@ type StreamResult struct {
 	Digest   Digest
 }
 
-// SaveStream writes a response incrementally to a temporary file, reporting
-// byte progress as chunks arrive. The completed file is linked into place only
-// after the stream succeeds, so cancellation and network errors leave no
-// partial download visible in the destination directory.
 func SaveStream(ctx context.Context, dir, name string, src io.Reader, progress func(downloaded int64)) (string, int64, Digest, error) {
 	res, err := SaveStreamPausable(ctx, dir, name, src, progress)
 	return res.Path, res.Bytes, res.Digest, err
 }
 
-// SaveStreamPausable is SaveStream with pause support. A paused stream returns
-// ErrPaused with the partial file in StreamResult.TempPath; cancellation still
-// removes the partial file.
 func SaveStreamPausable(ctx context.Context, dir, name string, src io.Reader, progress func(downloaded int64)) (StreamResult, error) {
 	if src == nil {
 		return StreamResult{}, errors.New("goosie: download: missing response body")
@@ -181,16 +148,11 @@ func SaveStreamPausable(ctx context.Context, dir, name string, src io.Reader, pr
 	return StreamResult{Path: fullPath, Bytes: total, Digest: sum}, nil
 }
 
-// SaveStreamTo writes a stream to an explicitly selected path. The temporary
-// file is placed beside the destination, then renamed into place after the
-// stream succeeds. Callers should only use this after obtaining overwrite
-// confirmation from the user's save dialog.
 func SaveStreamTo(ctx context.Context, target string, src io.Reader, progress func(downloaded int64)) (int64, Digest, error) {
 	res, err := SaveStreamToPausable(ctx, target, src, progress)
 	return res.Bytes, res.Digest, err
 }
 
-// SaveStreamToPausable is SaveStreamTo with pause support.
 func SaveStreamToPausable(ctx context.Context, target string, src io.Reader, progress func(downloaded int64)) (StreamResult, error) {
 	if src == nil {
 		return StreamResult{}, errors.New("goosie: download: missing response body")
@@ -216,10 +178,6 @@ func SaveStreamToPausable(ctx context.Context, target string, src io.Reader, pro
 	return StreamResult{Path: absTarget, Bytes: total, Digest: sum}, nil
 }
 
-// AppendToTemp continues a paused download into its existing partial file. It
-// returns the complete byte count and the SHA-256 of the whole file. ErrPaused
-// means the transfer stopped again and its partial file was preserved;
-// cancellation removes the partial file.
 func AppendToTemp(ctx context.Context, tempPath string, src io.Reader, progress func(downloaded int64)) (int64, Digest, error) {
 	if src == nil {
 		return 0, Digest{}, errors.New("goosie: download: missing response body")
@@ -291,8 +249,6 @@ func AppendToTemp(ctx context.Context, tempPath string, src io.Reader, progress 
 	return total, sum, nil
 }
 
-// FinalizeTemp links a completed temporary file into dir under a collision-free
-// name.
 func FinalizeTemp(tempPath, dir, name string) (string, error) {
 	name = sanitize(name)
 	if name == "" {
@@ -306,7 +262,6 @@ func FinalizeTemp(tempPath, dir, name string) (string, error) {
 	return fullPath, nil
 }
 
-// FinalizeTempTo renames a completed temporary file to an explicit destination.
 func FinalizeTempTo(tempPath, target string) error {
 	absTarget, err := resolveTarget(target)
 	if err != nil {
@@ -353,8 +308,6 @@ func linkTemp(tmpName, dir, name string) (string, error) {
 	return "", fmt.Errorf("goosie: download: no free name for %q in %q", name, dir)
 }
 
-// HashFile returns the SHA-256 of a file already on disk. Resumed downloads
-// use it when the server confirms the partial file already holds every byte.
 func HashFile(path string) (Digest, error) {
 	return hashFile(path)
 }

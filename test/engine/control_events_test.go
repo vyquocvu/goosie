@@ -9,8 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// --- Focus/blur/change event tests ---
-
 func TestFocusFiresFocusEvent(t *testing.T) {
 	html := `<html><body style="margin: 0;"><input id="a" value="hi"></body></html>`
 	s, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
@@ -48,7 +46,6 @@ func TestBlurFiresBlurEvent(t *testing.T) {
 
 	x, y := clickPoint(t, s, "a")
 	s.FocusControl(x, y)
-	// Blur by clicking empty space.
 	s.FocusControl(790, 590)
 
 	if !blurFired {
@@ -70,8 +67,8 @@ func TestBlurFiresChangeEventWhenValueModified(t *testing.T) {
 
 	x, y := clickPoint(t, s, "a")
 	s.FocusControl(x, y)
-	s.Edit(engine.EditRune, '!') // value changes from "hi" to "hi!"
-	s.FocusControl(790, 590)     // blur
+	s.Edit(engine.EditRune, '!')
+	s.FocusControl(790, 590)
 
 	if !changeFired {
 		t.Fatal("change event was not fired after value modification and blur")
@@ -150,8 +147,7 @@ func TestBlurNoChangeEventWhenValueUnmodified(t *testing.T) {
 
 	x, y := clickPoint(t, s, "a")
 	s.FocusControl(x, y)
-	// Do not edit.
-	s.FocusControl(790, 590) // blur
+	s.FocusControl(790, 590)
 
 	if changeFired {
 		t.Fatal("change event should not fire when value was not modified")
@@ -170,7 +166,6 @@ func TestCheckboxToggleFiresChangeEvent(t *testing.T) {
 	}, false)
 
 	s := &engine.Session{}
-	// Use the exported constructor to get a valid session with Doc set.
 	html := `<html><body><input id="cb" type="checkbox"></body></html>`
 	sess, err := engine.NewSession(html, nil, 800, engine.WithViewportH(600))
 	if err != nil {
@@ -189,7 +184,7 @@ func TestCheckboxToggleFiresChangeEvent(t *testing.T) {
 	if !changeFired {
 		t.Fatal("change event was not fired on checkbox toggle")
 	}
-	_ = s // unused, just to verify Session is usable
+	_ = s
 	_ = doc
 }
 
@@ -269,8 +264,6 @@ func TestBackspaceFiresInputEvent(t *testing.T) {
 	}
 }
 
-// --- Form submission event tests ---
-
 func TestSubmitFormFiresSubmitEvent(t *testing.T) {
 	doc := dom.NewDocument()
 	html := doc.NewElement("html")
@@ -316,14 +309,10 @@ func TestSubmitEventCancelable(t *testing.T) {
 		t.Fatal("form not found")
 	}
 
-	// Register a listener that prevents default.
 	dom.AddEventListener(formNode, "submit", func(e *dom.Event) {
 		e.PreventDefault()
 	}, false)
 
-	// Track whether form data would be collected by wrapping SubmitForm
-	// behavior: if preventDefault works, SubmitForm returns early.
-	// We verify by checking that the event was indeed prevented.
 	ev := dom.NewEvent("submit", true, true)
 	result := dom.DispatchEvent(formNode, ev)
 	if result {
@@ -333,8 +322,6 @@ func TestSubmitEventCancelable(t *testing.T) {
 		t.Fatal("event should report DefaultPrevented")
 	}
 }
-
-// --- Tabbable controls tests ---
 
 func TestTabbableControls(t *testing.T) {
 	doc := dom.NewDocument()
@@ -359,7 +346,7 @@ func TestTabbableControls(t *testing.T) {
 	btn := doc.NewElement("button")
 	link := doc.NewElement("a")
 	link.SetAttribute("href", "/page")
-	noLink := doc.NewElement("a") // no href
+	noLink := doc.NewElement("a")
 
 	form.AppendChild(text)
 	form.AppendChild(hidden)
@@ -375,8 +362,6 @@ func TestTabbableControls(t *testing.T) {
 
 	controls := engine.TabbableControls(doc)
 
-	// Expected tabbable: text input, textarea, select, button, a[href].
-	// NOT tabbable: hidden input, disabled input, a without href.
 	wantTags := []string{"input", "textarea", "select", "button", "a"}
 	if len(controls) != len(wantTags) {
 		t.Fatalf("tabbable controls = %d, want %d", len(controls), len(wantTags))
@@ -399,14 +384,12 @@ func TestFocusNextCycles(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 
-	// Focus the first input via click.
 	x, y := clickPoint(t, s, "a")
 	s.FocusControl(x, y)
 	if got := s.Focused().GetAttribute("id"); got != "a" {
 		t.Fatalf("focused = %q, want a", got)
 	}
 
-	// Tab to next.
 	s.FocusNext()
 	if got := s.Focused().GetAttribute("id"); got != "b" {
 		t.Fatalf("after FocusNext: focused = %q, want b", got)
@@ -417,7 +400,6 @@ func TestFocusNextCycles(t *testing.T) {
 		t.Fatalf("after 2nd FocusNext: focused = %q, want c", got)
 	}
 
-	// Wrap around.
 	s.FocusNext()
 	if got := s.Focused().GetAttribute("id"); got != "a" {
 		t.Fatalf("after wrap: focused = %q, want a", got)
@@ -435,11 +417,9 @@ func TestFocusPrevCycles(t *testing.T) {
 		t.Fatalf("NewSession: %v", err)
 	}
 
-	// Focus the first input via click.
 	x, y := clickPoint(t, s, "a")
 	s.FocusControl(x, y)
 
-	// Tab prev should wrap to last.
 	s.FocusPrev()
 	if got := s.Focused().GetAttribute("id"); got != "c" {
 		t.Fatalf("after FocusPrev from a: focused = %q, want c", got)

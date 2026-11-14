@@ -23,25 +23,21 @@ func TestReopenTabShortcut(t *testing.T) {
 		onCloseTab:  func(uint64) { closeTabCalls++ },
 	}
 
-	// Cmd+T -> onNewTab
 	handled := cw.handleTabShortcut('t', surface.ModCommand)
 	if !handled || newTabCalls != 1 || reopenTabCalls != 0 {
 		t.Fatalf("Cmd+T: handled=%v, newTabs=%d, reopenTabs=%d", handled, newTabCalls, reopenTabCalls)
 	}
 
-	// Cmd+Shift+T -> onReopenTab
 	handled = cw.handleTabShortcut('t', surface.ModCommand|surface.ModShift)
 	if !handled || newTabCalls != 1 || reopenTabCalls != 1 {
 		t.Fatalf("Cmd+Shift+T ('t'): handled=%v, newTabs=%d, reopenTabs=%d", handled, newTabCalls, reopenTabCalls)
 	}
 
-	// Cmd+Shift+T (uppercase 'T') -> onReopenTab
 	handled = cw.handleTabShortcut('T', surface.ModCommand|surface.ModShift)
 	if !handled || newTabCalls != 1 || reopenTabCalls != 2 {
 		t.Fatalf("Cmd+Shift+T ('T'): handled=%v, newTabs=%d, reopenTabs=%d", handled, newTabCalls, reopenTabCalls)
 	}
 
-	// Cmd+W -> onCloseTab
 	handled = cw.handleTabShortcut('w', surface.ModCommand)
 	if !handled || closeTabCalls != 1 {
 		t.Fatalf("Cmd+W: handled=%v, closeTabs=%d", handled, closeTabCalls)
@@ -51,7 +47,6 @@ func TestReopenTabShortcut(t *testing.T) {
 // qc:BR-039
 func TestFramePathReopenTab(t *testing.T) {
 	f := newNavTestPath(t)
-	// Create a second tab so we can close one without emptying the manager
 	tab2 := f.tabMgr.NewTab()
 	tab2.SetURL("https://example.com/page2")
 	tab2.SetTitle("Page Two")
@@ -63,7 +58,6 @@ func TestFramePathReopenTab(t *testing.T) {
 		t.Fatal("Active tab should be tab2")
 	}
 
-	// Close tab2
 	f.closeTab(tab2.ID())
 	if f.tabMgr.Count() != 1 {
 		t.Fatalf("Tab count after close = %d, want 1", f.tabMgr.Count())
@@ -72,7 +66,6 @@ func TestFramePathReopenTab(t *testing.T) {
 		t.Fatalf("ClosedTabCount() = %d, want 1", f.tabMgr.ClosedTabCount())
 	}
 
-	// Call reopenTab
 	f.reopenTab()
 	if f.tabMgr.Count() != 2 {
 		t.Fatalf("Tab count after reopen = %d, want 2", f.tabMgr.Count())

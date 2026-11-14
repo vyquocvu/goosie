@@ -39,11 +39,9 @@ func TestProgressAndMeterPainting(t *testing.T) {
 
 	for _, cmd := range commands {
 		if cmd.Kind == paint.CmdFill {
-			// Progress fill bar has blue RGB(0, 117, 255)
 			if cmd.Color.R() == 0 && cmd.Color.G() == 117 && cmd.Color.B() == 255 {
 				hasProgressFill = true
 			}
-			// Meter optimum fill bar has green RGB(40, 167, 69)
 			if cmd.Color.R() == 40 && cmd.Color.G() == 167 && cmd.Color.B() == 69 {
 				hasMeterFill = true
 			}

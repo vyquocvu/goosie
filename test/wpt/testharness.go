@@ -69,9 +69,6 @@ type wptHarnessReport struct {
 	Skips         []string `json:"skips"`
 }
 
-// runTestHarness executes a WPT testharness.js file in Goosie's real document
-// engine and collects the completion callback result. Page scripts and harness
-// resources are restricted to the active WPT server origin.
 func (r *Runner) runTestHarness(dt DiscoveredTest) TestResult {
 	queries := r.cfg.TestVariants[dt.Path]
 	if len(queries) == 0 {
@@ -143,9 +140,6 @@ func testVariantURL(testURL, query string) (string, error) {
 	return parsed.String(), nil
 }
 
-// wptDocumentURL gives secure-suffixed WPT files their specified HTTPS origin
-// while the harness transports the document bytes through its local HTTP
-// listener. Subresource adapters apply the same alias transport mapping.
 func wptDocumentURL(transportURL, testPath string) string {
 	if !strings.Contains(strings.ToLower(testPath), ".https.") {
 		return transportURL
@@ -364,8 +358,6 @@ func (r *Runner) runTestHarnessVariant(dt DiscoveredTest, query string) TestResu
 				at += len(marker)
 				data = append(data[:at], append([]byte("\n"+wptResultCollectorScript+"\n"), data[at:]...)...)
 			} else {
-				// Small WPT-compatible harnesses used by runner tests may not expose
-				// the upstream implementation's Tests constructor.
 				data = append(data, []byte("\n"+wptResultCollectorScript)...)
 			}
 			if len(data) > js.MaxScriptBytes {
@@ -727,9 +719,6 @@ func (r *Runner) runTestHarnessVariant(dt DiscoveredTest, query string) TestResu
 	}
 }
 
-// disableWPTHarnessOutput keeps the harness's progress UI from mutating the
-// document under test. Browser WPT runners normally render this output in a
-// parent document; Goosie's in-document runner has no opener document.
 func disableWPTHarnessOutput(source []byte) []byte {
 	return append([]byte("setup({output:false});\n"), source...)
 }
@@ -814,10 +803,6 @@ func parseWPTDataDocument(raw string) (*dom.Document, error) {
 	return doc, nil
 }
 
-// anyJSTestDocument adapts the Window variant of a WPT .any.js test to the
-// existing document-based testharness runner. META script dependencies remain
-// relative to the original WPT path because the generated document uses that
-// path as its URL.
 func anyJSTestDocument(testPath string, source []byte) []byte {
 	var dependencies []string
 	for _, line := range strings.Split(string(source), "\n") {
@@ -838,8 +823,6 @@ func anyJSTestDocument(testPath string, source []byte) []byte {
 	}
 
 	var document strings.Builder
-	// Match WPT's AnyHtmlHandler window wrapper. The per-global helpers must
-	// exist before the testharness and the .any.js source execute.
 	document.WriteString("<!doctype html><html><head><meta charset=utf-8><script>self.GLOBAL = { isWindow: function() { return true; }, isWorker: function() { return false; }, isShadowRealm: function() { return false; } };</script><script src='/resources/testharness.js'></script><script src='/resources/testharnessreport.js'></script>")
 	for _, dependency := range dependencies {
 		document.WriteString("<script src='")
@@ -877,15 +860,9 @@ func sameOrigin(candidate *url.URL, base string) bool {
 	if strings.EqualFold(candidate.Hostname(), baseURL.Hostname()) {
 		return true
 	}
-	// The WPT server's *.localhost names all route to loopback. Permit those
-	// hostnames for transport while the runtime still enforces their distinct
-	// document origins.
 	return isLocalhostHost(candidate.Hostname()) && isLocalhostHost(baseURL.Hostname())
 }
 
-// wptLocalTransportURL maps a WPT loopback origin to the one local HTTP
-// listener. The document keeps candidate's original scheme and host in its
-// Runtime URL; this mapping only chooses where the harness fetches its bytes.
 func wptLocalTransportURL(candidate *url.URL, serverBase string) (*url.URL, bool) {
 	if candidate == nil || candidate.User != nil || (candidate.Scheme != "http" && candidate.Scheme != "https") {
 		return nil, false

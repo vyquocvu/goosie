@@ -19,10 +19,6 @@ const (
 	MaxDecodedImagePixels = 16 * 1024 * 1024
 )
 
-// Probe checks encoded length and metadata before full decode. It returns the
-// image config if the data passes admission limits. Standalone SVG documents
-// resolve their raster size from width/height, viewBox, or the 300x150
-// replaced-element fallback, under the same dimension/pixel limits.
 func Probe(data []byte) (gimage.Config, error) {
 	if len(data) > MaxEncodedImageBytes {
 		return gimage.Config{}, fmt.Errorf("image: encoded size %d exceeds limit %d", len(data), MaxEncodedImageBytes)
@@ -53,9 +49,6 @@ func Probe(data []byte) (gimage.Config, error) {
 	return cfg, nil
 }
 
-// Decode decodes an image from raw bytes. The output is premultiplied RGBA at
-// the original resolution; the caller is responsible for any downscaling.
-// Standalone SVG documents rasterize through the static subset in svg.go.
 func Decode(data []byte) (gimage.Image, error) {
 	if _, err := Probe(data); err != nil {
 		return nil, err
@@ -78,7 +71,6 @@ func Decode(data []byte) (gimage.Image, error) {
 	return img, nil
 }
 
-// DecodePNG decodes a PNG image with metadata admission.
 func DecodePNG(r io.Reader) (gimage.Image, error) {
 	limited := io.LimitReader(r, MaxEncodedImageBytes+1)
 	var buf bytes.Buffer
@@ -106,7 +98,6 @@ func DecodePNG(r io.Reader) (gimage.Image, error) {
 	return img, nil
 }
 
-// DecodeJPEG decodes a JPEG image with metadata admission.
 func DecodeJPEG(r io.Reader) (gimage.Image, error) {
 	limited := io.LimitReader(r, MaxEncodedImageBytes+1)
 	var buf bytes.Buffer
@@ -134,7 +125,6 @@ func DecodeJPEG(r io.Reader) (gimage.Image, error) {
 	return img, nil
 }
 
-// EncodePNG encodes an image as PNG.
 func EncodePNG(w io.Writer, img gimage.Image) error {
 	return png.Encode(w, img)
 }

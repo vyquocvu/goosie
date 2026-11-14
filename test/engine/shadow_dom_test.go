@@ -7,11 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestShadowDOMAndCustomElementLifecycleStayScoped is the BR-118 engine oracle:
-// a declarative shadow root must render its own tree plus slotted light
-// children, the custom element callbacks around it must run once each, and
-// none of that may disturb the sibling document tree.
-//
 // qc:BR-118
 func TestShadowDOMAndCustomElementLifecycleStayScoped(t *testing.T) {
 	html := `<html><head><style>

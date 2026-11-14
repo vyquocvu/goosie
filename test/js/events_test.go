@@ -8,11 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// eventDOM builds a DOM tree for event tests:
-//
-//	html
-//	  body
-//	    div#target
 func eventDOM() *dom.Document {
 	doc := &dom.Document{}
 	html := doc.NewElement("html")
@@ -27,7 +22,6 @@ func eventDOM() *dom.Document {
 	return doc
 }
 
-// newEventRuntime creates a JS runtime with the event test DOM.
 func newEventRuntime(t *testing.T, doc *dom.Document) *js.Runtime {
 	t.Helper()
 	r, err := js.New(js.Options{
@@ -41,8 +35,6 @@ func newEventRuntime(t *testing.T, doc *dom.Document) *js.Runtime {
 	return r
 }
 
-// TestAddEventListenerFires verifies that addEventListener("click", fn) fires
-// when a click event is dispatched on the element.
 func TestAddEventListenerFires(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -57,7 +49,6 @@ func TestAddEventListenerFires(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Dispatch a click event on the div from Go.
 	div := doc.ElementByID("target")
 	event := dom.NewEvent("click", true, true)
 	dom.DispatchEvent(div, event)
@@ -1004,7 +995,6 @@ func TestSrcdocWindowPostMessageReachesParentWindow(t *testing.T) {
 	if got, ok := r.Global("childMessageResult"); !ok || got.Str != "pending" {
 		t.Fatalf("cross-window postMessage dispatched synchronously: %+v", got)
 	}
-	// Pump the parser/load task and queued message tasks.
 	for i := 0; i < 5; i++ {
 		r.Tick()
 	}
@@ -1020,8 +1010,6 @@ func TestSrcdocWindowPostMessageReachesParentWindow(t *testing.T) {
 	}
 }
 
-// TestEventBubblesInJS verifies that an event dispatched on a child element
-// bubbles up to the parent's listener.
 func TestEventBubblesInJS(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1036,7 +1024,6 @@ func TestEventBubblesInJS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Dispatch on the child div; the body listener should fire via bubbling.
 	div := doc.ElementByID("target")
 	event := dom.NewEvent("click", true, true)
 	dom.DispatchEvent(div, event)
@@ -1046,8 +1033,6 @@ func TestEventBubblesInJS(t *testing.T) {
 	}
 }
 
-// TestStopPropagationFromJS verifies that event.stopPropagation() prevents
-// the event from reaching ancestor listeners.
 // qc:BR-095
 func TestStopPropagationFromJS(t *testing.T) {
 	doc := eventDOM()
@@ -1076,8 +1061,6 @@ func TestStopPropagationFromJS(t *testing.T) {
 	}
 }
 
-// TestPreventDefaultFromJS verifies that event.preventDefault() marks the
-// event as default-prevented.
 func TestPreventDefaultFromJS(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1100,14 +1083,11 @@ func TestPreventDefaultFromJS(t *testing.T) {
 	if v, ok := r.Global("wasDefaultPrevented"); !ok || !v.Bool {
 		t.Errorf("wasDefaultPrevented = %+v, want true", v)
 	}
-	// DispatchEvent returns false when the event was cancelled.
 	if result {
 		t.Error("DispatchEvent returned true, want false (event was cancelled)")
 	}
 }
 
-// TestEventTargetIsSet verifies that event.target is the element the listener
-// is registered on (for at-target dispatch).
 func TestEventTargetIsSet(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1131,8 +1111,6 @@ func TestEventTargetIsSet(t *testing.T) {
 	}
 }
 
-// TestDispatchEventFromJS verifies that element.dispatchEvent(event) from JS
-// fires the element's own listeners.
 func TestDispatchEventFromJS(t *testing.T) {
 	doc := eventDOM()
 	r := newEventRuntime(t, doc)
@@ -1154,8 +1132,6 @@ func TestDispatchEventFromJS(t *testing.T) {
 	}
 }
 
-// TestRemoveEventListenerBasic verifies that removeEventListener with a named
-// function reference prevents the listener from firing.
 // qc:BR-096
 func TestRemoveEventListenerBasic(t *testing.T) {
 	doc := eventDOM()
@@ -1180,8 +1156,6 @@ func TestRemoveEventListenerBasic(t *testing.T) {
 	}
 }
 
-// TestRemoveEventListenerCaptureMismatch verifies that removing with a
-// different capture flag than was used to add does NOT remove the listener.
 // qc:BR-096
 func TestRemoveEventListenerCaptureMismatch(t *testing.T) {
 	doc := eventDOM()
@@ -1206,8 +1180,6 @@ func TestRemoveEventListenerCaptureMismatch(t *testing.T) {
 	}
 }
 
-// TestRemoveEventListenerPreservesOthers verifies that removing one listener
-// does not affect other listeners on the same element.
 // qc:BR-096
 func TestRemoveEventListenerPreservesOthers(t *testing.T) {
 	doc := eventDOM()
@@ -1234,9 +1206,6 @@ func TestRemoveEventListenerPreservesOthers(t *testing.T) {
 	}
 }
 
-// Registering the same function twice for the same type and capture flag is a
-// no-op in the event model, so a doubled add must not double-fire; removing the
-// one registration must then silence it entirely.
 // qc:BR-096
 func TestAddEventListenerDuplicateRegistrationFiresOnce(t *testing.T) {
 	doc := eventDOM()

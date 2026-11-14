@@ -52,7 +52,6 @@ func TestFormNavigationOnSubmitClick(t *testing.T) {
 	tab.SetTitle("Search Page")
 	tab.SetSession(sess)
 
-	// Find the submit button's center
 	var subX, subY int32
 	found := false
 	for _, obj := range sess.Arena.Objects {
@@ -68,13 +67,11 @@ func TestFormNavigationOnSubmitClick(t *testing.T) {
 		t.Fatal("submit button not found in arena")
 	}
 
-	// Click the submit button via focusClick
 	handled := f.focusClick(subX, subY)
 	if !handled {
 		t.Fatal("expected focusClick to handle submit button click")
 	}
 
-	// Wait for navResult from navigateTab
 	select {
 	case res := <-f.navResults:
 		f.applyNavResult(res)
@@ -82,7 +79,6 @@ func TestFormNavigationOnSubmitClick(t *testing.T) {
 		t.Fatal("timed out waiting for navResult")
 	}
 
-	// Check that the tab was navigated with parameters
 	currentURL := tab.URL()
 	expectedURL := server.URL + "/search?q=goosie"
 	if currentURL != expectedURL {
@@ -125,7 +121,6 @@ func TestFormNavigationOnEnterKey(t *testing.T) {
 	tab.SetURL(server.URL + "/")
 	tab.SetSession(sess)
 
-	// Focus the input
 	var inpX, inpY int32
 	for _, obj := range sess.Arena.Objects {
 		if obj.Node != nil && obj.Node.GetAttribute("id") == "queryinput" {
@@ -137,13 +132,11 @@ func TestFormNavigationOnEnterKey(t *testing.T) {
 	}
 	f.focusClick(inpX, inpY)
 
-	// Press Enter key
 	handled := f.contentKey('\r', surface.KeyMod(0))
 	if !handled {
 		t.Fatal("expected contentKey to handle Enter key")
 	}
 
-	// Wait for navResult
 	select {
 	case res := <-f.navResults:
 		f.applyNavResult(res)
@@ -151,7 +144,6 @@ func TestFormNavigationOnEnterKey(t *testing.T) {
 		t.Fatal("timed out waiting for navResult")
 	}
 
-	// Tab URL should be navigated
 	currentURL := tab.URL()
 	expectedURL := server.URL + "/results?q=golang"
 	if currentURL != expectedURL {
@@ -207,10 +199,6 @@ func TestAnchorNavigationOnEnterKey(t *testing.T) {
 	}
 }
 
-// The negative half of the link default-action contract: a click listener that
-// calls preventDefault() leaves the tab URL and loading state untouched. The
-// positive half (no preventDefault navigates) is
-// TestJourneyLinkNavigationInSameTab.
 // qc:BR-094
 func TestAnchorEnterPreventDefaultCancelsNavigation(t *testing.T) {
 	f := newNavTestPath(t)
@@ -231,8 +219,6 @@ func TestAnchorEnterPreventDefaultCancelsNavigation(t *testing.T) {
 	if !f.contentKey('\r', surface.KeyMod(0)) {
 		t.Fatal("Enter was not handled")
 	}
-	// The release completes the key operation but the cancelled click keeps
-	// the activation from navigating.
 	f.releaseContentKey('\r', surface.KeyMod(0))
 	if tab.URL() != "https://example.test/start" || tab.Nav.Loading {
 		t.Fatalf("prevented Enter changed navigation state: URL=%q loading=%v", tab.URL(), tab.Nav.Loading)
@@ -276,7 +262,6 @@ func TestCheckboxClickToggle(t *testing.T) {
 		t.Fatal("checkbox should be initially unchecked")
 	}
 
-	// Click checkbox via focusClick
 	if !f.focusClick(chkX, chkY) {
 		t.Fatal("focusClick failed to handle checkbox")
 	}
@@ -284,7 +269,6 @@ func TestCheckboxClickToggle(t *testing.T) {
 		t.Errorf("checkbox should be checked after click")
 	}
 
-	// Click checkbox again to toggle off
 	if !f.focusClick(chkX, chkY) {
 		t.Fatal("focusClick failed to handle second checkbox click")
 	}

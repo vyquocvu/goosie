@@ -13,9 +13,6 @@ import (
 	"golang.org/x/net/html/charset"
 )
 
-// FormData API implementation.
-
-// formDataEntry represents one entry in a FormData object.
 type formDataEntry struct {
 	name    string
 	value   string
@@ -27,7 +24,6 @@ type formDataList struct {
 	entries []formDataEntry
 }
 
-// setupFormData installs the FormData constructor.
 func (r *Runtime) setupFormData() {
 	ctor := func(call goja.ConstructorCall) *goja.Object {
 		list := &formDataList{}
@@ -67,7 +63,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 	obj := r.vm.NewObject()
 	r.formDataValues[obj] = list
 
-	// append(name, value)
 	_ = obj.Set("append", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return goja.Undefined()
@@ -82,7 +77,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return goja.Undefined()
 	})
 
-	// set(name, value)
 	_ = obj.Set("set", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
 			return goja.Undefined()
@@ -93,7 +87,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 			entry = r.makeFormDataEntry(name, call.Argument(1), call.Argument(2).String())
 		}
 
-		// Remove all existing entries with this name.
 		filtered := make([]formDataEntry, 0, len(list.entries))
 		for _, e := range list.entries {
 			if e.name != name {
@@ -105,7 +98,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return goja.Undefined()
 	})
 
-	// get(name)
 	_ = obj.Set("get", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Null()
@@ -119,7 +111,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return goja.Null()
 	})
 
-	// getAll(name)
 	_ = obj.Set("getAll", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return r.vm.NewArray()
@@ -136,7 +127,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return arr
 	})
 
-	// has(name)
 	_ = obj.Set("has", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return r.vm.ToValue(false)
@@ -150,7 +140,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return r.vm.ToValue(false)
 	})
 
-	// delete(name)
 	_ = obj.Set("delete", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Undefined()
@@ -166,7 +155,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return goja.Undefined()
 	})
 
-	// forEach(callback)
 	_ = obj.Set("forEach", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 1 {
 			return goja.Undefined()
@@ -181,7 +169,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return goja.Undefined()
 	})
 
-	// entries()
 	_ = obj.Set("entries", func(call goja.FunctionCall) goja.Value {
 		arr := r.vm.NewArray()
 		i := 0
@@ -195,7 +182,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return arr
 	})
 
-	// keys()
 	_ = obj.Set("keys", func(call goja.FunctionCall) goja.Value {
 		arr := r.vm.NewArray()
 		i := 0
@@ -206,7 +192,6 @@ func (r *Runtime) newFormDataObject(list *formDataList) *goja.Object {
 		return arr
 	})
 
-	// values()
 	_ = obj.Set("values", func(call goja.FunctionCall) goja.Value {
 		arr := r.vm.NewArray()
 		i := 0
@@ -321,10 +306,6 @@ func htmlEncodingLabel(name string) string {
 	return name
 }
 
-// encodeFormActionQuery applies the form's selected character encoding to
-// unescaped non-ASCII query characters in the action URL. The URL parser still
-// handles resolution and URL syntax; this preserves the form submission
-// algorithm's legacy encoding override for the action query.
 func encodeFormActionQuery(action, label string) string {
 	queryStart := strings.IndexByte(action, '?')
 	if queryStart < 0 {
@@ -460,9 +441,6 @@ func (r *Runtime) formDataEntries(form, submitter *dom.Node) []formDataEntry {
 		isCharset := control.Data == "input" && typ == "hidden" && asciiEqualFold(name, "_charset_")
 		entries = append(entries, formDataEntry{name: name, value: value.String(), charset: isCharset})
 	}
-	// An activated image submitter contributes its click coordinates instead
-	// of an ordinary name/value pair. Script-triggered click() has no pointer
-	// location, so both coordinates are zero.
 	if submitter != nil && submitter.Data == "input" && strings.EqualFold(submitter.GetAttribute("type"), "image") && r.formOwner(submitter) == form {
 		name := submitter.GetAttribute("name")
 		entries = append(entries,
@@ -551,8 +529,6 @@ func encodeISO2022JPRomanCharacters(value string) string {
 	inRoman := false
 	for _, r := range value {
 		if r == '\uff65' {
-			// The web encoding maps the halfwidth middle dot to the JIS
-			// X 0208 middle dot when producing ISO-2022-JP.
 			r = '\u30fb'
 		}
 		if r == '\u00a5' || r == '\u203e' {
@@ -574,7 +550,6 @@ func encodeISO2022JPRomanCharacters(value string) string {
 			} else if encoding != nil {
 				encoded, _ := encoding.NewEncoder().Bytes([]byte(string(r)))
 				if bytes.Contains(encoded, []byte("\x1b$B")) {
-					// An encoder-generated JIS X 0208 shift exits Roman mode.
 					inRoman = false
 				}
 			}

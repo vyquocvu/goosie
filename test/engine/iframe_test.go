@@ -471,8 +471,6 @@ func TestIframeFormSubmitNavigatesAndCallsParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sess.Close()
-	// Form submission is a planned navigation and runs on the child browsing
-	// context's next event-loop turn.
 	sess.PumpJS(800)
 	if scriptErrors := sess.ScriptErrors(); len(scriptErrors) != 0 {
 		t.Errorf("iframe script errors: %+v", scriptErrors)

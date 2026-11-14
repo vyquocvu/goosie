@@ -200,12 +200,10 @@ func TestStartingStyle_TopLevelAndNested(t *testing.T) {
 		t.Fatalf("sheet.Rules len = %d, want 4", len(sheet.Rules))
 	}
 
-	// Normal dialog rule
 	if sheet.Rules[0].StartingStyle {
 		t.Errorf("Rules[0].StartingStyle = true, want false")
 	}
 
-	// @starting-style dialog rule
 	if !sheet.Rules[1].StartingStyle {
 		t.Errorf("Rules[1].StartingStyle = false, want true")
 	}
@@ -213,12 +211,10 @@ func TestStartingStyle_TopLevelAndNested(t *testing.T) {
 		t.Errorf("Rules[1].Declarations len = %d, want 2", len(sheet.Rules[1].Declarations))
 	}
 
-	// Normal .card rule
 	if sheet.Rules[2].StartingStyle {
 		t.Errorf("Rules[2].StartingStyle = true, want false")
 	}
 
-	// Nested @starting-style .card rule
 	if !sheet.Rules[3].StartingStyle {
 		t.Errorf("Rules[3].StartingStyle = false, want true")
 	}

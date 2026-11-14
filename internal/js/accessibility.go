@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// SetAccessibilityProvider installs a host accessibility query for browser
-// automation. The callback receives only live DOM nodes resolved from this
-// Runtime's wrappers; ordinary page scripts have no access to host internals
-// unless the embedding application explicitly installs this provider.
 func (r *Runtime) SetAccessibilityProvider(provider func(*dom.Node) (role, label string, ok bool)) error {
 	if r == nil || r.vm == nil {
 		return fmt.Errorf("missing JavaScript runtime")

@@ -10,13 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// BR-142's engine half: highlighting an inspected node is a paint-only overlay.
-// It must never write to the DOM - no attribute, no text, no inserted marker
-// node - because the inspector shows the page exactly as the author wrote it.
-// There is no DOM serializer in the engine, so these oracles fingerprint the
-// tree structurally (id, type, data, content, attributes) and compare node
-// counts before and after a highlight, a paint and a clear.
-
 const inspectEngineHTML = `<html><head><style>` +
 	`html,body{margin:0}` +
 	`#target{position:absolute;left:10px;top:20px;width:100px;height:40px}` +
@@ -35,9 +28,6 @@ func inspectEngineSession(t *testing.T) *engine.Session {
 	return s
 }
 
-// domFingerprint records every node's identity and content in tree order, so
-// any mutation - an added attribute, edited text, or inserted marker - changes
-// the string.
 func domFingerprint(s *engine.Session) string {
 	var b strings.Builder
 	s.Doc.Node.Walk(func(n *dom.Node) bool {
@@ -99,8 +89,6 @@ func TestInspectHighlightDoesNotMutateDOM(t *testing.T) {
 // qc:BR-142
 func TestInspectHighlightSkipsDetachedNode(t *testing.T) {
 	s := inspectEngineSession(t)
-	// A node that is not in the layout arena has no box to highlight; the
-	// overlay must be skipped rather than panic or paint a stray rect.
 	detached := &dom.Node{ID: 999999, Type: dom.NodeElement, Data: "div"}
 	s.SetInspectHighlight(detached)
 	if got := inspectOverlayCount(t, s); got != 0 {

@@ -180,8 +180,6 @@ func TestHTTPCancellation(t *testing.T) {
 			t.Run(method+"/"+stage, func(t *testing.T) {
 				ready, disconnected, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					// Drain the upload so net/http can observe client disconnection
-					// even while the handler is blocked before response headers.
 					_, _ = io.Copy(io.Discard, r.Body)
 					if stage == "body" {
 						_, _ = io.WriteString(w, "partial")
@@ -304,11 +302,6 @@ func TestHTTPStopsAndClosesOversizedBody(t *testing.T) {
 	}
 }
 
-// A server can make the client buffer its whole header block before the first
-// body byte, and the inherited Go default is 10 MiB per response. The measured
-// worst across the project's own 20-site live corpus is 6.4 KiB (Wikipedia,
-// including its redirect hop) with a median of 454 B, so the cap is set where a
-// browser's would be rather than at the transport's default.
 // qc:BR-147
 func TestGetRejectsOversizedResponseHeaders(t *testing.T) {
 	const fields = transport.MaxResponseHeaderBytes/1024 + 2
@@ -328,10 +321,6 @@ func TestGetRejectsOversizedResponseHeaders(t *testing.T) {
 	}
 }
 
-// The other half of the rule: the cap has to clear what real sites actually
-// send. 250 fields is 250 KiB - just under the limit and forty times the
-// largest header block in the corpus - and a response that size must still
-// arrive, with its headers intact, rather than being truncated or refused.
 // qc:BR-147
 func TestGetAcceptsLargeResponseHeadersUnderTheCap(t *testing.T) {
 	const fields = 250
@@ -358,9 +347,6 @@ func TestGetAcceptsLargeResponseHeadersUnderTheCap(t *testing.T) {
 	}
 }
 
-// TestGetRejectsMalformedResponseHeaders verifies that a header block which
-// cannot be parsed fails loudly at the transport boundary instead of being
-// accepted with invented fields.
 // qc:BR-147
 func TestGetRejectsMalformedResponseHeaders(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -386,9 +372,6 @@ func TestGetRejectsMalformedResponseHeaders(t *testing.T) {
 	}
 }
 
-// TestGetReportsTruncatedResponseBody verifies that a server closing the
-// connection before the declared Content-Length arrives surfaces as a body
-// read error rather than a silently short document.
 // qc:BR-148
 func TestGetReportsTruncatedResponseBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -673,10 +656,6 @@ func await(t *testing.T, ch <-chan struct{}, description string) {
 	}
 }
 
-// TestRedactURL pins diagnostic hygiene: error and log paths print redacted
-// URLs that keep scheme/host/path for diagnosis but never carry userinfo,
-// query secrets or fragments (which is what ends up pasted into bug
-// reports). Unparseable input reports a fixed token rather than echoing.
 func TestRedactURL(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"https://example.com/search?q=token123&page=2", "https://example.com/search"},
@@ -695,9 +674,6 @@ func TestRedactURL(t *testing.T) {
 	}
 }
 
-// TestClientErrorsOmitQuerySecrets: a failed request (closed port fails
-// fast, no timeout) must not leak the query string through the stdlib error
-// chain, while keeping the host for diagnosis.
 func TestClientErrorsOmitQuerySecrets(t *testing.T) {
 	client := transport.DefaultClient()
 	defer client.Close()

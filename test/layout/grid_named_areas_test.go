@@ -4,13 +4,6 @@ import (
 	"testing"
 )
 
-// TestGridNamedAreasMatchCaseSensitively guards the link between
-// `grid-template-areas` and `grid-area`. CSS identifiers are case-sensitive, but
-// the item's name used to be lowercased when the declaration was read, so every
-// camelCase area failed its lookup and the item fell through to row-major
-// auto-placement. MediaWiki's Vector skin names all of its areas that way
-// (`siteNotice`, `columnStart`, `pageContent`), which is what swapped Wikipedia's
-// sidebar to the right of the article and started the content 400px too low.
 func TestGridNamedAreasMatchCaseSensitively(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; width: 720px; grid-template-columns: 200px 1fr; grid-template-areas: 'topARE topARE' 'sideARE mainARE';">
@@ -25,7 +18,6 @@ func TestGridNamedAreasMatchCaseSensitively(t *testing.T) {
 		t.Fatalf("found %d divs, want 4 (container + 3 items)", len(divs))
 	}
 	top, side, main := divs[1], divs[2], divs[3]
-	// topARE spans both columns of row 0; the other two split row 1.
 	if !almostEqual(top.W, 720) || !almostEqual(top.X, 0) {
 		t.Errorf("top = {X:%v W:%v}, want the full 720px first row", top.X, top.W)
 	}

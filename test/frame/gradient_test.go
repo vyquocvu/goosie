@@ -6,8 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// darkToLight is a vertical ramp from opaque black to opaque white, the simplest
-// shape that tells direction, position, and interpolation apart.
 func darkToLight() frame.LinearGradient {
 	return frame.LinearGradient{
 		Angle: 180,

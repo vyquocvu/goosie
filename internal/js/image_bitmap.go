@@ -7,9 +7,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// ImageBitmap is represented by runtime-owned immutable dimensions and pixels.
-// The current canvas implementation does not rasterize synchronously, so a
-// bitmap created from a canvas without a committed bitmap starts transparent.
 type imageBitmapData struct {
 	width, height int
 	pixels        []byte

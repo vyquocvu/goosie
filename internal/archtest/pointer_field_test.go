@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/archtest"
 )
 
-// TestEngineHasNoArenaPointerFields is the SP-5 L5 half of the box identity
-// rule: engine state names boxes by BoxKey, never holds a *layout.Object field
-// that dangles after the next arena growth or reflow. Paint's walk-local
-// overlays are re-fetched per paint and are deliberately out of scope.
 func TestEngineHasNoArenaPointerFields(t *testing.T) {
 	root := moduleRoot(t)
 	found, err := archtest.ArenaPointerFields(filepath.Join(root, "internal", "engine"))
@@ -25,10 +21,6 @@ func TestEngineHasNoArenaPointerFields(t *testing.T) {
 	}
 }
 
-// The non-vacuity cases: a held *layout.Object field is flagged, including under
-// a renamed import, while a BoxKey field and a func-typed field whose parameter
-// is a *layout.Object are not. A rule that reported nothing for any input would
-// pass the engine check above and be worthless.
 func TestArenaPointerFieldsFlagsHeldPointersOnly(t *testing.T) {
 	root := t.TempDir()
 	writePackageGo(t, filepath.Join(root, "p"), map[string]string{

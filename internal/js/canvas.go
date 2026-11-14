@@ -10,15 +10,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// Canvas 2D API implementation.
-
-// canvasDrawOp represents one drawing operation.
 type canvasDrawOp struct {
 	Method string
 	Args   []interface{}
 }
 
-// canvasContext2D holds the internal state of one 2D rendering context.
 type canvasContext2D struct {
 	mu                       sync.Mutex
 	width                    int
@@ -42,17 +38,11 @@ type canvasContext2D struct {
 	lineJoin                 string
 	miterLimit               float64
 	ops                      []canvasDrawOp
-	nodeID                   int // DOM node ID of the canvas element, 0 if unbound
-	// bitmap holds the most recently rendered pixel data for this canvas.
-	// The engine writes it via SetCanvasBitmap after replaying ops; getImageData
-	// reads from it to return actual pixel values instead of zeros.
-	bitmap  []byte
-	bitmapW int
-	bitmapH int
-	// obj is the JS wrapper carrying the drawing methods. getContext returns it
-	// on every call, so a page that asks for the context twice gets the same
-	// object instead of a bare Go struct with no methods.
-	obj *goja.Object
+	nodeID                   int
+	bitmap                   []byte
+	bitmapW                  int
+	bitmapH                  int
+	obj                      *goja.Object
 }
 
 const maxImageDataBytes = 64 << 20
@@ -121,10 +111,6 @@ func (r *Runtime) newUint8ClampedArray(length int) *goja.Object {
 	return array
 }
 
-// validateImageDataRegion rejects an ImageData region that would exceed the
-// byte limit. Callers run it before allocating the pixel buffer, so an
-// oversized getImageData throws instead of reserving hundreds of megabytes
-// only for newImageData to reject the same dimensions afterwards.
 func (r *Runtime) validateImageDataRegion(width, height int) {
 	if width <= 0 || height <= 0 || width > math.MaxInt/4 || height > maxImageDataBytes/(width*4) {
 		panic(r.domError("IndexSizeError", "ImageData dimensions are invalid or exceed the implementation limit"))
@@ -150,15 +136,11 @@ func (r *Runtime) newImageData(width, height int, data *goja.Object) *goja.Objec
 	return obj
 }
 
-// CanvasOp is one recorded canvas drawing operation, exposed to the engine
-// for replay into a bitmap.
 type CanvasOp struct {
 	Method string
 	Args   []interface{}
 }
 
-// CanvasOps returns the recorded drawing operations for the canvas context
-// bound to the given DOM node ID. Returns nil if no context is bound.
 func (r *Runtime) CanvasOps(nodeID int) []CanvasOp {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -179,11 +161,6 @@ func (r *Runtime) CanvasOps(nodeID int) []CanvasOp {
 	return nil
 }
 
-// CanvasVisualStamp returns a compact signature for the canvas state that the
-// paint pipeline can observe. Drawing operations are append-only in the
-// current Canvas 2D implementation, so node identity, dimensions, and the
-// operation count are sufficient to detect newly recorded canvas output
-// without copying or hashing every operation on each animation-frame turn.
 func (r *Runtime) CanvasVisualStamp() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -209,8 +186,6 @@ func (r *Runtime) CanvasVisualStamp() uint64 {
 	return stamp
 }
 
-// CanvasDimensions returns the width and height of the canvas context bound
-// to the given DOM node ID. Returns 0, 0 if no context is bound.
 func (r *Runtime) CanvasDimensions(nodeID int) (int, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -225,9 +200,6 @@ func (r *Runtime) CanvasDimensions(nodeID int) (int, int) {
 	return 0, 0
 }
 
-// BindCanvasContext associates a canvas context with a DOM node ID so the
-// paint pipeline can find it. Called when getContext("2d") is invoked on a
-// canvas element.
 func (r *Runtime) BindCanvasContext(nodeID int, ctx *canvasContext2D) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -238,10 +210,6 @@ func (r *Runtime) BindCanvasContext(nodeID int, ctx *canvasContext2D) {
 	r.canvasContexts[nodeID] = ctx
 }
 
-// SetCanvasBitmap stores rendered pixel data on the canvas context bound to
-// nodeID. The engine calls this after replaying canvas ops into a bitmap so
-// that getImageData can read actual pixel values. The rgba slice is copied;
-// the caller retains ownership of the original.
 func (r *Runtime) SetCanvasBitmap(nodeID int, rgba []byte, w, h int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -265,9 +233,6 @@ const (
 	defaultCanvasHeight = 150
 )
 
-// canvasNodeDimension resolves a canvas width/height attribute to its
-// backing-store size. A missing, negative, or non-numeric value falls back to
-// def.
 func canvasNodeDimension(node *dom.Node, attr string, def int) int {
 	if v, ok := parseHTMLUnsigned(node.GetAttribute(attr)); ok {
 		return int(v)
@@ -275,9 +240,6 @@ func canvasNodeDimension(node *dom.Node, attr string, def int) int {
 	return def
 }
 
-// isCanvasDimensionAttribute reports whether name names one of the two canvas
-// dimension attributes. Only the local name matters, so a differently cased
-// attribute routes through the same reset.
 func isCanvasDimensionAttribute(node *dom.Node, name string) bool {
 	if node == nil || node.Data != "canvas" {
 		return false
@@ -286,11 +248,6 @@ func isCanvasDimensionAttribute(node *dom.Node, name string) bool {
 	return strings.EqualFold(local, "width") || strings.EqualFold(local, "height")
 }
 
-// resetCanvasForAttribute retargets the bound 2D context to the element's
-// current width/height attributes and clears its bitmap and drawing state.
-// HTML resets a canvas whenever either dimension attribute is set, changed, or
-// removed - even to the same value. Keeping the recorded ops would replay the
-// old frame into the new size.
 func (r *Runtime) resetCanvasForAttribute(node *dom.Node) {
 	if node == nil || node.Data != "canvas" {
 		return
@@ -321,8 +278,6 @@ func (r *Runtime) resetCanvasForAttribute(node *dom.Node) {
 	ctx.mu.Unlock()
 }
 
-// jsGetContext implements getContext(contextType) on DOM elements. For canvas
-// elements with contextType="2d", it creates and returns a CanvasRenderingContext2D.
 func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) < 1 {
 		return goja.Null()
@@ -332,7 +287,6 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 		return goja.Null()
 	}
 
-	// Get the node ID from the this object
 	thisObj, ok := call.This.(*goja.Object)
 	if !ok {
 		return goja.Null()
@@ -343,7 +297,6 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	}
 	nodeID := int(nidVal.ToInteger())
 
-	// Look up the node to verify it's a canvas
 	r.mu.Lock()
 	node := r.nodeRegistry[nodeID]
 	r.mu.Unlock()
@@ -351,7 +304,6 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 		return goja.Null()
 	}
 
-	// Check if we already have a context for this canvas
 	r.mu.Lock()
 	if ctx, exists := r.canvasContexts[nodeID]; exists {
 		obj := ctx.obj
@@ -373,7 +325,6 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	}
 	r.mu.Unlock()
 
-	// Create a new context
 	width := canvasNodeDimension(node, "width", defaultCanvasWidth)
 	height := canvasNodeDimension(node, "height", defaultCanvasHeight)
 
@@ -388,7 +339,6 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 		textBaseline: "alphabetic",
 	}
 
-	// Create the JS wrapper object
 	obj := r.vm.NewObject()
 	ctx.obj = obj
 	_ = obj.Set("canvas", call.This)
@@ -399,7 +349,6 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	_ = obj.Set("textAlign", ctx.textAlign)
 	_ = obj.Set("textBaseline", ctx.textBaseline)
 
-	// Add all the drawing methods
 	r.setupCanvasContextMethods(obj, ctx)
 
 	r.BindCanvasContext(nodeID, ctx)
@@ -410,9 +359,7 @@ func (r *Runtime) jsGetContext(call goja.FunctionCall) goja.Value {
 	return obj
 }
 
-// setupCanvasContextMethods adds all the Canvas 2D API methods to a context wrapper.
 func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext2D) {
-	// Rect methods
 	_ = obj.Set("fillRect", func(call goja.FunctionCall) goja.Value {
 		args := parseFloatArgs(call, 0, 0, 0, 0)
 		ctx.mu.Lock()
@@ -446,7 +393,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return goja.Undefined()
 	})
 
-	// Path methods
 	_ = obj.Set("beginPath", func(call goja.FunctionCall) goja.Value {
 		ctx.mu.Lock()
 		ctx.ops = append(ctx.ops, canvasDrawOp{Method: "beginPath"})
@@ -568,7 +514,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return goja.Undefined()
 	})
 
-	// Drawing methods
 	_ = obj.Set("fill", func(call goja.FunctionCall) goja.Value {
 		ctx.mu.Lock()
 		defer ctx.mu.Unlock()
@@ -637,7 +582,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return goja.Undefined()
 	})
 
-	// Text methods
 	_ = obj.Set("fillText", func(call goja.FunctionCall) goja.Value {
 		text := ""
 		if len(call.Arguments) >= 1 {
@@ -721,12 +665,11 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		case "right", "end":
 			left = -width
 			right = 0.0
-		default: // "left", "start"
+		default:
 			left = 0.0
 			right = width
 		}
 
-		// Standard TextMetrics font and bounding box metrics
 		_ = res.Set("actualBoundingBoxAscent", fontSize*0.8)
 		_ = res.Set("actualBoundingBoxDescent", fontSize*0.2)
 		_ = res.Set("fontBoundingBoxAscent", fontSize*0.85)
@@ -739,7 +682,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return res
 	})
 
-	// Gradient methods
 	_ = obj.Set("createLinearGradient", func(call goja.FunctionCall) goja.Value {
 		args := parseFloatArgs(call, 0, 0, 0, 0)
 		return r.newCanvasGradient("linear", args)
@@ -767,7 +709,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return r.newCanvasPattern(imageObj, repetition)
 	})
 
-	// Transform methods
 	_ = obj.Set("save", func(call goja.FunctionCall) goja.Value {
 		ctx.mu.Lock()
 		ctx.ops = append(ctx.ops, canvasDrawOp{Method: "save"})
@@ -863,7 +804,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return goja.Undefined()
 	})
 
-	// State and smoothing properties
 	_ = obj.Set("imageSmoothingEnabled", true)
 	_ = obj.Set("imageSmoothingQuality", "low")
 	_ = obj.Set("filter", "none")
@@ -902,7 +842,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return r.vm.ToValue(res)
 	})
 
-	// Image drawing
 	_ = obj.Set("drawImage", func(call goja.FunctionCall) goja.Value {
 		args := make([]interface{}, len(call.Arguments))
 		for i, arg := range call.Arguments {
@@ -917,7 +856,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		return goja.Undefined()
 	})
 
-	// Pixel manipulation
 	_ = obj.Set("createImageData", func(call goja.FunctionCall) goja.Value {
 		w, h := 1, 1
 		if len(call.Arguments) >= 2 {
@@ -954,7 +892,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 		r.validateImageDataRegion(w, h)
 		data := make([]byte, w*h*4)
 
-		// Read from the rendered bitmap if available.
 		ctx.mu.Lock()
 		bm, bmW, bmH := ctx.bitmap, ctx.bitmapW, ctx.bitmapH
 		ctx.mu.Unlock()
@@ -974,7 +911,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 					if offset+3 >= len(bm) {
 						continue
 					}
-					// Bitmap stores premultiplied RGBA; unpremultiply for getImageData.
 					a := int(bm[offset+3])
 					red := int(bm[offset])
 					green := int(bm[offset+1])
@@ -1009,7 +945,6 @@ func (r *Runtime) setupCanvasContextMethods(obj *goja.Object, ctx *canvasContext
 	})
 }
 
-// setupCanvas installs the Canvas 2D API.
 func (r *Runtime) setupCanvas() {
 	r.setupImageData()
 	constructor := func(call goja.ConstructorCall) *goja.Object {
@@ -1036,7 +971,6 @@ func (r *Runtime) setupCanvas() {
 
 		obj := call.This
 
-		// Properties
 		_ = obj.Set("canvas", goja.Null())
 		_ = obj.Set("fillStyle", ctx.fillStyle)
 		_ = obj.Set("strokeStyle", ctx.strokeStyle)
@@ -1058,7 +992,6 @@ func (r *Runtime) setupCanvas() {
 		_ = obj.Set("miterLimit", 10.0)
 		_ = obj.Set("lineDashOffset", 0.0)
 
-		// Rect methods
 		_ = obj.Set("fillRect", func(call goja.FunctionCall) goja.Value {
 			args := parseFloatArgs(call, 0, 0, 0, 0)
 			ctx.mu.Lock()
@@ -1092,7 +1025,6 @@ func (r *Runtime) setupCanvas() {
 			return goja.Undefined()
 		})
 
-		// Path methods
 		_ = obj.Set("beginPath", func(call goja.FunctionCall) goja.Value {
 			ctx.mu.Lock()
 			ctx.ops = append(ctx.ops, canvasDrawOp{Method: "beginPath"})
@@ -1214,7 +1146,6 @@ func (r *Runtime) setupCanvas() {
 			return goja.Undefined()
 		})
 
-		// Drawing methods
 		_ = obj.Set("fill", func(call goja.FunctionCall) goja.Value {
 			ctx.mu.Lock()
 			ctx.ops = append(ctx.ops, canvasDrawOp{Method: "fill"})
@@ -1257,7 +1188,6 @@ func (r *Runtime) setupCanvas() {
 			return goja.Undefined()
 		})
 
-		// Text methods
 		_ = obj.Set("fillText", func(call goja.FunctionCall) goja.Value {
 			text := ""
 			if len(call.Arguments) >= 1 {
@@ -1300,7 +1230,6 @@ func (r *Runtime) setupCanvas() {
 			return goja.Undefined()
 		})
 
-		// Transform methods
 		_ = obj.Set("save", func(call goja.FunctionCall) goja.Value {
 			ctx.mu.Lock()
 			ctx.ops = append(ctx.ops, canvasDrawOp{Method: "save"})
@@ -1396,7 +1325,6 @@ func (r *Runtime) setupCanvas() {
 			return goja.Undefined()
 		})
 
-		// Image methods (stubs)
 		_ = obj.Set("drawImage", func(call goja.FunctionCall) goja.Value {
 			ctx.mu.Lock()
 			ctx.ops = append(ctx.ops, canvasDrawOp{
@@ -1407,7 +1335,6 @@ func (r *Runtime) setupCanvas() {
 			return goja.Undefined()
 		})
 
-		// Pixel manipulation (stubs)
 		_ = obj.Set("createImageData", func(call goja.FunctionCall) goja.Value {
 			w, h := 1, 1
 			if len(call.Arguments) >= 1 {
@@ -1431,7 +1358,6 @@ func (r *Runtime) setupCanvas() {
 			r.validateImageDataRegion(w, h)
 			data := make([]byte, w*h*4)
 
-			// Read from the rendered bitmap if available.
 			ctx.mu.Lock()
 			bm, bmW, bmH := ctx.bitmap, ctx.bitmapW, ctx.bitmapH
 			ctx.mu.Unlock()
@@ -1527,7 +1453,7 @@ func (r *Runtime) setupCanvas() {
 
 type canvasGradientData struct {
 	mu    sync.Mutex
-	kind  string // "linear", "radial", "conic"
+	kind  string
 	args  []float64
 	stops []gradientStop
 }

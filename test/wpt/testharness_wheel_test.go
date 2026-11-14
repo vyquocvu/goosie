@@ -7,17 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// wheelScrollPage runs one WPT scroll action against a document tall enough to
-// scroll and reports what the page's listeners saw. The expectations come from
-// measurements of Chromium's own behaviour, taken with
-// test/wpt/resources/wheel_probe.py:
-//
-//   - a generated wheel event is cancelable only while the dispatch can reach a
-//     non-passive wheel or mousewheel listener, and every listener of that
-//     dispatch reads the same value;
-//   - the legacy mousewheel event is dispatched only when the path has no wheel
-//     listener at all;
-//   - the scroll itself happens unless a listener cancels the gesture.
 func wheelScrollPage(t *testing.T, setup, action string) (report string, scrollY string) {
 	t.Helper()
 	rt, err := js.New(js.Options{})
@@ -66,10 +55,6 @@ func wheelScrollPage(t *testing.T, setup, action string) (report string, scrollY
 
 const wheelScrollAction = `test_driver.action_sequence([{type:"wheel",actions:[{type:"scroll",x:400,y:300,deltaX:0,deltaY:100}]}])`
 
-// The five default-passive targets plus a plain element, all registered with no
-// passive option. The element listener is the only non-passive one, so the
-// gesture is cancelable for every listener of the dispatch and the legacy
-// mousewheel event is skipped.
 func TestWPTTestDriverWheelScrollActionDispatchesCancelableTrustedWheel(t *testing.T) {
 	report, scrollY := wheelScrollPage(t, `
 		probe('window', window, {}, 'wheel');
@@ -91,9 +76,6 @@ func TestWPTTestDriverWheelScrollActionDispatchesCancelableTrustedWheel(t *testi
 	}
 }
 
-// Only default-passive targets listen, so nothing may cancel the scroll: the
-// generated wheel reports itself non-cancelable. Because a wheel listener is in
-// the path, the legacy mousewheel event is not dispatched as well.
 func TestWPTTestDriverWheelScrollActionStaysNonCancelableForPassiveListeners(t *testing.T) {
 	report, scrollY := wheelScrollPage(t, `
 		probe('window', window, {}, 'wheel');
@@ -108,9 +90,6 @@ func TestWPTTestDriverWheelScrollActionStaysNonCancelableForPassiveListeners(t *
 	}
 }
 
-// A page that only listens for the legacy type still gets it: the gesture has no
-// wheel listener to hand to, so mousewheel is dispatched, and its own listener
-// decides whether the event can be prevented.
 func TestWPTTestDriverWheelScrollActionFallsBackToLegacyMousewheel(t *testing.T) {
 	report, scrollY := wheelScrollPage(t, `
 		probe('div', div, {passive: false}, 'mousewheel');
@@ -124,8 +103,6 @@ func TestWPTTestDriverWheelScrollActionFallsBackToLegacyMousewheel(t *testing.T)
 	}
 }
 
-// The page's other assertions in this corpus rely on the cancel path: a
-// non-passive listener that calls preventDefault must stop the scroll.
 func TestWPTTestDriverWheelScrollActionHonorsPreventDefault(t *testing.T) {
 	report, scrollY := wheelScrollPage(t, `
 		window.cancelIn = true;

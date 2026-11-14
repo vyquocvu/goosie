@@ -1,22 +1,5 @@
 package archtest_test
 
-// The mission brief asks the engine for "zero global state", and rounds 15 and 16 deleted
-// the last three mutable process-wide globals in internal/ by making each value travel with
-// the document that owns it. Rounds cannot regress on their own: `style.SetCustomFonts` was
-// written by somebody who thought it was the simple shape, and nothing in the suite objected
-// until a document loaded in a second tab.
-//
-// So the rule is the deliverable, not the refactor. It reads the tree rather than a runtime
-// registry because mutation is a property of the code: an assignment to a package-level var
-// outside that var's initializer and outside init() is global state whether or not a test
-// happens to reach it, and the two defects that were fixed were invisible to -race until a
-// test drove concurrent loads.
-//
-// The exemption the rule grants is exactly `init()`, and it is a real one: a table filled
-// once by init and read-only after is immutable for the life of the process, which is the
-// letter of the clause without its intent being at risk. `dom.atomLookup` and the platform
-// backend hooks are that shape.
-
 import (
 	"os"
 	"path/filepath"
@@ -27,9 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/archtest"
 )
 
-// The clean fixture is the shape the rule must accept, not an empty file: a var with an
-// initializer, a var written only by init(), and a local that shadows a global name so a
-// rule keyed on identifiers alone would report a violation that is not one.
 const cleanGlobalsGo = `package p
 
 var table = map[string]int{"seed": 1}
@@ -47,9 +27,6 @@ func Shadow() int {
 }
 `
 
-// The three shapes of one defect: a plain assignment, a whole-value rewrite, and a write
-// through a composite, which is the one a "don't assign to globals" review comment misses
-// because the variable itself is never re-pointed.
 const dirtyGlobalsGo = `package p
 
 var cached *string
@@ -78,8 +55,6 @@ func writePackageGo(t *testing.T, dir string, bodies map[string]string) {
 	}
 }
 
-// writes renders the rule's answer as "pkg.fn.var" strings, sorted, so a failure reads as
-// the three names it has to check rather than as a wall of temp-dir paths.
 func writes(t *testing.T, root string, found []archtest.GlobalWrite) []string {
 	t.Helper()
 	out := make([]string, 0, len(found))
@@ -103,9 +78,6 @@ func mustGlobals(t *testing.T, root string) []archtest.GlobalWrite {
 	return found
 }
 
-// The non-vacuity cases. A rule that reported nothing for any input would pass the repo-wide
-// check below and be worthless, so the drifted tree has to report exactly the three writes
-// and the clean tree exactly none.
 func TestMutableGlobalsFlagsWritesAndAcceptsInit(t *testing.T) {
 	root := t.TempDir()
 	writePackageGo(t, filepath.Join(root, "p"), map[string]string{
@@ -122,9 +94,6 @@ func TestMutableGlobalsFlagsWritesAndAcceptsInit(t *testing.T) {
 	}
 }
 
-// A package-level var can be written from any file of its package, so a rule that collected
-// the var set per file would report nothing for the shape that motivated it: the setters in
-// internal/style and internal/css assigned a var declared in a different file.
 func TestMutableGlobalsSeesAcrossPackageFiles(t *testing.T) {
 	root := t.TempDir()
 	writePackageGo(t, filepath.Join(root, "q"), map[string]string{
@@ -139,9 +108,6 @@ func TestMutableGlobalsSeesAcrossPackageFiles(t *testing.T) {
 	}
 }
 
-// .worktrees/ holds a second full checkout of this module, so walking it would report that
-// copy's files, and `go list ./...` never builds testdata, whose fixtures are deliberately
-// malformed input for a parser test rather than code to police.
 func TestMutableGlobalsPrunesExcludedDirs(t *testing.T) {
 	root := t.TempDir()
 	writePackageGo(t, root, map[string]string{"clean.go": cleanGlobalsGo})
@@ -153,10 +119,6 @@ func TestMutableGlobalsPrunesExcludedDirs(t *testing.T) {
 	}
 }
 
-// A receiver, parameter or named result that happens to share a package var's name writes
-// through itself, not through the global. Treating only the body's bindings as local would
-// flag `rows.rows = nil`, `rows["x"] = 1` and `rows = 3` as writes to the package-level
-// `rows`, and a rule that reports writes nobody made is a rule people switch off.
 func TestMutableGlobalsSkipsReceiverParamAndResultNames(t *testing.T) {
 	root := t.TempDir()
 	writePackageGo(t, filepath.Join(root, "r"), map[string]string{
@@ -171,9 +133,6 @@ func TestMutableGlobalsSkipsReceiverParamAndResultNames(t *testing.T) {
 	}
 }
 
-// The clause itself: internal/ is the engine, and it is the directory the brief's §B is
-// about. cmd/ is exempt for the same reason the import table exempts it - a binary keeps its
-// own flags and its own counters, and nothing else reads them.
 func TestInternalHasNoMutableGlobals(t *testing.T) {
 	root := moduleRoot(t)
 	for _, g := range mustGlobals(t, filepath.Join(root, "internal")) {
@@ -181,11 +140,6 @@ func TestInternalHasNoMutableGlobals(t *testing.T) {
 	}
 }
 
-// The address of a package var is that var's state with no name attached to it, so the
-// assignment scan cannot see the write that follows. This is the shape the rule was
-// documented as blind to until 2026-09-27, and it is now the one this case pins: a
-// package var's address escapes from a function, while a local's, a receiver field's and
-// an init() one do not.
 func TestMutableGlobalsFlagsAddressOf(t *testing.T) {
 	root := t.TempDir()
 	writePackageGo(t, filepath.Join(root, "e"), map[string]string{

@@ -6,8 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// textCenter returns the centre of the laid-out word box whose text is
-// exactly content, which is where a hover of that word must register.
 func textCenter(t *testing.T, s *engine.Session, content string) (float32, float32) {
 	t.Helper()
 	for i := range s.Arena.Objects {
@@ -46,10 +44,6 @@ func TestHasTextAtHover(t *testing.T) {
 	}
 }
 
-// TestHasTextAtIncludesLineLeading is the example.com hover case: line-height
-// 1.6 leaves a gap between wrapped glyph boxes. The I-beam has to stay down
-// across that gap, and it has to come back up in the margin before the next
-// paragraph.
 func TestHasTextAtIncludesLineLeading(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin:0">
 		<p style="font-size:16px;line-height:1.6;max-width:8em;margin:0">Hello world this text wraps onto another line</p>
@@ -71,9 +65,6 @@ func TestHasTextAtIncludesLineLeading(t *testing.T) {
 	}
 }
 
-// TestHasTextAtExcludesColumnGutter keeps side-by-side columns from fusing
-// into one band: the gutter between them is not text. The old merge unioned
-// any vertically overlapping words regardless of x distance.
 func TestHasTextAtExcludesColumnGutter(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin:0">
 		<p style="position:absolute;left:0;top:0;margin:0">Left</p>
@@ -93,9 +84,6 @@ func TestHasTextAtExcludesColumnGutter(t *testing.T) {
 	}
 }
 
-// TestHasTextAtOutOfDocumentOrder guards words whose document order is not
-// vertical order (absolute content): every line must hit and the empty gap
-// between lines must not, regardless of the order selWords returns them in.
 func TestHasTextAtOutOfDocumentOrder(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin:0">
 		<p style="margin:0">Top</p>

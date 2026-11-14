@@ -8,10 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// NodeFilter constants
-// ---------------------------------------------------------------------------
-
 func TestNodeFilterConstantsExist(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -43,10 +39,6 @@ func TestNodeFilterConstantsExist(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: creation
-// ---------------------------------------------------------------------------
-
 func TestCreateTreeWalker(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -57,7 +49,6 @@ func TestCreateTreeWalker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// root should be body.
 	if err := r.Run(`
 		var rootIsBody = walker.root === document.body;
 	`, "test"); err != nil {
@@ -68,7 +59,6 @@ func TestCreateTreeWalker(t *testing.T) {
 		t.Error("walker.root should be document.body")
 	}
 
-	// currentNode should start at root.
 	if err := r.Run(`
 		var currentIsRoot = walker.currentNode === walker.root;
 	`, "test"); err != nil {
@@ -79,7 +69,6 @@ func TestCreateTreeWalker(t *testing.T) {
 		t.Error("walker.currentNode should initially be walker.root")
 	}
 
-	// whatToShow should be SHOW_ALL.
 	if err := r.Run(`
 		var whatToShowVal = walker.whatToShow;
 	`, "test"); err != nil {
@@ -91,15 +80,10 @@ func TestCreateTreeWalker(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: nextNode in document order
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerNextNodeAll(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Collect all nodes under body with SHOW_ALL.
 	if err := r.Run(`
 		var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ALL);
 		var twResults = [];
@@ -117,16 +101,11 @@ func TestTreeWalkerNextNodeAll(t *testing.T) {
 	}
 
 	v, _ := r.Global("twStr")
-	// Document order under body: p, #text(Hello), p, #text(World), div, #text(!)
 	want := "p,#text,p,#text,div,#text"
 	if v.Str != want {
 		t.Errorf("TreeWalker nextNode = %q, want %q", v.Str, want)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// TreeWalker: nextNode with SHOW_ELEMENT
-// ---------------------------------------------------------------------------
 
 func TestTreeWalkerShowElement(t *testing.T) {
 	d := testDOM(t)
@@ -151,10 +130,6 @@ func TestTreeWalkerShowElement(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: nextNode with SHOW_TEXT
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerShowText(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -178,15 +153,10 @@ func TestTreeWalkerShowText(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: custom filter function
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerWithFilter(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Filter that accepts only <p> elements.
 	if err := r.Run(`
 		var fw = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, function(node) {
 			return node.tagName.toLowerCase() === 'p' ? 1 : 3;
@@ -208,10 +178,6 @@ func TestTreeWalkerWithFilter(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: directional navigation
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerFirstChild(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -229,7 +195,6 @@ func TestTreeWalkerFirstChild(t *testing.T) {
 		t.Errorf("firstChild() = %q, want %q", v.Str, "p")
 	}
 
-	// From p, firstChild should be null (p has only text children, filtered out).
 	if err := r.Run(`
 		var fc2 = w1.firstChild();
 		var fc2IsNull = fc2 === null;
@@ -334,15 +299,10 @@ func TestTreeWalkerPreviousSibling(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: previousNode
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerPreviousNode(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Walk forward to the end, then walk backward.
 	if err := r.Run(`
 		var wp = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
 		var fwd = [];
@@ -376,15 +336,10 @@ func TestTreeWalkerPreviousNode(t *testing.T) {
 	if fwdStr != "p,p,div" {
 		t.Errorf("forward = %q, want %q", fwdStr, "p,p,div")
 	}
-	// Backward should be the reverse of forward (body is root, excluded).
 	if bwdStr != "p,p" {
 		t.Errorf("backward = %q, want %q", bwdStr, "p,p")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// TreeWalker: currentNode setter
-// ---------------------------------------------------------------------------
 
 func TestTreeWalkerCurrentNodeSetter(t *testing.T) {
 	d := testDOM(t)
@@ -417,10 +372,6 @@ func TestTreeWalkerCurrentNodeSetter(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NodeIterator: creation
-// ---------------------------------------------------------------------------
-
 func TestCreateNodeIterator(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -452,10 +403,6 @@ func TestCreateNodeIterator(t *testing.T) {
 		t.Errorf("whatToShow = %v, want %v", v.Num, 0xFFFFFFFF)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// NodeIterator: nextNode in document order
-// ---------------------------------------------------------------------------
 
 func TestNodeIteratorNextNodeAll(t *testing.T) {
 	d := testDOM(t)
@@ -530,10 +477,6 @@ func TestNodeIteratorShowText(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NodeIterator: filter function
-// ---------------------------------------------------------------------------
-
 func TestNodeIteratorWithFilter(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -559,18 +502,12 @@ func TestNodeIteratorWithFilter(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NodeIterator: previousNode
-// ---------------------------------------------------------------------------
-
 func TestNodeIteratorPreviousNode(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Build a flat element tree for predictable backward iteration.
 	doc := d
 	body := doc.Body
-	// Clear existing children.
 	for body.FirstChild != nil {
 		body.RemoveChild(body.FirstChild)
 	}
@@ -609,10 +546,6 @@ func TestNodeIteratorPreviousNode(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NodeIterator: currentNode setter
-// ---------------------------------------------------------------------------
-
 func TestNodeIteratorCurrentNodeSetter(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -642,10 +575,6 @@ func TestNodeIteratorCurrentNodeSetter(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NodeIterator: detach (deprecated no-op)
-// ---------------------------------------------------------------------------
-
 func TestNodeIteratorDetach(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -664,15 +593,10 @@ func TestNodeIteratorDetach(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: root boundary
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerDoesNotEscapeRoot(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Create a walker rooted at the first <p>. It should not see body or html.
 	if err := r.Run(`
 		var pEl = document.body.querySelector('p');
 		var wr = document.createTreeWalker(pEl, NodeFilter.SHOW_ELEMENT);
@@ -705,15 +629,10 @@ func TestTreeWalkerDoesNotEscapeRoot(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: filter with boolean return
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerFilterUsesNodeFilterConstants(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Filter results use FILTER_ACCEPT/FILTER_SKIP, not boolean truthiness.
 	if err := r.Run(`
 		var bf = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, function(node) {
 			return node.tagName.toLowerCase() !== 'div' ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
@@ -735,15 +654,10 @@ func TestTreeWalkerFilterUsesNodeFilterConstants(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// TreeWalker: default whatToShow
-// ---------------------------------------------------------------------------
-
 func TestTreeWalkerDefaultWhatToShow(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Omit whatToShow: should default to SHOW_ALL.
 	if err := r.Run(`
 		var dw = document.createTreeWalker(document.body);
 		var dwWhat = dw.whatToShow;
@@ -756,10 +670,6 @@ func TestTreeWalkerDefaultWhatToShow(t *testing.T) {
 		t.Errorf("default whatToShow = %v, want %v", v.Num, 0xFFFFFFFF)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// TreeWalker: comment nodes with SHOW_COMMENT
-// ---------------------------------------------------------------------------
 
 func TestTreeWalkerShowComment(t *testing.T) {
 	doc := dom.NewDocument()
@@ -796,15 +706,10 @@ func TestTreeWalkerShowComment(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NodeIterator: traverses entire subtree from root
-// ---------------------------------------------------------------------------
-
 func TestNodeIteratorFullSubtree(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Iterate from document (not body) with SHOW_ELEMENT.
 	if err := r.Run(`
 		var di = document.createNodeIterator(document, NodeFilter.SHOW_ELEMENT);
 		var diResults = [];
@@ -818,7 +723,6 @@ func TestNodeIteratorFullSubtree(t *testing.T) {
 	}
 
 	v, _ := r.Global("diStr")
-	// Document order: html, head, title, body, p, p, div
 	want := "html,head,title,body,p,p,div"
 	if v.Str != want {
 		t.Errorf("full subtree = %q, want %q", v.Str, want)
@@ -899,8 +803,6 @@ func TestTreeWalkerEveryNavigationMethodRejectsRecursiveFilter(t *testing.T) {
 		if !ok || got.Kind != js.KindObject {
 			t.Fatalf("recursiveResults missing or not object: %+v", got)
 		}
-		// Read each result through a small JS global because Runtime.Global only
-		// exports top-level primitive values.
 		if err := r.Run(`globalThis.recursiveResult = recursiveResults["`+method+`"]`, "treewalker-recursive-method-result"); err != nil {
 			t.Fatal(err)
 		}
@@ -961,10 +863,6 @@ func TestTreeWalkerSiblingTraversalChecksAncestorFilter(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
 func mustGlobalStr(r *js.Runtime, name string) string {
 	v, ok := r.Global(name)
 	if !ok {
@@ -973,5 +871,4 @@ func mustGlobalStr(r *js.Runtime, name string) string {
 	return v.Str
 }
 
-// Ensure testDOM is accessible (it's defined in dom_test.go in the same package).
 var _ = strings.Contains

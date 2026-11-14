@@ -37,7 +37,6 @@ func TestCSSMediaQueryWithRangeSyntax(t *testing.T) {
 		t.Fatalf("Failed to parse CSS with @media range syntax")
 	}
 
-	// At default viewport (1280px), desktop-only should match and mobile-only should not
 	foundDesktop := false
 	foundMobile := false
 	for _, rule := range sheet.Rules {
@@ -71,21 +70,18 @@ func TestCSSMediaQueryRangeEvaluation(t *testing.T) {
 }
 `
 
-	// At 500px: mobile (<=800) matches, tablet (400<=w<1000) matches, desktop (>=1000) does not
 	s500 := css.ParseForViewport(cssText, 500)
 	classes500 := ruleClasses(s500)
 	if !classes500[".mobile"] || !classes500[".tablet"] || classes500[".desktop"] {
 		t.Errorf("At 500px: want mobile+tablet, got %v", classes500)
 	}
 
-	// At 900px: tablet (400<=w<1000) matches, mobile and desktop do not
 	s900 := css.ParseForViewport(cssText, 900)
 	classes900 := ruleClasses(s900)
 	if classes900[".mobile"] || !classes900[".tablet"] || classes900[".desktop"] {
 		t.Errorf("At 900px: want tablet only, got %v", classes900)
 	}
 
-	// At 1200px: desktop (>=1000) matches, mobile and tablet do not
 	s1200 := css.ParseForViewport(cssText, 1200)
 	classes1200 := ruleClasses(s1200)
 	if classes1200[".mobile"] || classes1200[".tablet"] || !classes1200[".desktop"] {

@@ -14,15 +14,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// testDeadline is the hang budget for every blocking step below. The pool's
-// contract is that neither direction blocks the caller, so a lost result or a
-// leaked panic has to fail as "did not return within 2s" rather than as a test
-// suite that CI's own timeout eventually reports as nothing at all.
 const testDeadline = 2 * time.Second
 
-// within runs fn on a helper goroutine and fails if it has not returned by the
-// deadline. The goroutine is abandoned rather than killed, which is fine in a
-// test and is the only way to observe a hang at all.
 func within(t *testing.T, what string, fn func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -37,9 +30,6 @@ func within(t *testing.T, what string, fn func()) {
 	}
 }
 
-// mustNotPanic fails instead of taking the test binary down. It is applied to the
-// caller's own calls: a panic raised inside a worker is supposed to be converted
-// by the pool long before it could reach here.
 func mustNotPanic(t *testing.T, what string, fn func()) {
 	t.Helper()
 	defer func() {
@@ -50,7 +40,6 @@ func mustNotPanic(t *testing.T, what string, fn func()) {
 	fn()
 }
 
-// collect waits for n results, failing on timeout rather than blocking forever.
 func collect(t *testing.T, p *raster.Pool, n int) []raster.Done {
 	t.Helper()
 	ch := make(chan []raster.Done, 1)
@@ -67,9 +56,6 @@ func collect(t *testing.T, p *raster.Pool, n int) []raster.Done {
 	}
 }
 
-// pollUntil waits for cond to hold, reporting whether it ever did. Every test
-// that needs an asynchronous side effect to land uses this instead of a sleep,
-// so the suite stays fast when the code works and still fails when it does not.
 func pollUntil(cond func() bool) bool {
 	deadline := time.Now().Add(testDeadline)
 	for {
@@ -94,8 +80,6 @@ func TestDefaultWorkersLeavesOneCoreAndCapsAtFour(t *testing.T) {
 	if got := raster.DefaultWorkers(); got != want {
 		t.Fatalf("DefaultWorkers() = %d, want min(max(GOMAXPROCS-1, 1), 4) = %d", got, want)
 	}
-	// Zero means "decide for me" rather than a pool with no workers, which would
-	// silently never finish a tile.
 	if p := raster.New(0, 0, nil); p.Workers() != want {
 		t.Fatalf("New(0, 0).Workers() = %d, want %d", p.Workers(), want)
 	}
@@ -107,8 +91,6 @@ func TestDefaultWorkersLeavesOneCoreAndCapsAtFour(t *testing.T) {
 func TestAllJobsCompleteWithNoLostResults(t *testing.T) {
 	const cols, rows = 16, 16
 	n := cols * rows
-	// The buffers only have to be identifiable here, so they are small: this test
-	// is about the pool carrying one result per job, not about pixels.
 	outs := make([]*frame.Bitmap, n)
 	for i := range outs {
 		outs[i] = frame.NewBitmap(4, 4)
@@ -154,10 +136,6 @@ func TestAllJobsCompleteWithNoLostResults(t *testing.T) {
 	}
 }
 
-// TestJobsRunConcurrentlyAcrossWorkers proves the pool really has the worker
-// count it claims. Every job blocks inside the rasterizer until all of them are
-// in there at once, so a serialized pool hits the deadline instead of passing by
-// accident.
 func TestJobsRunConcurrentlyAcrossWorkers(t *testing.T) {
 	const w = 4
 	gate := make(chan struct{})
@@ -211,8 +189,6 @@ func TestPanickingJobIsRecoveredAndPoolKeepsServing(t *testing.T) {
 				t.Errorf("Submit: %v", err)
 			}
 		}
-		// The same exploding tile twice: recovery has to be per job, not a
-		// one-shot that leaves the pool disabled afterwards.
 		for i := 0; i < 2; i++ {
 			if err := p.Submit(raster.Job{Coord: boom}); err != nil {
 				t.Errorf("Submit(boom): %v", err)
@@ -240,7 +216,6 @@ func TestPanickingJobIsRecoveredAndPoolKeepsServing(t *testing.T) {
 		t.Fatalf("stats = %+v, want Panics=2 Failed=2 Rasterized=%d", st, clean0)
 	}
 
-	// Still serving afterwards: a panic must not retire the worker that ran it.
 	const more = 64
 	mustNotPanic(t, "the submit path after a panic", func() {
 		for i := 0; i < more; i++ {
@@ -264,11 +239,6 @@ func TestPanickingJobIsRecoveredAndPoolKeepsServing(t *testing.T) {
 	}
 }
 
-// TestFailedTileIsRetriedOnceThenMarkedFailed walks the caller's retry policy end
-// to end against a real grid: the first panic leaves the tile worth asking about
-// again, the second exhausts MaxTileAttempts, and only then does the tile become
-// a blank one with a counter. The pool supplies the distinction and the grid owns
-// the bookkeeping, which is why neither can retire a tile alone.
 // qc:BR-172
 func TestFailedTileIsRetriedOnceThenMarkedFailed(t *testing.T) {
 	c := frame.TileCoord{Col: 1, Row: 1}
@@ -300,18 +270,12 @@ func TestFailedTileIsRetriedOnceThenMarkedFailed(t *testing.T) {
 		if !errors.Is(d.Err, raster.ErrTilePanic) {
 			t.Fatalf("attempt %d reported %v, want ErrTilePanic", reports, d.Err)
 		}
-		// The failed raster's buffer goes back before the tile is asked for again.
-		// A buffer on order is what makes a tile in flight, so a retry that skipped
-		// this step would be handed the same buffer and the attempts would never
-		// exhaust - the panic would go on forever rather than becoming a blank tile.
 		if !l.Grid.Release(c, d.Out) {
 			t.Fatalf("attempt %d: Release refused the buffer the grid handed out", reports)
 		}
 		if l.Grid.Attempts(c) >= frame.MaxTileAttempts {
 			break
 		}
-		// The retry re-acquires rather than reusing the job: that is what counts
-		// the attempt and what keeps the buffer's ownership unambiguous.
 		out, _ = l.Grid.Acquire(c)
 	}
 	if reports != frame.MaxTileAttempts {
@@ -328,7 +292,6 @@ func TestFailedTileIsRetriedOnceThenMarkedFailed(t *testing.T) {
 		t.Fatalf("grid Failed count = %d, want 1", got)
 	}
 
-	// The neighbour is untouched by any of this and rasterizes normally.
 	near := frame.TileCoord{Col: 0, Row: 0}
 	nout, ok := l.Grid.Acquire(near)
 	if !ok {
@@ -350,7 +313,6 @@ func TestFailedTileIsRetriedOnceThenMarkedFailed(t *testing.T) {
 }
 
 func TestQueuedSubmissionsAreNotCountedAsWork(t *testing.T) {
-	// Unstarted, so nothing can have run: the queue holds all four jobs.
 	p := raster.New(2, 4, func(raster.Job) error { return nil })
 	for i := 0; i < 4; i++ {
 		if err := p.Submit(raster.Job{Coord: frame.TileCoord{Col: int32(i)}}); err != nil {
@@ -373,9 +335,6 @@ func TestSubmitRefusesInsteadOfBlocking(t *testing.T) {
 	if err := p.Submit(raster.Job{}); err != nil {
 		t.Fatalf("first Submit: %v", err)
 	}
-	// The queue is one deep and no worker exists, so the next two are refused.
-	// Refusing is the whole point: waiting here would put tile raster on the UI
-	// thread, which is invariant 2.
 	for i := 0; i < 2; i++ {
 		if err := p.Submit(raster.Job{}); !errors.Is(err, raster.ErrQueueFull) {
 			t.Fatalf("Submit to a full queue = %v, want ErrQueueFull", err)
@@ -391,13 +350,6 @@ func TestSubmitRefusesInsteadOfBlocking(t *testing.T) {
 	})
 }
 
-// TestUncollectedResultsPinTheWindowAndAreNeverLost covers the one way a UI thread
-// can damage the raster pipeline from the outside: stop collecting. Every job it
-// admitted still has to be collectable afterwards, because a lost result leaves
-// its tile claimed by a worker that will never report, and past the window the
-// pool has to say no rather than discard an answer. The workers are held inside a
-// rasterizer until told, so both halves are deterministic rather than a race
-// against a fast worker.
 func TestUncollectedResultsPinTheWindowAndAreNeverLost(t *testing.T) {
 	const (
 		workers    = 2
@@ -415,9 +367,6 @@ func TestUncollectedResultsPinTheWindowAndAreNeverLost(t *testing.T) {
 	p := raster.New(workers, queueDepth, rf)
 	p.Start(context.Background())
 	t.Cleanup(func() { p.Close() })
-	// Registered after p.Close's cleanup so that it runs first: a worker still
-	// parked inside the rasterizer would otherwise hang Close and turn an assertion
-	// failure into a package timeout.
 	t.Cleanup(func() {
 		select {
 		case <-release:
@@ -426,9 +375,6 @@ func TestUncollectedResultsPinTheWindowAndAreNeverLost(t *testing.T) {
 		}
 	})
 
-	// Take the workers out of the queue first, so that "the window is full" means
-	// the job queue is full *and* a worker is busy, rather than depending on how
-	// quickly the scheduler happened to start the goroutines.
 	for i := 0; i < workers; i++ {
 		if err := p.Submit(raster.Job{Coord: frame.TileCoord{Col: int32(i)}}); err != nil {
 			t.Fatalf("Submit %d onto an empty queue: %v", i, err)
@@ -443,9 +389,6 @@ func TestUncollectedResultsPinTheWindowAndAreNeverLost(t *testing.T) {
 		}
 	}
 
-	// Two jobs parked in the rasterizer and four queued, none collected. The next
-	// submission has to be a refusal - a lost result would leave its tile claimed
-	// by a worker that never reports.
 	if err := p.Submit(raster.Job{Coord: frame.TileCoord{Col: 99}}); !errors.Is(err, raster.ErrQueueFull) {
 		t.Fatalf("Submit past a full result window = %v, want ErrQueueFull", err)
 	}
@@ -460,8 +403,6 @@ func TestUncollectedResultsPinTheWindowAndAreNeverLost(t *testing.T) {
 	if st := p.Stats(); st.DroppedResults != 0 || st.Outstanding != 0 {
 		t.Fatalf("after collecting everything, outstanding/dropped = %d/%d, want 0/0", st.Outstanding, st.DroppedResults)
 	}
-	// Freeing a slot reopens the window. A dropped result would have wedged it shut
-	// and the frame path would have starved without a single error to read.
 	within(t, "Submit after the window drained", func() {
 		for p.Submit(raster.Job{}) != nil {
 			time.Sleep(time.Millisecond)
@@ -484,7 +425,7 @@ func TestPollNeverWaits(t *testing.T) {
 	if err := p.Submit(raster.Job{}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
-	<-entered // the single worker is busy, so the completion queue is certainly empty
+	<-entered
 	within(t, "Poll on an empty completion queue", func() {
 		for i := 0; i < 1000; i++ {
 			if d, ok := p.Poll(); ok {
@@ -500,9 +441,6 @@ func TestPollNeverWaits(t *testing.T) {
 }
 
 func TestSubmitPathIsAllocationFree(t *testing.T) {
-	// Unstarted with a queue deeper than the measurement, so the steady-state
-	// paths run without a worker racing them. Invariant 6 covers the UI thread,
-	// and these are the calls the UI thread makes every frame.
 	p := raster.New(1, 1024, func(raster.Job) error { return nil })
 	j := raster.Job{Coord: frame.TileCoord{Col: 1, Row: 2}, Bounds: frame.Rect4(0, 0, 256, 256)}
 	if err := p.Submit(j); err != nil {
@@ -545,8 +483,6 @@ func TestCloseIsIdempotentAndRefusesLaterSubmits(t *testing.T) {
 }
 
 func TestCancelingTheStartContextClosesThePool(t *testing.T) {
-	// A caller that owns a document lifetime must not need a separate teardown:
-	// cancelling the context it started with has to shut the pool down by itself.
 	ctx, cancel := context.WithCancel(context.Background())
 	p := raster.New(2, 8, func(raster.Job) error { return nil })
 	p.Start(ctx)
@@ -570,10 +506,6 @@ func TestNilRasterizerReportsInsteadOfPanicking(t *testing.T) {
 }
 
 func TestConcurrentWaitersGetDistinctResults(t *testing.T) {
-	// Wait reuses one buffer, so two waiters have to be serialised: without it
-	// both append into the same slot and each returns the other's tile. That is a
-	// data race the race detector cannot see, because it is not unsynchronised
-	// memory but a shared slice handed out twice.
 	const n = 32
 	p := raster.New(raster.DefaultWorkers(), n, func(raster.Job) error { return nil })
 	p.Start(context.Background())
@@ -610,8 +542,6 @@ func TestConcurrentWaitersGetDistinctResults(t *testing.T) {
 }
 
 func TestWaitZeroAndStatsAreUsableBeforeStart(t *testing.T) {
-	// A tool that constructs a pool and never starts it must still be able to ask
-	// for a summary, and Wait(0) is the non-blocking form that claims nothing.
 	p := raster.New(4, 8, nil)
 	if got := len(p.Wait(0)); got != 0 {
 		t.Fatalf("Wait(0) returned %d results", got)
@@ -624,10 +554,6 @@ func TestWaitZeroAndStatsAreUsableBeforeStart(t *testing.T) {
 	}
 }
 
-// TestPoolRasterizesRealTilesIntoGridBuffers is the one place before the
-// scheduler where the whole raster side runs together: real buffers from a real
-// grid, a real frozen display list, real glyph masks, and results the grid
-// accepts back through MarkValid.
 func TestPoolRasterizesRealTilesIntoGridBuffers(t *testing.T) {
 	f, g := mustFonts(t)
 	const cols, rows = 3, 3
@@ -664,8 +590,6 @@ func TestPoolRasterizesRealTilesIntoGridBuffers(t *testing.T) {
 		t.Fatalf("tile bytes %d over budget %d", st.Bytes, st.Budget)
 	}
 
-	// A worker that mixed up its buffers would still produce total pixels, so the
-	// proof is per-tile agreement with a single-threaded raster of that same tile.
 	for _, c := range []frame.TileCoord{{Col: 0, Row: 0}, {Col: 1, Row: 0}, {Col: 2, Row: 2}} {
 		ref := newTile()
 		if err := raster.RasterizeTile(dl, c.Rect(frame.TileSize), ref, f, g, frame.TransparentBlack); err != nil {
@@ -684,10 +608,6 @@ func TestPoolRasterizesRealTilesIntoGridBuffers(t *testing.T) {
 	}
 }
 
-// A result has to say which content version it depicts, because the caller cannot
-// recover that from the layer it still holds: content bumps while jobs run, and a
-// scheduler that assumed the current version would install older pixels and then
-// believe they were finished.
 func TestDoneCarriesTheVersionTheJobPainted(t *testing.T) {
 	src := paint.NewList(1)
 	src.Append(paint.DisplayCmd{Kind: paint.CmdFill, Rect: frame.Rect4(0, 0, 64, 64), Color: frame.RGB(1, 2, 3)})
@@ -704,8 +624,6 @@ func TestDoneCarriesTheVersionTheJobPainted(t *testing.T) {
 	jobs := []raster.Job{
 		{Layer: l, Coord: frame.TileCoord{Col: 0, Row: 0}, DL: older, Bounds: frame.Rect4(0, 0, 64, 64), Out: newTile()},
 		{Layer: l, Coord: frame.TileCoord{Col: 1, Row: 0}, DL: newer, Bounds: frame.Rect4(0, 0, 64, 64), Out: newTile()},
-		// A job with no list at all: the zero version is what makes a caller refuse it
-		// rather than accidentally mark a tile current.
 		{Layer: l, Coord: frame.TileCoord{Col: 2, Row: 0}, Bounds: frame.Rect4(0, 0, 64, 64), Out: newTile()},
 	}
 	for _, j := range jobs {
@@ -728,8 +646,6 @@ func TestDoneCarriesTheVersionTheJobPainted(t *testing.T) {
 	}
 }
 
-// newLayer returns a layer over a cols x rows tile grid whose single command
-// fills the whole extent, with a budget that holds every tile at once.
 func newLayer(t *testing.T, cols, rows int32) (*frame.Layer, *paint.LayerDL) {
 	t.Helper()
 	bounds := frame.Rect4(0, 0, cols*frame.TileSize, rows*frame.TileSize)

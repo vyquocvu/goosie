@@ -83,10 +83,6 @@ func TestCloseTabRemovesTab(t *testing.T) {
 	}
 }
 
-// TestCloseLastTabCallsOnCloseLast verifies that closing the final tab runs
-// the manager's close-last callback exactly once and leaves no dangling tab.
-// The browser wires that callback to closing the window, so the UI never stays
-// alive showing an empty tab strip.
 // qc:BR-031
 func TestCloseLastTabCallsOnCloseLast(t *testing.T) {
 	var calls atomic.Int32

@@ -10,9 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// layoutStyleKey is the projection of computed style consumed by layout.
-// Fields omitted here affect painting or interaction only, so their changes
-// can reuse the existing arena after all keys compare equal.
 type layoutStyleKey struct {
 	Display, Position, Float, Clear               uint8
 	FlowRoot                                      bool
@@ -186,10 +183,6 @@ func interactiveLayoutChanged(resolution style.InteractiveResolution, current ma
 			key := style.PseudoKey{NodeID: id, Pseudo: pseudo}
 			before, hadBefore := resolution.PreviousPseudo[key]
 			after, hasAfter := pseudos[key]
-			// The arena owns the pseudo box's computed style pointer. Refreshing
-			// ordinary DOM objects cannot update that anonymous layout object, so
-			// any pseudo style change needs a fresh reflow even when geometry is
-			// unchanged.
 			if hadBefore != hasAfter || (hadBefore && !reflect.DeepEqual(before, after)) {
 				return true
 			}

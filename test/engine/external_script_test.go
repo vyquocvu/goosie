@@ -11,9 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// External <script src> is how dynamic pages boot: the HTML is a shell and
-// the app arrives as bundles. The engine ran inline scripts only, so every
-// such page stayed a blank shell.
 func TestExternalScriptsRunInDocumentOrder(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {

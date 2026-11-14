@@ -10,10 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// TestJourneyFindInPageCountsStepsScrollsAndEscape drives the whole Cmd+F
-// journey through the real window wiring: a count appears without another
-// keystroke on reopen, Enter moves to the next hit and scrolls the document,
-// Escape closes find mode from wherever focus sits.
 // qc:BR-133 BR-137
 func TestJourneyFindInPageCountsStepsScrollsAndEscape(t *testing.T) {
 	var page strings.Builder
@@ -63,8 +59,6 @@ func TestJourneyFindInPageCountsStepsScrollsAndEscape(t *testing.T) {
 		return b.f.tabMgr.Active().ScrollY() > 0
 	})
 
-	// Escape closes find mode, drops the highlights, and hands focus back to
-	// the page instead of leaving the address-bar field focused.
 	b.pressKey(t, 0x1b)
 	b.waitFor(t, "Escape closes find", func() bool {
 		active, _, _ := b.f.toolbar.FindCounts()
@@ -74,7 +68,6 @@ func TestJourneyFindInPageCountsStepsScrollsAndEscape(t *testing.T) {
 		t.Fatalf("focus after Escape = %v, want FocusNone so keys reach the page", focus)
 	}
 
-	// Reopening restores the query and its count without another keystroke.
 	b.inject(t, surface.Event{Kind: surface.EvKey, Key: 'f', Mods: surface.ModCommand})
 	b.waitFor(t, "reopened find shows the restored count", func() bool {
 		active, total, _ := b.f.toolbar.FindCounts()
@@ -85,9 +78,6 @@ func TestJourneyFindInPageCountsStepsScrollsAndEscape(t *testing.T) {
 	}
 }
 
-// TestJourneyFindZeroMatchLeavesPageIntact drives the miss path through the
-// real window: a query with no hits reports a zero count, leaves the document
-// and its rendered layer untouched, and still closes on Escape.
 // qc:BR-134
 func TestJourneyFindZeroMatchLeavesPageIntact(t *testing.T) {
 	srvURL := findJourneyPage(t, `<p id="keep">alpha beta gamma</p>`, "")
@@ -149,10 +139,6 @@ func openFindWithQuery(t *testing.T, b *browserE2E, query string) {
 }
 
 // qc:BR-135
-//
-// Cmd+G steps to the next match and Cmd+Shift+G to the previous one, whether
-// find is open or the shortcut has to reopen it with the restored query. Both
-// directions wrap at the ends of the result set.
 func TestJourneyFindShortcutsStepAndReopen(t *testing.T) {
 	var body strings.Builder
 	body.WriteString("<p>needle one</p>")
@@ -224,8 +210,6 @@ func TestJourneyFindShortcutsStepAndReopen(t *testing.T) {
 	})
 }
 
-// A find that is already open must follow the document: nodes added or removed
-// by a page script update the count and keep the highlight on a live match.
 func TestJourneyFindTracksDOMMutations(t *testing.T) {
 	script := `<script>
 setTimeout(function () {

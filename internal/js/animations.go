@@ -11,37 +11,32 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// jsAnimation holds the Go-side state for one Web Animation.
 type jsAnimation struct {
 	r         *Runtime
 	nodeID    int
 	keyframes []css.KeyframeStop
-	effect    *goja.Object // KeyframeEffect JS object
-	obj       *goja.Object // Animation JS object
+	effect    *goja.Object
+	obj       *goja.Object
 
-	// Timing
 	duration  time.Duration
 	delay     time.Duration
 	endDelay  time.Duration
-	iterCount int // 0 = Infinity
+	iterCount int
 	direction css.AnimationDirection
 	fillMode  css.AnimationFillMode
 	easing    css.TimingFunc
 
-	// Playback state
-	playState    string // "idle", "running", "paused", "finished"
+	playState    string
 	startTime    time.Time
-	pausedAt     time.Duration // elapsed time when paused
+	pausedAt     time.Duration
 	playbackRate float64
 	finished     *promiseObj
 	onfinish     goja.Value
 	cancelled    bool
 }
 
-// animationStateKey is the global key under which we store the animation registry.
 const animationStateKey = "__animRegistry__"
 
-// animRegistry holds all active JS animations for one runtime.
 type animRegistry struct {
 	r     *Runtime
 	anims []*jsAnimation
@@ -63,26 +58,16 @@ func setAnimRegistry(r *Runtime, reg *animRegistry) {
 	_ = r.vm.Set(animationStateKey, reg)
 }
 
-// setupAnimations installs the Web Animations API:
-// - Element.prototype.animate(keyframes, options)
-// - Animation constructor
-// - KeyframeEffect constructor
 func (r *Runtime) setupAnimations() {
 	reg := &animRegistry{r: r}
 	setAnimRegistry(r, reg)
 	r.installAnimationElementAPI(reg)
 
-	// Install Animation and KeyframeEffect constructors globally.
 	r.installAnimationConstructor(reg)
 	r.installKeyframeEffectConstructor()
 }
 
-// installAnimationElementAPI binds animate() whenever setupDOM has created the
-// Element prototype. Runtimes that receive their Document later use this when
-// SetDOM rebuilds the prototype chain.
 func (r *Runtime) installAnimationElementAPI(reg *animRegistry) {
-	// Install animate() on Element.prototype only when a DOM is present;
-	// without one, setupDOM skips prototype creation and elementProto is nil.
 	if reg != nil && r.elementProto != nil {
 		_ = r.elementProto.Set("animate", func(call goja.FunctionCall) goja.Value {
 			return r.jsElementAnimate(call, reg)
@@ -90,7 +75,6 @@ func (r *Runtime) installAnimationElementAPI(reg *animRegistry) {
 	}
 }
 
-// jsElementAnimate implements element.animate(keyframes, options).
 func (r *Runtime) jsElementAnimate(call goja.FunctionCall, reg *animRegistry) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil || len(call.Arguments) < 1 {
@@ -101,26 +85,19 @@ func (r *Runtime) jsElementAnimate(call goja.FunctionCall, reg *animRegistry) go
 		options = call.Arguments[1]
 	}
 
-	// Capture the __nid__ (nodeRegistry key) from the JS wrapper, which may
-	// differ from node.ID.
 	nid := thisNID(call)
 	if nid == 0 {
 		nid = int(node.ID)
 	}
 
-	// Parse keyframes from the first argument.
 	kf, err := r.parseKeyframes(call.Arguments[0])
 	if err != nil || len(kf) == 0 {
-		// Return a dummy animation if keyframes are invalid.
 		return r.createAnimationObject(reg, nid, nil, options)
 	}
 
 	return r.createAnimationObject(reg, nid, kf, options)
 }
 
-// parseKeyframes handles both array and object keyframe formats:
-// - Array: [{opacity: 0}, {opacity: 1}]
-// - Object: {opacity: [0, 1], transform: ["translateX(0)", "translateX(100px)"]}
 func (r *Runtime) parseKeyframes(v goja.Value) ([]css.KeyframeStop, error) {
 	if goja.IsNull(v) || goja.IsUndefined(v) {
 		return nil, fmt.Errorf("invalid keyframes")
@@ -131,12 +108,10 @@ func (r *Runtime) parseKeyframes(v goja.Value) ([]css.KeyframeStop, error) {
 		return nil, fmt.Errorf("invalid keyframes")
 	}
 
-	// Check if it's an array.
 	lengthVal := obj.Get("length")
 	if lengthVal != nil && !goja.IsUndefined(lengthVal) {
 		length := int(lengthVal.ToInteger())
 		if length > 0 {
-			// Check if first element is an object (array format).
 			first := obj.Get("0")
 			if first != nil {
 				if _, isObj := first.(*goja.Object); isObj {
@@ -146,11 +121,9 @@ func (r *Runtime) parseKeyframes(v goja.Value) ([]css.KeyframeStop, error) {
 		}
 	}
 
-	// Object format: {property: [val1, val2, ...]}
 	return r.parseObjectKeyframes(obj)
 }
 
-// parseArrayKeyframes handles [{offset: 0, opacity: 0}, {offset: 1, opacity: 1}].
 func (r *Runtime) parseArrayKeyframes(arr *goja.Object, length int) ([]css.KeyframeStop, error) {
 	stops := make([]css.KeyframeStop, 0, length)
 	for i := 0; i < length; i++ {
@@ -168,16 +141,13 @@ func (r *Runtime) parseArrayKeyframes(arr *goja.Object, length int) ([]css.Keyfr
 			Declarations: make(map[string]string),
 		}
 
-		// Check for explicit offset.
 		if offVal := eObj.Get("offset"); offVal != nil && !goja.IsUndefined(offVal) {
 			stop.Offset = float32(offVal.ToFloat())
 		}
-		// Check for easing.
 		if easeVal := eObj.Get("easing"); easeVal != nil && !goja.IsUndefined(easeVal) {
-			_ = easeVal.String() // stored but not per-keyframe in our simplified model
+			_ = easeVal.String()
 		}
 
-		// Extract all properties.
 		keys := eObj.Keys()
 		for _, key := range keys {
 			if key == "offset" || key == "easing" || key == "composite" {
@@ -194,7 +164,6 @@ func (r *Runtime) parseArrayKeyframes(arr *goja.Object, length int) ([]css.Keyfr
 		}
 	}
 
-	// Ensure first stop is at 0 and last is at 1.
 	if len(stops) > 0 {
 		if stops[0].Offset != 0 {
 			first := css.KeyframeStop{Offset: 0, Declarations: make(map[string]string)}
@@ -215,14 +184,12 @@ func (r *Runtime) parseArrayKeyframes(arr *goja.Object, length int) ([]css.Keyfr
 	return stops, nil
 }
 
-// parseObjectKeyframes handles {opacity: [0, 1], transform: ["translateX(0)", "translateX(100px)"]}.
 func (r *Runtime) parseObjectKeyframes(obj *goja.Object) ([]css.KeyframeStop, error) {
 	keys := obj.Keys()
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("empty keyframes")
 	}
 
-	// Find the maximum array length across all properties.
 	maxLen := 0
 	propValues := make(map[string][]string)
 	for _, key := range keys {
@@ -236,7 +203,6 @@ func (r *Runtime) parseObjectKeyframes(obj *goja.Object) ([]css.KeyframeStop, er
 
 		cssProp := toCSSProperty(key)
 
-		// Check if it's an array.
 		if vObj, ok := val.(*goja.Object); ok {
 			arrLen := vObj.Get("length")
 			if arrLen != nil && !goja.IsUndefined(arrLen) {
@@ -256,7 +222,6 @@ func (r *Runtime) parseObjectKeyframes(obj *goja.Object) ([]css.KeyframeStop, er
 			}
 		}
 
-		// Single value: treat as array of length 1.
 		propValues[cssProp] = []string{val.String()}
 		if 1 > maxLen {
 			maxLen = 1
@@ -267,7 +232,6 @@ func (r *Runtime) parseObjectKeyframes(obj *goja.Object) ([]css.KeyframeStop, er
 		return nil, fmt.Errorf("no animatable properties in keyframes")
 	}
 
-	// Build keyframe stops.
 	stops := make([]css.KeyframeStop, maxLen)
 	for i := 0; i < maxLen; i++ {
 		offset := float32(i) / float32(maxInt(maxLen-1, 1))
@@ -289,9 +253,7 @@ func (r *Runtime) parseObjectKeyframes(obj *goja.Object) ([]css.KeyframeStop, er
 	return stops, nil
 }
 
-// parseTimingOptions extracts timing from the options argument.
 func parseTimingOptions(r *Runtime, v goja.Value) (duration, delay, endDelay time.Duration, iterCount int, direction css.AnimationDirection, fill css.AnimationFillMode, easing css.TimingFunc) {
-	// Defaults
 	duration = 0
 	delay = 0
 	endDelay = 0
@@ -304,7 +266,6 @@ func parseTimingOptions(r *Runtime, v goja.Value) (duration, delay, endDelay tim
 		return
 	}
 
-	// If it's a number, treat it as duration in ms.
 	if n, ok := v.Export().(float64); ok {
 		duration = time.Duration(n) * time.Millisecond
 		return
@@ -331,7 +292,7 @@ func parseTimingOptions(r *Runtime, v goja.Value) (duration, delay, endDelay tim
 	if d := obj.Get("iterations"); d != nil && !goja.IsUndefined(d) {
 		n := d.ToFloat()
 		if math.IsInf(n, 1) {
-			iterCount = 0 // Infinity
+			iterCount = 0
 		} else {
 			iterCount = int(n)
 			if iterCount < 0 {
@@ -352,7 +313,6 @@ func parseTimingOptions(r *Runtime, v goja.Value) (duration, delay, endDelay tim
 	return
 }
 
-// createAnimationObject builds the Animation JS object and registers it.
 func (r *Runtime) createAnimationObject(reg *animRegistry, nid int, kf []css.KeyframeStop, optionsVal goja.Value) goja.Value {
 	duration, delay, endDelay, iterCount, direction, fill, easing := parseTimingOptions(r, optionsVal)
 
@@ -372,32 +332,25 @@ func (r *Runtime) createAnimationObject(reg *animRegistry, nid int, kf []css.Key
 		startTime:    time.Now(),
 	}
 
-	// Create the finished promise.
 	anim.finished = r.newPromiseObj()
 
-	// Build the KeyframeEffect object.
 	effect := r.buildKeyframeEffect(anim)
 	anim.effect = effect
 
-	// Build the Animation object.
 	animObj := r.buildAnimationObject(anim, effect)
 	anim.obj = animObj
 
-	// Register and auto-play.
 	reg.anims = append(reg.anims, anim)
 	r.playAnimation(anim)
 
 	return animObj
 }
 
-// buildKeyframeEffect creates the KeyframeEffect JS object.
 func (r *Runtime) buildKeyframeEffect(anim *jsAnimation) *goja.Object {
 	obj := r.vm.NewObject()
 
-	// Store a reference back to the Go animation.
 	_ = obj.Set("__anim__", anim)
 
-	// getTiming() returns the timing properties.
 	_ = obj.Set("getTiming", func(call goja.FunctionCall) goja.Value {
 		result := r.vm.NewObject()
 		_ = result.Set("delay", anim.delay.Seconds()*1000)
@@ -410,7 +363,6 @@ func (r *Runtime) buildKeyframeEffect(anim *jsAnimation) *goja.Object {
 		return result
 	})
 
-	// getKeyframes() returns the keyframe array.
 	_ = obj.Set("getKeyframes", func(call goja.FunctionCall) goja.Value {
 		arr := r.vm.NewArray()
 		for i, kf := range anim.keyframes {
@@ -427,43 +379,34 @@ func (r *Runtime) buildKeyframeEffect(anim *jsAnimation) *goja.Object {
 	return obj
 }
 
-// buildAnimationObject creates the Animation JS object with all its methods and properties.
 func (r *Runtime) buildAnimationObject(anim *jsAnimation, effect *goja.Object) *goja.Object {
 	obj := r.vm.NewObject()
 	_ = obj.Set("__anim__", anim)
 	_ = obj.Set("effect", effect)
 
-	// timeline - a simple DocumentTimeline stub.
 	timeline := r.vm.NewObject()
 	_ = timeline.Set("currentTime", r.vm.ToValue(float64(time.Now().UnixMilli())))
 	_ = obj.Set("timeline", timeline)
 
-	// play() method
 	_ = obj.Set("play", func(call goja.FunctionCall) goja.Value {
 		r.playAnimation(anim)
 		return goja.Undefined()
 	})
 
-	// pause() method
 	_ = obj.Set("pause", func(call goja.FunctionCall) goja.Value {
 		r.pauseAnimation(anim)
 		return goja.Undefined()
 	})
 
-	// cancel() method
 	_ = obj.Set("cancel", func(call goja.FunctionCall) goja.Value {
 		r.cancelAnimation(anim)
 		return goja.Undefined()
 	})
 
-	// finish() method
 	_ = obj.Set("finish", func(call goja.FunctionCall) goja.Value {
 		r.finishAnimation(anim)
 		return goja.Undefined()
 	})
-	// commitStyles() writes the effect's current values into the target's
-	// inline style declaration, using the CSSOM mutation path so observed style
-	// attributes receive their custom-element reaction.
 	_ = obj.Set("commitStyles", func(call goja.FunctionCall) goja.Value {
 		node := r.nodeRegistry[anim.nodeID]
 		if node == nil || len(anim.keyframes) == 0 {
@@ -489,13 +432,11 @@ func (r *Runtime) buildAnimationObject(anim *jsAnimation, effect *goja.Object) *
 		return goja.Undefined()
 	})
 
-	// reverse() method
 	_ = obj.Set("reverse", func(call goja.FunctionCall) goja.Value {
 		r.reverseAnimation(anim)
 		return goja.Undefined()
 	})
 
-	// addEventListener / removeEventListener stubs for animation events.
 	_ = obj.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	})
@@ -503,13 +444,11 @@ func (r *Runtime) buildAnimationObject(anim *jsAnimation, effect *goja.Object) *
 		return goja.Undefined()
 	})
 
-	// Set initial JS-visible state.
 	_ = obj.Set("__playState__", "idle")
 	_ = obj.Set("__playbackRate__", 1.0)
 	_ = obj.Set("__startTimeMs__", float64(0))
 	_ = obj.Set("__onfinishHandler__", goja.Null())
 
-	// Use RunString with closures that capture the obj reference for accessor properties.
 	_ = r.vm.Set("__animObj__", obj)
 	_, _ = r.vm.RunString(`
 	(function(obj) {
@@ -575,10 +514,8 @@ func (r *Runtime) buildAnimationObject(anim *jsAnimation, effect *goja.Object) *
 	return obj
 }
 
-// playAnimation starts or resumes an animation.
 func (r *Runtime) playAnimation(anim *jsAnimation) {
 	if anim.playState == "paused" {
-		// Resume: adjust start time so currentTime is preserved.
 		anim.startTime = time.Now().Add(-anim.pausedAt)
 		anim.pausedAt = -1
 		_ = anim.obj.Set("__pausedAtMs__", goja.Undefined())
@@ -586,7 +523,6 @@ func (r *Runtime) playAnimation(anim *jsAnimation) {
 		anim.startTime = time.Now()
 		anim.pausedAt = -1
 		anim.cancelled = false
-		// Create a new finished promise for this play.
 		anim.finished = r.newPromiseObj()
 		_ = anim.obj.Set("__finishedPromise__", anim.finished.obj)
 	}
@@ -596,7 +532,6 @@ func (r *Runtime) playAnimation(anim *jsAnimation) {
 	_ = anim.obj.Set("__startTimeMs__", float64(anim.startTime.UnixMilli()))
 }
 
-// pauseAnimation pauses an animation.
 func (r *Runtime) pauseAnimation(anim *jsAnimation) {
 	if anim.playState == "finished" || anim.playState == "idle" {
 		return
@@ -610,39 +545,31 @@ func (r *Runtime) pauseAnimation(anim *jsAnimation) {
 	_ = anim.obj.Set("__playState__", "paused")
 }
 
-// cancelAnimation cancels an animation.
 func (r *Runtime) cancelAnimation(anim *jsAnimation) {
 	anim.playState = "idle"
 	anim.cancelled = true
 	anim.pausedAt = -1
 	_ = anim.obj.Set("__playState__", "idle")
-	// Reset the element's animated style.
 	r.clearAnimatedStyle(anim)
 }
 
-// finishAnimation forces an animation to its end state.
 func (r *Runtime) finishAnimation(anim *jsAnimation) {
 	if anim.playState == "idle" || anim.playState == "finished" {
 		return
 	}
 	anim.playState = "finished"
 	_ = anim.obj.Set("__playState__", "finished")
-	// Apply the final keyframe values.
 	r.applyAnimationAtOffset(anim, animFinalOffset(anim))
-	// Resolve the finished promise.
 	if anim.finished != nil {
 		r.resolvePromise(anim.finished, anim.obj)
 	}
-	// Fire onfinish.
 	r.fireOnFinish(anim)
 }
 
-// reverseAnimation reverses the playback direction.
 func (r *Runtime) reverseAnimation(anim *jsAnimation) {
 	anim.playbackRate = -anim.playbackRate
 	_ = anim.obj.Set("__playbackRate__", anim.playbackRate)
 	if anim.playState == "running" {
-		// Recalculate start time to preserve current position.
 		elapsed := time.Since(anim.startTime)
 		remaining := anim.duration - elapsed
 		anim.startTime = time.Now().Add(-remaining)
@@ -650,7 +577,6 @@ func (r *Runtime) reverseAnimation(anim *jsAnimation) {
 	}
 }
 
-// TickAnimations advances all registered animations. Called once per frame.
 func (r *Runtime) TickAnimations() {
 	reg := getAnimRegistry(r)
 	if reg == nil || len(reg.anims) == 0 {
@@ -664,7 +590,6 @@ func (r *Runtime) TickAnimations() {
 			continue
 		}
 		if anim.playState != "running" {
-			// Keep finished animations with fill mode, or paused ones.
 			if anim.playState == "paused" || (anim.playState == "finished" &&
 				(anim.fillMode == css.FillForwards || anim.fillMode == css.FillBoth)) {
 				kept = append(kept, anim)
@@ -674,13 +599,10 @@ func (r *Runtime) TickAnimations() {
 
 		elapsed := now.Sub(anim.startTime)
 		if anim.playbackRate < 0 {
-			// For reversed animations, we handle differently.
 			elapsed = time.Duration(float64(elapsed) * anim.playbackRate)
 		}
 
-		// Still in delay period.
 		if elapsed < anim.delay {
-			// Apply fill-backwards if needed.
 			if anim.fillMode == css.FillBackwards || anim.fillMode == css.FillBoth {
 				r.applyAnimationAtOffset(anim, 0)
 			}
@@ -703,11 +625,9 @@ func (r *Runtime) TickAnimations() {
 			continue
 		}
 
-		// Calculate total progress in iterations.
 		totalProgress := float64(activeDuration) / float64(anim.duration)
 
 		if anim.iterCount > 0 && totalProgress >= float64(anim.iterCount) {
-			// Animation complete.
 			anim.playState = "finished"
 			_ = anim.obj.Set("__playState__", "finished")
 			offset := animFinalOffset(anim)
@@ -722,14 +642,11 @@ func (r *Runtime) TickAnimations() {
 			continue
 		}
 
-		// Current iteration.
 		iteration := int(totalProgress)
 		iterProgress := totalProgress - float64(iteration)
 
-		// Apply direction.
 		offset := animApplyDirection(iterProgress, iteration, anim.direction)
 
-		// Apply easing.
 		eased := anim.easing.Eval(float64(offset))
 		offset = float32(eased)
 
@@ -739,8 +656,6 @@ func (r *Runtime) TickAnimations() {
 	reg.anims = kept
 }
 
-// applyAnimationAtOffset computes interpolated values at the given offset and
-// applies them to the DOM node's inline style.
 func (r *Runtime) applyAnimationAtOffset(anim *jsAnimation, offset float32) {
 	node := r.nodeRegistry[anim.nodeID]
 	if node == nil {
@@ -755,7 +670,6 @@ func (r *Runtime) applyAnimationAtOffset(anim *jsAnimation, offset float32) {
 	}
 }
 
-// clearAnimatedStyle removes animated properties from the inline style.
 func (r *Runtime) clearAnimatedStyle(anim *jsAnimation) {
 	node := r.nodeRegistry[anim.nodeID]
 	if node == nil {
@@ -768,7 +682,6 @@ func (r *Runtime) clearAnimatedStyle(anim *jsAnimation) {
 	}
 }
 
-// fireOnFinish invokes the onfinish handler.
 func (r *Runtime) fireOnFinish(anim *jsAnimation) {
 	if anim.onfinish != nil {
 		if fn, ok := goja.AssertFunction(anim.onfinish); ok {
@@ -778,7 +691,6 @@ func (r *Runtime) fireOnFinish(anim *jsAnimation) {
 			_, _ = fn(anim.obj, event)
 		}
 	}
-	// Also check the JS-side handler.
 	if anim.obj != nil {
 		handler := anim.obj.Get("__onfinishHandler__")
 		if handler != nil && !goja.IsUndefined(handler) && !goja.IsNull(handler) {
@@ -792,13 +704,11 @@ func (r *Runtime) fireOnFinish(anim *jsAnimation) {
 	}
 }
 
-// installAnimationConstructor publishes the Animation constructor globally.
 func (r *Runtime) installAnimationConstructor(reg *animRegistry) {
 	_ = r.vm.Set("__reg__", reg)
 	v, err := r.vm.RunString(`
 	(function(reg) {
 		function Animation(effect, timeline) {
-			// Simplified constructor: creates an idle animation.
 			this.effect = effect || null;
 			this.timeline = timeline || null;
 			this.__playState = 'idle';
@@ -816,7 +726,6 @@ func (r *Runtime) installAnimationConstructor(reg *animRegistry) {
 		};
 		Animation.prototype.cancel = function() { this.__playState = 'idle'; };
 		Animation.prototype.finish = function() {
-			// Noop if idle or already finished.
 			if (this.__playState === 'idle' || this.__playState === 'finished') return;
 			this.__playState = 'finished';
 		};
@@ -857,7 +766,6 @@ func (r *Runtime) installAnimationConstructor(reg *animRegistry) {
 	}
 }
 
-// installKeyframeEffectConstructor publishes KeyframeEffect globally.
 func (r *Runtime) installKeyframeEffectConstructor() {
 	v, err := r.vm.RunString(`
 		function KeyframeEffect(target, keyframes, options) {
@@ -886,11 +794,6 @@ func (r *Runtime) installKeyframeEffectConstructor() {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Interpolation helpers (self-contained, mirroring engine/animation.go logic)
-// ---------------------------------------------------------------------------
-
-// animatedProperties returns the union of all property names across keyframes.
 func animatedProperties(stops []css.KeyframeStop) []string {
 	seen := make(map[string]bool)
 	var props []string
@@ -905,7 +808,6 @@ func animatedProperties(stops []css.KeyframeStop) []string {
 	return props
 }
 
-// interpolateKeyframes computes the value of one property at the given offset.
 func interpolateKeyframes(stops []css.KeyframeStop, property string, offset float32) string {
 	if len(stops) == 0 {
 		return ""
@@ -914,16 +816,13 @@ func interpolateKeyframes(stops []css.KeyframeStop, property string, offset floa
 		return stops[0].Declarations[property]
 	}
 
-	// Before first stop.
 	if offset <= stops[0].Offset {
 		return stops[0].Declarations[property]
 	}
-	// After last stop.
 	if offset >= stops[len(stops)-1].Offset {
 		return stops[len(stops)-1].Declarations[property]
 	}
 
-	// Find surrounding stops.
 	lo, hi := 0, len(stops)-1
 	for i := 0; i < len(stops)-1; i++ {
 		if offset >= stops[i].Offset && offset <= stops[i+1].Offset {
@@ -946,14 +845,12 @@ func interpolateKeyframes(stops []css.KeyframeStop, property string, offset floa
 		return fromVal
 	}
 
-	// Segment progress.
 	span := float64(stops[hi].Offset - stops[lo].Offset)
 	if span <= 0 {
 		return toVal
 	}
 	segProgress := (float64(offset) - float64(stops[lo].Offset)) / span
 
-	// Try color interpolation.
 	if fromColor, ok := css.ParseColor(fromVal); ok {
 		if toColor, ok2 := css.ParseColor(toVal); ok2 {
 			c := interpColor(fromColor, toColor, segProgress)
@@ -961,7 +858,6 @@ func interpolateKeyframes(stops []css.KeyframeStop, property string, offset floa
 		}
 	}
 
-	// Try numeric interpolation.
 	if fromNum, fromUnit, ok := parseCSSNumeric(fromVal); ok {
 		if toNum, toUnit, ok2 := parseCSSNumeric(toVal); ok2 && toUnit == fromUnit {
 			n := fromNum*(1-segProgress) + toNum*segProgress
@@ -969,14 +865,12 @@ func interpolateKeyframes(stops []css.KeyframeStop, property string, offset floa
 		}
 	}
 
-	// Discrete: snap at midpoint.
 	if segProgress < 0.5 {
 		return fromVal
 	}
 	return toVal
 }
 
-// interpColor linearly interpolates between two CSS colors.
 func interpColor(from, to css.Color, t float64) css.Color {
 	if t < 0 {
 		t = 0
@@ -990,7 +884,6 @@ func interpColor(from, to css.Color, t float64) css.Color {
 	return css.Color{R: lerp(from.R, to.R), G: lerp(from.G, to.G), B: lerp(from.B, to.B), A: lerp(from.A, to.A)}
 }
 
-// formatCSSColor formats a css.Color as a CSS color string.
 func formatCSSColor(c css.Color) string {
 	if c.A == 255 {
 		return fmt.Sprintf("rgb(%d, %d, %d)", c.R, c.G, c.B)
@@ -999,7 +892,6 @@ func formatCSSColor(c css.Color) string {
 	return fmt.Sprintf("rgba(%d, %d, %d, %s)", c.R, c.G, c.B, strconv.FormatFloat(alpha, 'f', 2, 64))
 }
 
-// parseCSSNumeric tries to parse a CSS value as number + unit.
 func parseCSSNumeric(s string) (float64, string, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -1033,7 +925,6 @@ func parseCSSNumeric(s string) (float64, string, bool) {
 	return v, unit, true
 }
 
-// formatCSSNumeric formats a numeric value with its unit.
 func formatCSSNumeric(v float64, unit string) string {
 	s := strconv.FormatFloat(v, 'f', 4, 64)
 	if strings.Contains(s, ".") {
@@ -1043,7 +934,6 @@ func formatCSSNumeric(v float64, unit string) string {
 	return s + unit
 }
 
-// animApplyDirection computes the effective offset within an iteration.
 func animApplyDirection(progress float64, iteration int, dir css.AnimationDirection) float32 {
 	switch dir {
 	case css.AnimNormal:
@@ -1064,7 +954,6 @@ func animApplyDirection(progress float64, iteration int, dir css.AnimationDirect
 	return float32(progress)
 }
 
-// animFinalOffset returns the offset when an animation finishes.
 func animFinalOffset(anim *jsAnimation) float32 {
 	switch anim.direction {
 	case css.AnimNormal, css.AnimAlternate:
@@ -1083,7 +972,6 @@ func animFinalOffset(anim *jsAnimation) float32 {
 	return 1
 }
 
-// animIterJS returns the JS-visible iteration count (Infinity for 0).
 func animIterJS(n int) interface{} {
 	if n == 0 {
 		return math.Inf(1)
@@ -1091,7 +979,6 @@ func animIterJS(n int) interface{} {
 	return float64(n)
 }
 
-// animDirectionJS returns the JS string for a direction.
 func animDirectionJS(d css.AnimationDirection) string {
 	switch d {
 	case css.AnimNormal:
@@ -1106,7 +993,6 @@ func animDirectionJS(d css.AnimationDirection) string {
 	return "normal"
 }
 
-// animFillJS returns the JS string for a fill mode.
 func animFillJS(f css.AnimationFillMode) string {
 	switch f {
 	case css.FillNone:
@@ -1121,17 +1007,11 @@ func animFillJS(f css.AnimationFillMode) string {
 	return "none"
 }
 
-// ---------------------------------------------------------------------------
-// Inline style helpers
-// ---------------------------------------------------------------------------
-
-// mergeInlineStyle adds or replaces one property in a CSS inline style string.
 func mergeInlineStyle(style, prop, value string) string {
 	if style == "" {
 		return prop + ": " + value
 	}
 
-	// Check if property already exists.
 	lower := strings.ToLower(prop)
 	parts := strings.Split(style, ";")
 	found := false
@@ -1156,12 +1036,10 @@ func mergeInlineStyle(style, prop, value string) string {
 		return strings.Join(parts, ";")
 	}
 
-	// Append new property.
 	result := strings.TrimRight(style, ";")
 	return result + "; " + prop + ": " + value
 }
 
-// removeInlineStyle removes one property from a CSS inline style string.
 func removeInlineStyle(style, prop string) string {
 	if style == "" {
 		return ""
@@ -1181,14 +1059,13 @@ func removeInlineStyle(style, prop string) string {
 		}
 		existingProp := strings.TrimSpace(trimmed[:colonIdx])
 		if strings.ToLower(existingProp) == lower {
-			continue // skip this property
+			continue
 		}
 		kept = append(kept, part)
 	}
 	return strings.Join(kept, "; ")
 }
 
-// toCSSProperty converts a JS camelCase property name to CSS kebab-case.
 func toCSSProperty(s string) string {
 	var sb strings.Builder
 	for i, c := range s {
@@ -1204,7 +1081,6 @@ func toCSSProperty(s string) string {
 	return sb.String()
 }
 
-// toJSProperty converts a CSS kebab-case property name to JS camelCase.
 func toJSProperty(s string) string {
 	var sb strings.Builder
 	upper := false
@@ -1227,7 +1103,6 @@ func toJSProperty(s string) string {
 	return sb.String()
 }
 
-// maxInt returns the larger of two ints.
 func maxInt(a, b int) int {
 	if a > b {
 		return a

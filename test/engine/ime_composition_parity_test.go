@@ -11,40 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// BR-111: Vietnamese typed through a host IME.
-//
-// An IME does not type one character at a time - it marks a passage and then
-// REPLACES that same passage on every keystroke: `ti`, `tie`, `tiế`, `tiếng`.
-// Both failure modes the catalog names live in that replacement: append instead
-// of replace and the field reads `titietiếtiếng` (a duplicated base letter);
-// drop the tone mark and it reads `tieng`.
-//
-// Every number below is quoted from scripts/verify-br111-ime-composition.js,
-// which drives Chromium 153.0.8010.12 through CDP Input.imeSetComposition
-// (2026-11-05). That seam cannot commit through a native candidate window, so
-// nothing here asserts the inputType or the trust of the commit event; what it
-// does assert is the part both paths share and the page actually reads.
-//
-// Chromium, per step, on an empty <input> and on a contenteditable alike:
-//
-//	compositionstart  data=""                     cancelable=true
-//	compositionupdate data="ti"   value=""        cancelable=true
-//	beforeinput       insertCompositionText "ti"  value=""       isComposing=true cancelable=false
-//	input             insertCompositionText "ti"  value="ti"     isComposing=true cancelable=false  ss=0 se=2
-//	compositionupdate data="tie"  value="ti"      cancelable=true
-//	beforeinput       insertCompositionText "tie" value="ti"     cancelable=false
-//	input             insertCompositionText "tie" value="tie"    ss=0 se=3
-//	… same shape for "tiế" (se=3) and "tiếng" (se=5)
-//	then input … and compositionend data="tiếng" cancelable=true, selection collapsed
-//
-// Two details only a measurement gives: while the passage is marked the
-// control reports it as SELECTED (ss=0, se=5) yet selectionDirection stays
-// "none"; and the composition events are cancelable while their beforeinput is
-// not, because a page cannot veto text it never asked for.
-
-// imeProbe records every composition and editing event the page sees, in the
-// fields the Chromium script prints, together with the field state at that
-// moment - which is how a replacement is told apart from an append.
 const imeProbe = `(function(id){var el=document.getElementById(id);window.EVENTS=[];window.STATE=[];
 window.rec=function(e){window.EVENTS.push(e.type+':'+(e.inputType||'-')+':'+JSON.stringify(e.data===undefined?null:e.data)+':comp='+(e.isComposing===undefined?'-':e.isComposing)+':cancel='+e.cancelable);
 window.STATE.push({t:e.type,value:(el.value===undefined?el.textContent:el.value),ss:(el.selectionStart===undefined?-1:el.selectionStart),se:(el.selectionEnd===undefined?-1:el.selectionEnd),dir:(el.selectionDirection===undefined?'-':el.selectionDirection)});};
@@ -58,9 +24,6 @@ func installIMEProbe(t *testing.T, sess sessionEvaluator, id string) {
 	}
 }
 
-// sessionEvaluator is the slice's view of a session with a script runtime: the
-// probes below read page state, so every test here needs one expression
-// evaluated at a time.
 type sessionEvaluator interface {
 	EvaluateJS(string) (string, error)
 }
@@ -83,12 +46,6 @@ func evalState(t *testing.T, s sessionEvaluator, expr string) string {
 	return got
 }
 
-// newCompositionSession builds the session a host IME really drives: a script
-// runtime plus the invalidation batch that records DOM mutations. A marked
-// first step into an empty contenteditable inserts the Text node its preview
-// lands in, and an unstyled node is skipped by layout - so without the batch
-// there is no mutation to pump, and the test would pass over a page the app
-// renders empty.
 func newCompositionSession(t *testing.T, html string) *engine.Session {
 	t.Helper()
 	rt, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://test.example/"})
@@ -109,13 +66,6 @@ func newCompositionSession(t *testing.T, html string) *engine.Session {
 }
 
 // qc:BR-111
-//
-// The marked passage is selected, not merely caret-terminated: Chromium gives
-// ss=0 se=2 for "ti", se=3 for "tie" and "tiế", se=5 for "tiếng", with
-// selectionDirection "none" all the way through, and collapses to ss=se=5 only
-// at the commit. Goosie reported a collapsed range at the start of the passage
-// instead, which is why a page watching the selection - and a host asking where
-// to put a candidate window - saw nothing.
 func TestCompositionSelectsTheMarkedRangeInATextControl(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0"><input id="a"></body></html>`)
 	installIMEProbe(t, s, "a")
@@ -144,11 +94,6 @@ func TestCompositionSelectsTheMarkedRangeInATextControl(t *testing.T) {
 }
 
 // qc:BR-111
-//
-// The stream a page listens to: composition events cancelable, their
-// beforeinput not, each step carrying the marked text as `data`, in the order
-// compositionupdate -> beforeinput -> input, with the field value moving only
-// at the last one.
 func TestCompositionEventStreamCarriesTheMarkedTextOnce(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0"><input id="a"></body></html>`)
 	installIMEProbe(t, s, "a")
@@ -171,9 +116,6 @@ func TestCompositionEventStreamCarriesTheMarkedTextOnce(t *testing.T) {
 	if got != want {
 		t.Errorf("composition event stream =\n  %s\nwant, as Chromium 153 reported it\n  %s", got, want)
 	}
-	// The value the page holds at each event is what separates a replacement
-	// from an append: still the previous passage at beforeinput, the whole new
-	// one at input, never the two concatenated.
 	states := evalState(t, s, `JSON.stringify(window.STATE.map(function(x){return x.t+"="+x.value}))`)
 	wantStates := `["compositionstart=","compositionupdate=","beforeinput=","input=ti",` +
 		`"compositionupdate=ti","beforeinput=ti","input=tie",` +
@@ -185,14 +127,6 @@ func TestCompositionEventStreamCarriesTheMarkedTextOnce(t *testing.T) {
 }
 
 // qc:BR-111
-//
-// An empty contenteditable previews every step, in the DOM and on screen.
-// Chromium's first input event on a fresh <div contenteditable> carried
-// value="ti" with a Selection equal to it; Goosie needed a Text node to exist
-// before it could mark anything, so Vietnamese typed into an empty editor
-// showed nothing at all until the commit. The node the composition inserts is
-// a DOM mutation like any other, so the preview reaches the screen through the
-// same pump turn that styles a script-inserted node.
 func TestCompositionPreviewsLiveInAnEmptyContenteditable(t *testing.T) {
 	s := newCompositionSession(t, `<html><body style="margin:0"><div id="ce" contenteditable="true"></div></body></html>`)
 	installIMEProbe(t, s, "ce")
@@ -210,8 +144,6 @@ func TestCompositionPreviewsLiveInAnEmptyContenteditable(t *testing.T) {
 	if !s.CanDeferControlEditReflow() {
 		t.Error("the composition that inserted the preview node reported no pending DOM mutation, so the host would reflow an unstyled tree and paint nothing")
 	}
-	// Seeing it is the point of the row: the preview has to be laid out and
-	// inked, once, while the composition is still open.
 	if !s.PumpJS(800) {
 		t.Fatal("the pump ignored the DOM mutation the composition made")
 	}
@@ -231,28 +163,18 @@ func TestCompositionPreviewsLiveInAnEmptyContenteditable(t *testing.T) {
 }
 
 // qc:BR-111
-//
-// A pre-filled contenteditable whose selection is not inside its text nodes
-// still gets a composition preview: the caret is placed at the end of the last
-// text node descendant. This pins the fix for GOOSIE-IMEPREVIEW-001.
 func TestCompositionPreviewsInPrefilledContenteditableWithoutSelection(t *testing.T) {
 	s := newCompositionSession(t, `<html><body style="margin:0"><div id="ce" contenteditable="true">hello</div></body></html>`)
 	installIMEProbe(t, s, "ce")
 	if !s.FocusNode(s.Doc.ElementByID("ce")) {
 		t.Fatal("contenteditable should take focus")
 	}
-	// Clear the selection so CompositionCaret falls through to lastTextDescendant
-	// instead of finding the caret via SelectionTextCaret at offset 0.
 	if _, err := s.EvaluateJS(`getSelection().removeAllRanges()`); err != nil {
 		t.Fatalf("clear selection: %v", err)
 	}
-	// Don't position the selection inside the text - leave it on the host.
-	// This simulates the case where focus lands on the editor but the IME
-	// starts before any caret exists inside the text.
 	if !s.SetMarked("ti") {
 		t.Fatal("SetMarked reported no change")
 	}
-	// The marked text should be appended to the existing content.
 	if got, want := evalState(t, s, `document.getElementById('ce').textContent`), "helloti"; got != want {
 		t.Errorf("contenteditable text during composition = %q, want %q", got, want)
 	}
@@ -265,17 +187,6 @@ func TestCompositionPreviewsInPrefilledContenteditableWithoutSelection(t *testin
 }
 
 // qc:BR-111
-//
-// The preview node is an observed DOM insertion. Chromium's MutationObserver on
-// a fresh <div contenteditable> reported exactly:
-//
-//	childList #text | characterData "ti" | characterData "tie" | characterData "tiế" | characterData "tiếng"
-//
-// - one insertion for the first step, then a data change per rewrite
-// (scripts/verify-br111-ime-composition.js, mutation records line). An editor
-// built on the DOM (a page that re-renders, counts characters, or persists the
-// document) only works if the composition announces itself there too, not just
-// through the events.
 func TestCompositionMutatesTheDocumentAsObserved(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0"><div id="ce" contenteditable="true"></div></body></html>`)
 	if _, err := s.EvaluateJS(`(function(){window.MO=[];new MutationObserver(function(rs){for(var k=0;k<rs.length;k++){var r=rs[k];window.MO.push(r.type+(r.addedNodes.length?':'+r.addedNodes[0].nodeName:''));}}).observe(document.getElementById('ce'),{childList:true,characterData:true,subtree:true});return 'observing'})()`); err != nil {
@@ -285,19 +196,11 @@ func TestCompositionMutatesTheDocumentAsObserved(t *testing.T) {
 		t.Fatal("contenteditable should take focus")
 	}
 	driveMarked(t, s, []string{"ti", "tie", "tiế", "tiếng"})
-	// The values Chromium's callback read per step were "ti", "tie", "tiế",
-	// "tiếng"; a characterData record carries the node rather than a snapshot,
-	// and Goosie delivers the queue on the pump turn, so what is comparable in
-	// both is the shape of the queue: one insertion, then one data change per
-	// rewrite.
 	s.PumpJS(800)
 	want := "childList:#text,characterData,characterData,characterData,characterData"
 	if got := evalState(t, s, `window.MO.join(",")`); got != want {
 		t.Errorf("mutation records = %q, want %q as Chromium reported them", got, want)
 	}
-	// A step that inserted a node instead of rewriting the marked one would
-	// leave the word twice in the editor - the duplication this catalog row is
-	// about, seen from the page rather than from the paint.
 	if got := evalState(t, s, `window.MO.filter(function(m){return m.indexOf('childList')===0}).length`); got != "1" {
 		t.Errorf("insertion records = %s, want 1 (only the first step adds the preview node)", got)
 	}
@@ -307,10 +210,6 @@ func TestCompositionMutatesTheDocumentAsObserved(t *testing.T) {
 }
 
 // qc:BR-111
-//
-// Tone marks handed over as combining characters stay that way. Chromium stored
-// the decomposed "tiếng" as 7 code points and reported the selection end as 7:
-// it neither normalises to the precomposed form nor counts in another space.
 func TestCompositionKeepsCombiningMarksVerbatim(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0"><input id="a"></body></html>`)
 	installIMEProbe(t, s, "a")
@@ -324,11 +223,6 @@ func TestCompositionKeepsCombiningMarksVerbatim(t *testing.T) {
 }
 
 // qc:BR-111
-//
-// The composed word is inked once. A control's value already carries the marked
-// passage, so drawing the marked text again on top of it doubles every glyph -
-// the "repeated combined character" the catalog row names, in the one place a
-// user can see it.
 func TestCompositionInksTheMarkedTextOnce(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0"><input id="a"></body></html>`)
 	x, y := clickPoint(t, s, "a")
@@ -339,8 +233,6 @@ func TestCompositionInksTheMarkedTextOnce(t *testing.T) {
 	}
 }
 
-// paintedRunes is the ink the frame path would place: every glyph in the frozen
-// display list, in the order the builder emitted it.
 func paintedRunes(t *testing.T, s *engine.Session) string {
 	t.Helper()
 	list, err := s.PaintChecked(1)

@@ -10,8 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// A masked fill shows the colour only where the mask says so: alpha masks
-// gate on alpha, alpha-less images fall back to luminance (match-source).
 func TestMaskedFillAlpha(t *testing.T) {
 	mask := image.NewRGBA(image.Rect(0, 0, 10, 10))
 	for y := 0; y < 10; y++ {
@@ -42,7 +40,6 @@ func TestMaskedFillAlpha(t *testing.T) {
 }
 
 func TestMaskedFillLuminance(t *testing.T) {
-	// Opaque image without alpha: white half passes, black half blocks.
 	mask := image.NewRGBA(image.Rect(0, 0, 10, 10))
 	for y := 0; y < 10; y++ {
 		for x := 0; x < 10; x++ {
@@ -72,7 +69,6 @@ func TestMaskedFillLuminance(t *testing.T) {
 }
 
 func TestMaskedFillStretches(t *testing.T) {
-	// A 2px mask stretches over the fill rect.
 	mask := image.NewRGBA(image.Rect(0, 0, 2, 1))
 	mask.SetRGBA(0, 0, color.RGBA{0, 0, 0, 255})
 	mask.SetRGBA(1, 0, color.RGBA{0, 0, 0, 0})

@@ -46,7 +46,6 @@ func TestJS_DeclarativeShadowDOMAccess(t *testing.T) {
 		t.Fatalf("expected host.shadowRoot.mode to be 'open', got %v", modeVal)
 	}
 
-	// Verify that closed mode shadow root returns null in JS
 	docClosed := domtest.Parse(`<!DOCTYPE html>
 <html>
 <body>

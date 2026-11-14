@@ -14,9 +14,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// fakeController is a scriptable media.Controller. It records what the bindings
-// asked for and hands back whatever snapshot the test set, so the JS surface can
-// be pinned without a decoder, a network or a display.
 type fakeController struct {
 	mu      sync.Mutex
 	snap    media.Snapshot
@@ -130,8 +127,6 @@ func videoOf(doc *dom.Document) *dom.Node {
 	return nodes[0]
 }
 
-// mediaRuntime builds a runtime with the given controller wired to the document's
-// video element. A nil controller models a build with no playback backend.
 func mediaRuntime(t *testing.T, html string, c media.Controller) (*js.Runtime, *dom.Document) {
 	t.Helper()
 	doc := domtest.Parse(html)
@@ -153,7 +148,6 @@ func mediaRuntime(t *testing.T, html string, c media.Controller) (*js.Runtime, *
 	return rt, doc
 }
 
-// evalString runs a script and returns its string result.
 func evalString(t *testing.T, rt *js.Runtime, src string) string {
 	t.Helper()
 	v, err := rt.Evaluate(src)
@@ -163,10 +157,6 @@ func evalString(t *testing.T, rt *js.Runtime, src string) string {
 	return v
 }
 
-// TestMediaInertWithoutBackend pins what a page sees when nothing can play video.
-// The properties have to exist and answer with the DOM's own "nothing loaded"
-// values; a missing property would turn a feature check into a TypeError, and a
-// duration of 0 would make every seek clamp to the start.
 func TestMediaInertWithoutBackend(t *testing.T) {
 	rt, _ := mediaRuntime(t, mediaDoc, nil)
 	out := evalString(t, rt, `
@@ -227,8 +217,6 @@ func TestMediaInertWithoutBackend(t *testing.T) {
 	}
 }
 
-// TestMediaPropertiesReflectTheController pins that the read-only properties are
-// the backend's state rather than a copy the bindings keep for themselves.
 func TestMediaPropertiesReflectTheController(t *testing.T) {
 	c := newFakeController()
 	c.current = "https://cdn.example/clip.mp4"
@@ -258,7 +246,6 @@ func TestMediaPropertiesReflectTheController(t *testing.T) {
 		}
 	}
 
-	// A state change is visible on the next read, with no re-wrapping.
 	c.set(func(s *media.Snapshot) { s.State = media.StatePaused })
 	if got := evalString(t, rt, `document.getElementById('v').paused`); got != "true" {
 		t.Fatalf("paused after the backend paused = %q, want true", got)
@@ -268,8 +255,6 @@ func TestMediaPropertiesReflectTheController(t *testing.T) {
 	}
 }
 
-// TestMediaErrorObject pins the MediaError shape, including that the code
-// distinguishes a source the browser refused from one that would not decode.
 func TestMediaErrorObject(t *testing.T) {
 	c := newFakeController()
 	rt, _ := mediaRuntime(t, mediaDoc, c)
@@ -294,8 +279,6 @@ func TestMediaErrorObject(t *testing.T) {
 	}
 }
 
-// TestMediaSrcSetterRunsTheLoadAlgorithm pins that assigning src is not just an
-// attribute write: the DOM says it selects the resource and starts loading it.
 func TestMediaSrcSetterRunsTheLoadAlgorithm(t *testing.T) {
 	c := newFakeController()
 	rt, doc := mediaRuntime(t, mediaDoc, c)
@@ -314,15 +297,12 @@ func TestMediaSrcSetterRunsTheLoadAlgorithm(t *testing.T) {
 		t.Fatalf("reading src back gave %q", got)
 	}
 
-	// Clearing it stops rather than loading nothing.
 	evalString(t, rt, `document.getElementById('v').src = ''`)
 	if c.loads != 1 {
 		t.Fatalf("clearing src triggered another load (%d total), want none", c.loads)
 	}
 }
 
-// TestMediaControlsAndMutedReflection pins the two writable properties that are
-// not playback state.
 func TestMediaControlsAndMutedReflection(t *testing.T) {
 	c := newFakeController()
 	rt, doc := mediaRuntime(t, mediaDoc, c)
@@ -344,9 +324,6 @@ func TestMediaControlsAndMutedReflection(t *testing.T) {
 	}
 }
 
-// TestMediaCurrentTimeSetterSeeks pins that writing currentTime seeks, and that a
-// value that is not a usable time is ignored rather than turning into a seek to
-// zero — which is what Number(undefined) would silently produce.
 func TestMediaCurrentTimeSetterSeeks(t *testing.T) {
 	c := newFakeController()
 	rt, _ := mediaRuntime(t, mediaDoc, c)
@@ -361,7 +338,6 @@ func TestMediaCurrentTimeSetterSeeks(t *testing.T) {
 	}
 }
 
-// TestMediaPauseAndLoadCallThrough pins the two methods that have no promise.
 func TestMediaPauseAndLoadCallThrough(t *testing.T) {
 	c := newFakeController()
 	rt, _ := mediaRuntime(t, mediaDoc, c)
@@ -377,9 +353,6 @@ func TestMediaPauseAndLoadCallThrough(t *testing.T) {
 	}
 }
 
-// TestMediaPlayReturnsASettledPromise is the contract the whole JS surface rests
-// on: play() hands back a real Promise, and it settles when the backend says
-// playback started — not when the request was accepted.
 func TestMediaPlayReturnsASettledPromise(t *testing.T) {
 	c := newFakeController()
 	rt, doc := mediaRuntime(t, mediaDoc, c)
@@ -395,11 +368,6 @@ func TestMediaPlayReturnsASettledPromise(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("unmarshal %q: %v", out, err)
 	}
-	// Thenable, not `instanceof Promise`: this runtime's newPromiseObj builds a
-	// plain object with then/catch/finally and no prototype, so instanceof fails
-	// for every promise it makes — Promise.resolve and Promise.all included. That
-	// is a gap in the shared promise implementation, not in the media binding, and
-	// fixing it here would mean touching every promise in the runtime.
 	if got[0] != "object" || got[1] != "function" || got[2] != "function" {
 		t.Fatalf("play() returned %v, want a thenable object", got)
 	}
@@ -407,7 +375,6 @@ func TestMediaPlayReturnsASettledPromise(t *testing.T) {
 		t.Fatalf("the promise settled immediately (%v): play() must wait for playback", got[3])
 	}
 
-	// Nothing has played yet, so a tick must not settle it.
 	rt.Tick()
 	if got := evalString(t, rt, `state`); got != "pending" {
 		t.Fatalf("the promise settled without a backend event: %q", got)
@@ -422,9 +389,6 @@ func TestMediaPlayReturnsASettledPromise(t *testing.T) {
 	}
 }
 
-// TestMediaPlayRejectionNamesTheReason pins that each refusal reaches the page as
-// the DOMException name it can branch on. A page that catches NotAllowedError to
-// show a "click to play" affordance cannot do that with a generic error.
 func TestMediaPlayRejectionNamesTheReason(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -453,9 +417,6 @@ func TestMediaPlayRejectionNamesTheReason(t *testing.T) {
 	}
 }
 
-// TestMediaPlayRejectedByEventSettlesThePromise pins the other half: a request
-// that was accepted and then abandoned (a pause during the download, a source
-// replaced) rejects rather than leaving the page waiting forever.
 func TestMediaPlayRejectedByEventSettlesThePromise(t *testing.T) {
 	c := newFakeController()
 	rt, doc := mediaRuntime(t, mediaDoc, c)
@@ -473,9 +434,6 @@ func TestMediaPlayRejectedByEventSettlesThePromise(t *testing.T) {
 	}
 }
 
-// TestMediaPlayWithoutBackendRejects pins that a build with no playback support
-// says so through the promise instead of leaving it pending, which a page would
-// read as "still loading".
 func TestMediaPlayWithoutBackendRejects(t *testing.T) {
 	rt, _ := mediaRuntime(t, mediaDoc, nil)
 	evalString(t, rt, `
@@ -490,8 +448,6 @@ func TestMediaPlayWithoutBackendRejects(t *testing.T) {
 	}
 }
 
-// TestMediaEventsReachListeners pins the dispatch path and the event names, which
-// are the DOM's own rather than an internal spelling.
 func TestMediaEventsReachListeners(t *testing.T) {
 	c := newFakeController()
 	rt, doc := mediaRuntime(t, mediaDoc, c)
@@ -542,9 +498,6 @@ func TestMediaEventsReachListeners(t *testing.T) {
 	}
 }
 
-// TestMediaEventsDoNotBubble pins that a media event is about one element. A
-// bubbling "play" would reach a document-level listener for every video on the
-// page, which is not what the DOM specifies and not what a page expects.
 func TestMediaEventsDoNotBubble(t *testing.T) {
 	c := newFakeController()
 	rt, doc := mediaRuntime(t, `<html><body><div id="wrap"><video id="v"></video></div></body></html>`, c)
@@ -567,10 +520,6 @@ func TestMediaEventsDoNotBubble(t *testing.T) {
 	}
 }
 
-// TestMediaHostileListenerCannotHangThePump pins the bound on dispatched
-// listeners. The media pump runs on the browser's UI thread, so a page that loops
-// forever inside a timeupdate handler must cost one timeout rather than the
-// window's ability to respond to anything.
 func TestMediaHostileListenerCannotHangThePump(t *testing.T) {
 	c := newFakeController()
 	rt, doc := mediaRuntime(t, mediaDoc, c)
@@ -593,8 +542,6 @@ func TestMediaHostileListenerCannotHangThePump(t *testing.T) {
 		t.Fatal("a looping listener hung the media dispatch")
 	}
 
-	// The event after the hostile one still arrives: one bad listener costs its
-	// own dispatch, not the rest of the element's events.
 	rt.Tick()
 	if got := evalString(t, rt, `reached`); got != "1" {
 		t.Fatalf("the pause listener ran %s times, want 1", got)

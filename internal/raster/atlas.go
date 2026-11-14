@@ -7,12 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// glyphKey names one cached rendering.
-//
-// Size is a device-pixel size, so a glyph drawn for a 1x plan and the same glyph
-// drawn for a 2x plan at the same device size are one entry, not two. That is
-// the reuse the frame gate counts on: changing device ratio must re-render the
-// layout, not the font.
 type glyphKey struct {
 	r    rune
 	size int32
@@ -24,7 +18,6 @@ type glyphVal struct {
 	g Glyph
 }
 
-// AtlasStats counts what the cache did, for the frame report and the tests.
 type AtlasStats struct {
 	Entries   int
 	Bytes     int64
@@ -34,30 +27,17 @@ type AtlasStats struct {
 	Misses    int64
 }
 
-// GlyphAtlas is a byte-budgeted LRU of rendered glyphs shared by every worker.
-//
-// Two properties make it worth having separately from Fonts. It is the layer
-// that can drop entries when a page uses forty sizes, because Fonts' per-face
-// memo has no budget and would grow without bound; and it is safe for concurrent
-// read on the hit path, which is the only path a warm scroll takes. A miss
-// reaches into Fonts, which serializes face access, so a burst of first-pass
-// rasters is bounded by one mutex rather than by a per-worker copy of a 900 KB
-// font.
 type GlyphAtlas struct {
 	mu     sync.Mutex
 	fonts  *Fonts
 	budget int64
 	used   int64
 
-	order *list.List // front = most recently used
+	order *list.List
 	index map[glyphKey]*list.Element
 	stats AtlasStats
 }
 
-// NewGlyphAtlas returns an atlas holding at most budget bytes of glyph masks.
-// A zero or negative budget disables caching rather than failing: every lookup
-// goes to Fonts, which still memoizes per face, so correctness does not depend on
-// the budget.
 func NewGlyphAtlas(budget int64, f *Fonts) *GlyphAtlas {
 	return &GlyphAtlas{
 		fonts:  f,
@@ -68,15 +48,6 @@ func NewGlyphAtlas(budget int64, f *Fonts) *GlyphAtlas {
 	}
 }
 
-// Get returns the rendering of r in a slot at a device-pixel size, rasterizing
-// it on a miss. The zero Glyph means the font has no such glyph.
-//
-// A miss rasterizes outside the atlas lock: holding it across Fonts.Glyph would
-// serialize every worker on one mutex (and stack the atlas lock under the Fonts
-// lock on every tile). Two workers can rasterize the same missing glyph at once;
-// the second insert then finds the first's entry and counts a hit, exactly as if
-// it had waited. Single-threaded behavior - one miss counted, one entry stored -
-// is unchanged.
 func (a *GlyphAtlas) Get(r rune, size int32, slot frame.FontSlot) Glyph {
 	k := glyphKey{r: r, size: size, slot: slot}
 	a.mu.Lock()
@@ -98,8 +69,6 @@ func (a *GlyphAtlas) Get(r rune, size int32, slot frame.FontSlot) Glyph {
 	}
 	a.stats.Misses++
 	if !g.Ok || g.Mask == nil {
-		// Uncached: a miss with nothing to store. Repeated lookups for the same
-		// absent glyph stay cheap because Fonts memoizes its own answer.
 		return g
 	}
 	if a.budget <= 0 {
@@ -109,9 +78,6 @@ func (a *GlyphAtlas) Get(r rune, size int32, slot frame.FontSlot) Glyph {
 	return g
 }
 
-// GlyphBound returns the box r occupies relative to the pen, without exposing
-// the mask. Tile selection and text bounds use it; a false result means the
-// glyph is unknown or draws nothing.
 func (a *GlyphAtlas) GlyphBound(r rune, size int32, slot frame.FontSlot) (frame.Rect, bool) {
 	g := a.Get(r, size, slot)
 	if !g.Ok || g.Mask == nil {
@@ -125,9 +91,6 @@ func (a *GlyphAtlas) insert(k glyphKey, g Glyph) {
 	el := a.order.PushFront(val)
 	a.index[k] = el
 	a.used += g.Bytes()
-	// Evicting the oldest entries can free less than one glyph if the new
-	// insertion alone exceeds the budget; the loop still terminates because the
-	// list is finite and the newest entry is never dropped here.
 	for a.used > a.budget {
 		back := a.order.Back()
 		if back == nil || back == el {
@@ -142,8 +105,6 @@ func (a *GlyphAtlas) insert(k glyphKey, g Glyph) {
 	a.refresh()
 }
 
-// Reset drops every cached glyph, used when a document is torn down and the
-// masks would otherwise keep the atlas full for the next page.
 func (a *GlyphAtlas) Reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -154,7 +115,6 @@ func (a *GlyphAtlas) Reset() {
 	a.stats.Bytes = 0
 }
 
-// Stats returns a snapshot of the cache counters.
 func (a *GlyphAtlas) Stats() AtlasStats {
 	a.mu.Lock()
 	defer a.mu.Unlock()

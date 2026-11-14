@@ -8,25 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// GOOSIE-CSSOMCOLLECTION-001: the three CSSOM collections had no interface of
-// their own. document.styleSheets, sheet.cssRules and sheet.media answered as
-// anonymous indexed objects with own `length` and `item` properties, so
-// Object.prototype.toString.call(list) named nothing, `list instanceof
-// StyleSheetList` was false, a detached CSSRuleList.prototype.item worked on any
-// object at all, and sheet.cssRules was rebuilt on every read, so
-// `sheet.cssRules === sheet.cssRules` was false.
-//
-// Every expectation is read off the Chromium 153.0.8010.12 measurements (the
-// Node Playwright 1.63.0 oracle; 2026-11-13, one http fixture, viewport
-// 1280x400, DPR 1, dumps /tmp/b287/cr_col.json through cr_col12.txt plus
-// cr_colA/B/C) quoted in internal/js/cssom_collections.go; re-running the same
-// 14 probes on the pinned 131.0.6778.33 render oracle agreed on 12 of them. The
-// page below is the same document order measured there - two links, then the
-// head's style elements, then the body's - with one rule per style element, and it is
-// what the dumps measured: the C1 link is the one carrying media="screen, print"
-// (MediaList of 2), C2 has no media attribute (the empty list, not "all"), and
-// A1/A2/A3 each own a one-rule sheet.
-
 const cssomColPage = `<!doctype html><html><head>
 <link id="C1" rel="stylesheet" href="a.css" media="screen, print" title="Alternate">
 <link id="C2" rel="stylesheet" href="b.css">
@@ -51,9 +32,6 @@ func cssomColRuntime(t *testing.T) *js.Runtime {
 	return r
 }
 
-// shapeJS declares the probes several of these oracles share. This runtime has
-// no network, so the linked sheets own no rules; the rule-list laws read the
-// inline A1 sheet, whose one rule Chromium measured the same way.
 const shapeJS = `
 	var list = document.styleSheets;
 	var c1 = list[0], c2 = list[1], a1 = list[2];
@@ -64,20 +42,6 @@ const shapeJS = `
 	function tagged(name) { var fake = { length: 5 }; fake[1] = 'x'; fake[Symbol.toStringTag] = name; return fake }
 `
 
-// The three interfaces exist as globals, brand their lists, and sit one link
-// above Object.prototype. Measured: Object.prototype.toString.call gives
-// [object StyleSheetList] / [object CSSRuleList] / [object MediaList]; instanceof
-// and isPrototypeOf answer true against each global; the globals are functions of
-// length 0 whose call is `TypeError: Illegal constructor`; the own symbols of a
-// prototype are Symbol.toStringTag and Symbol.iterator.
-//
-// Only the call form is asserted. Measured just after (cr_colC.txt), Chromium
-// answers `new CSSRuleList()` with `TypeError: Failed to construct 'CSSRuleList':
-// Illegal constructor` - the bare message is reserved for a call - while this
-// engine's house style is the bare message both ways, in every interface in
-// internal/js. That wording is GOOSIE-CTORMESSAGE-001, so it is deliberately not
-// pinned here.
-//
 // qc:BR-285
 func TestCSSOMCollectionsBrandTheirInterfaces(t *testing.T) {
 	r := cssomColRuntime(t)
@@ -106,13 +70,6 @@ func TestCSSOMCollectionsBrandTheirInterfaces(t *testing.T) {
 	}
 }
 
-// The prototypes own exactly the members Chromium's do, with the measured
-// descriptors: length is a getter-only enumerable configurable accessor with no
-// setter, item a data function of arity 1, MediaList adds a mediaText accessor
-// and a toString of arity 0, and the constructor stays non-enumerable. The
-// methods keep one identity per interface, so `rules.item` is
-// CSSRuleList.prototype.item on every read.
-//
 // qc:BR-285
 func TestCSSOMCollectionPrototypesOwnTheMeasuredMembers(t *testing.T) {
 	r := cssomColRuntime(t)
@@ -147,12 +104,6 @@ func TestCSSOMCollectionPrototypesOwnTheMeasuredMembers(t *testing.T) {
 	}
 }
 
-// A collection owns its indices and nothing else: measured, the StyleSheetList
-// of three sheets gives own names "0+1+2", a one-rule list "0", a two-entry
-// MediaList "0+1", and Object.keys answers the same because length and item are
-// inherited. for-in still walks indices first, then the enumerable prototype
-// members, and for-of yields the members.
-//
 // qc:BR-285
 func TestCSSOMCollectionsOwnOnlyTheirIndices(t *testing.T) {
 	r := cssomColRuntime(t)
@@ -188,13 +139,6 @@ func TestCSSOMCollectionsOwnOnlyTheirIndices(t *testing.T) {
 	}
 }
 
-// The receiver test is an identity test. Measured: the length getter, item,
-// mediaText and toString all answer `TypeError: Illegal invocation` for `{}`,
-// `[]`, `{ length: 3 }`, `{ length: 3, 1: 'x' }`, an object carrying the
-// interface's own @@toStringTag, and a list handed to a *different* interface's
-// member - while called on a real list the same detached members answer live
-// values: the length getter gives the rule count and the media text is readable.
-//
 // qc:BR-285
 func TestCSSOMCollectionMembersRefuseForeignReceivers(t *testing.T) {
 	r := cssomColRuntime(t)
@@ -232,14 +176,6 @@ func TestCSSOMCollectionMembersRefuseForeignReceivers(t *testing.T) {
 	}
 }
 
-// item() takes its index the way Chromium's bindings do. Measured: no argument
-// at all is `TypeError: Failed to execute 'item' on 'StyleSheetList': 1 argument
-// required, but only 0 present.` - and the same sentence names whichever
-// interface was called; a Symbol argument gives the same sentence ending
-// `Cannot convert a Symbol value to a number`; the receiver is checked before
-// either; undefined, null, NaN, `{}` and a non-numeric string all give the first
-// member; 1.7 truncates to the second; and past the end or below zero is null.
-//
 // qc:BR-285
 func TestCSSOMCollectionItemConvertsItsIndex(t *testing.T) {
 	r := cssomColRuntime(t)
@@ -263,13 +199,6 @@ func TestCSSOMCollectionItemConvertsItsIndex(t *testing.T) {
 	}
 }
 
-// A MediaList is the owner's media attribute read now. Measured: media="screen,
-// print" gives length 2, [0] "screen" and item(1) "print", own names "0+1" and an
-// index descriptor that is non-writable, enumerable and configurable; a sheet
-// with no media attribute - link or style element alike - gives the empty text,
-// length 0, undefined at [0], null at item(0) and no own index at all, not "all";
-// and String(media) and media.toString() are the mediaText.
-//
 // qc:BR-285
 func TestMediaListReportsTheOwnersAttribute(t *testing.T) {
 	r := cssomColRuntime(t)
@@ -291,20 +220,6 @@ func TestMediaListReportsTheOwnersAttribute(t *testing.T) {
 	}
 }
 
-// The lists stay live through the one object a page holds. Measured: after
-// `L1.setAttribute("media", "screen and (min-width: 100px)")` the MediaList
-// already in hand reports the new text, length 1 and one entry holding the whole
-// query - a comma inside parentheses does not split it - with own names "0"; and
-// after appending a <style> the StyleSheetList already in hand has one more
-// entry, the new sheet answers a null href and an empty mediaText, and item(n)
-// is the very object at [n].
-//
-// The two reference builds split on exactly this law: on 153.0.8010.12 the
-// handle in hand answers the new text and a fresh read of `sheet.media` is the
-// same object, while on the pinned 131.0.6778.33 render oracle the handle keeps
-// the old two-entry text and a fresh read is a different MediaList (`=== m`
-// false). This oracle pins the live reading, which this engine implements.
-//
 // qc:BR-285
 func TestCSSOMCollectionsStayLiveThroughOneObject(t *testing.T) {
 	r := cssomColRuntime(t)
@@ -325,11 +240,6 @@ func TestCSSOMCollectionsStayLiveThroughOneObject(t *testing.T) {
 	}
 }
 
-// One list per sheet, cached against the sheet. Measured: sheet.cssRules is the
-// same object on every read while another sheet's list is a different object,
-// the same holds for sheet.media, the rule a page reaches twice is the same
-// object either way, and document.styleSheets hands out one list per document.
-//
 // qc:BR-285
 func TestCSSOMCollectionsAreCachedPerOwner(t *testing.T) {
 	r := cssomColRuntime(t)

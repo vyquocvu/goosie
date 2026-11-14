@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// Three parses of `a`, with an unrelated stylesheet parsed in between, is the
-// point: css.Parse must not carry anything from one stylesheet into the next.
-// A single parse-twice comparison would only catch a parser that is unstable on
-// its own input, which is a much weaker claim than the one this makes.
 func FuzzParseStylesheet(f *testing.F) {
 	f.Add(`p { color: red }`, `@media all{}`)
 	f.Add(`@media (min-width: 1px){ .a > #b:not(:hover)::before { content: "\2014" } }`, `a{color:#fff}`)

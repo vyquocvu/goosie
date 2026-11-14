@@ -115,12 +115,10 @@ func TestContainerQuery_SizeMatching(t *testing.T) {
 		t.Fatalf("largeCard not found or unstyled")
 	}
 
-	// Small card container is 300px < 500px -> should remain black (0, 0, 0)
 	if res[smallCard.ID].Color.R != 0 {
 		t.Errorf("smallCard color = %+v, want black", res[smallCard.ID].Color)
 	}
 
-	// Large card container is 700px >= 500px -> should be red (255, 0, 0)
 	if res[largeCard.ID].Color.R != 255 || res[largeCard.ID].Color.G != 0 {
 		t.Errorf("largeCard color = %+v, want red", res[largeCard.ID].Color)
 	}
@@ -157,12 +155,10 @@ func TestContainerQuery_NamedMatching(t *testing.T) {
 		t.Fatalf("contentWidget not found or unstyled")
 	}
 
-	// sidebarWidget matches @container sidebar -> font-weight: 700
 	if res[sidebarWidget.ID].FontWeight != style.WeightBold {
 		t.Errorf("sidebarWidget weight = %v, want 700", res[sidebarWidget.ID].FontWeight)
 	}
 
-	// contentWidget does not match "sidebar" container name -> font-weight: 400
 	if res[contentWidget.ID].FontWeight != style.WeightNormal {
 		t.Errorf("contentWidget weight = %v, want 400", res[contentWidget.ID].FontWeight)
 	}
@@ -189,12 +185,10 @@ func TestContainerQuery_RangeSyntax(t *testing.T) {
 	card1 := findElementByClass(&doc.Node, "card1")
 	card2 := findElementByClass(&doc.Node, "card2")
 
-	// card1 container is 450px: 300 <= 450 <= 600 -> true, color blue (0, 0, 255)
 	if res[card1.ID].Color.B != 255 {
 		t.Errorf("card1 color = %+v, want blue", res[card1.ID].Color)
 	}
 
-	// card2 container is 250px: not in [300, 600] -> false, color black
 	if res[card2.ID].Color.B != 0 {
 		t.Errorf("card2 color = %+v, want black", res[card2.ID].Color)
 	}
@@ -213,12 +207,10 @@ func TestContainerQuery_RelativeUnitsInDeclaration(t *testing.T) {
 		t.Fatalf("item not found")
 	}
 
-	// 10cqw of 500px = 50px
 	if res[item.ID].PaddingLeft != 50 {
 		t.Errorf("item padding-left = %v, want 50", res[item.ID].PaddingLeft)
 	}
 
-	// 10cqh of 300px = 30px
 	if res[item.ID].PaddingTop != 30 {
 		t.Errorf("item padding-top = %v, want 30", res[item.ID].PaddingTop)
 	}

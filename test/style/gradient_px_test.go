@@ -2,21 +2,6 @@ package style_test
 
 import "testing"
 
-// BR-074's length half: a stop position written as a CSS <length> - `0px`,
-// `30px` - is a legal <length-percentage>, and Chromium keeps and paints the
-// ramp. The cascade cannot turn a length into a fraction of the gradient line
-// because the line's length belongs to the laid-out box, so the length rides
-// on the stop unresolved and paint resolves it against the box it measures.
-// Until that carrying existed, ParseColor saw `#0a0 0px` and dropped the whole
-// ramp: the author's gradient painted NOTHING - not a wrong colour, no colour
-// at all.
-//
-// Measured scripts/verify-br074-color-idle-scroll.js (Chromium 1.63, this
-// host, 2026-11-06):
-//
-//	SYNTAX px-ends kept=YES computed=linear-gradient(rgb(0, 170, 0) 0px, rgb(170, 0, 0) 60px)
-//	SYNTAX px-mid  kept=YES computed=linear-gradient(rgb(255, 0, 0), rgb(0, 255, 0) 30px, rgb(0, 0, 255) 60px)
-
 // qc:BR-074
 func TestGradientPxStopPositionsRideTheStopUnresolved(t *testing.T) {
 	s := styleFor(t, `<html><body><div>x</div></body></html>`,
@@ -35,11 +20,6 @@ func TestGradientPxStopPositionsRideTheStopUnresolved(t *testing.T) {
 	}
 }
 
-// A ramp mixing fractions and lengths cannot be distributed at cascade time:
-// the fractions are set, the lengths wait, and a stop the declaration left
-// unpositioned keeps its -1 until paint has resolved the lengths against the
-// box and can distribute around them.
-//
 // qc:BR-074
 func TestGradientMixedLengthAndFractionRampDefersDistribution(t *testing.T) {
 	s := styleFor(t, `<html><body><div>x</div></body></html>`,

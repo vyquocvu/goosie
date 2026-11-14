@@ -8,8 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// faviconBand counts non-background pixels in the icon slot of tab 0
-// (logical x 16..32, tab 0 starts at LeftMargin=8, icon inset 8).
 func faviconBand(t *testing.T, mgr *TabManager) (red, dark int) {
 	t.Helper()
 	buf := frame.NewBitmap(400, TabBarHeight)
@@ -29,8 +27,6 @@ func faviconBand(t *testing.T, mgr *TabManager) (red, dark int) {
 	return red, dark
 }
 
-// TestDrawTabFaviconImage pins that a stored favicon is resampled into the
-// icon slot.
 func TestDrawTabFaviconImage(t *testing.T) {
 	mgr := NewManager(nil)
 	tab := mgr.NewTab()
@@ -48,8 +44,6 @@ func TestDrawTabFaviconImage(t *testing.T) {
 	}
 }
 
-// TestDrawTabFallbackIcon pins the placeholder: a tab with no favicon still
-// shows a visible glyph so the strip has a consistent icon column.
 func TestDrawTabFallbackIcon(t *testing.T) {
 	mgr := NewManager(nil)
 	mgr.NewTab()
@@ -59,8 +53,6 @@ func TestDrawTabFallbackIcon(t *testing.T) {
 	}
 }
 
-// TestDrawTabFaviconIgnoresEmptyImage guards the draw path against a decoded
-// image with a zero-sized (or fully empty) bounds rect.
 func TestDrawTabFaviconIgnoresEmptyImage(t *testing.T) {
 	mgr := NewManager(nil)
 	tab := mgr.NewTab()

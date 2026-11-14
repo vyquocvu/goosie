@@ -13,31 +13,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// This file implements the DOM Range and Selection APIs.
-//
-// Range represents a contiguous region in a DOM tree defined by a start
-// boundary point (container + offset) and an end boundary point. It provides
-// methods to manipulate those boundary points and to extract, clone, delete,
-// or insert content within the range.
-//
-// Selection represents the text selection in a document. It holds a list of
-// Ranges (usually 0 or 1) and provides methods to inspect and modify the
-// selection.
-
-// ---------------------------------------------------------------------------
-// Range
-// ---------------------------------------------------------------------------
-
-// rangeBoundary is one endpoint of a Range: a node and an integer offset into
-// that node. For element nodes the offset is a child index; for text/comment
-// nodes it is a character offset.
 type rangeBoundary struct {
 	container *dom.Node
 	offset    int
 }
 
-// jsRange is the Go state behind one JS Range object. The JS wrapper stores a
-// pointer to this struct in its __range__ field.
 type jsRange struct {
 	start rangeBoundary
 	end   rangeBoundary
@@ -125,8 +105,6 @@ func (r *Runtime) adjustLiveRangesForNodeRemoval(parent, removed *dom.Node, inde
 	visit(root)
 }
 
-// setupRange installs document.createRange() and the Range prototype methods
-// on the document object. Called from setupDOM.
 func (r *Runtime) setupRange() {
 	if r.domDoc == nil {
 		return
@@ -150,15 +128,11 @@ func (r *Runtime) setupRange() {
 
 	doc := r.docObj()
 
-	// document.createRange()
 	_ = doc.Set("createRange", func(call goja.FunctionCall) goja.Value {
 		return r.jsCreateRange()
 	})
 }
 
-// jsCreateRange constructs a new Range object whose start and end are both
-// collapsed to the document node, matching the DOM Standard's "create a range"
-// algorithm (startContainer = endContainer = document, startOffset = endOffset = 0).
 func (r *Runtime) jsCreateRange() *goja.Object {
 	return r.jsCreateRangeForDocument(r.domDoc)
 }
@@ -185,8 +159,6 @@ func (r *Runtime) jsCreateRangeForDocument(doc *dom.Document) *goja.Object {
 	return obj
 }
 
-// getRange extracts the *jsRange from a JS Range wrapper. Returns nil if the
-// object is not a Range.
 func getRange(obj *goja.Object) *jsRange {
 	if obj == nil {
 		return nil
@@ -203,34 +175,26 @@ func getRange(obj *goja.Object) *jsRange {
 	return nil
 }
 
-// installRangeMethods sets the accessors and methods on one Range wrapper.
 func (r *Runtime) installRangeMethods(obj *goja.Object, ran *jsRange) {
-	// startContainer
 	_ = obj.Set("__getStartContainer__", func() goja.Value {
 		return r.wrapNode(ran.start.container)
 	})
-	// startOffset
 	_ = obj.Set("__getStartOffset__", func() int {
 		return ran.start.offset
 	})
-	// endContainer
 	_ = obj.Set("__getEndContainer__", func() goja.Value {
 		return r.wrapNode(ran.end.container)
 	})
-	// endOffset
 	_ = obj.Set("__getEndOffset__", func() int {
 		return ran.end.offset
 	})
-	// collapsed
 	_ = obj.Set("__getCollapsed__", func() bool {
 		return ran.start.container == ran.end.container && ran.start.offset == ran.end.offset
 	})
-	// commonAncestorContainer
 	_ = obj.Set("__getCommonAncestorContainer__", func() goja.Value {
 		return r.wrapNode(commonAncestor(ran.start.container, ran.end.container))
 	})
 
-	// Methods
 	_ = obj.Set("setStart", func(call goja.FunctionCall) goja.Value {
 		return r.jsRangeSetStart(call, ran)
 	})
@@ -262,7 +226,6 @@ func (r *Runtime) installRangeMethods(obj *goja.Object, ran *jsRange) {
 		return r.jsRangeCloneRange(ran)
 	})
 	_ = obj.Set("detach", func(call goja.FunctionCall) goja.Value {
-		// detach() is a no-op in modern browsers but must exist.
 		return goja.Undefined()
 	})
 	_ = obj.Set("deleteContents", func(call goja.FunctionCall) goja.Value {
@@ -296,7 +259,6 @@ func (r *Runtime) installRangeMethods(obj *goja.Object, ran *jsRange) {
 		return r.vm.ToValue(rangeToString(ran))
 	})
 
-	// Define JS getters for the read-only properties.
 	_ = r.vm.Set("__rangeTarget__", obj)
 	_, _ = r.vm.RunString(`
 		(function() {
@@ -330,9 +292,6 @@ func (r *Runtime) installRangeMethods(obj *goja.Object, ran *jsRange) {
 	_ = r.vm.Set("__rangeTarget__", nil)
 }
 
-// jsRangeCreateContextualFragment parses markup using the Range's start
-// container as the HTML fragment context, falling back to the owner document's
-// body when the boundary is not inside an element.
 func (r *Runtime) jsRangeCreateContextualFragment(call goja.FunctionCall, ran *jsRange) goja.Value {
 	if len(call.Arguments) == 0 {
 		panic(r.vm.NewTypeError("Failed to execute 'createContextualFragment': 1 argument required"))
@@ -357,9 +316,6 @@ func (r *Runtime) jsRangeCreateContextualFragment(call goja.FunctionCall, ran *j
 	parseContext := *context
 	isXML := context.Doc != nil && context.Doc.IsXML
 	if !isXML {
-		// The HTML fragment algorithm treats the document's <html> and <body>
-		// contexts equivalently. A foreign-namespace element with one of those
-		// names follows the generic fragment path instead.
 		if parseContext.Namespace == dom.NSHTML && parseContext.Data == "html" {
 			parseContext.Data = "body"
 		} else if parseContext.Namespace != dom.NSHTML && parseContext.Data == "html" {
@@ -394,10 +350,6 @@ func (r *Runtime) jsRangeCreateContextualFragment(call goja.FunctionCall, ran *j
 	return r.wrapNode(fragment)
 }
 
-// ---------------------------------------------------------------------------
-// Range boundary setters
-// ---------------------------------------------------------------------------
-
 func (r *Runtime) jsRangeSetStart(call goja.FunctionCall, ran *jsRange) goja.Value {
 	if len(call.Arguments) < 2 {
 		panic(r.vm.NewTypeError("Failed to execute 'setStart': 2 arguments required"))
@@ -408,7 +360,6 @@ func (r *Runtime) jsRangeSetStart(call goja.FunctionCall, ran *jsRange) goja.Val
 	}
 	offset := int(call.Arguments[1].ToInteger())
 	ran.start = rangeBoundary{container: node, offset: offset}
-	// If the new start is after the end, collapse to start.
 	if compareBoundaryPoints(ran.start, ran.end) > 0 {
 		ran.end = ran.start
 	}
@@ -425,7 +376,6 @@ func (r *Runtime) jsRangeSetEnd(call goja.FunctionCall, ran *jsRange) goja.Value
 	}
 	offset := int(call.Arguments[1].ToInteger())
 	ran.end = rangeBoundary{container: node, offset: offset}
-	// If the new end is before the start, collapse to end.
 	if compareBoundaryPoints(ran.end, ran.start) < 0 {
 		ran.start = ran.end
 	}
@@ -508,10 +458,6 @@ func (r *Runtime) jsRangeSetEndAfter(call goja.FunctionCall, ran *jsRange) goja.
 	return goja.Undefined()
 }
 
-// ---------------------------------------------------------------------------
-// Range collapse / select
-// ---------------------------------------------------------------------------
-
 func (r *Runtime) jsRangeCollapse(call goja.FunctionCall, ran *jsRange) goja.Value {
 	toStart := true
 	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) {
@@ -568,13 +514,9 @@ func (r *Runtime) jsRangeCloneRange(ran *jsRange) *goja.Object {
 	return obj
 }
 
-// ---------------------------------------------------------------------------
-// Range content manipulation
-// ---------------------------------------------------------------------------
-
 func (r *Runtime) jsRangeDeleteContents(ran *jsRange) goja.Value {
 	if ran.start.container == ran.end.container && ran.start.offset == ran.end.offset {
-		return goja.Undefined() // collapsed
+		return goja.Undefined()
 	}
 	start, end := ran.start, ran.end
 	if compareBoundaryPoints(start, end) > 0 {
@@ -917,10 +859,6 @@ func (r *Runtime) rangeContentsNode(node *dom.Node, start, end rangeBoundary, ex
 	}
 	var partial *dom.Node
 	if node.Type == dom.NodeElement {
-		// Range clone/extract algorithms use the DOM cloning steps for each
-		// partially contained element as well as fully contained subtrees.
-		// Route that shallow clone through Node.cloneNode so custom-element
-		// registry association and construction happen in tree order.
 		value := r.jsCloneNode(goja.FunctionCall{
 			This:      r.wrapNode(node),
 			Arguments: []goja.Value{r.vm.ToValue(false)},
@@ -946,8 +884,6 @@ func (r *Runtime) rangeContentsNode(node *dom.Node, start, end rangeBoundary, ex
 	return partial, changed, collapse
 }
 
-// rangeRemoveNode applies the same lifecycle and admission accounting as a
-// script-visible Node.removeChild() when a Range algorithm detaches a node.
 func (r *Runtime) rangeRemoveNode(node *dom.Node) {
 	if node == nil || node.Parent == nil {
 		return
@@ -1058,32 +994,27 @@ func (r *Runtime) jsRangeSurroundContents(call goja.FunctionCall, ran *jsRange) 
 	if newParent == nil {
 		panic(r.vm.NewTypeError("Failed to execute 'surroundContents': parameter 1 is not of type 'Node'"))
 	}
-	// Collect the nodes in the range.
 	nodes := collectRangeNodes(ran)
 	if len(nodes) == 0 {
 		return goja.Undefined()
 	}
-	// Check that all nodes share the same parent (simplified check).
 	firstParent := nodes[0].Parent
 	for _, n := range nodes {
 		if n.Parent != firstParent {
 			panic(r.vm.NewTypeError("Failed to execute 'surroundContents': the Range has partially selected a non-text node"))
 		}
 	}
-	// Remove nodes from their parent and append to newParent.
 	for _, n := range nodes {
 		if n.Parent != nil {
 			r.rangeRemoveNode(n)
 		}
 		newParent.AppendChild(n)
 	}
-	// Insert newParent where the first node was.
 	ref := childAt(firstParent, ran.start.offset)
 	r.jsInsertBefore(goja.FunctionCall{
 		This:      r.wrapNode(firstParent),
 		Arguments: []goja.Value{r.wrapNode(newParent), nodeValueOrNull(r, ref)},
 	})
-	// Update the range to surround the new parent.
 	if newParent.Parent != nil {
 		idx := childIndex(newParent.Parent, newParent)
 		ran.start = rangeBoundary{container: newParent.Parent, offset: idx}
@@ -1100,12 +1031,6 @@ func nodeValueOrNull(r *Runtime, node *dom.Node) goja.Value {
 	return r.wrapNode(node)
 }
 
-// ---------------------------------------------------------------------------
-// Range comparison
-// ---------------------------------------------------------------------------
-
-// compareBoundaryPoints returns -1 if a < b, 0 if a == b, 1 if a > b,
-// using document order.
 func compareBoundaryPoints(a, b rangeBoundary) int {
 	if a.container == b.container {
 		if a.offset < b.offset {
@@ -1175,8 +1100,6 @@ func childBelowAncestor(ancestor, node *dom.Node) *dom.Node {
 	return nil
 }
 
-// treePosition returns a document-order index for a node by walking the tree.
-// This is O(n) but correct for comparison purposes.
 func treePosition(n *dom.Node) int {
 	if n == nil {
 		return 0
@@ -1185,7 +1108,7 @@ func treePosition(n *dom.Node) int {
 	var walk func(node *dom.Node) bool
 	walk = func(node *dom.Node) bool {
 		if node == n {
-			return false // found
+			return false
 		}
 		pos++
 		for c := node.FirstChild; c != nil; c = c.NextSibling {
@@ -1195,7 +1118,6 @@ func treePosition(n *dom.Node) int {
 		}
 		return true
 	}
-	// Find the document root.
 	root := n
 	for root.Parent != nil {
 		root = root.Parent
@@ -1219,15 +1141,14 @@ func (r *Runtime) jsRangeCompareBoundaryPoints(call goja.FunctionCall, ran *jsRa
 	}
 
 	var a, b rangeBoundary
-	// START_TO_START = 0, START_TO_END = 1, END_TO_END = 2, END_TO_START = 3
 	switch how {
-	case 0: // START_TO_START
+	case 0:
 		a, b = ran.start, other.start
-	case 1: // START_TO_END
+	case 1:
 		a, b = ran.end, other.start
-	case 2: // END_TO_END
+	case 2:
 		a, b = ran.end, other.end
-	case 3: // END_TO_START
+	case 3:
 		a, b = ran.start, other.end
 	default:
 		panic(r.domError("NotSupportedError", "The how parameter must be one of the Range boundary constants"))
@@ -1252,7 +1173,6 @@ func (r *Runtime) jsRangeIsPointInRange(call goja.FunctionCall, ran *jsRange) go
 	offset := webIDLUnsignedLong(call.Arguments[1])
 	r.validateRangePoint(node, offset, "isPointInRange")
 	point := rangeBoundary{container: node, offset: offset}
-	// Point is in range if start <= point <= end.
 	return r.vm.ToValue(compareBoundaryPoints(ran.start, point) <= 0 && compareBoundaryPoints(point, ran.end) <= 0)
 }
 
@@ -1320,11 +1240,6 @@ func nodeRoot(node *dom.Node) *dom.Node {
 	return node
 }
 
-// ---------------------------------------------------------------------------
-// Range toString
-// ---------------------------------------------------------------------------
-
-// rangeToString returns the text contained by the range in tree order.
 func rangeToString(ran *jsRange) string {
 	if ran.start.container == nil || ran.end.container == nil ||
 		compareBoundaryPoints(ran.start, ran.end) == 0 {
@@ -1335,8 +1250,6 @@ func rangeToString(ran *jsRange) string {
 	return sb.String()
 }
 
-// collectTextInRange visits text descendants of the common ancestor and appends
-// only the portions between the range's boundary points.
 func collectTextInRange(startContainer *dom.Node, startOffset int, endContainer *dom.Node, endOffset int, sb *strings.Builder) {
 	start := rangeBoundary{container: startContainer, offset: startOffset}
 	end := rangeBoundary{container: endContainer, offset: endOffset}
@@ -1390,11 +1303,6 @@ func collectTextInRange(startContainer *dom.Node, startOffset int, endContainer 
 	walk(ancestor)
 }
 
-// ---------------------------------------------------------------------------
-// Range helpers
-// ---------------------------------------------------------------------------
-
-// commonAncestor returns the deepest node that is an ancestor of both a and b.
 func commonAncestor(a, b *dom.Node) *dom.Node {
 	if a == nil || b == nil {
 		return nil
@@ -1402,12 +1310,10 @@ func commonAncestor(a, b *dom.Node) *dom.Node {
 	if a == b {
 		return a
 	}
-	// Collect ancestors of a.
 	ancestors := make(map[*dom.Node]bool)
 	for n := a; n != nil; n = n.Parent {
 		ancestors[n] = true
 	}
-	// Walk up from b to find the first common ancestor.
 	for n := b; n != nil; n = n.Parent {
 		if ancestors[n] {
 			return n
@@ -1416,7 +1322,6 @@ func commonAncestor(a, b *dom.Node) *dom.Node {
 	return nil
 }
 
-// childIndex returns the index of child among parent's children.
 func childIndex(parent, child *dom.Node) int {
 	idx := 0
 	for c := parent.FirstChild; c != nil; c = c.NextSibling {
@@ -1428,7 +1333,6 @@ func childIndex(parent, child *dom.Node) int {
 	return idx
 }
 
-// nodeChildCount returns the number of children of node.
 func nodeChildCount(node *dom.Node) int {
 	if isRangeCharacterData(node) {
 		return len(characterDataCodeUnits(node))
@@ -1475,7 +1379,6 @@ func (r *Runtime) normalizeNode(node *dom.Node) {
 	}
 }
 
-// childAt returns the child at the given index, or nil if out of range.
 func childAt(parent *dom.Node, index int) *dom.Node {
 	idx := 0
 	for c := parent.FirstChild; c != nil; c = c.NextSibling {
@@ -1487,22 +1390,15 @@ func childAt(parent *dom.Node, index int) *dom.Node {
 	return nil
 }
 
-// collectRangeNodes returns the top-level nodes fully or partially contained
-// in the range. This is a simplified implementation that collects nodes
-// between start and end in document order.
 func collectRangeNodes(ran *jsRange) []*dom.Node {
 	var nodes []*dom.Node
 	start := ran.start.container
 	end := ran.end.container
 
 	if start == end {
-		// Same container.
 		if start.Type == dom.NodeText {
-			// For text nodes, we can't really "collect" partial text as nodes.
-			// Return the text node itself; the caller handles splitting.
 			nodes = append(nodes, start)
 		} else {
-			// Collect children from startOffset to endOffset.
 			idx := 0
 			for c := start.FirstChild; c != nil; c = c.NextSibling {
 				if idx >= ran.start.offset && idx < ran.end.offset {
@@ -1514,20 +1410,17 @@ func collectRangeNodes(ran *jsRange) []*dom.Node {
 		return nodes
 	}
 
-	// Different containers: collect nodes between start and end.
 	ancestor := commonAncestor(start, end)
 	if ancestor == nil {
 		return nil
 	}
 
-	// Walk the tree from ancestor and collect nodes in range.
 	collecting := false
 	var walk func(n *dom.Node)
 	walk = func(n *dom.Node) {
 		if n == start {
 			collecting = true
 			if n.Type != dom.NodeText {
-				// Collect children from offset onward.
 				idx := 0
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
 					if idx >= ran.start.offset {
@@ -1542,7 +1435,6 @@ func collectRangeNodes(ran *jsRange) []*dom.Node {
 		}
 		if n == end {
 			if n.Type != dom.NodeText {
-				// Collect children up to offset.
 				idx := 0
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
 					if idx >= ran.end.offset {
@@ -1559,12 +1451,11 @@ func collectRangeNodes(ran *jsRange) []*dom.Node {
 		}
 		if collecting {
 			nodes = append(nodes, n)
-			return // Don't descend into already-collected nodes.
+			return
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
 			if !collecting && len(nodes) > 0 {
-				// Check if we've reached the end.
 				break
 			}
 		}
@@ -1573,18 +1464,12 @@ func collectRangeNodes(ran *jsRange) []*dom.Node {
 	return nodes
 }
 
-// ---------------------------------------------------------------------------
-// Selection
-// ---------------------------------------------------------------------------
-
-// jsSelection is the Go state behind one JS Selection object.
 type jsSelection struct {
 	ranges          []*jsRange
 	selectedControl *dom.Node
 	backward        bool
 }
 
-// setupSelection installs window.getSelection() on the window object.
 func (r *Runtime) setupSelection() {
 	if r.domDoc == nil {
 		return
@@ -1606,7 +1491,6 @@ func (r *Runtime) setupSelection() {
 		return r.wrapSelection(sel)
 	})
 
-	// Also install on the global scope.
 	_ = r.vm.Set("getSelection", func(call goja.FunctionCall) goja.Value {
 		return r.wrapSelection(sel)
 	})
@@ -1627,9 +1511,6 @@ func (r *Runtime) selectionForDocument(doc *dom.Document) *jsSelection {
 	return selection
 }
 
-// EnsureContentEditableSelection places a missing or out-of-host Selection at
-// the start of an editing host. Focusing a contenteditable host makes it ready
-// for keyboard editing even when no script has created a Range first.
 func (r *Runtime) EnsureContentEditableSelection(host *dom.Node) bool {
 	if host == nil || host.Doc == nil || !dom.IsContentEditable(host) {
 		return false
@@ -1673,9 +1554,6 @@ func (r *Runtime) EnsureContentEditableSelection(host *dom.Node) bool {
 	return true
 }
 
-// MoveSelectionCaret moves the document Selection through editable text in
-// tree order. The direction is one of left, right, home, or end. Left/right
-// cross Text node boundaries while remaining within the editing host.
 func (r *Runtime) MoveSelectionCaret(host *dom.Node, direction string) bool {
 	if host == nil || host.Doc == nil {
 		return false
@@ -1861,9 +1739,6 @@ func (r *Runtime) MoveSelectionCaret(host *dom.Node, direction string) bool {
 	return true
 }
 
-// SelectionTextCaret returns the collapsed Selection's Text node and UTF-16
-// offset when that caret is inside host. It is used for composition rendering,
-// where the preview belongs in the layout run without changing the DOM.
 func (r *Runtime) SelectionTextCaret(host *dom.Node) (*dom.Node, int, bool) {
 	if host == nil || host.Doc == nil {
 		return nil, 0, false
@@ -1886,15 +1761,6 @@ func (r *Runtime) SelectionTextCaret(host *dom.Node) (*dom.Node, int, bool) {
 	return ran.start.container, offset, true
 }
 
-// CompositionCaret returns the Text node and UTF-16 offset a host IME's marked
-// passage belongs at. An editor with no text has no caret to read yet, and
-// Chromium does not wait for one: the first composition step into a fresh
-// <div contenteditable> inserts the Text node the preview lands in
-// (scripts/verify-br111-ime-composition.js, 2026-11-05 - its first input event
-// already carried value="ti" and a Selection equal to it). Without that node
-// the user types a whole word into an empty editor and sees nothing until the
-// commit. A host that already has children but no selection inside them gets
-// the caret placed at the end of the last text node descendant (GOOSIE-IMEPREVIEW-001).
 func (r *Runtime) CompositionCaret(host *dom.Node) (*dom.Node, int, bool) {
 	if node, at, ok := r.SelectionTextCaret(host); ok {
 		return node, at, true
@@ -1902,7 +1768,6 @@ func (r *Runtime) CompositionCaret(host *dom.Node) (*dom.Node, int, bool) {
 	if host == nil || host.Doc == nil || !dom.IsContentEditable(host) {
 		return nil, 0, false
 	}
-	// If the host has no children, create a text node for the composition.
 	if host.FirstChild == nil {
 		text := host.Doc.NewText("")
 		host.AppendChild(text)
@@ -1914,15 +1779,10 @@ func (r *Runtime) CompositionCaret(host *dom.Node) (*dom.Node, int, bool) {
 			sel.selectedControl = nil
 			sel.backward = false
 		}
-		// An inserted node is a structural change however it arrived: a page
-		// observing the editor sees the child, and the engine learns that a node
-		// the load-time cascade never saw has to be styled before it can ink.
 		r.queueInsertionMutation(host, []*dom.Node{text}, nil)
 		r.notifyMutation()
 		return text, 0, true
 	}
-	// Host has children but no selection inside them. Find the last text node
-	// descendant and place the caret at the end.
 	if text := lastTextDescendant(host); text != nil {
 		offset := len(characterDataCodeUnits(text))
 		if sel := r.selectionForDocument(host.Doc); sel != nil {
@@ -1938,13 +1798,10 @@ func (r *Runtime) CompositionCaret(host *dom.Node) (*dom.Node, int, bool) {
 	return nil, 0, false
 }
 
-// lastTextDescendant returns the last text node descendant of node in tree
-// order, or nil if none exists.
 func lastTextDescendant(node *dom.Node) *dom.Node {
 	if node == nil {
 		return nil
 	}
-	// Walk children in reverse to find the last text node.
 	for child := node.LastChild; child != nil; child = child.PrevSibling {
 		if child.Type == dom.NodeText {
 			return child
@@ -2021,10 +1878,6 @@ func (r *Runtime) execCommandDeleteSelectionWithInputType(sel *jsSelection, inpu
 					ran.start = previous
 					ran.end = rangeBoundary{container: previous.container, offset: nextCharacterBoundary(previous.container, previous.offset)}
 				} else {
-					// A caret after an atomic, text-free child (for example an empty
-					// custom element or image) deletes that child as one editing unit.
-					// Preserve the parent/index boundary so Range deletion uses the
-					// normal lifecycle-aware subtree removal path.
 					container := ran.start.container
 					offset := ran.start.offset
 					if container == nil || !container.Element() || offset <= 0 {
@@ -2148,8 +2001,6 @@ func (r *Runtime) execCommandDeleteSelectionWithInputType(sel *jsSelection, inpu
 		mergeInlineBeforeBlock(r, start, endBlock, host)
 	}
 	if inputType == "deleteWordBackward" && start.container.Type == dom.NodeText && end.container.Type == dom.NodeText {
-		// Preserve the visible separator and remove empty formatting wrappers
-		// when a word crosses inline text nodes.
 		units := characterDataCodeUnits(start.container)
 		if len(units) > 0 && units[len(units)-1] == ' ' {
 			r.replaceCharacterDataUnits(start.container, len(units)-1, 1, []uint16{0x00a0})
@@ -2193,10 +2044,6 @@ func (r *Runtime) execCommandDeleteSelectionWithInputType(sel *jsSelection, inpu
 	} else if startBlock != nil && startBlock.IsConnected() {
 		r.ensureEditingBlockPlaceholder(startBlock)
 	}
-	// Keep the editing selection anchored in its original start text node when
-	// that node survives deletion. Range.deleteContents() collapses according
-	// to the DOM Range boundary algorithm, while editing deletion keeps the
-	// caret at the start character offset within surviving text.
 	if start.container.Type == dom.NodeText && isAncestorNode(host, start.container) {
 		offset := start.offset
 		if length := len(characterDataCodeUnits(start.container)); offset > length {
@@ -2580,10 +2427,6 @@ func previousEditableTextBoundary(host, container *dom.Node, offset int) (rangeB
 	return rangeBoundary{}, false
 }
 
-// textChildTargetRange follows the editing target-range rule for a selection
-// that selects exactly one Text child through its parent element boundaries.
-// The public Range remains element-boundary based; the beforeinput target
-// range instead identifies the selected character data.
 func textChildTargetRange(ran *jsRange) (rangeBoundary, rangeBoundary, bool) {
 	if ran == nil || ran.start.container == nil || ran.start.container != ran.end.container || !ran.start.container.Element() {
 		return rangeBoundary{}, rangeBoundary{}, false
@@ -2602,9 +2445,6 @@ func textChildTargetRange(ran *jsRange) (rangeBoundary, rangeBoundary, bool) {
 	return rangeBoundary{container: child, offset: 0}, rangeBoundary{container: child, offset: len(characterDataCodeUnits(child))}, true
 }
 
-// nonEditableListTargetRange maps a selection of a list with noneditable edge
-// items to the editable content at each edge. Editing hosts preserve list
-// structure around noneditable items, so those edges remain list boundaries.
 func nonEditableListTargetRange(ran *jsRange) (rangeBoundary, rangeBoundary, bool) {
 	if ran == nil || ran.start.container == nil || ran.start.container != ran.end.container || !ran.start.container.Element() {
 		return rangeBoundary{}, rangeBoundary{}, false
@@ -2685,9 +2525,6 @@ func listItemEdgeBoundary(item *dom.Node, start bool) (rangeBoundary, bool) {
 	return visit(item)
 }
 
-// listItemTextTargetRange reports the selected text when a list selection
-// encloses one list item. The public selection keeps list boundaries, while
-// beforeinput targets the item text that deletion edits.
 func listItemTextTargetRange(ran *jsRange) (rangeBoundary, rangeBoundary, bool) {
 	if ran == nil || ran.start.container == nil || ran.start.container != ran.end.container || !ran.start.container.Element() {
 		return rangeBoundary{}, rangeBoundary{}, false
@@ -2853,10 +2690,6 @@ func separateEditingListRoots(start, end, host *dom.Node) bool {
 	return false
 }
 
-// normalizeEditingTargetRange includes collapsed boundary whitespace when a
-// non-collapsed edit selection crosses an editing block or selects an atomic
-// editing element. Those spaces would otherwise become visible after deletion
-// or insertion at the join point.
 func normalizeEditingTargetRange(host *dom.Node, ran *jsRange) (rangeBoundary, rangeBoundary, bool) {
 	if host == nil || ran == nil || ran.start.container == nil || ran.end.container == nil {
 		return rangeBoundary{}, rangeBoundary{}, false
@@ -3163,8 +2996,6 @@ func (r *Runtime) deletionTargetRange(host *dom.Node, ran *jsRange, inputType st
 				for start > 0 && !isHTMLSpaceCodeUnit(units[start-1]) {
 					start--
 				}
-				// A word can span inline formatting boundaries. Continue into
-				// preceding editable text nodes until whitespace or a block edge.
 				if start == 0 {
 					cursor := rangeBoundary{container: container, offset: 0}
 					for previous, ok := previousEditableTextBoundary(host, cursor.container, cursor.offset); ok; previous, ok = previousEditableTextBoundary(host, cursor.container, cursor.offset) {
@@ -3181,8 +3012,6 @@ func (r *Runtime) deletionTargetRange(host *dom.Node, ran *jsRange, inputType st
 					}
 				}
 			}
-			// Deleting the last character inside an inline formatting element
-			// removes that element as one editing unit in the current UA model.
 			if inputType != "deleteWordBackward" && offset == len(units) {
 				for ancestor := container.Parent; ancestor != nil && ancestor != host; ancestor = ancestor.Parent {
 					if isEditingBlockElement(ancestor) {
@@ -3216,7 +3045,7 @@ func (r *Runtime) deletionTargetRange(host *dom.Node, ran *jsRange, inputType st
 				}
 				preservesSpaces := whiteSpace == "pre" || whiteSpace == "pre-wrap" || whiteSpace == "break-spaces" || (block != nil && strings.EqualFold(block.Data, "pre"))
 				if !preservesSpaces && end < len(units) && end-spaceStart > 1 {
-					end-- // Retain one collapsed space to separate the following word.
+					end--
 				}
 			}
 			if offset == 0 {
@@ -3237,10 +3066,6 @@ func (r *Runtime) deletionTargetRange(host *dom.Node, ran *jsRange, inputType st
 		if container.Type == dom.NodeText && point.offset == 0 {
 			units := characterDataCodeUnits(container)
 			if parent := container.Parent; parent != nil {
-				// A line break immediately before the caret is a deletion unit.
-				// Keep the end at the text boundary so consecutive BRs delete one
-				// line break at a time instead of collapsing the range before all of
-				// them via previousEditableTextBoundary.
 				if previous := container.PrevSibling; previous != nil && previous.Element() && strings.EqualFold(previous.Data, "br") {
 					index := childIndex(parent, previous)
 					return rangeBoundary{container: parent, offset: index}, rangeBoundary{container: parent, offset: index + 1}, true
@@ -4000,10 +3825,6 @@ func isEditingBlockElement(node *dom.Node) bool {
 	}
 }
 
-// mergeAdjacentEditingBlocks applies the structural part of a contenteditable
-// deletion that spans sibling blocks. Keeping the operation here, beside the
-// Range deletion algorithm, preserves the normal character-data and subtree
-// removal notifications used by live ranges and custom elements.
 func mergeAdjacentEditingBlocks(r *Runtime, start, end, host *dom.Node) bool {
 	return mergeAdjacentEditingBlocksWithTrailingBreak(r, start, end, host, false)
 }
@@ -4122,10 +3943,6 @@ func mergeAdjacentEditingBlocksWithTrailingBreak(r *Runtime, start, end, host *d
 			r.replaceCharacterData(firstText, 0, cut, "")
 		}
 	} else if preParagraphJoin && strings.EqualFold(end.Data, "pre") && firstText != nil {
-		// The leading spaces are visible in the preformatted block, but after
-		// joining into a paragraph a run of ordinary spaces would collapse.
-		// Alternate non-breaking spaces into the run so it keeps its rendered
-		// width in the resulting normal-flow paragraph.
 		units := characterDataCodeUnits(firstText)
 		spaceCount := 0
 		for spaceCount < len(units) && units[spaceCount] == ' ' {
@@ -4206,9 +4023,6 @@ func mergeAdjacentEditingBlocksWithTrailingBreak(r *Runtime, start, end, host *d
 	return true
 }
 
-// mergeInlineBeforeBlock joins preceding inline content with a block's first
-// line when a deletion crosses into that block. A line break in the block
-// keeps the remaining lines grouped in the original block.
 func mergeInlineBeforeBlock(r *Runtime, start rangeBoundary, block, host *dom.Node) bool {
 	if r == nil || start.container == nil || block == nil || host == nil ||
 		!block.Element() || !block.IsConnected() || block.Parent == nil || editingHostFor(start.container) != host || editingHostFor(block) != host {
@@ -4477,8 +4291,6 @@ func firstElementChildNode(parent *dom.Node) *dom.Node {
 	return nil
 }
 
-// mergeInlineAfterBlock joins following inline content into the final line of
-// a block when a deletion crosses from the block's end into that content.
 func mergeInlineAfterBlock(r *Runtime, block *dom.Node, start, end rangeBoundary, host *dom.Node) bool {
 	if r == nil || block == nil || block.Parent == nil || host == nil || !block.Element() || !block.IsConnected() ||
 		editingHostFor(block) != host || !boundaryAtEditingBlockEnd(host, block, start) {
@@ -4836,9 +4648,6 @@ func adjacentNestedListRootsForJoin(start, end, host *dom.Node) ([]*dom.Node, bo
 	if leftRoot == nil || rightRoot == nil {
 		return nil, false
 	}
-	// Within one list root, the join anchor may be either the nested list that
-	// contains start or its containing outer list item. In both cases, require
-	// that anchor to be the last meaningful content before end.
 	if leftRoot == rightRoot && end.Parent == rightRoot {
 		for sibling := start.NextSibling; sibling != nil; sibling = sibling.NextSibling {
 			if sibling.Type != dom.NodeText || strings.TrimSpace(sibling.DataContent) != "" {
@@ -5441,8 +5250,6 @@ func (r *Runtime) execCommandInsertMarkup(sel *jsSelection, markup, inputType st
 	return r.vm.ToValue(changed)
 }
 
-// insertionPointForBoundary normalizes a Range boundary into a parent and
-// reference node, splitting a Text node when the insertion falls inside it.
 func (r *Runtime) insertionPointForBoundary(point rangeBoundary) (*dom.Node, *dom.Node, bool) {
 	if point.container == nil {
 		return nil, nil, false
@@ -5899,10 +5706,6 @@ func editingFormatCommandTag(command string) string {
 	}
 }
 
-// queryEditingFormatState implements the state and indeterminate queries for
-// the formatting commands supported by execCommand. A collapsed selection
-// reports its active ancestor or pending typing style; a non-collapsed
-// selection is indeterminate when only some selected text has the format.
 func (r *Runtime) queryEditingFormatState(doc *dom.Document, command string) (bool, bool) {
 	tag := editingFormatCommandTag(command)
 	if doc == nil || tag == "" {
@@ -6078,8 +5881,6 @@ func (r *Runtime) execCommandInsertTextWithTypingStyles(sel *jsSelection, value 
 		for _, tag := range active {
 			existing := editingFormatAncestor(text, host, tag)
 			if existing != nil && !isAncestorNode(target, existing) {
-				// This formatting ancestor stays around the insertion when target
-				// is split, so cloning it here would apply the style twice.
 				continue
 			}
 			outer := newEditingFormatWrapper(text.Doc, text, host, tag)
@@ -6148,9 +5949,6 @@ func editingFormatAncestor(node, host *dom.Node, tag string) *dom.Node {
 	return nil
 }
 
-// splitTextOutOfFormattingAncestor preserves the content on both sides of a
-// caret while moving newly inserted text outside target. Every inline ancestor
-// between the Text node and target is cloned for its trailing subtree.
 func splitTextOutOfFormattingAncestor(text, target *dom.Node, offset int) bool {
 	if text == nil || target == nil || text.Type != dom.NodeText || text.Parent == nil ||
 		target.Parent == nil || text.Doc == nil {
@@ -6297,7 +6095,6 @@ func editingHostFor(node *dom.Node) *dom.Node {
 	return nil
 }
 
-// wrapSelection creates a JS Selection wrapper from a jsSelection.
 func (r *Runtime) wrapSelection(sel *jsSelection) *goja.Object {
 	if sel == nil {
 		return nil
@@ -6311,35 +6108,30 @@ func (r *Runtime) wrapSelection(sel *jsSelection) *goja.Object {
 	obj := r.vm.NewObject()
 	_ = obj.Set("__sel__", sel)
 
-	// anchorNode
 	_ = obj.Set("__getAnchorNode__", func() goja.Value {
 		if len(sel.ranges) == 0 {
 			return goja.Null()
 		}
 		return r.wrapNode(selectionAnchor(sel).container)
 	})
-	// anchorOffset
 	_ = obj.Set("__getAnchorOffset__", func() int {
 		if len(sel.ranges) == 0 {
 			return 0
 		}
 		return selectionAnchor(sel).offset
 	})
-	// focusNode
 	_ = obj.Set("__getFocusNode__", func() goja.Value {
 		if len(sel.ranges) == 0 {
 			return goja.Null()
 		}
 		return r.wrapNode(selectionFocus(sel).container)
 	})
-	// focusOffset
 	_ = obj.Set("__getFocusOffset__", func() int {
 		if len(sel.ranges) == 0 {
 			return 0
 		}
 		return selectionFocus(sel).offset
 	})
-	// isCollapsed
 	_ = obj.Set("__getIsCollapsed__", func() bool {
 		if len(sel.ranges) == 0 {
 			return true
@@ -6347,11 +6139,9 @@ func (r *Runtime) wrapSelection(sel *jsSelection) *goja.Object {
 		ran := sel.ranges[0]
 		return ran.start.container == ran.end.container && ran.start.offset == ran.end.offset
 	})
-	// rangeCount
 	_ = obj.Set("__getRangeCount__", func() int {
 		return len(sel.ranges)
 	})
-	// type
 	_ = obj.Set("__getType__", func() string {
 		if len(sel.ranges) == 0 {
 			return "None"
@@ -6363,7 +6153,6 @@ func (r *Runtime) wrapSelection(sel *jsSelection) *goja.Object {
 		return "Range"
 	})
 
-	// Methods
 	_ = obj.Set("getRangeAt", func(call goja.FunctionCall) goja.Value {
 		return r.jsSelectionGetRangeAt(call, sel)
 	})
@@ -6383,9 +6172,6 @@ func (r *Runtime) wrapSelection(sel *jsSelection) *goja.Object {
 		if len(sel.ranges) == 0 {
 			return goja.Undefined()
 		}
-		// Selection.deleteFromDocument() deletes the selected range's contents.
-		// Range.deleteContents() applies the normal DOM removal steps, including
-		// custom-element disconnection reactions, and collapses the live range.
 		r.jsRangeDeleteContents(sel.ranges[0])
 		sel.selectedControl = nil
 		return goja.Undefined()
@@ -6415,7 +6201,6 @@ func (r *Runtime) wrapSelection(sel *jsSelection) *goja.Object {
 		return r.jsSelectionToString(sel)
 	})
 
-	// Define JS getters.
 	_ = r.vm.Set("__selTarget__", obj)
 	_, _ = r.vm.RunString(`
 		(function() {
@@ -6483,7 +6268,6 @@ func (r *Runtime) jsSelectionAddRange(call goja.FunctionCall, sel *jsSelection) 
 	if ran == nil {
 		panic(r.vm.NewTypeError("Failed to execute 'addRange': parameter 1 is not of type 'Range'"))
 	}
-	// Check if this range is already in the selection.
 	for _, existing := range sel.ranges {
 		if existing == ran {
 			return goja.Undefined()
@@ -6524,7 +6308,6 @@ func (r *Runtime) jsSelectionRemoveRange(call goja.FunctionCall, sel *jsSelectio
 
 func (r *Runtime) jsSelectionCollapse(call goja.FunctionCall, sel *jsSelection) goja.Value {
 	if len(call.Arguments) < 1 {
-		// collapse() with no args clears the selection.
 		sel.ranges = nil
 		sel.selectedControl = nil
 		sel.backward = false
@@ -6690,8 +6473,6 @@ func (r *Runtime) jsSelectionContainsNode(call goja.FunctionCall, sel *jsSelecti
 	}
 	_ = allowPartial
 	for _, ran := range sel.ranges {
-		// Check if node is within the range.
-		// Simplified: check if node is between start and end containers.
 		startPos := treePosition(ran.start.container)
 		endPos := treePosition(ran.end.container)
 		nodePos := treePosition(node)

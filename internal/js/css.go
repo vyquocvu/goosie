@@ -13,7 +13,6 @@ import (
 func (r *Runtime) setupCSS() {
 	cssObj := r.vm.NewObject()
 
-	// CSS.escape(ident)
 	cssObj.Set("escape", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return r.vm.ToValue("")
@@ -22,7 +21,6 @@ func (r *Runtime) setupCSS() {
 		return r.vm.ToValue(escapeCSSIdent(s))
 	})
 
-	// CSS.supports(prop, val) or CSS.supports(condition)
 	cssObj.Set("supports", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			return r.vm.ToValue(false)
@@ -36,7 +34,6 @@ func (r *Runtime) setupCSS() {
 		return r.vm.ToValue(evalSupportsProperty(prop, val))
 	})
 
-	// CSS.registerProperty(descriptor)
 	cssObj.Set("registerProperty", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
 			panic(r.vm.NewTypeError("CSS.registerProperty: descriptor object required"))
@@ -119,7 +116,6 @@ func (r *Runtime) setupCSS() {
 	r.setupStyleSheetInterfaces()
 }
 
-// escapeCSSIdent escapes a string for use as a CSS identifier per CSSOM View §3.1.
 func escapeCSSIdent(s string) string {
 	if s == "" {
 		return ""

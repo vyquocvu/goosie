@@ -33,18 +33,10 @@ func canvasLimitRuntime(t *testing.T) *js.Runtime {
 	return r
 }
 
-// TestCanvasGetImageDataRejectsOversizedRegionBeforeAllocating pins the memory
-// behaviour of getImageData: the region is validated against the ImageData byte
-// limit before the pixel buffer exists. The old path allocated w*h*4 ints
-// (eight bytes each) first and only then let newImageData reject the size, so a
-// page could demand 512 MiB for a region that was never going to be returned.
-//
 // qc:BR-115
 func TestCanvasGetImageDataRejectsOversizedRegionBeforeAllocating(t *testing.T) {
 	r := canvasLimitRuntime(t)
 
-	// 4097x4096 RGBA is one pixel past maxImageDataBytes (64 MiB), so the call
-	// must throw. Before the guard the intermediate []int was ~512 MiB.
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
@@ -64,9 +56,6 @@ func TestCanvasGetImageDataRejectsOversizedRegionBeforeAllocating(t *testing.T) 
 	}
 }
 
-// TestCanvasGetImageDataKeepsSmallRegionsWorking is the healthy-path control
-// for the allocation guard: a region under the limit still returns pixels.
-//
 // qc:BR-115
 func TestCanvasGetImageDataKeepsSmallRegionsWorking(t *testing.T) {
 	r := canvasLimitRuntime(t)

@@ -8,9 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// A relatively positioned box is in-flow: its margins collapse with its
-// parent and siblings exactly like a static box (CSS 2.1 §8.3.1). The
-// relative offset applies afterwards and does not take part in collapsing.
 func divY(t *testing.T, divStyle string) float32 {
 	t.Helper()
 	doc := domtest.Parse(`<html><body><div style="` + divStyle + `">x</div></body></html>`)
@@ -29,8 +26,6 @@ func TestRelativeFirstChildCollapsesWithParent(t *testing.T) {
 	base := "margin: 16px 0; border: 1px solid black; height: 96px; width: 480px;"
 	staticY := divY(t, base)
 	relY := divY(t, base+" position: relative;")
-	// Body carries the UA 8px margin; the div's 16px margin collapses with
-	// it, so the border-top edge lands at max(8, 16) = 16 in both cases.
 	if !almostEqual(staticY, 16) {
 		t.Fatalf("static div.Y = %v, want 16", staticY)
 	}
@@ -50,8 +45,6 @@ func TestRelativeSiblingsCollapse(t *testing.T) {
 	if len(divs) != 2 {
 		t.Fatalf("found %d divs, want 2", len(divs))
 	}
-	// Adjacent margins collapse to max(20, 16) = 20: second border-top at
-	// 10 (first height) + 20 = 30.
 	if !almostEqual(divs[1].Y, 30) {
 		t.Fatalf("second div.Y = %v, want 30 (collapsed max(20,16) after 10px first box)", divs[1].Y)
 	}

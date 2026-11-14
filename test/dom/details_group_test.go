@@ -40,7 +40,6 @@ func TestCloseOtherNamedDetailsClosesSameNamePeers(t *testing.T) {
 		t.Error("a different name group and an unnamed details must not close")
 	}
 
-	// The "other" group has no second member, so opening d3 closes nothing.
 	if closed := dom.CloseOtherNamedDetails(d3); len(closed) != 0 {
 		t.Fatalf("opening d3 closed %v, want no peers", closed)
 	}
@@ -78,8 +77,6 @@ func TestCloseOtherNamedDetailsIgnoresUnnamedAndDetached(t *testing.T) {
 		t.Error("an unnamed details must not enforce name-group exclusivity")
 	}
 
-	// A detached subtree is its own tree: its open same-named descendant is
-	// closed, and nothing in the document is touched.
 	detached := doc.NewElement("details")
 	detached.SetAttribute("name", "faq")
 	detached.SetAttribute("open", "")

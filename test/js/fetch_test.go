@@ -12,13 +12,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// Mock HTTPFetcher.
-// ---------------------------------------------------------------------------
-
-// mockFetcher is a test double for js.HTTPFetcher. It returns pre-configured
-// responses keyed by URL, or a fixed error. It records every call so tests
-// can assert on the method, headers, and body the fetch passed through.
 type mockFetcher struct {
 	mu        sync.Mutex
 	responses map[string]*js.FetchResponse
@@ -69,11 +62,9 @@ func (delayedErrorFetcher) Fetch(ctx context.Context, url, method string, header
 	return nil, fmt.Errorf("delayed network down")
 }
 
-// blockingFetcher blocks on a gate channel inside Fetch, allowing tests to
-// control exactly when requests complete. Used by the concurrent-limit test.
 type blockingFetcher struct {
-	gate   chan struct{} // closed to unblock all Fetch calls
-	active int           // atomic-ish, protected by mu
+	gate   chan struct{}
+	active int
 	mu     sync.Mutex
 	resp   *js.FetchResponse
 }
@@ -86,12 +77,6 @@ func (b *blockingFetcher) Fetch(ctx context.Context, url, method string, headers
 	return b.resp, nil
 }
 
-// ---------------------------------------------------------------------------
-// Test helpers.
-// ---------------------------------------------------------------------------
-
-// newFetchRuntime creates a Runtime with the given HTTPFetcher wired through
-// Options.HTTPClient, so that fetch() is available to scripts.
 func newFetchRuntime(t *testing.T, fetcher js.HTTPFetcher) *js.Runtime {
 	t.Helper()
 	r, err := js.New(js.Options{
@@ -182,8 +167,6 @@ func TestResponseIsNotStructuredCloneable(t *testing.T) {
 	}
 }
 
-// drainFetch waits for in-flight fetches to finish, then invokes their queued
-// callbacks on the runtime goroutine.
 func drainFetch(t *testing.T, r *js.Runtime) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -196,13 +179,6 @@ func drainFetch(t *testing.T, r *js.Runtime) {
 	r.DrainFetchCallbacks()
 }
 
-// ---------------------------------------------------------------------------
-// Standalone tests: verify exported types without needing the full wiring.
-// ---------------------------------------------------------------------------
-
-// TestFetchResponseTypeFields verifies that FetchResponse can be constructed
-// with all its fields. This is a compile-time contract test: if the struct
-// changes incompatibly, this file will not compile.
 func TestFetchResponseTypeFields(t *testing.T) {
 	resp := &js.FetchResponse{
 		Status:     200,
@@ -232,8 +208,6 @@ func TestFetchResponseTypeFields(t *testing.T) {
 	}
 }
 
-// TestFetchOptionsTypeFields verifies that FetchOptions can be constructed
-// with all its fields.
 func TestFetchOptionsTypeFields(t *testing.T) {
 	opts := js.FetchOptions{
 		Method:  "POST",
@@ -251,15 +225,10 @@ func TestFetchOptionsTypeFields(t *testing.T) {
 	}
 }
 
-// TestHTTPFetcherInterface verifies that mockFetcher satisfies the
-// js.HTTPFetcher interface. This is a compile-time check: if the interface
-// changes, this assignment will not compile.
 func TestHTTPFetcherInterface(t *testing.T) {
 	var _ js.HTTPFetcher = &mockFetcher{}
 }
 
-// TestMockFetcherReturnsConfiguredResponse verifies the mock itself works:
-// it returns the response keyed by URL and 404 for unknown URLs.
 func TestMockFetcherReturnsConfiguredResponse(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -283,7 +252,6 @@ func TestMockFetcherReturnsConfiguredResponse(t *testing.T) {
 		t.Errorf("Body = %q, want %q", resp.Body, "data")
 	}
 
-	// Unknown URL -> 404.
 	resp, err = m.Fetch(context.Background(), "https://example.test/missing", "GET", nil, nil)
 	if err != nil {
 		t.Fatalf("Fetch unknown URL: %v", err)
@@ -293,8 +261,6 @@ func TestMockFetcherReturnsConfiguredResponse(t *testing.T) {
 	}
 }
 
-// TestMockFetcherReturnsError verifies that the mock propagates a fixed
-// error for every request.
 func TestMockFetcherReturnsError(t *testing.T) {
 	m := &mockFetcher{err: fmt.Errorf("network down")}
 	_, err := m.Fetch(context.Background(), "https://example.test/", "GET", nil, nil)
@@ -306,8 +272,6 @@ func TestMockFetcherReturnsError(t *testing.T) {
 	}
 }
 
-// TestMockFetcherRecordsCalls verifies that the mock records every call for
-// later inspection.
 func TestMockFetcherRecordsCalls(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{},
@@ -373,8 +337,6 @@ func TestWorkerFetchUsesCreatorHTTPClient(t *testing.T) {
 	t.Fatalf("worker fetch did not resolve; result=%+v calls=%d", result, fetcher.callCount())
 }
 
-// TestFetchConstants verifies the exported resource-limit constants have the
-// values the architecture requires.
 func TestFetchConstants(t *testing.T) {
 	if js.MaxConcurrentFetches != 6 {
 		t.Errorf("MaxConcurrentFetches = %d, want 6", js.MaxConcurrentFetches)
@@ -387,8 +349,6 @@ func TestFetchConstants(t *testing.T) {
 	}
 }
 
-// TestFetchErrorSentinels verifies the exported error values exist and have
-// distinct messages.
 func TestFetchErrorSentinels(t *testing.T) {
 	if js.ErrFetchNotAvailable == nil {
 		t.Fatal("ErrFetchNotAvailable is nil")
@@ -401,12 +361,6 @@ func TestFetchErrorSentinels(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Integration tests: verify fetch() end-to-end through the JS runtime.
-// ---------------------------------------------------------------------------
-
-// TestFetchReturnsResponse verifies that a basic fetch resolves with the
-// correct status, headers, and body on the response object.
 // qc:BR-119
 func TestFetchReturnsResponse(t *testing.T) {
 	m := &mockFetcher{
@@ -454,8 +408,6 @@ func TestFetchReturnsResponse(t *testing.T) {
 	}
 }
 
-// TestFetchThenCallback verifies that the .then() callback receives the
-// response object and can read its properties.
 func TestFetchThenCallback(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -482,8 +434,6 @@ func TestFetchThenCallback(t *testing.T) {
 	}
 }
 
-// TestFetchCatchOnError verifies that .catch() fires when the HTTP client
-// returns an error.
 func TestFetchCatchOnError(t *testing.T) {
 	m := &mockFetcher{err: fmt.Errorf("network down")}
 	r := newFetchRuntime(t, m)
@@ -503,16 +453,12 @@ func TestFetchCatchOnError(t *testing.T) {
 	}
 }
 
-// TestFetchCatchAttachedAfterSettlement verifies a fetch rejection is settled
-// before .catch() is attached and delivered when the callback queue drains.
 func TestFetchCatchAttachedAfterSettlement(t *testing.T) {
 	m := &mockFetcher{err: fmt.Errorf("network down")}
 	r := newFetchRuntime(t, m)
 	if err := r.Run(`var lateFetch = fetch('/x'); var lateCatch = '';`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	// PendingFetches is only a barrier proving runFetch has settled and queued
-	// its result; the handler is deliberately attached after that point.
 	deadline := time.Now().Add(2 * time.Second)
 	for r.PendingFetches() > 0 {
 		if time.Now().After(deadline) {
@@ -533,8 +479,6 @@ func TestFetchCatchAttachedAfterSettlement(t *testing.T) {
 	}
 }
 
-// TestFetchDrainWaitsForSlowRequest proves drainFetch waits for the request
-// goroutine instead of relying on the former 50 ms timing guess.
 func TestFetchDrainWaitsForSlowRequest(t *testing.T) {
 	r := newFetchRuntime(t, delayedErrorFetcher{})
 
@@ -553,8 +497,6 @@ func TestFetchDrainWaitsForSlowRequest(t *testing.T) {
 	}
 }
 
-// TestFetchResponseText verifies that response.text() is available and
-// returns a thenable that resolves with the body string.
 // qc:BR-119
 func TestFetchResponseText(t *testing.T) {
 	m := &mockFetcher{
@@ -588,8 +530,6 @@ func TestFetchResponseText(t *testing.T) {
 	}
 }
 
-// TestFetchResponseJSON verifies that response.json() parses a JSON body and
-// resolves with the resulting JS object.
 func TestFetchResponseJSON(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -617,8 +557,6 @@ func TestFetchResponseJSON(t *testing.T) {
 	}
 }
 
-// TestFetchResponseOK verifies that response.ok is true for 200-299 and false
-// otherwise.
 func TestFetchResponseOK(t *testing.T) {
 	tests := []struct {
 		path   string
@@ -657,8 +595,6 @@ func TestFetchResponseOK(t *testing.T) {
 	}
 }
 
-// TestFetchMethodOption verifies that the method option is forwarded to the
-// HTTP client.
 func TestFetchMethodOption(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -679,8 +615,6 @@ func TestFetchMethodOption(t *testing.T) {
 	}
 }
 
-// TestFetchHeadersOption verifies that request headers are forwarded to the
-// HTTP client.
 func TestFetchHeadersOption(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -701,8 +635,6 @@ func TestFetchHeadersOption(t *testing.T) {
 	}
 }
 
-// TestFetchBodyOption verifies that the request body is forwarded to the HTTP
-// client with POST.
 func TestFetchBodyOption(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -756,8 +688,6 @@ func TestFetchFormDataEncodesMultipartFieldsAndFiles(t *testing.T) {
 	}
 }
 
-// TestFetchConcurrentLimit verifies that at most MaxConcurrentFetches (6)
-// requests can be in flight simultaneously. The 7th must reject.
 func TestFetchConcurrentLimit(t *testing.T) {
 	bf := &blockingFetcher{
 		gate: make(chan struct{}),
@@ -765,7 +695,6 @@ func TestFetchConcurrentLimit(t *testing.T) {
 	}
 	r := newFetchRuntime(t, bf)
 
-	// Launch 6 blocking fetches plus a 7th that should be rejected.
 	if err := r.Run(`
 		var fetchConcReject = '';
 		for (var i = 0; i < 6; i++) {
@@ -778,10 +707,8 @@ func TestFetchConcurrentLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Give the 6 goroutines time to enter Fetch and block on the gate.
 	time.Sleep(50 * time.Millisecond)
 
-	// Unblock the 6 fetches.
 	close(bf.gate)
 	drainFetch(t, r)
 
@@ -790,8 +717,6 @@ func TestFetchConcurrentLimit(t *testing.T) {
 	}
 }
 
-// TestFetchWithNilClientRejects verifies that fetch without an HTTP client
-// is not defined and calling it produces an error.
 func TestFetchWithNilClientRejects(t *testing.T) {
 	r, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {
@@ -799,8 +724,6 @@ func TestFetchWithNilClientRejects(t *testing.T) {
 	}
 	t.Cleanup(func() { r.Close() })
 
-	// Without HTTPClient, fetch is not defined at all, so calling it
-	// produces a ReferenceError.
 	err = r.Run(`fetch('/x').catch(function(e) {});`, "inline")
 	if err == nil {
 		t.Fatal("expected error when fetch is not defined")
@@ -810,8 +733,6 @@ func TestFetchWithNilClientRejects(t *testing.T) {
 	}
 }
 
-// TestFetchURLResolution verifies that relative URLs are resolved against the
-// document URL before being passed to the HTTP client.
 func TestFetchURLResolution(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -832,8 +753,6 @@ func TestFetchURLResolution(t *testing.T) {
 	}
 }
 
-// TestFetchTickDrainsCallbacks verifies that fetch callbacks are processed
-// when the event loop drains them via Tick.
 func TestFetchTickDrainsCallbacks(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -858,8 +777,6 @@ func TestFetchTickDrainsCallbacks(t *testing.T) {
 	}
 }
 
-// TestFetchMultipleThenChain verifies that multiple independent fetches
-// all resolve correctly.
 func TestFetchMultipleThenChain(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -891,9 +808,6 @@ func TestFetchMultipleThenChain(t *testing.T) {
 	}
 }
 
-// TestFetchSameOriginSettlesOnce verifies that a same-origin fetch settles its
-// promise exactly once and that the body is readable from the resolved
-// response. Draining again must not re-deliver the same settlement.
 // qc:BR-119
 func TestFetchSameOriginSettlesOnce(t *testing.T) {
 	m := &mockFetcher{
@@ -933,8 +847,6 @@ func TestFetchSameOriginSettlesOnce(t *testing.T) {
 	}
 }
 
-// TestFetchDefaultsToGETWithoutInit pins the method used when fetch is called
-// with no RequestInit: the client must receive GET, not an empty method.
 func TestFetchDefaultsToGETWithoutInit(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -953,8 +865,6 @@ func TestFetchDefaultsToGETWithoutInit(t *testing.T) {
 	}
 }
 
-// methodFetcher answers by URL and HTTP method, so a cross-origin request can
-// pass its preflight OPTIONS and then exercise the actual response check.
 type methodFetcher struct {
 	responses map[string]map[string]*js.FetchResponse
 	mu        sync.Mutex
@@ -981,9 +891,6 @@ func corsPreflight(origin string) *js.FetchResponse {
 	}}
 }
 
-// TestFetchCrossOriginBlockedResponseDoesNotReachScript verifies that a
-// cross-origin response without Access-Control-Allow-Origin is rejected even
-// after a valid preflight, and that none of its body reaches the page.
 // qc:BR-120
 func TestFetchCrossOriginBlockedResponseDoesNotReachScript(t *testing.T) {
 	m := &methodFetcher{responses: map[string]map[string]*js.FetchResponse{
@@ -1023,9 +930,6 @@ func TestFetchCrossOriginBlockedResponseDoesNotReachScript(t *testing.T) {
 	}
 }
 
-// TestFetchCrossOriginAllowedResponseReachesScript verifies that a
-// cross-origin response that names the document origin in
-// Access-Control-Allow-Origin is delivered to the page.
 // qc:BR-120
 func TestFetchCrossOriginAllowedResponseReachesScript(t *testing.T) {
 	m := &methodFetcher{responses: map[string]map[string]*js.FetchResponse{

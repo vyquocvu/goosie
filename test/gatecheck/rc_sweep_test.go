@@ -358,7 +358,6 @@ func TestRCSweepOfflineLiveSmokeHasNoPassVerdictAndLocalURLIsSupported(t *testin
 	if err := os.WriteFile(steps, []byte("true\ntrue\ntrue\ntrue\ntrue\n-\ntrue\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Closed loopback port models an offline host without ever contacting the internet.
 	offlineOut := t.TempDir()
 	if out, code := runRCSweep(t, "-binary", bin, "-steps", steps, "-live-url", "http://127.0.0.1:1/", "-out", offlineOut); code != 2 || strings.Contains(out, "live_smoke: pass") || !strings.Contains(out, "live_smoke: NO VERDICT") {
 		t.Fatalf("offline live smoke: exit=%d output=%q, want only a step-level no verdict", code, out)

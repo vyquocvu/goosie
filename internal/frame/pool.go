@@ -2,16 +2,6 @@ package frame
 
 import "sync"
 
-// BitmapPool recycles fixed-dimension bitmaps so the steady-state frame path
-// stops allocating. Invariant 6 (a warm scroll frame allocates nothing that is
-// not pooled) is only achievable if tile buffers and the backing store come
-// from here, which is why it lives in the leaf package rather than in surface:
-// raster, surface, and the grid all hand buffers to each other.
-//
-// One pool serves one dimension. That is deliberately narrow: tiles are
-// uniformly TileSize and the backing store is one viewport size, so a keyed map
-// of free lists would be speculative generality. Callers needing two sizes hold
-// two pools.
 type BitmapPool struct {
 	size     Size
 	maxIdle  int
@@ -22,9 +12,6 @@ type BitmapPool struct {
 	released int64
 }
 
-// NewBitmapPool returns a pool for buffers of the given size, retaining at most
-// maxIdle of them. maxIdle <= 0 means retain without a cap, which is safe
-// because the pool only ever holds buffers that were already allocated.
 func NewBitmapPool(size Size, maxIdle int) *BitmapPool {
 	pre := maxIdle
 	if pre <= 0 || pre > 64 {
@@ -33,11 +20,8 @@ func NewBitmapPool(size Size, maxIdle int) *BitmapPool {
 	return &BitmapPool{size: size, maxIdle: maxIdle, idle: make([]*Bitmap, 0, pre)}
 }
 
-// Size returns the dimension every buffer in the pool has.
 func (p *BitmapPool) Size() Size { return p.size }
 
-// Prealloc warms the pool so a benchmark's first frames are not measured
-// through their own setup allocations.
 func (p *BitmapPool) Prealloc(n int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -54,9 +38,6 @@ func (p *BitmapPool) cap() int {
 	return p.maxIdle
 }
 
-// Acquire returns a buffer of the pool's size. Its contents are undefined: every
-// consumer is responsible for clearing before writing, which is cheaper than
-// zeroing here and then painting over the zeroing.
 func (p *BitmapPool) Acquire() *Bitmap {
 	p.mu.Lock()
 	p.acquired++
@@ -72,9 +53,6 @@ func (p *BitmapPool) Acquire() *Bitmap {
 	return NewBitmap(int(size.W), int(size.H))
 }
 
-// Release returns b to the pool. A buffer of another size is dropped rather than
-// kept, because the next Acquire would hand out a wrongly-sized buffer and the
-// bug would surface as a pixel-index panic far from its cause.
 func (p *BitmapPool) Release(b *Bitmap) {
 	if b == nil || b.Empty() {
 		return
@@ -91,14 +69,10 @@ func (p *BitmapPool) Release(b *Bitmap) {
 	p.mu.Unlock()
 }
 
-// PoolStats is a snapshot of pool churn. Created is the number that ever
-// allocated, so Created staying flat across frames is the direct evidence that
-// steady state is allocation-free.
 type PoolStats struct {
 	Created, Acquired, Released, Idle int64
 }
 
-// Stats returns the churn counters.
 func (p *BitmapPool) Stats() PoolStats {
 	p.mu.Lock()
 	defer p.mu.Unlock()

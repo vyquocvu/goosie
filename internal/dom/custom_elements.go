@@ -2,8 +2,6 @@ package dom
 
 import "unicode/utf8"
 
-// IsValidCustomElementName reports whether name satisfies the HTML Standard's
-// custom-element-name production, including its reserved-name exclusions.
 func IsValidCustomElementName(name string) bool {
 	if len(name) == 0 || name[0] < 'a' || name[0] > 'z' {
 		return false

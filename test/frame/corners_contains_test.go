@@ -14,7 +14,6 @@ func TestSquareCornersAreThePlainRectTest(t *testing.T) {
 			t.Errorf("(%v,%v) excluded by a square box", p.x, p.y)
 		}
 	}
-	// Half-open on the far edges, so two abutting boxes never both claim a seam.
 	for _, p := range []struct{ x, y float32 }{{-1, 50}, {100, 50}, {50, -1}, {50, 100}} {
 		if c.Contains(0, 0, 100, 100, p.x, p.y) {
 			t.Errorf("(%v,%v) inside a square box that stops there", p.x, p.y)
@@ -22,15 +21,10 @@ func TestSquareCornersAreThePlainRectTest(t *testing.T) {
 	}
 }
 
-// A rounded corner cuts the pixels outside its quarter ellipse. These are the
-// same numbers the BR-073 fixture probes at 200,20: the corner pixel is outside
-// the curve while the point straight along the edge from the centre is inside.
-//
 // qc:BR-073
 func TestRoundedCornerExcludesPixelsOutsideTheCurve(t *testing.T) {
 	r := frame.Radius{X: 30, Y: 30}
 	c := frame.Corners{TL: r, TR: r, BR: r, BL: r}
-	// Box 120x60 with 30px corners: fully rounded ends.
 	if c.Contains(0, 0, 120, 60, 2, 2) {
 		t.Error("(2,2) is outside the top-left curve but counted as hit")
 	}
@@ -49,16 +43,11 @@ func TestRoundedCornerExcludesPixelsOutsideTheCurve(t *testing.T) {
 	if c.Contains(0, 0, 120, 60, 118, 58) {
 		t.Error("(118,58) is outside the bottom-right curve but counted as hit")
 	}
-	// Along the edge the curve touches, the box keeps its full width.
 	if !c.Contains(0, 0, 120, 60, 60, 0) {
 		t.Error("(60,0) is on the straight top edge and must count as hit")
 	}
 }
 
-// Elliptical corners (border-radius: 40px 10px) test each axis separately, so a
-// point can be within the long horizontal reach yet still outside the curve
-// because of the short vertical radius.
-//
 // qc:BR-073
 func TestEllipticalCornerTestsEachAxis(t *testing.T) {
 	c := frame.Corners{TL: frame.Radius{X: 40, Y: 10}}
@@ -68,7 +57,6 @@ func TestEllipticalCornerTestsEachAxis(t *testing.T) {
 	if !c.Contains(0, 0, 200, 100, 30, 1) {
 		t.Error("(30,1) is inside the ellipse and must count as hit")
 	}
-	// A square corner among rounded ones is not cut at all.
 	mixed := frame.Corners{TL: frame.Radius{X: 20, Y: 20}}
 	if mixed.Contains(0, 0, 200, 100, 1, 1) {
 		t.Error("(1,1) is outside the one declared corner and must not count as hit")

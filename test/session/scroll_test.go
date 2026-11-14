@@ -9,8 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/session"
 )
 
-// TestScrollRoundTrip guards Bug C4: a saved session must carry the viewport
-// scroll position so a restored tab reopens where the user left it.
 func TestScrollRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 	want := session.State{
@@ -38,8 +36,6 @@ func TestScrollRoundTrip(t *testing.T) {
 	}
 }
 
-// TestLoadLegacyStateWithoutScroll keeps forward compatibility: state files
-// written before scroll persistence have no scroll keys and must load as 0.
 func TestLoadLegacyStateWithoutScroll(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.json")
 	legacy := `{"tabs":[{"url":"https://a.example/","title":"A","history":["https://a.example/"],"historyIndex":0}],"active":0}`
@@ -61,8 +57,6 @@ func TestLoadLegacyStateWithoutScroll(t *testing.T) {
 	}
 }
 
-// TestTabStateJSONFieldNames pins the serialized shape so old and new binaries
-// read each other's files.
 func TestTabStateJSONFieldNames(t *testing.T) {
 	data, err := json.Marshal(session.TabState{URL: "https://a.example/", ScrollX: 5, ScrollY: 7})
 	if err != nil {

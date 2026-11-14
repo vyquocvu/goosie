@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// TestJSMutationSinkNotNil verifies that JSMutationSink always returns a
-// non-nil function, regardless of whether an invalidation was supplied.
 func TestJSMutationSinkNotNil(t *testing.T) {
 	sess, err := engine.NewSession("<html><body></body></html>", nil, 800)
 	if err != nil {
@@ -20,12 +18,9 @@ func TestJSMutationSinkNotNil(t *testing.T) {
 	if sink == nil {
 		t.Fatal("JSMutationSink returned nil")
 	}
-	// Should not panic when called without an invalidation (no-op).
 	sink()
 }
 
-// TestWithInvalidationOption verifies that WithInvalidation wires the
-// invalidation so that JSMutationSink records DOMMutation into it.
 func TestWithInvalidationOption(t *testing.T) {
 	var inv engine.Invalidation
 
@@ -41,7 +36,7 @@ func TestWithInvalidationOption(t *testing.T) {
 	if sess.HasPendingDOMMutation() {
 		t.Fatal("new invalidation unexpectedly contains a DOM mutation")
 	}
-	sink() // simulate a JS mutation
+	sink()
 	if !sess.HasPendingDOMMutation() {
 		t.Fatal("pending DOM mutation was not observable after the mutation sink")
 	}
@@ -51,7 +46,6 @@ func TestWithInvalidationOption(t *testing.T) {
 		t.Error("WithInvalidation did not cause DOMMutation to be recorded")
 	}
 
-	// After reset, the invalidation should be clean.
 	inv.Reset()
 	if sess.HasPendingDOMMutation() {
 		t.Fatal("Reset left a pending DOM mutation")
@@ -62,9 +56,6 @@ func TestWithInvalidationOption(t *testing.T) {
 	}
 }
 
-// TestJSMutationSinkWithoutInvalidationIsNoop verifies that calling the
-// mutation sink without an invalidation does not panic and does not record
-// any reasons.
 func TestJSMutationSinkWithoutInvalidationIsNoop(t *testing.T) {
 	sess, err := engine.NewSession("<html><body></body></html>", nil, 800)
 	if err != nil {
@@ -73,14 +64,11 @@ func TestJSMutationSinkWithoutInvalidationIsNoop(t *testing.T) {
 	defer sess.Close()
 
 	sink := sess.JSMutationSink()
-	// Should not panic.
 	sink()
 	sink()
 	sink()
 }
 
-// TestJSMutationSinkRecordsDOMMutationReason verifies that each call to the
-// mutation sink records exactly the DOMMutation reason.
 func TestJSMutationSinkRecordsDOMMutationReason(t *testing.T) {
 	var inv engine.Invalidation
 
@@ -94,7 +82,6 @@ func TestJSMutationSinkRecordsDOMMutationReason(t *testing.T) {
 
 	sink := sess.JSMutationSink()
 
-	// Call the sink multiple times; DOMMutation should be recorded.
 	sink()
 	sink()
 	sink()
@@ -103,7 +90,6 @@ func TestJSMutationSinkRecordsDOMMutationReason(t *testing.T) {
 	if plan.Reasons&engine.DOMMutation == 0 {
 		t.Error("expected DOMMutation in reasons")
 	}
-	// No other reasons should be present.
 	if plan.Reasons != engine.DOMMutation {
 		t.Errorf("reasons = %v, want only DOMMutation (%v)", plan.Reasons, engine.DOMMutation)
 	}

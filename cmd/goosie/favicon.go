@@ -15,23 +15,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
-// faviconTimeout bounds one icon fetch. Icons are cosmetic: a hanging origin
-// must not keep a tab's icon request alive beyond the navigation that asked.
 const faviconTimeout = 5 * time.Second
 
-// faviconURLFor returns the URL a tab should fetch for its icon: only an icon
-// the document declared. There is deliberately no implicit /favicon.ico
-// request: visiting a page would otherwise add a hidden request to every origin
-// (and to every origin a test server stands in for), while the tab strip's
-// placeholder already covers sites that publish no icon.
 func faviconURLFor(doc *dom.Node, pageURL string) string {
 	return findFaviconLink(doc, pageURL)
 }
 
-// findFaviconLink searches the DOM for a <link rel="icon"> (or the Apple touch
-// icon as a fallback) and resolves its href against the document URL. A
-// standard icon anywhere in the head beats an Apple icon, matching the priority
-// browsers give the explicit favicon.
 func findFaviconLink(root *dom.Node, baseURL string) string {
 	if root == nil {
 		return ""
@@ -103,9 +92,6 @@ func isAppleIconRel(rel string) bool {
 	return false
 }
 
-// fetchFavicon downloads and decodes one icon through the admission caps in
-// internal/image (encoded size, dimensions and pixel count are all checked
-// before decode).
 func fetchFavicon(ctx context.Context, client net.HTTP, rawURL string) (image.Image, error) {
 	if client == nil {
 		return nil, errors.New("favicon: no HTTP client")
@@ -126,9 +112,6 @@ func fetchFavicon(ctx context.Context, client net.HTTP, rawURL string) (image.Im
 	return imgdecode.Decode(resp.Body)
 }
 
-// loadFavicon fetches a tab's icon on the caller's goroutine and stores it only
-// if no newer navigation superseded the one that requested it. It runs off the
-// chrome thread; the draw path picks the image up on the next vsync.
 func (f *framePath) loadFavicon(tab *tabs.Tab, serial uint64, rawURL string) {
 	if tab == nil || rawURL == "" {
 		return

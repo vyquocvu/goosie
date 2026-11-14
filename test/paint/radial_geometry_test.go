@@ -10,39 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// The radial ending shape - centre, shape, size - reaches the rasterizer as
-// concrete per-axis radii, and the painted ramp matches Chromium at the points
-// the anchor samples. Everything here is measured, not recalled:
-// scripts/verify-radialgrad-geometry.js prints Chromium 1.63 on this host
-// (2026-11-06) answering, for #f00 -> #00f on the same geometry,
-//
-//	PIXELS fc centre                  rgb(252,0,2)   - the default circle reaches the FAR CORNER
-//	PIXELS fc 50px above              rgb(76,0,178)  - half the side is still blending (70.7px radius)
-//	PIXELS fc midway to corner        rgb(130,0,125)
-//	PIXELS fc near corner             rgb(23,0,232)
-//	PIXELS cs 25px right              rgb(0,0,255)   - closest-side radius is 25px: the side IS the end
-//	PIXELS cs 17px right              rgb(76,0,179)
-//	PIXELS fs 25px right              rgb(168,0,87)  - farthest-side radius is 75px: a third of the ramp
-//	PIXELS fs corner                  rgb(161,0,94)
-//	PIXELS cc 17px right              rgb(129,0,126) - closest-corner radius is 35.36px
-//	PIXELS cc corner                  rgb(56,0,199)
-//	PIXELS ell 50px right             rgb(164,0,91)  - ellipse farthest-corner on 200x100: per-axis 141.4x70.7
-//	PIXELS ell 35px above             rgb(131,0,125) - the same blend no scalar radius can give
-//	PIXELS ell diagonal               rgb(73,0,181)
-//	PIXELS ellcs 50px right           rgb(126,0,128) - closest-side ellipse: t=.5 at half WIDTH
-//	PIXELS ellcs 25px above           rgb(130,0,125) - and the SAME t=.5 at half HEIGHT
-//	PIXELS ellcs 75px right           rgb(63,0,193)
-//	PIXELS ellcs 45px below           rgb(23,0,232)
-//	PIXELS ellfs 75px right           rgb(127,0,128) - farthest-side ellipse: t=.5 at 75px (radius 150)
-//	PIXELS ellfs 37px below           rgb(127,0,127) - and t=.5 at 37px (radius 75), sides differ per axis
-//	PIXELS ellcs2 50px right          rgb(0,0,255)   - closest-side ellipse off-centre: the nearest
-//	PIXELS ellcs2 25px below          rgb(0,0,255)     side IS the end colour on each axis (50,25)
-//	PIXELS pxat centre (30,30)        rgb(253,0,2)   - a length position anchors the centre
-//	PIXELS pxat near far corner       rgb(16,0,238)
-//
-// Goosie answered the first block with min(w,h)/2 for a circle and one scalar
-// for an ellipse, ignored the size keywords entirely, and dropped every header
-// carrying `at ...` - so the cs/fs/cc/pxat boxes painted nothing at all.
 const rgFixture = `<!doctype html><html><head><style>
 html,body{margin:0;padding:0;background:#fff}
 .box{position:absolute}
@@ -91,12 +58,6 @@ func rgCommands(t *testing.T) ([]paint.DisplayCmd, *frame.Bitmap, *raster.Fonts)
 	return built.All(), bm, fonts
 }
 
-// TestRadialCommandsCarryTheResolvedSizing pins the sizing table at the
-// display-list boundary: each command names the radii the rasterizer will
-// blend across, derived once from the declaration against the box, so the
-// rule lives in exactly one place. Chromium's answers are the anchor's
-// geometry, measured above.
-//
 // qc:BR-074
 func TestRadialCommandsCarryTheResolvedSizing(t *testing.T) {
 	cmds, _, _ := rgCommands(t)
@@ -139,11 +100,6 @@ func TestRadialCommandsCarryTheResolvedSizing(t *testing.T) {
 	}
 }
 
-// TestRadialGradientsPaintTheMeasuredSizing reads the pixels the anchor
-// reads. Wants are the arithmetic ramp values, and the tolerance covers
-// Chromium's dither and Goosie's truncation: no wrong radius lands within 25
-// units of any of them.
-//
 // qc:BR-074
 func TestRadialGradientsPaintTheMeasuredSizing(t *testing.T) {
 	_, bm, _ := rgCommands(t)

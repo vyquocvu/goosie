@@ -8,13 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// ---------------------------------------------------------------------------
-// Fuzz tests for the input path.
-//
-// These exercise input operations with arbitrary values and check observable
-// invariants as well as stability under adversarial input.
-// ---------------------------------------------------------------------------
-
 const fuzzHTML = `<!DOCTYPE html>
 <html><body>
 <form id="f">
@@ -192,8 +185,6 @@ func FuzzEdit(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, actionByte byte, r rune) {
 		sess := newFuzzSession(t)
-		// Programmatic focus starts at the end; pointer focus places the caret
-		// under the click and is covered by the interaction regressions.
 		sess.FocusNode(sess.Doc.ElementByID("t"))
 		action := engine.EditAction(actionByte)
 		before := sess.FocusedText()
@@ -202,10 +193,6 @@ func FuzzEdit(f *testing.F) {
 		if action != engine.EditRune || !sess.FocusedEditable() {
 			return
 		}
-		// focus.go:360 refuses every C0 control: no keyboard path delivers one to a
-		// form field, and CR/LF/TAB must stay out of a single-line value. Anything
-		// else appends at the caret, which sits at the end after focusing, and
-		// string(r) already folds invalid scalars and lone surrogates to U+FFFD.
 		if r < 0x20 {
 			if changed || after != before {
 				t.Fatalf("Edit(EditRune, %q) returned %t and left %q -> %q, want refused and unchanged", r, changed, before, after)
@@ -228,7 +215,6 @@ func FuzzInteractionSequence(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, seq uint8, x1, y1, x2, y2 float32) {
 		sess := newFuzzSession(t)
-		// Exercise a sequence of interactions. The order depends on seq.
 		switch seq % 6 {
 		case 0:
 			sess.ClickAt(x1, y1)

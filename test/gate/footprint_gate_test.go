@@ -9,42 +9,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// The footprint criteria. M1's other gates say the frame path allocates nothing per
-// frame; these say what the path holds when it is not allocating, which is the number a
-// "lightweight browser" claim is actually about.
-//
-// They are bounds against capacity rather than absolute megabytes on purpose. Retained
-// memory here is the tile cache plus the two whole-surface bitmap rings, and all three
-// are configured: gateBudgetTiles is the cache ceiling and each ring slot is one device
-// surface. A flat "under 50MB" assertion would be false at this geometry (1440x900 at
-// DPR 2 with a document-wide cache is ~210MB, and correctly so) and true at a phone-sized
-// one whether or not the path leaked, so it would gate the wrong thing either way. What
-// these do gate is memory the configuration did not ask for - a frame path that starts
-// retaining a fourth surface bitmap, or a sweep that keeps every tile buffer it touches
-// alive past the budget - and that is the regression class an absolute number only
-// reports after it has already shipped.
-//
-// The absolute figures are recorded in docs/superpowers/plans/ along with the process
-// resident-set numbers, so a change in either is visible to a reader without being
-// inferred from a passing test.
-
 const miB = 1 << 20
 
-// gateFootprintSlack is what retained heap may exceed the configured caches by. The
-// measured residual is ~5.5MB, and it is the glyph atlas the rasterizer is handed
-// (4MB) plus the scene and the layer records; 12MB leaves room for that to move and no
-// room for a surface bitmap (19.78MB) to appear.
 const gateFootprintSlack = 12.0
 
-// gateGrowthSlack is what retained heap may grow by across the warm sweep. Measured
-// growth is 0.00MB over gateWarmFrames. 4MB still catches a path retaining ~7KB per
-// frame, which is the size of a small per-frame record, and TestFootprintInstrumentDetectsRetention
-// below proves it catches that rather than passing because it cannot see.
 const gateGrowthSlack = 4.0
 
-// heapMiB returns live heap after a full collection: what the process retains, not what
-// the allocator has asked the OS for. Sys is deliberately not used - it counts arena
-// reservation, which follows GC timing rather than anything the frame path does.
 func heapMiB() float64 {
 	runtime.GC()
 	var m runtime.MemStats
@@ -52,15 +22,8 @@ func heapMiB() float64 {
 	return float64(m.HeapAlloc) / miB
 }
 
-// gateFallbackFontBudgetMiB is the documented capacity ceiling for lazily loaded fallback fonts.
-// Derived from engine admission limits: raster.MaxParsedFallbackFonts (2) * raster.MaxFallbackFontBytes (4 MiB) = 8.0 MiB.
-// This is a fixed capacity constant, NOT a dynamic measurement of live retained bytes.
-// It is strictly bounded so that massive font files like Arial Unicode.ttf (~22-39 MiB) cannot slip in.
 const gateFallbackFontBudgetMiB = float64(raster.MaxParsedFallbackFonts*raster.MaxFallbackFontBytes) / miB
 
-// configuredCapacityMiB is the memory the harness above asked for by construction: the
-// tile grid at its budget, and one device surface per composer backing and per window
-// present slot, plus the budgeted capacity for retained fallback fonts.
 func configuredCapacityMiB(g *frame.Layer) float64 {
 	surface := float64(gateDevW*gateDevH*4) / miB
 	return float64(g.Grid.Stats().Budget)/miB +
@@ -75,8 +38,6 @@ func TestFootprintAtRestIsBoundedByConfiguredCaches(t *testing.T) {
 	gridMB := float64(h.l.Grid.Stats().Bytes) / miB
 	t.Logf("retained=%.2f MiB, configured=%.2f MiB (tile grid %.2f of it)", rest, capacity, gridMB)
 
-	// The lower bound keeps this from passing on a path that holds nothing: an empty
-	// pipeline is under every ceiling above and measures nothing.
 	if h.l.Grid.Stats().Valid != gateCols*gateRows {
 		t.Fatalf("the warm scene holds %d of %d tiles, so the upper bound below is not being tested",
 			h.l.Grid.Stats().Valid, gateCols*gateRows)
@@ -103,16 +64,9 @@ func TestFootprintDoesNotGrowAcrossWarmSweep(t *testing.T) {
 	}
 }
 
-// TestFootprintInstrumentDetectsRetention is the same guard
-// TestGate_AllocationInstrumentIsNotVacuous gives the allocation criterion: the growth
-// measurement is shown to see memory held across frames. Without it, a GC that happened
-// to run differently, or a harness whose sweep stopped drawing, would report zero growth
-// forever.
 func TestFootprintInstrumentDetectsRetention(t *testing.T) {
 	h := newWarmScene(t)
 	before := heapMiB()
-	// Hold one device surface's worth per frame for 32 frames - more than the budget
-	// allows, far less than a real leak would need to be noticed.
 	var held [][]byte
 	for i := 0; i < 32; i++ {
 		h.travel(gateWarmStep)
@@ -127,22 +81,14 @@ func TestFootprintInstrumentDetectsRetention(t *testing.T) {
 		t.Errorf("retaining 32 MiB across the sweep moved the measurement by %.2f MiB, under the %.2f MiB budget: the growth criterion cannot see what it claims to",
 			after-before, gateGrowthSlack)
 	}
-	// Keep the slices alive past the measurement so the compiler cannot drop them early.
 	runtime.KeepAlive(held)
 }
 
-// TestFootprintAtRestInstrumentDetectsRetention is the at-rest analog of
-// TestFootprintInstrumentDetectsRetention. It proves that the at-rest criterion
-// (TestFootprintAtRestIsBoundedByConfiguredCaches) actually detects retention.
-// When retained memory is within the documented budget (gateFallbackFontBudgetMiB),
-// the at-rest ceiling holds. When an unbudgeted retention equivalent to Arial Unicode.ttf
-// (~39 MiB) is held, it exceeds configuredCapacityMiB + gateFootprintSlack and fails.
 func TestFootprintAtRestInstrumentDetectsRetention(t *testing.T) {
 	h := newWarmScene(t)
 	capacity := configuredCapacityMiB(h.l)
 	ceiling := capacity + gateFootprintSlack
 
-	// 1. Within budget: holding bytes within gateFallbackFontBudgetMiB must stay under the ceiling.
 	withinBytes := int(gateFallbackFontBudgetMiB * miB)
 	heldWithin := make([]byte, withinBytes)
 	for i := range heldWithin {
@@ -155,9 +101,6 @@ func TestFootprintAtRestInstrumentDetectsRetention(t *testing.T) {
 	}
 	runtime.KeepAlive(heldWithin)
 
-	// 2. Deliberate excess: simulate holding an oversized font like Arial Unicode.ttf (~39 MiB).
-	// The instrument must see this excess and exceed the ceiling. If it does not, the at-rest
-	// criterion is vacuous.
 	excessBytes := 39 * miB
 	heldExcess := make([]byte, excessBytes)
 	for i := range heldExcess {

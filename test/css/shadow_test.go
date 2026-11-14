@@ -6,8 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestParseBoxShadowBasic verifies that a simple box-shadow with offset, blur,
-// spread, and color parses correctly.
 func TestParseBoxShadowBasic(t *testing.T) {
 	shadows := css.ParseBoxShadow("2px 4px 6px 2px rgba(0, 0, 0, 0.5)")
 	if len(shadows) != 1 {
@@ -37,11 +35,6 @@ func TestParseBoxShadowBasic(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowNegativeSpread pins the fourth length as a distance rather
-// than a radius: a negative spread shrinks the shadow inside its box and Chromium
-// paints it, so the layer has to survive the parser at all. Only the blur radius
-// is restricted to a non-negative length.
-//
 // qc:BR-281
 func TestParseBoxShadowNegativeSpread(t *testing.T) {
 	shadows := css.ParseBoxShadow("0 0 8px -4px rgb(0, 0, 255)")
@@ -59,7 +52,6 @@ func TestParseBoxShadowNegativeSpread(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowInset verifies the inset keyword is recognized.
 func TestParseBoxShadowInset(t *testing.T) {
 	shadows := css.ParseBoxShadow("inset 3px 3px 5px black")
 	if len(shadows) != 1 {
@@ -79,7 +71,6 @@ func TestParseBoxShadowInset(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowNone verifies that "none" returns nil.
 func TestParseBoxShadowNone(t *testing.T) {
 	shadows := css.ParseBoxShadow("none")
 	if shadows != nil {
@@ -87,7 +78,6 @@ func TestParseBoxShadowNone(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowEmpty verifies that empty string returns nil.
 func TestParseBoxShadowEmpty(t *testing.T) {
 	shadows := css.ParseBoxShadow("")
 	if shadows != nil {
@@ -95,20 +85,17 @@ func TestParseBoxShadowEmpty(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowMultiple verifies comma-separated shadows parse correctly.
 func TestParseBoxShadowMultiple(t *testing.T) {
 	shadows := css.ParseBoxShadow("2px 2px 4px red, -1px -1px 3px blue")
 	if len(shadows) != 2 {
 		t.Fatalf("expected 2 shadows, got %d", len(shadows))
 	}
-	// First shadow.
 	if shadows[0].OffsetX != 2 || shadows[0].OffsetY != 2 {
 		t.Errorf("shadow[0] offset = (%v,%v), want (2,2)", shadows[0].OffsetX, shadows[0].OffsetY)
 	}
 	if shadows[0].Color.R != 255 || shadows[0].Color.G != 0 || shadows[0].Color.B != 0 {
 		t.Errorf("shadow[0] color = (%d,%d,%d), want red", shadows[0].Color.R, shadows[0].Color.G, shadows[0].Color.B)
 	}
-	// Second shadow.
 	if shadows[1].OffsetX != -1 || shadows[1].OffsetY != -1 {
 		t.Errorf("shadow[1] offset = (%v,%v), want (-1,-1)", shadows[1].OffsetX, shadows[1].OffsetY)
 	}
@@ -117,7 +104,6 @@ func TestParseBoxShadowMultiple(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowNoBlur verifies that blur and spread are optional.
 func TestParseBoxShadowNoBlur(t *testing.T) {
 	shadows := css.ParseBoxShadow("5px 10px green")
 	if len(shadows) != 1 {
@@ -141,8 +127,6 @@ func TestParseBoxShadowNoBlur(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowColorBeforeLengths verifies that the color can appear
-// anywhere in the layer.
 func TestParseBoxShadowColorBeforeLengths(t *testing.T) {
 	shadows := css.ParseBoxShadow("red 4px 6px 8px")
 	if len(shadows) != 1 {
@@ -160,8 +144,6 @@ func TestParseBoxShadowColorBeforeLengths(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowDefaultColor verifies that when no color is specified,
-// the default is opaque black.
 func TestParseBoxShadowDefaultColor(t *testing.T) {
 	shadows := css.ParseBoxShadow("3px 3px 5px")
 	if len(shadows) != 1 {
@@ -173,7 +155,6 @@ func TestParseBoxShadowDefaultColor(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowNegativeOffsets verifies negative offset values.
 func TestParseBoxShadowNegativeOffsets(t *testing.T) {
 	shadows := css.ParseBoxShadow("-3px -5px 10px #000")
 	if len(shadows) != 1 {
@@ -188,8 +169,6 @@ func TestParseBoxShadowNegativeOffsets(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowInsufficientLengths verifies that a shadow with fewer
-// than two length values is rejected.
 func TestParseBoxShadowInsufficientLengths(t *testing.T) {
 	shadows := css.ParseBoxShadow("5px red")
 	if len(shadows) != 0 {
@@ -197,7 +176,6 @@ func TestParseBoxShadowInsufficientLengths(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowWithRGBColor verifies parsing with rgb() color function.
 func TestParseBoxShadowWithRGBColor(t *testing.T) {
 	shadows := css.ParseBoxShadow("2px 2px 4px rgb(100, 200, 50)")
 	if len(shadows) != 1 {
@@ -209,7 +187,6 @@ func TestParseBoxShadowWithRGBColor(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowBasic verifies a simple text-shadow parses correctly.
 func TestParseTextShadowBasic(t *testing.T) {
 	shadows := css.ParseTextShadow("1px 2px 3px rgba(0,0,0,0.5)")
 	if len(shadows) != 1 {
@@ -230,7 +207,6 @@ func TestParseTextShadowBasic(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowNone verifies that "none" returns nil.
 func TestParseTextShadowNone(t *testing.T) {
 	shadows := css.ParseTextShadow("none")
 	if shadows != nil {
@@ -238,7 +214,6 @@ func TestParseTextShadowNone(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowEmpty verifies that empty string returns nil.
 func TestParseTextShadowEmpty(t *testing.T) {
 	shadows := css.ParseTextShadow("")
 	if shadows != nil {
@@ -246,7 +221,6 @@ func TestParseTextShadowEmpty(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowMultiple verifies comma-separated text shadows.
 func TestParseTextShadowMultiple(t *testing.T) {
 	shadows := css.ParseTextShadow("1px 1px 2px black, 0 0 1em blue")
 	if len(shadows) != 2 {
@@ -260,7 +234,6 @@ func TestParseTextShadowMultiple(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowNoBlur verifies that blur is optional for text-shadow.
 func TestParseTextShadowNoBlur(t *testing.T) {
 	shadows := css.ParseTextShadow("2px 2px red")
 	if len(shadows) != 1 {
@@ -278,7 +251,6 @@ func TestParseTextShadowNoBlur(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowDefaultColor verifies omitted color marks currentcolor.
 func TestParseTextShadowDefaultColor(t *testing.T) {
 	shadows := css.ParseTextShadow("1px 1px")
 	if len(shadows) != 1 {
@@ -290,8 +262,6 @@ func TestParseTextShadowDefaultColor(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowInsufficientLengths verifies that a text-shadow with
-// fewer than two length values is rejected.
 func TestParseTextShadowInsufficientLengths(t *testing.T) {
 	shadows := css.ParseTextShadow("5px red")
 	if len(shadows) != 0 {
@@ -299,7 +269,6 @@ func TestParseTextShadowInsufficientLengths(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowColorFirst verifies that color can come before lengths.
 func TestParseTextShadowColorFirst(t *testing.T) {
 	shadows := css.ParseTextShadow("blue 2px 3px 1px")
 	if len(shadows) != 1 {
@@ -317,9 +286,6 @@ func TestParseTextShadowColorFirst(t *testing.T) {
 	}
 }
 
-// TestParseBoxShadowOneBadLayerDropsAll pins whole-declaration invalidity: a
-// `none` layer among valid ones drops everything, so a previous valid
-// declaration (not these layers) is what the cascade keeps.
 func TestParseBoxShadowOneBadLayerDropsAll(t *testing.T) {
 	for _, v := range []string{
 		"none, red 0px -100px",
@@ -335,8 +301,6 @@ func TestParseBoxShadowOneBadLayerDropsAll(t *testing.T) {
 	}
 }
 
-// TestParseTextShadowOneBadLayerDropsAll pins the same rule for text-shadow,
-// including the 3-length cap and negative blur.
 func TestParseTextShadowOneBadLayerDropsAll(t *testing.T) {
 	for _, v := range []string{
 		"1px 1px red, none",
@@ -350,8 +314,6 @@ func TestParseTextShadowOneBadLayerDropsAll(t *testing.T) {
 	}
 }
 
-// TestParseShadowCurrentColor pins the currentcolor marker for both an
-// explicit keyword and the omitted-color default.
 func TestParseShadowCurrentColor(t *testing.T) {
 	for _, v := range []string{"10px 5px 5px currentcolor", "-3em 0em"} {
 		got := css.ParseBoxShadow(v)

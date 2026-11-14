@@ -4,10 +4,6 @@ import (
 	"testing"
 )
 
-// A float is thrown to one side of its container and stops taking a vertical
-// slot: the content that follows it starts at the same height and rides past its
-// side. Stacking it in the flow instead pushed every row of lobste.rs's story
-// list down by the height of its vote column.
 func TestFloatTakesNoVerticalSlot(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">
@@ -35,8 +31,6 @@ func TestFloatTakesNoVerticalSlot(t *testing.T) {
 	}
 }
 
-// A right float hangs from the container's right content edge, measured from the
-// outside of its own box.
 func TestFloatRightHangsAtTheRightEdge(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">
@@ -53,8 +47,6 @@ func TestFloatRightHangsAtTheRightEdge(t *testing.T) {
 	}
 }
 
-// Two floats on the same side stack along the edge rather than landing on top of
-// each other, which is how a row of floated columns works.
 func TestSameSideFloatsSitSideBySide(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px;">
@@ -76,11 +68,6 @@ func TestSameSideFloatsSitSideBySide(t *testing.T) {
 	}
 }
 
-// A float that does not fit beside the floats already on its line starts a new
-// line below them. Before this, two width:100% floats were placed side by side
-// at X=0 and X=container width, and every later block was pushed one viewport
-// further right: vnexpress.net builds its whole body from width:100% floats, so
-// all of it rendered off-screen and the page came out blank.
 // qc:BR-257
 func TestFullWidthFloatsStackInsteadOfWalkingOffTheEdge(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
@@ -108,9 +95,6 @@ func TestFullWidthFloatsStackInsteadOfWalkingOffTheEdge(t *testing.T) {
 	}
 }
 
-// A container that establishes a formatting context - here by clipping - grows
-// around the floats it holds. A plain block box collapses past them instead,
-// which is the behaviour a clearfix works around.
 func TestFormattingContextGrowsAroundFloats(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <section style="width: 400px; overflow: hidden;">
@@ -134,10 +118,6 @@ func TestFormattingContextGrowsAroundFloats(t *testing.T) {
 	}
 }
 
-// An inline-block holding block content shrinks to its widest child too. The
-// measure that reads the placed words cannot see past a block child, so the box
-// kept the whole row: lobste.rs's tag pills, which are list items inside an
-// inline-block list, filled the line and wrapped over each other.
 func TestInlineBlockOfBlockContentShrinksToItsChildren(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="width: 400px;">
@@ -162,10 +142,6 @@ func TestInlineBlockOfBlockContentShrinksToItsChildren(t *testing.T) {
 	}
 }
 
-// TestFloatPercentWidthResolvesAgainstContainer guards percentage widths on
-// floats: the share speaks the containing block, but the content pass used
-// to re-resolve it against the settled box (`33%` of 267 instead of 800,
-// yielding 89px columns).
 func TestFloatPercentWidthResolvesAgainstContainer(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="float: left; width: 33.3333%; height: 100px;">a</div>
@@ -176,7 +152,6 @@ func TestFloatPercentWidthResolvesAgainstContainer(t *testing.T) {
 	if len(divs) != 2 {
 		t.Fatalf("found %d divs, want 2", len(divs))
 	}
-	// 33.3333% of 800 = 266.67.
 	for i, d := range divs {
 		if d.W < 266 || d.W > 267 {
 			t.Errorf("div[%d].W = %v, want ~266.67", i, d.W)
@@ -187,12 +162,6 @@ func TestFloatPercentWidthResolvesAgainstContainer(t *testing.T) {
 	}
 }
 
-// A float belongs to the nearest formatting context, not to the block that
-// happens to contain it in the DOM. When an earlier row's float sits inside a
-// nested plain block, a later row's clear:both must still move below it.
-// Google's legacy advanced-search rows are exactly this shape: each row is a
-// clear:both block whose label and input are floats, and a flat float context
-// per block stacked every row on top of the first.
 func TestClearSeesFloatsNestedInPreviousSibling(t *testing.T) {
 	arena := sessionSheets(t, `<html><head><style>
 .group{width:600px}
@@ -214,10 +183,6 @@ func TestClearSeesFloatsNestedInPreviousSibling(t *testing.T) {
 	}
 }
 
-// Cross-axis alignment moves a flex item as a box, not just the words inside
-// it. Shifting only inline content left a centred item's block children at the
-// item's pre-alignment origin; inside an overflow:hidden ancestor that put the
-// Google logo 12px above its clip and made it disappear.
 func TestFlexCentredItemMovesItsBlockChildren(t *testing.T) {
 	arena := session(t, `<html><body style="margin:0">
 <div style="display:flex;align-items:center;height:48px;overflow:hidden">
@@ -239,10 +204,6 @@ func TestFlexCentredItemMovesItsBlockChildren(t *testing.T) {
 	}
 }
 
-// An inline-block whose width is auto still contributes its shrink-to-fit size
-// to a flex item's max-content. Dropping it measured Google's account area as
-// the sign-in button alone, so the header wrapped the button under the apps
-// icon and pushed it out of the bar.
 func TestMaxContentCountsAutoWidthInlineBlockInsideInline(t *testing.T) {
 	arena := session(t, `<html><body style="margin:0">
 <div style="display:flex;width:200px">

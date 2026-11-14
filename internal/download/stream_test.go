@@ -12,9 +12,6 @@ import (
 	"testing"
 )
 
-// TestSaveStreamHandlesFilesLargerThanDocumentLimit verifies that a binary
-// stream well past the document limit lands on disk byte-for-byte with the
-// reported size and digest, and that progress reaches the final byte count.
 // qc:BR-153
 func TestSaveStreamHandlesFilesLargerThanDocumentLimit(t *testing.T) {
 	dir := t.TempDir()

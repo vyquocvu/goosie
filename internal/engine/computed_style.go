@@ -8,22 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// computedStyleValues renders one node's cascade result as CSS declaration
-// values, which is the shape internal/js asks for so that package can answer
-// getComputedStyle without importing internal/style (the archtest import table
-// does not allow that edge).
-//
-// The rule this function obeys is the one the API's contract sets: report what
-// the engine resolved, and nothing it did not. Every value here comes from a
-// field the session's own style pass filled, or from the layout box the arena
-// holds. A property the engine does not model is left out of the map, so the
-// binding reads it back as the empty string instead of inventing an initial.
-//
-// It returns nil when the node has no entry in the document's style map even
-// after the synchronous CSSOM refresh: a detached node, or a node whose
-// document is not this session's, has no cascade result to name, and "I have
-// not resolved this node" is information the caller can use, while an empty map
-// would look like "this node resolved to nothing".
 func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	if s == nil || n == nil {
 		return nil
@@ -44,10 +28,6 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 		}
 		s.opMu.Unlock()
 	} else if n.Doc != nil {
-		// Iframe documents share the runtime's getComputedStyle binding, but
-		// keep their own DOM and cascade. Resolve their author sheets against
-		// that document so defaultView.getComputedStyle observes iframe rules
-		// and live states such as :defined.
 		sheets, err := s.collectSheets(n.Doc, nil)
 		if err != nil {
 			return nil
@@ -80,7 +60,6 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	put("white-space", whiteSpaceKeyword(cs.WhiteSpace))
 	put("font-style", fontStyleKeyword(cs.FontStyle))
 
-	// Numbers and lengths: each rendered the way CSS spells the used value.
 	out["opacity"] = formatCSSNumber(float64(cs.Opacity))
 	if cs.HasZIndex {
 		put("z-index", strconv.FormatInt(int64(cs.ZIndex), 10))
@@ -106,13 +85,6 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	put("color", cssColor(cs.Color))
 	put("background-color", cssColor(cs.BackgroundColor))
 
-	// Box metrics. A laid-out node reports the used value from its layout box,
-	// which is what a browser reports; a node the cascade knows but layout
-	// skipped reports the cascade length, because that is all the engine has and
-	// it is still the engine's own answer. See the deviation note in
-	// docs/tasks/TASK-047-DOM-JQUERY-APIS.md: the arena keeps the content width
-	// in W, so a border-box element's reported width is short by its padding and
-	// border.
 	if hasBox {
 		put("width", px(boxW))
 		put("height", px(boxH))
@@ -149,18 +121,12 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	put("border-bottom-color", cssColor(cs.BorderBottomColor))
 	put("border-left-color", cssColor(cs.BorderLeftColor))
 
-	// Custom properties are the one case where the engine keeps the author's
-	// raw text, so it can be handed back raw: a page reading var() values out of
-	// getComputedStyle is reading the declaration, not a resolved length.
 	for name, value := range cs.Custom {
 		put(name, value)
 	}
 	return out
 }
 
-// pseudoStyleValues exposes the resolved declarations used by text APIs that
-// account for pseudo-element styling. Keep this boundary in engine so
-// internal/js does not depend on internal/style.
 func (s *Session) pseudoStyleValues(n *dom.Node, pseudo string) map[string]string {
 	if s == nil || n == nil || n.Doc != s.Doc {
 		return nil
@@ -179,10 +145,6 @@ func (s *Session) pseudoStyleValues(n *dom.Node, pseudo string) map[string]strin
 	return values
 }
 
-// refreshStylesForCSSOMRead implements the synchronous style flush required by
-// getComputedStyle. Script mutations mark the session dirty; resolving here
-// makes a following CSSOM read observe the updated attributes and tree before
-// the asynchronous paint loop runs.
 func (s *Session) refreshStylesForCSSOMRead() {
 	if s == nil || !s.styleDirty.Swap(false) {
 		return
@@ -199,9 +161,6 @@ func (s *Session) refreshStylesForCSSOMRead() {
 	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, styles, s.customFonts)
 }
 
-// px renders a CSS pixel length the way a browser's computed style spells it:
-// whole numbers without a fraction, and the unit always present because a
-// computed length is never unitless.
 func px(v float32) string {
 	if v == 0 {
 		return "0px"
@@ -213,8 +172,6 @@ func px(v float32) string {
 	return strconv.FormatFloat(f, 'f', -1, 32) + "px"
 }
 
-// formatCSSNumber renders a unitless number, trimming the trailing zeros Go's
-// shortest representation would still print for a whole value.
 func formatCSSNumber(v float64) string {
 	if v == float64(int64(v)) && v >= -1e9 && v <= 1e9 {
 		return strconv.FormatInt(int64(v), 10)
@@ -222,9 +179,6 @@ func formatCSSNumber(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 32)
 }
 
-// cssColor renders a resolved colour the way getComputedStyle reports it: rgb()
-// when the alpha channel is full, rgba() otherwise, and the two forms use the
-// comma syntax browsers return rather than the modern CSS one.
 func cssColor(c css.Color) string {
 	if c.A == 255 {
 		return "rgb(" + strconv.Itoa(int(c.R)) + ", " + strconv.Itoa(int(c.G)) + ", " + strconv.Itoa(int(c.B)) + ")"
@@ -232,11 +186,6 @@ func cssColor(c css.Color) string {
 	return "rgba(" + strconv.Itoa(int(c.R)) + ", " + strconv.Itoa(int(c.G)) + ", " + strconv.Itoa(int(c.B)) + ", " + formatCSSNumber(float64(c.A)/255) + ")"
 }
 
-// The keyword tables below exist because internal/style's enums have no
-// String(): the style package keeps values as compact integers for layout, and
-// a page only ever sees the CSS spelling. Each maps the engine's zero value to
-// the property's initial keyword, which is exactly how the resolver seeds an
-// unset property.
 func displayKeyword(d style.Display) string {
 	switch d {
 	case style.DisplayNone:

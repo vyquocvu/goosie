@@ -15,20 +15,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
-// Picker selections are bounded before anything is read, so a page cannot make
-// the browser allocate an unbounded FileList. The per-file cap matches the
-// script-visible Blob limit; the total keeps one selection from holding several
-// of those at once.
 const (
 	maxPickedFileCount  = 32
 	maxPickedFileBytes  = 64 << 20
 	maxPickedTotalBytes = 64 << 20
 )
 
-// serviceFilePicker drains a pending file-picker request for tab and, when the
-// host has a picker, replaces the control's selection with the chosen files.
-// It reports whether a request was pending, whether or not the user chose
-// anything: the activation that opened the picker is consumed either way.
 func (f *framePath) serviceFilePicker(tab *tabs.Tab) bool {
 	if tab == nil || tab.Session() == nil {
 		return false
@@ -61,9 +53,6 @@ func (f *framePath) serviceFilePicker(tab *tabs.Tab) bool {
 	return true
 }
 
-// readPickedFiles reads the paths a native picker returned into File contents.
-// It rejects anything that is not a regular file and enforces the caps before
-// reading, so a picker aimed at a device or a huge file cannot exhaust memory.
 func readPickedFiles(paths []string) ([]js.FileSelection, error) {
 	if len(paths) == 0 {
 		return nil, nil
@@ -109,10 +98,6 @@ func readPickedFiles(paths []string) ([]js.FileSelection, error) {
 	return files, nil
 }
 
-// fileContentType is the type a File object reports. The extension wins because
-// that is what a browser uses for a picked file; the bytes are the fallback for
-// names the system does not recognise. Parameters are dropped because File.type
-// is a bare MIME type.
 func fileContentType(path string, data []byte) string {
 	typ := mime.TypeByExtension(strings.ToLower(filepath.Ext(path)))
 	if typ == "" {
@@ -127,9 +112,6 @@ func fileContentType(path string, data []byte) string {
 	return strings.ToLower(strings.TrimSpace(typ))
 }
 
-// reflowAfterControlChange restyles and relayouts the active document after a
-// control's value or selection changed, then publishes the repaint. Controls
-// can turn :valid/:invalid and :checked, so a reflow alone is not enough.
 func (f *framePath) reflowAfterControlChange(tab *tabs.Tab) {
 	sess := tab.Session()
 	if sess == nil {

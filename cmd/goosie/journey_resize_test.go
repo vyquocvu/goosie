@@ -9,11 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// TestJourneyResizeKeepsControlsReachable resizes the window small and large
-// and asserts the toolbar geometry contract holds at each size, the chrome
-// accessibility nodes stay within the window and never overlap, and the address
-// bar still navigates (BR-143).
-//
 // qc:BR-143
 func TestJourneyResizeKeepsControlsReachable(t *testing.T) {
 	srvURL := findJourneyPage(t, "<p>resize journey</p>", "")
@@ -33,8 +28,6 @@ func TestJourneyResizeKeepsControlsReachable(t *testing.T) {
 			t.Fatalf("width %d: menu missing from layout", w)
 		}
 
-		// The live accessibility surface must agree with the geometry: every
-		// chrome control sits inside the window and no two controls overlap.
 		group, ok := findAXNode(b.window.AccessibilityTree(), "goosie.toolbar")
 		if !ok {
 			t.Fatalf("width %d: toolbar accessibility group missing", w)
@@ -60,7 +53,6 @@ func TestJourneyResizeKeepsControlsReachable(t *testing.T) {
 			t.Fatalf("width %d: menu=%v address=%v, want both reachable", w, menu, address)
 		}
 
-		// The address bar still navigates at this width.
 		target := fmt.Sprintf("%s/width-%d", srvURL, w)
 		b.navigateViaAddressBar(t, target)
 		b.waitFor(t, fmt.Sprintf("navigated at width %d", w), func() bool { return b.activeURL() == target })

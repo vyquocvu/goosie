@@ -10,18 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// The visual half of GOOSIE-LISTBOX-001: the rows a user can see are the rows
-// the engine hit-tests (test/engine/listbox_viewport_test.go pins that rule and
-// quotes scripts/verify-br101-listbox-viewport.js), and what the display list
-// draws must agree with them. Before this slice the builder was handed the whole
-// option list tiled below the control, so a select near the viewport bottom drew
-// rows the compositor had no pixels for, and a long list drew rows past the fold
-// while hiding the one the user had selected.
-//
-// These oracles read the panel fill and the row runs back: a flipped listbox
-// paints above its control, a windowed one paints exactly the rows the engine
-// reports, and no listbox command lands outside the viewport.
-
 func listboxPaintFixture(top float32, n, selected int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<html><head><style>html,body{margin:0}</style></head><body>`+
@@ -37,9 +25,6 @@ func listboxPaintFixture(top float32, n, selected int) string {
 	return b.String()
 }
 
-// textRunsAbove returns every glyph run painted at or above y, in display-list
-// order, so a flipped panel's rows are not mistaken for the closed control's own
-// label.
 func textRunsAbove(cmds []paint.DisplayCmd, y float32) []paint.DisplayCmd {
 	var out []paint.DisplayCmd
 	for _, cmd := range cmds {
@@ -62,7 +47,6 @@ func panelFill(t *testing.T, cmds []paint.DisplayCmd) frame.Rect {
 	return panels[0]
 }
 
-// controlRect is the box the closed control occupies, in document CSS px.
 func controlRect(t *testing.T, s *engine.Session, id string) frame.RectF {
 	t.Helper()
 	for i := range s.Arena.Objects {
@@ -76,9 +60,6 @@ func controlRect(t *testing.T, s *engine.Session, id string) frame.RectF {
 	return frame.RectF{}
 }
 
-// A listbox that flipped upward must draw its rows above the control, inside the
-// viewport, and in option order.
-//
 // qc:BR-101
 func TestFlippedListboxPaintsItsRowsAboveTheControl(t *testing.T) {
 	s, rows := openListbox(t, listboxPaintFixture(540, 12, 3))
@@ -104,10 +85,6 @@ func TestFlippedListboxPaintsItsRowsAboveTheControl(t *testing.T) {
 	}
 }
 
-// A list longer than the panel must not draw the rows it is not showing: the
-// display list carries exactly the window, and the selected row's highlight sits
-// on the row the engine marked.
-//
 // qc:BR-101
 func TestWindowedListboxPaintsOnlyTheRowsItShows(t *testing.T) {
 	s, rows := openListbox(t, listboxPaintFixture(200, 40, 33))
@@ -145,10 +122,6 @@ func TestWindowedListboxPaintsOnlyTheRowsItShows(t *testing.T) {
 	}
 }
 
-// The panel and its rows always land inside the viewport, whichever side they
-// open on and however much of the list they show. This is the invariant the
-// defect was written for, checked on the display list rather than the model.
-//
 // qc:BR-101
 func TestListboxPaintsInsideTheViewportOnEverySide(t *testing.T) {
 	for _, tc := range []struct {

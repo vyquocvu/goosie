@@ -42,14 +42,12 @@ func TestJourneyTextInputEditingAndCaret(t *testing.T) {
 		return ok && browser.activeURL() == pageURL && node.Value == "abc"
 	})
 
-	// 1. Focus input
 	browser.clickNode(t, "txtinput")
 	browser.waitFor(t, "input focused and initial value loaded", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "txtinput")
 		return ok && node.Focused && node.Value == "abc"
 	})
 
-	// 2. Type 'd' and 'e' at end
 	browser.pressKey(t, 'd')
 	browser.pressKey(t, 'e')
 	browser.waitFor(t, "typing appended characters", func() bool {
@@ -57,30 +55,26 @@ func TestJourneyTextInputEditingAndCaret(t *testing.T) {
 		return ok && node.Value == "abcde"
 	})
 
-	// 3. Edit with Backspace
 	browser.pressKey(t, 0x7f)
 	browser.waitFor(t, "backspace removed last character", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "txtinput")
 		return ok && node.Value == "abcd"
 	})
 
-	// 4. Move caret left and insert character in the middle
-	browser.pressKey(t, 0xF702) // Left arrow: caret moves between 'c' and 'd'
+	browser.pressKey(t, 0xF702)
 	browser.pressKey(t, 'X')
 	browser.waitFor(t, "character inserted at caret position", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "txtinput")
 		return ok && node.Value == "abcXd"
 	})
 
-	// 5. Move caret to home (start) and insert character
-	browser.pressKey(t, 0xF704) // Home: caret = 0
+	browser.pressKey(t, 0xF704)
 	browser.pressKey(t, 'Z')
 	browser.waitFor(t, "character inserted at start", func() bool {
 		node, ok := findAXNode(browser.window.AccessibilityTree(), "txtinput")
 		return ok && node.Value == "ZabcXd"
 	})
 
-	// 6. Select all inside the focused control with Cmd+A, then replace it
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: 'a', Mods: surface.ModCommand})
 	browser.pressKey(t, 'Q')
 	browser.waitFor(t, "select-all and typing replaced the whole value", func() bool {
@@ -88,7 +82,6 @@ func TestJourneyTextInputEditingAndCaret(t *testing.T) {
 		return ok && node.Value == "Q"
 	})
 
-	// 7. Replace via accessibility / programmatic edit
 	inpNode, ok := findAXNode(browser.window.AccessibilityTree(), "txtinput")
 	if !ok {
 		t.Fatal("txtinput AXNode missing")
@@ -138,20 +131,16 @@ func TestJourneyTextareaMultilineInput(t *testing.T) {
 		return ok && node.Focused
 	})
 
-	// Type first line: "line1"
 	for _, ch := range "line1" {
 		browser.pressKey(t, ch)
 	}
-	// Enter for newline
 	browser.pressKey(t, '\r')
 
-	// Type second line: "line2"
 	for _, ch := range "line2" {
 		browser.pressKey(t, ch)
 	}
 	browser.pressKey(t, '\r')
 
-	// Type third line: "line3"
 	for _, ch := range "line3" {
 		browser.pressKey(t, ch)
 	}
@@ -161,7 +150,6 @@ func TestJourneyTextareaMultilineInput(t *testing.T) {
 		return ok && node.Value == "line1\nline2\nline3"
 	})
 
-	// Assert newlines and exact order of lines
 	node, _ := findAXNode(browser.window.AccessibilityTree(), "myta")
 	lines := strings.Split(node.Value, "\n")
 	if len(lines) != 3 {
@@ -171,7 +159,6 @@ func TestJourneyTextareaMultilineInput(t *testing.T) {
 		t.Fatalf("unexpected line contents: %v", lines)
 	}
 
-	// Add fourth line
 	browser.pressKey(t, '\r')
 	for _, ch := range "end" {
 		browser.pressKey(t, ch)
@@ -243,17 +230,13 @@ chk.addEventListener("change", function() {
 		return ok && browser.activeURL() == pageURL
 	})
 
-	// Step 1: Click checkbox to toggle ON (event 1, agreed=true)
 	browser.clickElementByID(t, "chk")
 
-	// Step 2: Tab to focus checkbox, Space to toggle OFF (event 2, agreed=false)
 	browser.pressKey(t, '\t')
 	browser.pressKey(t, ' ')
 
-	// Step 3: Click checkbox again to toggle ON (event 3, agreed=true)
 	browser.clickElementByID(t, "chk")
 
-	// Step 4: Submit the form to verify data payload sent to server
 	browser.clickNode(t, "sub_chk")
 	browser.waitFor(t, "server received form submission", func() bool {
 		reqMu.Lock()
@@ -322,10 +305,8 @@ func TestJourneyRadioGroupSelection(t *testing.T) {
 		return ok && browser.activeURL() == pageURL
 	})
 
-	// Click radio green to switch selection from red to green
 	browser.clickElementByID(t, "r_green")
 
-	// Submit the form
 	browser.clickNode(t, "subbtn")
 	browser.waitFor(t, "navigation to /submit completes", func() bool {
 		reqMu.Lock()
@@ -354,8 +335,6 @@ func TestJourneyRadioGroupSelection(t *testing.T) {
 
 // qc:BR-101
 func TestJourneySelectOptionChange(t *testing.T) {
-	// Catalog BR-101: "Chọn option trong select bằng bàn phím → value, focus và
-	// paint khớp lựa chọn."
 	var reqMu sync.Mutex
 	var submits int
 	var received url.Values
@@ -370,8 +349,6 @@ func TestJourneySelectOptionChange(t *testing.T) {
 			fmt.Fprint(w, `<!doctype html><html><body><h1 id="done">Picked</h1></body></html>`)
 			return
 		}
-		// Tall filler below the form so the page has a real scroll range: a key
-		// misrouted to the scroller becomes observable.
 		fmt.Fprint(w, `<!doctype html><html><body style="margin: 0;">`+
 			`<form id="f" action="/picked" method="GET">`+
 			`<select id="sel" name="opt">`+
@@ -415,16 +392,8 @@ func TestJourneySelectOptionChange(t *testing.T) {
 	scrollAtFocus := browser.f.sched.Viewport().Offset.Y
 	rasterAtFocus := browser.f.loop.Stats().Rasterize
 	sess := browser.f.tabMgr.Active().Session()
-	// Read the selection through the engine, not the DOM: the chrome pump
-	// rewrites the option "selected" attributes on its own goroutine, so
-	// walking nodes from here is a data race. -race caught exactly that.
 	selectedValue := sess.FocusedSelectValue
 
-	// record presses one platform key and requires the selection to follow it,
-	// the focus to stay on the select, and the viewport not to move.
-	// 0xF700/0xF701 are the private-use runes the platform delivers for Up and
-	// Down; 0xF704/0xF705 are Home and End, the interesting ones because they
-	// are page-scroll keys for every other focused element.
 	record := func(key rune, name, want string) {
 		browser.pressKey(t, key)
 		browser.waitFor(t, name+" moves the selection to "+want+" without scrolling the page", func() bool {
@@ -434,7 +403,6 @@ func TestJourneySelectOptionChange(t *testing.T) {
 		})
 	}
 
-	// Nothing authored selected, so the first option is the current one.
 	if got := selectedValue(); got != "1" {
 		t.Fatalf("before any key the select reports value %q, want 1", got)
 	}
@@ -459,7 +427,6 @@ func TestJourneySelectOptionChange(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("the server saw %d submissions, want exactly 1", count)
 	}
-	// Down -> Two, Home -> One, End -> Three.
 	if got := params.Get("opt"); got != "3" {
 		t.Fatalf("ArrowDown, Home, End then submit sent opt=%q, want opt=3: the last selection the user made must be the value sent", got)
 	}
@@ -469,10 +436,6 @@ func TestJourneySelectOptionChange(t *testing.T) {
 	if got := browser.f.sched.Viewport().Offset.Y; got != scrollAtFocus {
 		t.Fatalf("the select keys moved the viewport from %d to %d device px", scrollAtFocus, got)
 	}
-	// Paint must follow the selection. The tile cache only rasterizes a tile
-	// whose content it has not seen before, so moving back to an earlier label
-	// counts as reuse; the requirement is therefore at least one new
-	// rasterization across the three changes, not one per change.
 	if got := browser.f.loop.Stats().Rasterize; got == rasterAtFocus {
 		t.Fatalf("no tile was rasterized across three selection changes (counter stayed at %d); the painted label cannot have followed the selection", got)
 	}
@@ -508,43 +471,36 @@ func TestJourneyFormTabNavigationOrder(t *testing.T) {
 		return o1 && o2 && o3 && o4 && browser.activeURL() == pageURL
 	})
 
-	// Focus first input
 	browser.clickNode(t, "f1")
 	browser.waitFor(t, "f1 focused", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "f1")
 	})
 
-	// Tab -> f2
 	browser.pressKey(t, '\t')
 	browser.waitFor(t, "tab moved focus to f2", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "f2")
 	})
 
-	// Tab -> f3
 	browser.pressKey(t, '\t')
 	browser.waitFor(t, "tab moved focus to f3", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "f3")
 	})
 
-	// Tab -> f4
 	browser.pressKey(t, '\t')
 	browser.waitFor(t, "tab moved focus to f4", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "f4")
 	})
 
-	// Shift+Tab -> f3
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: '\t', Mods: surface.ModShift})
 	browser.waitFor(t, "shift+tab moved focus back to f3", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "f3")
 	})
 
-	// Shift+Tab -> f2
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: '\t', Mods: surface.ModShift})
 	browser.waitFor(t, "shift+tab moved focus back to f2", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "f2")
 	})
 
-	// Shift+Tab -> f1
 	browser.inject(t, surface.Event{Kind: surface.EvKey, Key: '\t', Mods: surface.ModShift})
 	browser.waitFor(t, "shift+tab moved focus back to f1", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "f1")
@@ -591,13 +547,11 @@ func TestJourneyFormSubmitOnEnterKey(t *testing.T) {
 		return ok && browser.activeURL() == pageURL
 	})
 
-	// Focus the input
 	browser.clickNode(t, "queryinput")
 	browser.waitFor(t, "queryinput focused", func() bool {
 		return isNodeFocused(browser.window.AccessibilityTree(), "queryinput")
 	})
 
-	// Press Enter to submit
 	browser.pressKey(t, '\r')
 
 	browser.waitFor(t, "search results loaded and server received submit exactly once", func() bool {
@@ -667,7 +621,6 @@ func TestJourneyFormSubmitOnButtonClick(t *testing.T) {
 		return ok && browser.activeURL() == pageURL
 	})
 
-	// Click submit button
 	browser.clickNode(t, "btn_submit")
 
 	browser.waitFor(t, "destination loaded and parameters received", func() bool {
@@ -686,7 +639,6 @@ func TestJourneyFormSubmitOnButtonClick(t *testing.T) {
 		t.Fatalf("expected exactly 1 submission, got %d", count)
 	}
 
-	// Verify the exact set of submitted name/value pairs
 	expected := map[string]string{
 		"token": "secret123",
 		"user":  "alice",
@@ -705,7 +657,6 @@ func TestJourneyFormSubmitOnButtonClick(t *testing.T) {
 		}
 	}
 
-	// Ensure unselected controls were NOT submitted
 	if params.Has("skip") {
 		t.Errorf("unchecked checkbox 'skip' should not be submitted, got %v", params["skip"])
 	}
@@ -777,7 +728,6 @@ func TestJourneyFormMethodAndEncoding(t *testing.T) {
 		t.Errorf("HTTP method = %q, want GET", m)
 	}
 
-	// Verify query decoding
 	if got := q.Get("query"); got != "goosie engine & fast?" {
 		t.Errorf("decoded 'query' = %q, want %q", got, "goosie engine & fast?")
 	}
@@ -785,14 +735,13 @@ func TestJourneyFormMethodAndEncoding(t *testing.T) {
 		t.Errorf("decoded 'tag' = %q, want %q", got, "tiếng việt #1")
 	}
 
-	// Verify encoding over wire contains URL-escaped characters
-	if !strings.Contains(raw, "%26") { // & escaped
+	if !strings.Contains(raw, "%26") {
 		t.Errorf("raw query %q missing percent-encoded ampersand (%%26)", raw)
 	}
-	if !strings.Contains(raw, "%3F") { // ? escaped
+	if !strings.Contains(raw, "%3F") {
 		t.Errorf("raw query %q missing percent-encoded question mark (%%3F)", raw)
 	}
-	if !strings.Contains(raw, "%23") { // # escaped
+	if !strings.Contains(raw, "%23") {
 		t.Errorf("raw query %q missing percent-encoded hash (%%23)", raw)
 	}
 

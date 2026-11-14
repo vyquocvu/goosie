@@ -20,12 +20,7 @@ func pngOf(t *testing.T, w, h int) []byte {
 	return buf.Bytes()
 }
 
-// TestDeferredImagesPaintAfterLoad pins the progressive-paint contract: with
 // qc:BR-084
-// WithDeferredImages the session builds without calling the fetcher at all,
-// so the first frame can go out immediately; LoadDeferredImages then fetches
-// in the background and reports how many images landed, after which a reflow
-// sees the intrinsic sizes.
 func TestDeferredImagesPaintAfterLoad(t *testing.T) {
 	pngBytes := pngOf(t, 640, 292)
 	var fetched int64
@@ -47,7 +42,6 @@ func TestDeferredImagesPaintAfterLoad(t *testing.T) {
 	if p := s.DeferredImagesPending(); p != 1 {
 		t.Fatalf("DeferredImagesPending = %d, want 1", p)
 	}
-	// Without the natural size the box collapses to zero height.
 	img := s.Doc.ElementByID("pic")
 	id, ok := s.Arena.ForNode(img.ID)
 	if !ok {
@@ -79,9 +73,6 @@ func TestDeferredImagesPaintAfterLoad(t *testing.T) {
 	}
 }
 
-// TestDeferredImagesWithoutLoadStaysQuiet pins that a session built with the
-// plain WithImages option is unchanged: images are already applied inside
-// NewSession and there is nothing to load.
 func TestDeferredImagesWithoutLoadStaysQuiet(t *testing.T) {
 	pngBytes := pngOf(t, 640, 292)
 	s, err := engine.NewSession(`<html><body><img id="pic" src="/pic.png"></body></html>`, nil, 800,

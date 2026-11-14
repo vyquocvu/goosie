@@ -7,12 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestDeferredImagesSafeUnderReflow pins the progressive-paint threading
-// contract: LoadDeferredImages applies decoded pixels from its own goroutine
-// while the owner keeps reflowing (resize, scroll-triggered relayout). Without
-// internal locking that is a concurrent map read/write, which the runtime can
-// take down on its own; with it, -race stays clean and the final reflow sees
-// every image.
 func TestDeferredImagesSafeUnderReflow(t *testing.T) {
 	pngBytes := pngOf(t, 640, 292)
 	ready := make(chan struct{})
@@ -40,8 +34,6 @@ func TestDeferredImagesSafeUnderReflow(t *testing.T) {
 		s.LoadDeferredImages(func(int) { close(done) })
 	}()
 	close(ready)
-	// Reflow continuously until the images land, so the map reads inside
-	// Reflow and the writes inside apply genuinely overlap.
 loop:
 	for {
 		if err := s.Reflow(800); err != nil {

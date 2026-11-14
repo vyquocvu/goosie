@@ -28,17 +28,14 @@ func TestParseContainerRule_Basic(t *testing.T) {
 		t.Fatalf("expected 3 rules, got %d", len(sheet.Rules))
 	}
 
-	// Rule 0: .container
 	if sheet.Rules[0].ContainerQuery != "" {
 		t.Errorf("rule 0 should have no container query, got %q", sheet.Rules[0].ContainerQuery)
 	}
 
-	// Rule 1: .card
 	if sheet.Rules[1].ContainerQuery != "(min-width: 400px)" {
 		t.Errorf("rule 1 expected container query '(min-width: 400px)', got %q", sheet.Rules[1].ContainerQuery)
 	}
 
-	// Rule 2: .item
 	if sheet.Rules[2].ContainerQuery != "sidebar (max-width: 600px)" {
 		t.Errorf("rule 2 expected container query 'sidebar (max-width: 600px)', got %q", sheet.Rules[2].ContainerQuery)
 	}
@@ -65,7 +62,6 @@ func TestParseContainerRule_Nested(t *testing.T) {
 }
 
 func TestContainerRelativeUnits(t *testing.T) {
-	// Container size: width 400, height 200
 	cqW := float32(400)
 	cqH := float32(200)
 
@@ -73,12 +69,12 @@ func TestContainerRelativeUnits(t *testing.T) {
 		input    string
 		expected float32
 	}{
-		{"10cqw", 40},   // 10% of 400 = 40
-		{"10cqh", 20},   // 10% of 200 = 20
-		{"50cqi", 200},  // 50% of 400 = 200
-		{"50cqb", 100},  // 50% of 200 = 100
-		{"10cqmin", 20}, // 10% of min(400, 200) = 20
-		{"10cqmax", 40}, // 10% of max(400, 200) = 40
+		{"10cqw", 40},
+		{"10cqh", 20},
+		{"50cqi", 200},
+		{"50cqb", 100},
+		{"10cqmin", 20},
+		{"10cqmax", 40},
 	}
 
 	for _, tc := range tests {
@@ -99,7 +95,6 @@ func TestResolveContainerUnits(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ResolveContainerUnits to succeed")
 	}
-	// 10cqw = 50px
 	expected := "calc(50px + 20px)"
 	if resolved != expected {
 		t.Errorf("ResolveContainerUnits(%q) = %q, want %q", expr, resolved, expected)

@@ -6,7 +6,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// WebSocket readyState constants.
 const (
 	WSConnecting = 0
 	WSOpen       = 1
@@ -14,9 +13,6 @@ const (
 	WSClosed     = 3
 )
 
-// WebSocketConn is the interface a WebSocket connection satisfies. The engine
-// provides the concrete implementation; internal/js defines the interface so
-// it does not import internal/net (archtest forbids it).
 type WebSocketConn interface {
 	Send(data string) error
 	SendBytes(data []byte) error
@@ -24,13 +20,10 @@ type WebSocketConn interface {
 	ReadMessage() (messageType int, data []byte, err error)
 }
 
-// WebSocketDialer opens a WebSocket connection. The engine wires the concrete
-// dialer at pipeline assembly time.
 type WebSocketDialer interface {
 	Dial(url string, protocols []string) (WebSocketConn, string, error)
 }
 
-// wsEvent is a pending WebSocket event to be drained by Tick.
 type wsEvent struct {
 	typ      string
 	data     string
@@ -40,7 +33,6 @@ type wsEvent struct {
 	wasClean bool
 }
 
-// wsObj holds the internal state of one WebSocket object.
 type wsObj struct {
 	mu         sync.Mutex
 	conn       WebSocketConn
@@ -49,7 +41,7 @@ type wsObj struct {
 	extensions string
 	state      int
 	buffered   int
-	binaryType string // "blob" or "arraybuffer"
+	binaryType string
 	events     []wsEvent
 	obj        *goja.Object
 	r          *Runtime
@@ -80,14 +72,12 @@ func wsStateOf(r *Runtime) *wsState {
 	return s
 }
 
-// setupWebSocket installs the WebSocket constructor on the global scope.
 func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 	state := &wsState{
 		dialer: dialer,
 	}
 	setWSState(r, state)
 
-	// WebSocket constructor.
 	constructor := func(call goja.ConstructorCall) *goja.Object {
 		if len(call.Arguments) < 1 {
 			panic(r.vm.NewTypeError("WebSocket requires a URL argument"))
@@ -122,7 +112,6 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 		obj := call.This
 		ws.obj = obj
 
-		// readyState property.
 		_ = obj.Set("readyState", WSConnecting)
 		_ = obj.Set("url", urlStr)
 		_ = obj.Set("protocol", "")
@@ -130,13 +119,11 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 		_ = obj.Set("bufferedAmount", 0)
 		_ = obj.Set("binaryType", "blob")
 
-		// Event handlers (initially null).
 		_ = obj.Set("onopen", goja.Null())
 		_ = obj.Set("onmessage", goja.Null())
 		_ = obj.Set("onclose", goja.Null())
 		_ = obj.Set("onerror", goja.Null())
 
-		// send(data) method.
 		_ = obj.Set("send", func(call goja.FunctionCall) goja.Value {
 			ws.mu.Lock()
 			if ws.state != WSOpen {
@@ -156,7 +143,6 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 			case string:
 				err = conn.Send(v)
 			default:
-				// For binary data, convert to string representation.
 				err = conn.Send(arg.String())
 			}
 
@@ -168,7 +154,6 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 			return goja.Undefined()
 		})
 
-		// close(code, reason) method.
 		_ = obj.Set("close", func(call goja.FunctionCall) goja.Value {
 			ws.mu.Lock()
 			if ws.state == WSClosing || ws.state == WSClosed {
@@ -208,7 +193,6 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 			return goja.Undefined()
 		})
 
-		// Connect asynchronously.
 		state.mu.Lock()
 		state.sockets = append(state.sockets, ws)
 		state.mu.Unlock()
@@ -253,12 +237,9 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 			ws.conn = conn
 			ws.protocol = protocol
 			ws.state = WSOpen
-			// NOTE: no goja access here. DrainWSEvents syncs readyState/protocol
-			// onto the JS object on the VM thread before firing the open event.
 			ws.events = append(ws.events, wsEvent{typ: "open"})
 			ws.mu.Unlock()
 
-			// Read messages in a loop.
 			for {
 				msgType, data, err := conn.ReadMessage()
 				ws.mu.Lock()
@@ -277,12 +258,12 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 					return
 				}
 
-				if msgType == 1 { // text
+				if msgType == 1 {
 					ws.events = append(ws.events, wsEvent{
 						typ:  "message",
 						data: string(data),
 					})
-				} else { // binary
+				} else {
 					ws.events = append(ws.events, wsEvent{
 						typ:   "message",
 						bdata: data,
@@ -304,14 +285,12 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 	ctor := r.vm.ToValue(constructor)
 	_ = r.vm.Set("WebSocket", ctor)
 
-	// Also install on window.
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set("WebSocket", ctor)
 		}
 	}
 
-	// Static constants on the constructor.
 	if wsCtor := r.vm.Get("WebSocket"); wsCtor != nil {
 		if wsObj, ok := wsCtor.(*goja.Object); ok {
 			_ = wsObj.Set("CONNECTING", WSConnecting)
@@ -324,10 +303,6 @@ func (r *Runtime) setupWebSocket(dialer WebSocketDialer) {
 	_ = proto
 }
 
-// DrainWSEvents drains pending WebSocket events and fires them on the main
-// goroutine. Call this from Tick. It also syncs readyState/protocol from the
-// plain-Go fields onto the JS objects, so background goroutines never touch
-// goja values.
 func (r *Runtime) DrainWSEvents() {
 	state := wsStateOf(r)
 	if state == nil {

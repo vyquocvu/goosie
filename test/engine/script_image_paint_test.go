@@ -17,19 +17,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// Engine half of TASK-057 (GOOSIE-LAZYIMG-001): a script that assigns a source
-// to an <img> already in the document must reach paint. The binding reports
-// the decoded pixels through the image-pixel sink; the pump attaches them
-// after the turn and forces the one layout that turns s.natural into a box.
-//
-// Every fixture uses engine.WithJS and a fetcher that blocks until the test
-// releases the bytes, so the decode provably happens after NewSession
-// returned. Waiting is done on channels and script-set flags with a bounded
-// pump loop and a wall-clock deadline; no sleeps are used to order events.
-
-// blockingFetcher announces the URL it was asked for, then blocks until the
-// test hands back a response. The page under test loads one image at a time,
-// so a single release channel is enough.
 type blockingFetcher struct {
 	entered chan string
 	release chan fetchResult
@@ -53,9 +40,6 @@ func (f *blockingFetcher) fetch(base, url string) ([]byte, error) {
 	return r.data, r.err
 }
 
-// waitForURL pumps turns until the fetcher is asked for want. The pump is
-// what fires the page's timer; the fetch goroutine then announces itself and
-// blocks, proving the load is still in flight after NewSession returned.
 func (f *blockingFetcher) waitForURL(t *testing.T, sess *engine.Session, want string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -76,8 +60,6 @@ func (f *blockingFetcher) waitForURL(t *testing.T, sess *engine.Session, want st
 	}
 }
 
-// pumpUntilSet pumps turns in order until the page sets flag to "yes" and
-// returns the work counts immediately before and after the turn that set it.
 func pumpUntilSet(t *testing.T, sess *engine.Session, rt *js.Runtime, flag string) (before, after engine.WorkCounts) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -95,8 +77,6 @@ func pumpUntilSet(t *testing.T, sess *engine.Session, rt *js.Runtime, flag strin
 	}
 }
 
-// solidPNG encodes a w x h RGBA PNG filled with c, so a pixel read back from
-// the laid-out object can only have come from the script-assigned source.
 func solidPNG(t *testing.T, w, h int, c color.RGBA) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -141,8 +121,6 @@ func laidOutImage(t *testing.T, sess *engine.Session, id string) *layout.Object 
 	return sess.Arena.Get(oid)
 }
 
-// checkFixturePixels asserts the laid-out object carries the fixture pixels,
-// naming the measured value so a failure says what reached paint.
 func checkFixturePixels(t *testing.T, obj *layout.Object, want color.RGBA, what string) {
 	t.Helper()
 	img, ok := obj.Image.(image.Image)
@@ -157,7 +135,6 @@ func checkFixturePixels(t *testing.T, obj *layout.Object, want color.RGBA, what 
 	}
 }
 
-// imageCommands counts the image commands a paint of the session would emit.
 func imageCommands(sess *engine.Session) int {
 	n := 0
 	for _, cmd := range sess.Paint(1).All() {
@@ -189,8 +166,6 @@ setTimeout(function(){
 		sess := lazyImageSession(t, rt, fetch.fetch, html)
 
 		fetch.waitForURL(t, sess, "https://example.test/lazy.png")
-		// No pump can run the load microtask until this send unblocks the
-		// fetch goroutine, so the decode completes after NewSession returned.
 		fetch.release <- fetchResult{data: png7x9}
 		pumpUntilSet(t, sess, rt, "window.done")
 
@@ -206,9 +181,6 @@ setTimeout(function(){
 		if err != nil {
 			t.Fatalf("js.New: %v", err)
 		}
-		// The same assignment written synchronously during parse is the
-		// pre-existing path the load-time collector serves; it must keep
-		// painting without any pump.
 		html := `<!DOCTYPE html><html><body><img id="eager"><script>
 document.getElementById('eager').src = '` + dataURL(png7x9) + `';
 </script></body></html>`
@@ -250,9 +222,6 @@ setTimeout(function(){
 		t.Fatalf("setup: the first assignment did not attach (Image=%T)", obj.Image)
 	}
 
-	// The engine fires a 0ms timer scheduled from a load handler inside the
-	// same Tick, so the test schedules the second stage only after observing
-	// the first attach; each load then owns its own pump turn.
 	if _, err := rt.Evaluate(`setTimeout(function(){
   i.onload = function(){ window.second = 'yes'; };
   i.src = 'https://example.test/second.png';
@@ -301,11 +270,6 @@ setTimeout(function(){
 		t.Fatalf("setup: first assignment did not attach (Image=%T box=%vx%v)", obj.Image, obj.W, obj.H)
 	}
 
-	// A source the fetcher rejects replaces a painted one: the old pixels must
-	// stop painting, not linger until something else reflows. Each later stage
-	// is scheduled after the previous attach is observed so it owns its own
-	// pump turn (a 0ms timer scheduled from a load handler would fire in the
-	// same Tick and only its last write would own the drain).
 	if _, err := rt.Evaluate(`setTimeout(function(){
   i.onerror = function(){ window.failed = 'yes'; };
   i.src = 'https://example.test/reject.png';
@@ -326,7 +290,6 @@ setTimeout(function(){
 		t.Errorf("failed assignment: painted %d image commands, want 0 (document has no other image source)", n)
 	}
 
-	// A later successful assignment must paint again: dropping is not sticky.
 	if _, err := rt.Evaluate(`setTimeout(function(){
   i.onload = function(){ window.again = 'yes'; };
   i.src = 'https://example.test/again.png';
@@ -342,8 +305,6 @@ setTimeout(function(){
 		t.Errorf("re-assignment after a failure: box = %vx%v, want 10x4", obj.W, obj.H)
 	}
 
-	// Sub-case: src = '' never reaches the loader; the pump after the
-	// assignment must still clear the retained pixels.
 	if _, err := rt.Evaluate(`setTimeout(function(){
   i.onerror = null;
   i.src = '';

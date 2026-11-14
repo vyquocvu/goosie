@@ -11,8 +11,6 @@ import (
 
 func rightOf(o *layout.Object) float32 { return o.X + o.W }
 
-// words returns the placed text fragments: inline boxes the inline pass
-// allocated, which carry no element of their own.
 func words(arena *layout.Arena) []*layout.Object {
 	var out []*layout.Object
 	for i := range arena.Objects {
@@ -25,11 +23,6 @@ func words(arena *layout.Arena) []*layout.Object {
 	return out
 }
 
-// TestCenteredTableTakesItsPresentationalWidth pins `<table width="85%">`, the
-// presentational attribute Hacker News still drives its whole column structure
-// with. The attribute is a zero-specificity hint for the CSS `width`, and a
-// block child of <center> is centred by the leftover space, so at an 800px
-// viewport the table is 680 wide starting at x=60.
 func TestCenteredTableTakesItsPresentationalWidth(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;"><center>
 <table width="85%"><tr><td>one</td></tr></table>
@@ -46,9 +39,6 @@ func TestCenteredTableTakesItsPresentationalWidth(t *testing.T) {
 	}
 }
 
-// TestCenterAlignsTableCellText verifies that <center> (which sets text-align: center)
-// centers text inside table cells, matching Chromium's behavior. An explicit text-align
-// on the cell still wins over the inherited value.
 func TestCenterAlignsTableCellText(t *testing.T) {
 	t.Run("inherited centring applies to table cells", func(t *testing.T) {
 		arena := session(t, `<html><body style="margin: 0;"><center>
@@ -59,10 +49,6 @@ func TestCenterAlignsTableCellText(t *testing.T) {
 		if td == nil || len(ws) == 0 {
 			t.Fatal("no cell or no words")
 		}
-		// Text should be centered in the cell, not at the left edge.
-		// For an 800px viewport with 100% width table/cell, centered text
-		// should be roughly at (800 - textWidth) / 2. Allow 50px tolerance
-		// for cell padding, borders, and table spacing.
 		cellCenter := td.X + td.W/2
 		textCenter := ws[0].X + ws[0].W/2
 		if diff := textCenter - cellCenter; diff > 50 || diff < -50 {
@@ -85,8 +71,6 @@ func TestCenterAlignsTableCellText(t *testing.T) {
 	})
 }
 
-// TestCellPresentationalAttributes pins `align` on a cell and `cellpadding` on
-// its table, the two attributes old table markup uses in place of CSS.
 func TestCellPresentationalAttributes(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <table width="100%" cellpadding="10" cellspacing="0"><tr>
@@ -102,8 +86,6 @@ func TestCellPresentationalAttributes(t *testing.T) {
 			t.Errorf("cell %d padding = %v/%v, want 10/10 from cellpadding", i, td.PaddingLeft, td.PaddingRight)
 		}
 	}
-	// Split the placed words between the two columns and check each one sits at
-	// the edge its alignment asks for.
 	var left, right []*layout.Object
 	for _, w := range words(arena) {
 		if w.X < tds[1].X {

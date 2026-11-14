@@ -8,12 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// Two documents, two font tables. Each engine Session is given its own
-// rasterizer-side FontRegistry, so the 1-based indices it hands out only mean
-// anything inside that registry - which is exactly why a family table shared by
-// the whole process resolves the wrong face: document B's registrations replace
-// the map document A resolves against, and A's declared family stops matching
-// even though A's own table still holds it.
 type fakeRegistry struct{ n uint16 }
 
 func (r *fakeRegistry) Register([]byte) (uint16, error) {
@@ -56,8 +50,6 @@ func TestCustomFontResolutionIsPerSession(t *testing.T) {
 	if got := customIdx(t, b); got != 1 {
 		t.Fatalf("document B resolves BetaFace to index %d, want 1", got)
 	}
-	// B's load is what the tab-switch or navigation is: a second document
-	// registering its own faces in its own table. A must keep what it had.
 	if got := customIdx(t, a); got != 1 {
 		t.Errorf("after document B registered its own @font-face set, document A resolves AlphaFace to index %d: "+
 			"the family table is process-global, so B's registrations replaced A's", got)
@@ -71,10 +63,6 @@ func (failingRegistry) Register([]byte) (uint16, error) {
 }
 
 // qc:BR-083
-//
-// A failed fetch and a rejected face both leave the paragraph on its system
-// fallback: the face must not register, the text must still occupy a box and
-// reach the display list, and a reflow must not turn the page blank.
 func TestFontFailureKeepsFallbackAndPageVisible(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

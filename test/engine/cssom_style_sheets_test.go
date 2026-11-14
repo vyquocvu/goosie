@@ -10,7 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// colorOfClass reads the resolved colour of the one element carrying a class.
 func colorOfClass(t *testing.T, sess *engine.Session, class string) (int, int, int) {
 	t.Helper()
 	var found []*dom.Node
@@ -39,26 +38,6 @@ func colorOfClass(t *testing.T, sess *engine.Session, class string) (int, int, i
 	return int(st.Color.R), int(st.Color.G), int(st.Color.B)
 }
 
-// GOOSIE-CSSOMSURFACE-001 through the wiring that actually owns a linked
-// sheet's text: document.styleSheets used to list only the inline <style>
-// elements, so the same document that Chromium reads 12 sheets on read 4 here,
-// every linked entry answered href null, and a sheet whose fetch failed had no
-// representation at all.
-//
-// The expectations are the ones measured on one Chromium 153.0.8010.12 fixture
-// served over http (the Node Playwright 1.63.0 oracle; 2026-11-13, viewport
-// 1280x400, DPR 1, dumps quoted in the BR-284 catalog row, and re-run on the
-// pinned 131.0.6778.33 render oracle, which answered them the same way): a
-// linked sheet reports its own rules whatever its media
-// says (/print.css: 1 rule at a screen viewport, and the request is issued), a
-// sheet whose fetch 404s is listed with 0 rules and a non-null .sheet, two links
-// with the same href are two sheets behind one request, and a link with the
-// disabled attribute is in neither the list nor the cascade - measured as
-// `p.dis` reading rgb(0, 0, 0) in Chromium where this engine answered
-// rgb(6, 6, 6) - while a <style> carrying the same attribute is in both, because
-// HTMLStyleElement has no disabled IDL and Chromium applies rgb(14, 14, 14).
-
-// cssomServer answers style sheet URLs for these oracles and counts requests.
 type cssomServer struct {
 	mu       sync.Mutex
 	requests map[string]int
@@ -95,7 +74,6 @@ func (s *cssomServer) count(href string) int {
 	return s.requests[href]
 }
 
-// cssomJS evaluates a probe that must answer the expected string.
 func cssomJS(t *testing.T, sess *engine.Session, expr, want string) string {
 	t.Helper()
 	got, err := sess.EvaluateJS(expr)
@@ -109,13 +87,6 @@ func cssomJS(t *testing.T, sess *engine.Session, expr, want string) string {
 	return got
 }
 
-// The list holds one entry per usable <link> and <style> in document order, each
-// with the absolute URL or null href Chromium reports, and each linked sheet
-// parsing its own fetched text: measured 1 rule for /a.css ("p.a"), 1 for the
-// media="print" sheet ("p.prt", because the CSSOM is not filtered by media), and
-// 0 for the sheet that 404s - which is still listed and still answers a
-// non-null .sheet.
-//
 // qc:BR-284
 func TestCSSOMListsLinkedSheetsWithFetchedRules(t *testing.T) {
 	srv := newCSSOMServer()
@@ -150,16 +121,6 @@ func TestCSSOMListsLinkedSheetsWithFetchedRules(t *testing.T) {
 	`, "[object CSSStyleSheet],true,true,true,print")
 }
 
-// A disabled linked sheet is in neither the list nor the cascade, and a disabled
-// <style> is in both. Measured: Chromium leaves L8 (disabled by script) and L10
-// (disabled in the markup) out of its 12 entries and both report a null .sheet,
-// while `p.dis`, coloured only by the disabled L10's sheet, reads rgb(0, 0, 0);
-// S5 carries the same attribute in markup and is both listed and applied,
-// reading rgb(14, 14, 14) there too.
-//
-// Chromium does request dis.css; this engine does not, because nothing can read
-// a disabled link's text once the list leaves it out.
-//
 // qc:BR-284
 func TestDisabledLinkedSheetIsNeitherListedNorApplied(t *testing.T) {
 	srv := newCSSOMServer()
@@ -179,8 +140,6 @@ func TestDisabledLinkedSheetIsNeitherListedNorApplied(t *testing.T) {
 		[owners.join('+'), String(document.getElementById('L2').sheet)].join('|')
 	`, "L1+S1|null")
 
-	// .dis stays unstyled because the sheet that would colour it is disabled,
-	// and .styledis is coloured because the attribute does nothing to a <style>.
 	if r, g, b := colorOfClass(t, sess, "dis"); r != 0 || g != 0 || b != 0 {
 		t.Errorf("p.dis color = (%d,%d,%d), want (0,0,0) as Chromium measures it", r, g, b)
 	}
@@ -192,11 +151,6 @@ func TestDisabledLinkedSheetIsNeitherListedNorApplied(t *testing.T) {
 	}
 }
 
-// Two links to one href are two sheets behind one request: measured as L7 and
-// L8 both reporting the absolute /dup.css href and 1 rule each, in adjacent
-// entries at indices 6 and 7, while Chromium's request log shows /dup.css
-// fetched once.
-//
 // qc:BR-284
 func TestDuplicateLinkedHrefListsTwoSheetsFromOneRequest(t *testing.T) {
 	srv := newCSSOMServer()
@@ -220,14 +174,6 @@ func TestDuplicateLinkedHrefListsTwoSheetsFromOneRequest(t *testing.T) {
 	}
 }
 
-// One URL linked twice, the first time with media that does not match this
-// viewport, still colours the page: measured on a fixture linking s.css with
-// media="print" and then with no media, Chromium reads rgb(11, 22, 33) for the
-// class s.css colours behind exactly one request, and lists both entries - the
-// print sheet with its media text and 1 rule, the matching one with empty media
-// and 1 rule. Fetched-for-the-CSSOM text and the cascade slot are two different
-// facts about a URL, so deduplicating the fetch must not swallow the slot.
-//
 // qc:BR-284
 func TestMediaMismatchedDuplicateHrefKeepsTheCascadeSlot(t *testing.T) {
 	srv := newCSSOMServer()
@@ -256,12 +202,6 @@ func TestMediaMismatchedDuplicateHrefKeepsTheCascadeSlot(t *testing.T) {
 	`, "/s.css|print|1,/s.css||1")
 }
 
-// A link a script appends is listed where its element sits: measured on the
-// fixture, the parser-blocking script's L9 lands after the two head <style>
-// elements and before the body's. Its rules are not claimed here - Chromium
-// reads 1 for /late.css because it fetches the sheet the script added, and this
-// engine never re-collects for a link, which is GOOSIE-SCRIPTCSS-001.
-//
 // qc:BR-284
 func TestScriptInsertedLinkIsListedAtItsDocumentPosition(t *testing.T) {
 	srv := newCSSOMServer()

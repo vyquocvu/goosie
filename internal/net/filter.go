@@ -11,12 +11,10 @@ import (
 
 type shieldsDisabledKey struct{}
 
-// WithShieldsDisabled returns a copy of parent context with the shields disabled flag set.
 func WithShieldsDisabled(ctx context.Context, disabled bool) context.Context {
 	return context.WithValue(ctx, shieldsDisabledKey{}, disabled)
 }
 
-// IsShieldsDisabled reports whether ad/tracker shields are disabled in ctx.
 func IsShieldsDisabled(ctx context.Context) bool {
 	if ctx == nil {
 		return false
@@ -25,11 +23,8 @@ func IsShieldsDisabled(ctx context.Context) bool {
 	return ok && v
 }
 
-// ErrBlockedByFilter reports that a request was refused by the ad/tracker filter.
 var ErrBlockedByFilter = errors.New("net: request blocked by ad/tracker filter")
 
-// FilterEngine matches URLs against domain, pattern, and exception rules
-// in standard ad blocker formats (e.g., EasyList).
 type FilterEngine struct {
 	mu           sync.RWMutex
 	enabled      bool
@@ -39,7 +34,6 @@ type FilterEngine struct {
 	blockedCount int64
 }
 
-// DefaultBlockedDomains contains high-volume analytics, tracker, and ad domains.
 var defaultBlockedDomains = []string{
 	"google-analytics.com",
 	"googletagmanager.com",
@@ -67,7 +61,6 @@ var defaultBlockedDomains = []string{
 	"applovin.com",
 }
 
-// NewFilterEngine returns a filter engine pre-loaded with the default privacy rules.
 func NewFilterEngine() *FilterEngine {
 	fe := NewEmptyFilterEngine()
 	fe.enabled = true
@@ -77,7 +70,6 @@ func NewFilterEngine() *FilterEngine {
 	return fe
 }
 
-// NewEmptyFilterEngine returns an empty filter engine.
 func NewEmptyFilterEngine() *FilterEngine {
 	return &FilterEngine{
 		enabled:    true,
@@ -87,26 +79,22 @@ func NewEmptyFilterEngine() *FilterEngine {
 	}
 }
 
-// SetEnabled enables or disables the filter.
 func (f *FilterEngine) SetEnabled(enabled bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.enabled = enabled
 }
 
-// IsEnabled reports whether the filter is active.
 func (f *FilterEngine) IsEnabled() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.enabled
 }
 
-// BlockedCount returns the total number of blocked requests.
 func (f *FilterEngine) BlockedCount() int64 {
 	return atomic.LoadInt64(&f.blockedCount)
 }
 
-// AddDomain adds a domain (and its subdomains) to the block list.
 func (f *FilterEngine) AddDomain(domain string) {
 	domain = cleanDomain(domain)
 	if domain == "" {
@@ -117,7 +105,6 @@ func (f *FilterEngine) AddDomain(domain string) {
 	f.domains[domain] = true
 }
 
-// AddWhitelistDomain unblocks a domain (and its subdomains).
 func (f *FilterEngine) AddWhitelistDomain(domain string) {
 	domain = cleanDomain(domain)
 	if domain == "" {
@@ -128,19 +115,12 @@ func (f *FilterEngine) AddWhitelistDomain(domain string) {
 	f.exceptions[domain] = true
 }
 
-// AddRule parses and registers a rule in standard Adblock Plus / EasyList format.
-// Supported syntax:
-//   - "||example.com^" : domain anchor
-//   - "@@||example.com^" : exception/whitelist rule
-//   - "example.com" : plain domain match
-//   - "/ads/banner" : URL substring pattern
 func (f *FilterEngine) AddRule(rule string) {
 	rule = strings.TrimSpace(rule)
 	if rule == "" || strings.HasPrefix(rule, "!") || strings.HasPrefix(rule, "#") {
-		return // comment or cosmetic rule
+		return
 	}
 
-	// Exception rule
 	if strings.HasPrefix(rule, "@@") {
 		content := rule[2:]
 		if strings.HasPrefix(content, "||") {
@@ -152,20 +132,17 @@ func (f *FilterEngine) AddRule(rule string) {
 		return
 	}
 
-	// Domain anchor rule: ||domain.com^
 	if strings.HasPrefix(rule, "||") {
 		domain := strings.TrimSuffix(strings.TrimPrefix(rule, "||"), "^")
 		f.AddDomain(domain)
 		return
 	}
 
-	// Domain without anchor or scheme
 	if !strings.Contains(rule, "/") && !strings.Contains(rule, "*") {
 		f.AddDomain(strings.TrimSuffix(rule, "^"))
 		return
 	}
 
-	// Path or substring pattern
 	pattern := strings.Trim(rule, "*")
 	if pattern != "" {
 		f.mu.Lock()
@@ -174,8 +151,6 @@ func (f *FilterEngine) AddRule(rule string) {
 	}
 }
 
-// ShouldBlock evaluates rawURL against the filter rules.
-// If blocked, it returns true and the matching rule or domain, and increments BlockedCount.
 func (f *FilterEngine) ShouldBlock(rawURL string) (bool, string) {
 	if f == nil {
 		return false, ""
@@ -198,18 +173,15 @@ func (f *FilterEngine) ShouldBlock(rawURL string) (bool, string) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// 1. Check exceptions (whitelist) first
 	if f.isDomainMatched(host, f.exceptions) {
 		return false, ""
 	}
 
-	// 2. Check domain block rules
 	if matchedDomain := f.findMatchingDomain(host, f.domains); matchedDomain != "" {
 		atomic.AddInt64(&f.blockedCount, 1)
 		return true, matchedDomain
 	}
 
-	// 3. Check substring/path patterns
 	for _, pat := range f.patterns {
 		if strings.Contains(urlLower, pat) {
 			atomic.AddInt64(&f.blockedCount, 1)

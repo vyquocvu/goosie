@@ -8,9 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// FR-JS-06 needs to tell the host that the deadline, not a navigation, stopped
-// the script: only the former is an unresponsive page worth prompting about.
-
 // qc:BR-167
 func TestTimeoutIsReportedOnce(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/slow", Timeout: 50 * time.Millisecond})

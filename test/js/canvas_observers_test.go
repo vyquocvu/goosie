@@ -19,8 +19,6 @@ func observerTestDocument() *dom.Document {
 	return doc
 }
 
-// Canvas 2D tests
-
 func TestCanvasConstructor(t *testing.T) {
 	r, err := js.New(js.Options{
 		Timeout: 5 * time.Second,
@@ -192,8 +190,6 @@ func TestCanvasOnWindow(t *testing.T) {
 	}
 }
 
-// MutationObserver tests
-
 func TestMutationObserverConstructor(t *testing.T) {
 	doc := dom.NewDocument()
 	r, err := js.New(js.Options{
@@ -311,8 +307,6 @@ func TestMutationObserverOnWindow(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 }
-
-// ResizeObserver tests
 
 func TestResizeObserverConstructor(t *testing.T) {
 	doc := dom.NewDocument()

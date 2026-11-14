@@ -8,27 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// GOOSIE-CSSOMSURFACE-001: document.styleSheets listed only the inline <style>
-// elements, so a document with seven usable linked sheets and four inline ones
-// read 4 where Chromium reads 12, and every entry answered href null with no
-// media, title or disabled surface at all and no way back to its element.
-//
-// Every expectation below is read off one Chromium 153.0.8010.12 measurement
-// (the Node Playwright 1.63.0 oracle) of a fixture served over http (2026-11-13,
-// viewport 1280x400, DPR 1; the raw dumps are quoted in the BR-284 catalog row),
-// re-run on the pinned 131.0.6778.33 render oracle, which answered all six of
-// these probes the same way. Chromium's 12 entries there were
-//
-//	LINK#L1 LINK#L2 LINK#L3 LINK#L4 LINK#L5 LINK#L6 LINK#L7 STYLE#S1
-//	STYLE#S2 LINK#L9 STYLE#S3 STYLE#S5
-//
-// in document order, with the disabled L8 (disabled by script) and L10 (disabled
-// in the markup) absent, the <style> inside <template id="TPL"> absent, and the
-// sheet adopted through document.adoptedStyleSheets absent. These oracles hold
-// the shape of that contract in a runtime with no network, so they assert the
-// list, the href, the media/title/disabled surface and the identity rules; the
-// engine package holds the ones that need fetched text.
-
 const cssomPage = `<!doctype html><html><head>
 <link id="L1" rel="stylesheet" href="a.css">
 <link id="L2" rel="stylesheet" href="b.css" media="screen">
@@ -67,8 +46,6 @@ func mustCSSOM(t *testing.T, r *js.Runtime, expr string) string {
 	return got
 }
 
-// owners reports the id of every listed sheet's owner, in the order the page
-// sees them.
 const ownersJS = `
 	var owners = function () {
 		var out = [];
@@ -79,11 +56,6 @@ const ownersJS = `
 		return out.join(',');
 	};`
 
-// The list is the document order of the elements that own a sheet: the three
-// usable links, then the two head <style> elements, then the body's. The
-// disabled L4, the hrefless L5, the rel=preload L6 and the <style> inside the
-// template own no sheet, which is what Chromium's 12-entry order above shows.
-//
 // qc:BR-284
 func TestStyleSheetListOrdersLinksAndStylesInDocumentOrder(t *testing.T) {
 	r := cssomRuntime(t)
@@ -103,11 +75,6 @@ func TestStyleSheetListOrdersLinksAndStylesInDocumentOrder(t *testing.T) {
 	}
 }
 
-// A sheet's href is the absolute URL its owner's reference resolves to, and null
-// for an inline sheet: measured as "http://127.0.0.1:8931/a.css" for L1 and null
-// for every <style>, while HTMLLinkElement.href on the same link answered the
-// same absolute URL the sheet reported.
-//
 // qc:BR-284
 func TestStyleSheetHrefIsAbsoluteForLinksAndNullForStyles(t *testing.T) {
 	r := cssomRuntime(t)
@@ -122,13 +89,6 @@ func TestStyleSheetHrefIsAbsoluteForLinksAndNullForStyles(t *testing.T) {
 	}
 }
 
-// The MediaList is the owner's media attribute read on the spot. Measured: a
-// sheet with no attribute reports mediaText "" with length 0, item(0) null and
-// [0] undefined; media="screen" reports "screen" with length 1 and item(0) and
-// [0] both "screen"; and after L3.setAttribute('media', 'screen and
-// (min-width: 100px)') the sheet the page already held reported the new text.
-// The same MediaList object comes back for every read of the same sheet.
-//
 // qc:BR-284
 func TestStyleSheetMediaReportsTheAttributeAndStaysLive(t *testing.T) {
 	r := cssomRuntime(t)
@@ -149,11 +109,6 @@ func TestStyleSheetMediaReportsTheAttributeAndStaysLive(t *testing.T) {
 	}
 }
 
-// title is the owner's title attribute or null, never "": measured "Alternate"
-// for the <link title="Alternate">, "StyleTitle" for an appended <style>
-// carrying the attribute, and null for every sheet without one. type answers
-// "text/css" for a linked and an inline sheet alike.
-//
 // qc:BR-284
 func TestStyleSheetTitleIsNullUnlessTheAttributeIsSet(t *testing.T) {
 	r := cssomRuntime(t)
@@ -179,10 +134,6 @@ func TestStyleSheetTitleIsNullUnlessTheAttributeIsSet(t *testing.T) {
 	}
 }
 
-// disabled is the sheet's own flag, not the element's attribute. Measured:
-// setting it on a listed sheet reads back true, leaves that sheet at index 0 of
-// document.styleSheets, and writes no attribute on the link.
-//
 // qc:BR-284
 func TestSheetDisabledFlagReadsBackWithoutTouchingTheAttribute(t *testing.T) {
 	r := cssomRuntime(t)
@@ -201,12 +152,6 @@ func TestSheetDisabledFlagReadsBackWithoutTouchingTheAttribute(t *testing.T) {
 	}
 }
 
-// .sheet on the element is the very object the list hands out for it, and an
-// element that owns no sheet answers null: measured as L1.sheet ===
-// document.styleSheets[0] true, a link whose fetch 404s still holding a sheet,
-// and both a disabled link and a link with no href holding none - as does the
-// <style> inside a template.
-//
 // qc:BR-284
 func TestLinkAndStyleSheetIdentityMatchesTheListEntry(t *testing.T) {
 	r := cssomRuntime(t)
@@ -230,11 +175,6 @@ func TestLinkAndStyleSheetIdentityMatchesTheListEntry(t *testing.T) {
 	}
 }
 
-// The list is live in both directions. Measured: clearing a disabled link's
-// flag took the length from 12 to 13 and put its sheet at index 7, right after
-// the other link with the same href; removing L1 took 12 down to 11 and left L2
-// first; an appended <style> landed at index 10, ahead of the body's sheets.
-//
 // qc:BR-284
 func TestStyleSheetListIsLiveForAppendRemoveAndDisable(t *testing.T) {
 	r := cssomRuntime(t)
@@ -258,11 +198,6 @@ func TestStyleSheetListIsLiveForAppendRemoveAndDisable(t *testing.T) {
 	}
 }
 
-// Entries and rules are objects, not per-read copies: measured as
-// document.styleSheets[0] === document.styleSheets.item(0) true, sheet.cssRules
-// [0] === sheet.cssRules.item(0) true, rule.parentStyleSheet === sheet true, and
-// item(-1) null with an index at the length undefined.
-//
 // qc:BR-284
 func TestStyleSheetAndRuleObjectsKeepIdentityAcrossReads(t *testing.T) {
 	r := cssomRuntime(t)
@@ -284,10 +219,6 @@ func TestStyleSheetAndRuleObjectsKeepIdentityAcrossReads(t *testing.T) {
 	}
 }
 
-// A sheet adopted through document.adoptedStyleSheets is not one of the listed
-// sheets: measured on the fixture, the page reported adoptedStyleSheets.length 1
-// while document.styleSheets held exactly the 12 element-owned entries.
-//
 // qc:BR-284
 func TestAdoptedStyleSheetIsNotListed(t *testing.T) {
 	r := cssomRuntime(t)

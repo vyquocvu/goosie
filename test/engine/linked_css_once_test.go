@@ -10,19 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// GOOSIE-LIVE-001 measured one navigation asking for 33 stylesheets 927 to
-// 1,059 times (https://www.gov.vn, 2026-11-13, viewport 1280): every
-// parser-blocking script re-collected the sheet set and every collection
-// re-requested every sheet, so 9.6s to 29.8s of fetch work ran against the 6s
-// per-pass budget and the links a pass never reached were asked for by the next
-// one. Chromium issues 36 stylesheet requests for 36 distinct URLs on that
-// page. These oracles pin the rule the fix installs: one request per URL per
-// navigation, and a collection only when the document's stylesheet state or
-// the media options moved.
-
-// sheetServer answers the three URLs the fixtures link, and counts every
-// request and attempt it sees. failOnce URLs refuse their first attempt, which
-// is how the retry rule gets measured rather than assumed.
 type sheetServer struct {
 	mu       sync.Mutex
 	requests map[string]int
@@ -109,8 +96,6 @@ func newCSSSession(t *testing.T, rt *js.Runtime, html string, linker engine.CSSL
 	return sess
 }
 
-// colorOf reads one tag's resolved colour, failing the test when the tag is
-// missing or unresolved.
 func colorOf(t *testing.T, sess *engine.Session, tag string) (int, int, int) {
 	t.Helper()
 	nodes := sess.Doc.ElementsByTagName(tag)
@@ -124,19 +109,10 @@ func colorOf(t *testing.T, sess *engine.Session, tag string) (int, int, int) {
 	return int(st.Color.R), int(st.Color.G), int(st.Color.B)
 }
 
-// appendedStyle is the script mutation that makes a collection pass legitimate:
-// a new style element changes the document's stylesheet state, so the next
-// script's collection has to run and has to see the sheets it already holds.
 func appendedStyle(marker, decl string) string {
 	return fmt.Sprintf("<script>var %s = document.createElement('style'); %s.textContent = '%s'; document.head.appendChild(%s);</script>", marker, marker, decl, marker)
 }
 
-// TestLinkedSheetsRequestedOnceAcrossScriptPasses is the storm itself: three
-// sheets plus two scripts that each add a style element, so more than one
-// collection pass runs and every one of them used to ask for every sheet. One
-// request per URL is Chromium's measured profile, and all four declarations
-// must still cascade - a memo that traded fewer requests for missing rules
-// fails here too.
 // qc:BR-282
 func TestLinkedSheetsRequestedOnceAcrossScriptPasses(t *testing.T) {
 	srv := newSheetServer()
@@ -161,8 +137,6 @@ func TestLinkedSheetsRequestedOnceAcrossScriptPasses(t *testing.T) {
 	if got := srv.total(); got != 3 {
 		t.Errorf("total stylesheet requests = %d, want 3", got)
 	}
-	// Document order is a.css, b.css, s1, c.css, s2: c.css is the last sheet
-	// declaring p, the injected styles only declare div, and b.css only h1.
 	if r, g, b := colorOf(t, sess, "p"); r != 2 || g != 0 || b != 0 {
 		t.Errorf("p color = (%d,%d,%d), want (2,0,0) from c.css", r, g, b)
 	}
@@ -174,10 +148,6 @@ func TestLinkedSheetsRequestedOnceAcrossScriptPasses(t *testing.T) {
 	}
 }
 
-// TestDuplicateLinkedSheetHrefRequestedOnce pins the memo against the shape a
-// real CMS emits - the same stylesheet linked twice. Chromium dedupes the
-// request while keeping both link elements, so one fetch with the rule applied
-// is the only passing shape.
 // qc:BR-282
 func TestDuplicateLinkedSheetHrefRequestedOnce(t *testing.T) {
 	srv := newSheetServer()
@@ -195,11 +165,6 @@ func TestDuplicateLinkedSheetHrefRequestedOnce(t *testing.T) {
 	}
 }
 
-// TestImportedSheetRequestedOnceAcrossPasses covers the @import half of the
-// rule: an imported target belongs to the navigation's fetch profile, so a
-// later collection splices it from the memo instead of asking again. b.css
-// carries the only declaration that reaches h1, so an expansion that dropped
-// the import shows up as a missing colour rather than only a count.
 // qc:BR-282
 func TestImportedSheetRequestedOnceAcrossPasses(t *testing.T) {
 	srv := newSheetServer()
@@ -223,9 +188,6 @@ func TestImportedSheetRequestedOnceAcrossPasses(t *testing.T) {
 	}
 }
 
-// TestScriptRewrittenHrefFetchesOnlyTheNewSheet is the guard against reading
-// the memo too broadly: pointing a link at another URL changes the document's
-// stylesheet state, so that URL is a new key, fetched once, and its rule wins.
 // qc:BR-282
 func TestScriptRewrittenHrefFetchesOnlyTheNewSheet(t *testing.T) {
 	srv := newSheetServer()
@@ -246,11 +208,6 @@ func TestScriptRewrittenHrefFetchesOnlyTheNewSheet(t *testing.T) {
 	}
 }
 
-// TestFailedSheetFetchIsRetriedOnLaterPass records what the memo deliberately
-// does not remember: a failed fetch holds no charged bytes, so the next
-// collection asks for the URL again and the sheet lands. Measured on the live
-// page, 0 of the 33 stylesheet URLs failed, so retries were not part of the
-// storm - this pins the decision rather than a Chromium number.
 // qc:BR-282
 func TestFailedSheetFetchIsRetriedOnLaterPass(t *testing.T) {
 	srv := newSheetServer("https://example.test/a.css")
@@ -269,12 +226,6 @@ func TestFailedSheetFetchIsRetriedOnLaterPass(t *testing.T) {
 	}
 }
 
-// TestPureReadScriptsCollectTheSheetSetOnce separates the fix's second half
-// from its first: with the memo alone a quiet page still walks the document and
-// re-parses every sheet once per script. Nothing here moves the stylesheet
-// state, so only two collections remain - the first script's, because nothing
-// was installed yet, and the load's final one, which covers links that appear
-// after the last script. Before this slice every script added a collection.
 // qc:BR-282
 func TestPureReadScriptsCollectTheSheetSetOnce(t *testing.T) {
 	srv := newSheetServer()
@@ -296,10 +247,6 @@ func TestPureReadScriptsCollectTheSheetSetOnce(t *testing.T) {
 	}
 }
 
-// TestMutatingScriptsCollectOncePerChange is the same counter read the other
-// way: three scripts that each add a style element do owe three collections,
-// because each changed what the next script's CSSOM read must see. A fix that
-// collected only once per navigation would fail here.
 // qc:BR-282
 func TestMutatingScriptsCollectOncePerChange(t *testing.T) {
 	srv := newSheetServer()
@@ -326,9 +273,6 @@ func TestMutatingScriptsCollectOncePerChange(t *testing.T) {
 	}
 }
 
-// TestMixedContentLinkedSheetFetchesNothing keeps the refusal in front of the
-// memo: an http sheet on an https page is reported and never requested, so no
-// collection pass can turn mixed content into a memo hit.
 // qc:BR-282
 func TestMixedContentLinkedSheetFetchesNothing(t *testing.T) {
 	srv := newSheetServer()

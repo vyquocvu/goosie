@@ -191,11 +191,6 @@ func TestNoErrorIndicatorWhenFocused(t *testing.T) {
 	}
 }
 
-// TestConcurrentChromeAccessIsRaceFree hammers the three-thread sharing the
-// browser relies on: typing/clicks (event pump), loading flags and tab sync
-// (navigation drain), and Draw (UI loop). Before the State mutex this trips
-// the race detector; the private-field writes it also performs would not
-// even compile now, which is the point.
 func TestConcurrentChromeAccessIsRaceFree(t *testing.T) {
 	fonts, err := raster.NewFonts()
 	if err != nil {
@@ -247,7 +242,6 @@ func TestToolbarButtonDisabledState(t *testing.T) {
 		traverseDelta = delta
 	}
 
-	// Initially empty history: neither back nor forward should fire
 	backRect := ButtonRect(ButtonBack, 800)
 	clickPt := frame.Point{X: backRect.X0 + 5, Y: backRect.Y0 + 5}
 	state.HandleClick(clickPt, surface.ButtonLeft)
@@ -262,7 +256,6 @@ func TestToolbarButtonDisabledState(t *testing.T) {
 		t.Fatalf("traversed on empty history forward: got delta %d", traverseDelta)
 	}
 
-	// Push 2 pages: back enabled, forward disabled
 	state.History.Push("https://a/")
 	state.History.Push("https://b/")
 
@@ -279,7 +272,6 @@ func TestToolbarButtonDisabledState(t *testing.T) {
 		t.Fatalf("traversed on forward at head of history: got delta %d", traverseDelta)
 	}
 
-	// Move cursor back: back disabled, forward enabled
 	state.History.Back()
 	clickPt = frame.Point{X: forwardRect.X0 + 5, Y: forwardRect.Y0 + 5}
 	state.HandleClick(clickPt, surface.ButtonLeft)
@@ -294,10 +286,8 @@ func TestToolbarNilHistorySafe(t *testing.T) {
 	var traversed bool
 	state.OnTraverse = func(delta int) { traversed = true }
 
-	// Should not panic on Navigate with nil history
 	state.Navigate("https://example.com")
 
-	// Should not panic on HandleClick for Back/Forward
 	backRect := ButtonRect(ButtonBack, 800)
 	state.HandleClick(frame.Point{X: backRect.X0 + 5, Y: backRect.Y0 + 5}, surface.ButtonLeft)
 	if traversed {
@@ -310,7 +300,6 @@ func TestToolbarNilHistorySafe(t *testing.T) {
 		t.Fatal("traversed should not fire with nil History")
 	}
 
-	// Should not panic on Draw
 	buf := frame.NewBitmap(800, 60)
 	state.Draw(buf, 0)
 }
@@ -347,25 +336,21 @@ func TestToolbarSuggestionsLifecycle(t *testing.T) {
 		t.Fatalf("SelectedSuggestion() initially = %d, want -1", state.SelectedSuggestion())
 	}
 
-	// Arrow down selects first suggestion
 	state.HandleKeyEvent(keyDown, 0)
 	if state.SelectedSuggestion() != 0 {
 		t.Fatalf("SelectedSuggestion() after down = %d, want 0", state.SelectedSuggestion())
 	}
 
-	// Arrow down again selects second suggestion
 	state.HandleKeyEvent(keyDown, 0)
 	if state.SelectedSuggestion() != 1 {
 		t.Fatalf("SelectedSuggestion() after down = %d, want 1", state.SelectedSuggestion())
 	}
 
-	// Arrow up wraps back to first suggestion
 	state.HandleKeyEvent(keyUp, 0)
 	if state.SelectedSuggestion() != 0 {
 		t.Fatalf("SelectedSuggestion() after up = %d, want 0", state.SelectedSuggestion())
 	}
 
-	// Enter submits selected suggestion URL
 	state.HandleKeyEvent('\r', 0)
 	if navigatedURL != "https://google.com/search?q=go" {
 		t.Errorf("navigatedURL = %q, want https://google.com/search?q=go", navigatedURL)
@@ -374,14 +359,13 @@ func TestToolbarSuggestionsLifecycle(t *testing.T) {
 		t.Error("suggestions should be closed after submit")
 	}
 
-	// Test Esc dismisses suggestions
 	state.HandleKeyEvent('g', 0)
 	state.HandleKeyEvent('o', 0)
 	state.RefreshSuggestions(time.Now().Add(SuggestDebounce))
 	if !state.HasSuggestions() {
 		t.Fatal("suggestions should be active again")
 	}
-	state.HandleKeyEvent(0x1b, 0) // Esc
+	state.HandleKeyEvent(0x1b, 0)
 	if state.HasSuggestions() {
 		t.Error("Esc should close suggestions")
 	}
@@ -400,13 +384,11 @@ func TestToolbarSuggestionsHitAndDraw(t *testing.T) {
 		t.Fatal("SuggestionsRect should not be empty")
 	}
 
-	// Hit test on first suggestion row
 	sug, ok := state.HitSuggestion(frame.Point{X: rect.X0 + 10, Y: 64 + 10}, 64)
 	if !ok || sug.URL != "https://golang.org" {
 		t.Fatalf("HitSuggestion row 0 = (%v, %v), want golang.org", sug, ok)
 	}
 
-	// Draw onto bitmap
 	state.Suggestions = []Suggestion{
 		{Title: "Golang", URL: "https://golang.org", Kind: SuggestBookmark},
 	}
@@ -425,24 +407,20 @@ func TestToolbarDownloadsButton(t *testing.T) {
 	midX := (btnRect.X0 + btnRect.X1) / 2
 	midY := (btnRect.Y0 + btnRect.Y1) / 2
 
-	// 1. Cursor check
 	cur := state.CursorAt(frame.Point{X: midX, Y: midY})
 	if cur != surface.CursorPointer {
 		t.Errorf("CursorAt downloads button = %v, want CursorPointer", cur)
 	}
 
-	// 2. Click fires OnDownloads callback
 	state.HandleClick(frame.Point{X: midX, Y: midY}, surface.ButtonLeft)
 	if !downloadsClicked {
 		t.Error("clicking downloads button did not fire OnDownloads callback")
 	}
 
-	// 3. Draw with active progress
 	state.SetDownloadStats(1, 2, 45.0)
 	buf := frame.NewBitmap(800, 40)
 	state.Draw(buf, 0)
 
-	// Check that active blue progress bar is drawn on the downloads button
 	hasBluePixel := false
 	for y := btnRect.Y0; y < btnRect.Y1; y++ {
 		for x := btnRect.X0; x < btnRect.X1; x++ {
@@ -461,9 +439,6 @@ func TestToolbarDownloadsButton(t *testing.T) {
 	}
 }
 
-// TestSuggestionsDebounceFiresOnceAfterIdle pins FR-NAV-04's 50ms debounce:
-// keystrokes only schedule the query, and the host's per-frame Refresh runs it
-// once the user has been idle for the window.
 func TestSuggestionsDebounceFiresOnceAfterIdle(t *testing.T) {
 	state := NewState(800, nil)
 	var queries []string
@@ -498,7 +473,6 @@ func TestSuggestionsDebounceFiresOnceAfterIdle(t *testing.T) {
 		t.Fatalf("dropdown count = %d, want 1", state.SuggestionCount())
 	}
 
-	// A later refresh must not replay the query.
 	state.RefreshSuggestions(time.Now().Add(time.Second))
 	if len(queries) != 1 {
 		t.Fatalf("queries = %v, want no replay", queries)

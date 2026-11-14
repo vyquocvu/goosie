@@ -7,13 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// mutationDOM builds a minimal DOM tree for mutation tests:
-//
-//	html
-//	  body
-//	    div#main.container
-//	      p
-//	        "hello"
 func mutationDOM() *dom.Document {
 	doc := &dom.Document{}
 	html := doc.NewElement("html")
@@ -32,8 +25,6 @@ func mutationDOM() *dom.Document {
 	return doc
 }
 
-// newMutationRuntime creates a JS runtime with the given DOM and optional
-// OnMutation callback.
 func newMutationRuntime(t *testing.T, doc *dom.Document, onMutation func()) *js.Runtime {
 	t.Helper()
 	r, err := js.New(js.Options{
@@ -47,10 +38,6 @@ func newMutationRuntime(t *testing.T, doc *dom.Document, onMutation func()) *js.
 	t.Cleanup(func() { r.Close() })
 	return r
 }
-
-// ---------------------------------------------------------------------------
-// Attribute tests
-// ---------------------------------------------------------------------------
 
 func TestGetAttribute(t *testing.T) {
 	doc := mutationDOM()
@@ -97,7 +84,6 @@ func TestSetAttribute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify on the Go side.
 	div := doc.ElementByID("main")
 	if got := div.GetAttribute("data-x"); got != "1" {
 		t.Errorf("data-x = %q, want %q", got, "1")
@@ -115,7 +101,6 @@ func TestRemoveAttribute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify the attribute is gone on the original node.
 	divs := doc.ElementsByTagName("div")
 	if len(divs) == 0 {
 		t.Fatal("no div found")
@@ -143,10 +128,6 @@ func TestHasAttribute(t *testing.T) {
 		t.Errorf("hasMissing = %+v, want false", v)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// classList tests
-// ---------------------------------------------------------------------------
 
 func TestClassListAdd(t *testing.T) {
 	doc := mutationDOM()
@@ -202,11 +183,9 @@ func TestClassListToggle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// First toggle removes "container" (it was present), returns false.
 	if v, ok := r.Global("r1"); !ok || v.Bool != false {
 		t.Errorf("r1 = %+v, want false (removed)", v)
 	}
-	// Second toggle adds "container" back, returns true.
 	if v, ok := r.Global("r2"); !ok || v.Bool != true {
 		t.Errorf("r2 = %+v, want true (added)", v)
 	}
@@ -231,10 +210,6 @@ func TestClassListContains(t *testing.T) {
 		t.Errorf("hasActive = %+v, want false", v)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// innerHTML tests
-// ---------------------------------------------------------------------------
 
 func TestInnerHTMLGetter(t *testing.T) {
 	doc := mutationDOM()
@@ -271,10 +246,6 @@ func TestInnerHTMLSetter(t *testing.T) {
 		t.Errorf("first child tag = %q, want %q", div.FirstChild.Data, "span")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Element removal and query tests
-// ---------------------------------------------------------------------------
 
 func TestRemoveElement(t *testing.T) {
 	doc := mutationDOM()
@@ -374,10 +345,6 @@ func TestCreateTextNode(t *testing.T) {
 		t.Errorf("gotContent = %+v, want %q", v, "world")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Mutation callback test
-// ---------------------------------------------------------------------------
 
 func TestSetAttributeTriggersMutation(t *testing.T) {
 	doc := mutationDOM()

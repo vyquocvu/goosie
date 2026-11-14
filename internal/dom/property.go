@@ -7,7 +7,6 @@ import (
 	"unicode"
 )
 
-// CleanSyntax strips enclosing quotes from a syntax string, e.g. "'<color>'" -> "<color>".
 func CleanSyntax(syntax string) string {
 	syntax = strings.TrimSpace(syntax)
 	if len(syntax) >= 2 {
@@ -19,8 +18,6 @@ func CleanSyntax(syntax string) string {
 	return syntax
 }
 
-// ValidatePropertySyntax checks whether a syntax descriptor conforms to the
-// CSS Properties and Values API Level 1 grammar.
 func ValidatePropertySyntax(syntax string) error {
 	syntax = CleanSyntax(syntax)
 	if syntax == "" {
@@ -65,7 +62,6 @@ func validateSyntaxComponent(comp string) error {
 		}
 	}
 
-	// Ident token: must be a valid CSS ident and not a reserved keyword
 	lower := strings.ToLower(base)
 	switch lower {
 	case "inherit", "initial", "unset", "revert", "revert-layer", "default":
@@ -88,7 +84,6 @@ func validateSyntaxComponent(comp string) error {
 	return nil
 }
 
-// MatchesPropertySyntax returns true if value conforms to the registered syntax.
 func MatchesPropertySyntax(syntax, val string) bool {
 	syntax = CleanSyntax(syntax)
 	val = strings.TrimSpace(val)
@@ -222,7 +217,6 @@ func matchesBaseType(base, val string) bool {
 		}
 	}
 
-	// Literal keyword match
 	return strings.EqualFold(base, val)
 }
 

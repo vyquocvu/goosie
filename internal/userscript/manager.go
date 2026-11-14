@@ -9,28 +9,24 @@ import (
 	"sync"
 )
 
-// Manager manages a collection of user scripts loaded from disk or registered at runtime.
 type Manager struct {
 	mu      sync.RWMutex
 	dir     string
 	scripts []*Script
 }
 
-// NewManager creates a script manager targeting dir.
 func NewManager(dir string) *Manager {
 	return &Manager{
 		dir: dir,
 	}
 }
 
-// Dir returns the directory path managed by this manager.
 func (m *Manager) Dir() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.dir
 }
 
-// AddScript registers a script directly in the manager.
 func (m *Manager) AddScript(s *Script) {
 	if s == nil {
 		return
@@ -47,7 +43,6 @@ func (m *Manager) AddScript(s *Script) {
 	m.scripts = append(m.scripts, s)
 }
 
-// RemoveScript unregisters a script by ID.
 func (m *Manager) RemoveScript(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -60,7 +55,6 @@ func (m *Manager) RemoveScript(id string) {
 	}
 }
 
-// ScriptByID finds a script by ID.
 func (m *Manager) ScriptByID(id string) *Script {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -73,7 +67,6 @@ func (m *Manager) ScriptByID(id string) *Script {
 	return nil
 }
 
-// SetEnabled toggles a script's enabled status.
 func (m *Manager) SetEnabled(id string, enabled bool) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -87,7 +80,6 @@ func (m *Manager) SetEnabled(id string, enabled bool) bool {
 	return false
 }
 
-// Scripts returns a snapshot slice of all registered scripts.
 func (m *Manager) Scripts() []*Script {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -97,7 +89,6 @@ func (m *Manager) Scripts() []*Script {
 	return res
 }
 
-// MatchingScripts returns all enabled scripts matching rawURL and scheduled to run at stage.
 func (m *Manager) MatchingScripts(rawURL string, stage RunAt) []*Script {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -108,7 +99,6 @@ func (m *Manager) MatchingScripts(rawURL string, stage RunAt) []*Script {
 			continue
 		}
 		if s.RunAt != stage {
-			// document-idle scripts run with document-end in our engine
 			if !(stage == RunAtDocumentEnd && s.RunAt == RunAtDocumentIdle) {
 				continue
 			}
@@ -120,7 +110,6 @@ func (m *Manager) MatchingScripts(rawURL string, stage RunAt) []*Script {
 	return res
 }
 
-// Load scans the configured directory for *.user.js and *.js files, parsing each.
 func (m *Manager) Load() error {
 	if m.dir == "" {
 		return nil

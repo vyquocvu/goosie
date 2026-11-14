@@ -34,8 +34,6 @@ func findElementByID(n *dom.Node, id string) *dom.Node {
 }
 
 func TestCascadeLayers_StatementOrdering(t *testing.T) {
-	// @layer reset, base, utilities explicitly declares layer order.
-	// utilities is declared last, so it beats base and reset, regardless of specificity!
 	cssText := `
 @layer reset, base, utilities;
 
@@ -63,7 +61,6 @@ func TestCascadeLayers_StatementOrdering(t *testing.T) {
 		t.Fatal("style for action button not resolved")
 	}
 
-	// Red is #ff0000 (RGB: 255, 0, 0, 255)
 	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
 		t.Fatalf("expected color from 'utilities' layer (red), got rgba(%d,%d,%d,%d)",
 			cs.Color.R, cs.Color.G, cs.Color.B, cs.Color.A)
@@ -71,8 +68,6 @@ func TestCascadeLayers_StatementOrdering(t *testing.T) {
 }
 
 func TestCascadeLayers_UnlayeredBeatsLayered(t *testing.T) {
-	// Normal unlayered author styles must outrank all layered author styles,
-	// even if the layered rule has much higher specificity.
 	cssText := `
 @layer theme {
     #box.item { background-color: #00ff00; }
@@ -92,7 +87,6 @@ div.item { background-color: #ffff00; }
 		t.Fatal("style for box not resolved")
 	}
 
-	// Yellow is #ffff00 (RGB: 255, 255, 0, 255)
 	if cs.BackgroundColor.R != 255 || cs.BackgroundColor.G != 255 || cs.BackgroundColor.B != 0 {
 		t.Fatalf("expected unlayered color (yellow), got rgba(%d,%d,%d,%d)",
 			cs.BackgroundColor.R, cs.BackgroundColor.G, cs.BackgroundColor.B, cs.BackgroundColor.A)
@@ -100,9 +94,6 @@ div.item { background-color: #ffff00; }
 }
 
 func TestCascadeLayers_ImportantReversesPrecedence(t *testing.T) {
-	// For !important declarations:
-	// 1. Layered styles beat unlayered styles.
-	// 2. Earlier layers beat later layers.
 	cssText := `
 @layer reset, utilities;
 
@@ -131,8 +122,6 @@ func TestCascadeLayers_ImportantReversesPrecedence(t *testing.T) {
 		t.Fatal("style for alert not resolved")
 	}
 
-	// Reset is the earliest layer, so its !important beats utilities and unlayered!
-	// Red is #ff0000 (RGB: 255, 0, 0, 255)
 	if cs.Color.R != 255 || cs.Color.G != 0 || cs.Color.B != 0 {
 		t.Fatalf("expected reset !important (red) to win, got rgba(%d,%d,%d,%d)",
 			cs.Color.R, cs.Color.G, cs.Color.B, cs.Color.A)
@@ -140,7 +129,6 @@ func TestCascadeLayers_ImportantReversesPrecedence(t *testing.T) {
 }
 
 func TestCascadeLayers_NestedLayers(t *testing.T) {
-	// Nested @layer outer { @layer inner { ... } } should flatten to outer.inner
 	cssText := `
 @layer framework {
     @layer components {
@@ -186,7 +174,6 @@ func TestCascadeLayers_NestedLayers(t *testing.T) {
 }
 
 func TestCascadeLayers_AnonymousLayers(t *testing.T) {
-	// Anonymous @layer blocks receive unique anonymous layer names and execute in source order
 	cssText := `
 @layer {
     .box { width: 100px; }

@@ -2,9 +2,6 @@ package dom
 
 import "strings"
 
-// Atom is an interned string for element and attribute names. Comparing atoms
-// is a single integer comparison rather than a string walk, which is what keeps
-// selector matching fast across a large tree.
 type Atom uint32
 
 const (
@@ -263,7 +260,6 @@ func init() {
 	}
 }
 
-// Lookup returns the atom for name, or AtomUnknown if it is not interned.
 func Lookup(name string) Atom {
 	if a, ok := atomLookup[strings.ToLower(name)]; ok {
 		return a
@@ -271,7 +267,6 @@ func Lookup(name string) Atom {
 	return AtomUnknown
 }
 
-// String returns the element or attribute name for the atom.
 func (a Atom) String() string {
 	if a > 0 && int(a) < len(atomNames) {
 		return atomNames[a]
@@ -279,7 +274,6 @@ func (a Atom) String() string {
 	return ""
 }
 
-// AttrAtom is an interned attribute name.
 type AttrAtom uint32
 
 const (
@@ -368,7 +362,6 @@ func init() {
 	}
 }
 
-// LookupAttr returns the attribute atom for name, or AttrUnknown.
 func LookupAttr(name string) AttrAtom {
 	if a, ok := attrLookup[strings.ToLower(name)]; ok {
 		return a
@@ -376,7 +369,6 @@ func LookupAttr(name string) AttrAtom {
 	return AttrUnknown
 }
 
-// String returns the attribute name.
 func (a AttrAtom) String() string {
 	if a > 0 && int(a) < len(attrNames) {
 		return attrNames[a]

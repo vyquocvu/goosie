@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/frame"
 )
 
-// A word that still fits must stay one token: fragmenting an unused U+00AD
-// would draw a hyphen in the middle of a line that never wrapped.
 // qc:BR-087
 func TestSplitSoftBreaksLeavesAFittingWordAlone(t *testing.T) {
 	word := "aa\u00ADbb"
@@ -18,10 +16,6 @@ func TestSplitSoftBreaksLeavesAFittingWordAlone(t *testing.T) {
 	}
 }
 
-// Chromium 1.63 (scripts/verify-br087-text-parity.js): 42 a's + U+00AD + 48
-// b's in a 200px box wraps at the SHY, not earlier. With the half-em estimate
-// the whole word is overlong, so the splitter must close a token after the
-// opportunity and leave the b-run as the next one.
 // qc:BR-087
 func TestSplitSoftBreaksClosesATokenAfterTheOpportunity(t *testing.T) {
 	as, bs := strings.Repeat("a", 42), strings.Repeat("b", 48)

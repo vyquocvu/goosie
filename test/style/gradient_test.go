@@ -9,7 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// styleFor returns the computed style of the first element named tag.
 func styleFor(t *testing.T, html, sheet, tag string) *style.ComputedStyle {
 	t.Helper()
 	doc := domtest.Parse(html)
@@ -39,10 +38,6 @@ func styleFor(t *testing.T, html, sheet, tag string) *style.ComputedStyle {
 }
 
 func TestUnitlessLineHeightRecomputesPerFontSize(t *testing.T) {
-	// A unitless line-height inherits as the number, not as the length its parent
-	// computed, so a 1.6 on the body gives a 32px heading 51px rather than the
-	// 26px its 16px parent worked out. Getting this wrong moves every line below
-	// the first heading out of place.
 	const html = `<html><body><h1>title</h1><p>text</p></body></html>`
 	const sheet = `body { line-height: 1.6 }`
 	p := styleFor(t, html, sheet, "p")
@@ -59,8 +54,6 @@ func TestUnitlessLineHeightRecomputesPerFontSize(t *testing.T) {
 }
 
 func TestLengthLineHeightStillInheritsAsAValue(t *testing.T) {
-	// The contrast case: a declared length is a length, so the child inherits the
-	// resolved number and does not re-derive it.
 	p := styleFor(t, `<html><body><h1>t</h1></body></html>`, `body { line-height: 20px }`, "h1")
 	if p.LineHeight != 20 {
 		t.Errorf("h1 line-height = %v, want 20", p.LineHeight)
@@ -68,11 +61,6 @@ func TestLengthLineHeightStillInheritsAsAValue(t *testing.T) {
 }
 
 func TestEmLineHeightResolvesAgainstOwnFontSize(t *testing.T) {
-	// `line-height: 1em` is a length whose em unit belongs to the element's own
-	// final font size, whichever order the size arrives in. yesterweb's nav links
-	// declare the line-height before the 22px size in the same rule and its
-	// headings declare them in two separate rules; resolving either against the
-	// default 16px shrinks every line box and drags the rest of the page up.
 	t.Run("declared before the size in the same rule", func(t *testing.T) {
 		a := styleFor(t, `<html><body><a href="#">x</a></body></html>`,
 			`a { line-height: 1em; font-size: 22px }`, "a")
@@ -88,8 +76,6 @@ func TestEmLineHeightResolvesAgainstOwnFontSize(t *testing.T) {
 		}
 	})
 	t.Run("inherits as the resolved length", func(t *testing.T) {
-		// The computed value of an em line-height is a length, so a child takes
-		// the 20px the parent worked out rather than re-deriving 2em itself.
 		h1 := styleFor(t, `<html><body><h1>x</h1></body></html>`,
 			`body { font-size: 10px; line-height: 2em } h1 { font-size: 32px }`, "h1")
 		if h1.LineHeight != 20 {
@@ -116,7 +102,6 @@ func TestBackgroundGradientRamp(t *testing.T) {
 			t.Errorf("stop %d colour = %+v, want %+v", i, g.Stops[i].Color, want)
 		}
 	}
-	// The shorthand declares no colour, and a gradient is not one.
 	if s.BackgroundColor.A != 0 {
 		t.Errorf("background colour = %+v, want transparent", s.BackgroundColor)
 	}

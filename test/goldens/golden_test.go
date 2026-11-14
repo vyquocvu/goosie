@@ -1,8 +1,3 @@
-// Package goldens_test is the pixel regression ratchet: committed renders of
-// one fixture per layout family, produced with GOOSIE_SYSTEM_FONTS=0 so the
-// pixels are a function of the binary alone (internal/raster/fonts.go).
-// A deliberate engine change re-records in the same commit via
-// GOOSIE_RECORD_GOLDENS=1 go test ./test/goldens/ -run TestRecordGoldens.
 package goldens_test
 
 import (
@@ -112,9 +107,6 @@ func decodePNG(t *testing.T, path string) image.Image {
 	return img
 }
 
-// comparePixels returns the number of differing pixels and the first
-// differing coordinate. Images are compared in RGBA so color-model
-// differences in the PNG encoding cannot mask a pixel change.
 func comparePixels(a, b image.Image) (int, image.Point) {
 	ba, bb := a.Bounds(), b.Bounds()
 	if ba != bb {
@@ -167,8 +159,6 @@ func TestGoldensMatch(t *testing.T) {
 	}
 }
 
-// TestGoldenManifestCoversFamilies keeps the ratchet honest: every layout
-// family the spec names must keep a golden, and every fixture must exist.
 func TestGoldenManifestCoversFamilies(t *testing.T) {
 	m := loadManifest(t)
 	want := []string{"block", "inline", "float", "flex", "grid", "table", "positioning"}
@@ -186,9 +176,6 @@ func TestGoldenManifestCoversFamilies(t *testing.T) {
 	}
 }
 
-// TestGoldenComparatorDetectsOnePixel is the V0 acceptance: a deliberate
-// one-pixel change must be caught. It perturbs a decoded golden in memory;
-// no committed file is touched.
 func TestGoldenComparatorDetectsOnePixel(t *testing.T) {
 	m := loadManifest(t)
 	if len(m.Goldens) == 0 {
@@ -205,7 +192,6 @@ func TestGoldenComparatorDetectsOnePixel(t *testing.T) {
 			perturbed.Set(x, y, img.At(x, y))
 		}
 	}
-	// Flip one channel by one 8-bit step; keep alpha opaque.
 	perturbed.Set(px.X, px.Y, rgba64{r: r ^ 0x100, g: g2, b: bl, a: a})
 	diffs, first := comparePixels(img, perturbed)
 	if diffs != 1 || first != px {
@@ -217,8 +203,6 @@ type rgba64 struct{ r, g, b, a uint32 }
 
 func (c rgba64) RGBA() (uint32, uint32, uint32, uint32) { return c.r, c.g, c.b, c.a }
 
-// TestRenderIsDeterministic guards the golden premise: two renders of the
-// same fixture with system fonts off must be byte-identical.
 func TestRenderIsDeterministic(t *testing.T) {
 	bin := headlessBinary(t)
 	m := loadManifest(t)
@@ -240,8 +224,6 @@ func TestRenderIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestRecordGoldens re-records the committed baselines. It only runs when
-// explicitly asked, so a normal test run can never overwrite evidence.
 func TestRecordGoldens(t *testing.T) {
 	if os.Getenv("GOOSIE_RECORD_GOLDENS") != "1" {
 		t.Skip("set GOOSIE_RECORD_GOLDENS=1 to re-record the golden baselines")

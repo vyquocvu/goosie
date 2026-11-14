@@ -23,8 +23,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// profileSuggestionStores builds bookmarks and history stores whose URLs all
-// match the query "go" so a leak into a private tab is impossible to miss.
 func profileSuggestionStores(t *testing.T) (*bookmarks.Store, *history.Store) {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -40,9 +38,6 @@ func profileSuggestionStores(t *testing.T) (*bookmarks.Store, *history.Store) {
 	return bmStore, histStore
 }
 
-// countProfileMatches reports how many suggestions came from the profile's
-// bookmarks or history stores (internal goosie:// pages are bookmark-kind but
-// carry goosie:// URLs, so they are excluded).
 func countProfileMatches(sugs []toolbar.Suggestion) (bookmarksHits, historyHits int) {
 	for _, s := range sugs {
 		if strings.HasPrefix(s.URL, "goosie://") {
@@ -58,10 +53,6 @@ func countProfileMatches(sugs []toolbar.Suggestion) (bookmarksHits, historyHits 
 	return
 }
 
-// TestQuerySuggestionsPrivateTabSuppressesProfileData guards the omnibox
-// privacy contract: an incognito tab may show search suggestions and internal
-// pages, but must never read the profile's bookmarks or history. Switching
-// back to a normal tab must restore them.
 func TestQuerySuggestionsPrivateTabSuppressesProfileData(t *testing.T) {
 	bmStore, histStore := profileSuggestionStores(t)
 	f := newNavTestPath(t)
@@ -102,8 +93,6 @@ func TestQuerySuggestionsPrivateTabSuppressesProfileData(t *testing.T) {
 	}
 }
 
-// TestQuerySuggestionsPrivateSessionSuppressesProfileData covers the whole-run
-// -private mode: even a non-incognito tab object must not surface profile data.
 func TestQuerySuggestionsPrivateSessionSuppressesProfileData(t *testing.T) {
 	bmStore, histStore := profileSuggestionStores(t)
 	f := newNavTestPath(t)
@@ -116,9 +105,6 @@ func TestQuerySuggestionsPrivateSessionSuppressesProfileData(t *testing.T) {
 	}
 }
 
-// TestSuggestionsClearedOnTabSwitch pins that switching tabs drops the
-// dropdown the previous tab produced, so a fast switch cannot show stale data
-// (and never keeps an incognito-produced list visible on a normal tab).
 func TestSuggestionsClearedOnTabSwitch(t *testing.T) {
 	bmStore, histStore := profileSuggestionStores(t)
 	f := newNavTestPath(t)
@@ -147,8 +133,6 @@ func TestSuggestionsClearedOnTabSwitch(t *testing.T) {
 	}
 }
 
-// TestSuggestionsClearedOnNavigationStart pins that a programmatic navigation
-// (a link click, not an omnibox submit) also invalidates the dropdown.
 func TestSuggestionsClearedOnNavigationStart(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -177,7 +161,6 @@ func TestSuggestionsClearedOnNavigationStart(t *testing.T) {
 	if tb.HasSuggestions() {
 		t.Error("stale suggestions survived a navigation start")
 	}
-	// Drain the load so the test leaves no in-flight navigation behind.
 	res := <-f.navResults
 	if res.err != nil {
 		t.Fatalf("navigation failed: %v", res.err)
@@ -202,18 +185,15 @@ func TestQuerySuggestions(t *testing.T) {
 	f.bookmarks = bmStore
 	f.history = histStore
 
-	// Query for "go"
 	sugs := f.querySuggestions("go")
 	if len(sugs) == 0 {
 		t.Fatal("querySuggestions('go') returned no suggestions")
 	}
 
-	// First should be Google Search suggestion
 	if sugs[0].Kind != toolbar.SuggestSearch || !strings.Contains(sugs[0].URL, "q=go") {
 		t.Errorf("sugs[0] = %v, want SuggestSearch with q=go", sugs[0])
 	}
 
-	// Should contain bookmarked golang.org or goosie
 	foundBookmark := false
 	foundHistory := false
 	for _, s := range sugs {
@@ -231,7 +211,6 @@ func TestQuerySuggestions(t *testing.T) {
 		t.Errorf("expected history in suggestions: %v", sugs)
 	}
 
-	// Empty query returns nil
 	if empty := f.querySuggestions("   "); len(empty) != 0 {
 		t.Errorf("querySuggestions('') = %v, want nil", empty)
 	}
@@ -269,7 +248,6 @@ func TestChromeWindowSuggestionClickIntercept(t *testing.T) {
 		onLinkClick: func(href string) { clickedLink = href },
 	}
 
-	// Click on suggestion row directly beneath toolbar (topOffset = chromeHeight)
 	chromeH := cw.chromeHeight()
 	sugRect := tb.SuggestionsRect(chromeH)
 	if sugRect.Empty() {
@@ -295,9 +273,6 @@ func TestChromeWindowSuggestionClickIntercept(t *testing.T) {
 	}
 }
 
-// TestQuerySuggestionsRankByFrecency pins FR-NAV-04's ranking: frequent and
-// recent visits outrank a stale one-off, and a bookmark with no visits ranks
-// between them because saving it is one deliberate act of interest.
 func TestQuerySuggestionsRankByFrecency(t *testing.T) {
 	now := time.Now()
 	tmpDir := t.TempDir()
@@ -348,8 +323,6 @@ func TestQuerySuggestionsRankByFrecency(t *testing.T) {
 	}
 }
 
-// TestQuerySuggestionsCapAtEight covers the dropdown bound, including when
-// more than eight profile URLs match.
 func TestQuerySuggestionsCapAtEight(t *testing.T) {
 	tmpDir := t.TempDir()
 	histStore, err := history.Load(filepath.Join(tmpDir, "history.json"))

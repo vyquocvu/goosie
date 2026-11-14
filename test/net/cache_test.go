@@ -14,7 +14,6 @@ import (
 	transport "github.com/vyquocvu/goosie/internal/net"
 )
 
-// hitCounter serves one fixed body and records how many requests reached it.
 func hitCounter(t *testing.T, headers map[string]string) (*httptest.Server, *int64) {
 	t.Helper()
 	var hits int64
@@ -160,9 +159,6 @@ func TestCacheBoundedByBytes(t *testing.T) {
 	defer srv.Close()
 	client := transport.DefaultClient()
 	defer client.Close()
-	// Fill past the bound with distinct URLs; the client must stay correct
-	// (a re-get of any stored URL either hits the server or the cache, never
-	// returns a wrong body).
 	for i := 0; i < 2000; i++ {
 		if _, err := client.Get(context.Background(), fmt.Sprintf("%s/%d", srv.URL, i)); err != nil {
 			t.Fatal(err)

@@ -7,19 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// nodeType carries the DOM Standard's ordinals, not internal/dom's.
-//
-// internal/dom numbers its kinds from 0 with the document first
-// (NodeDocument=0, NodeElement=1, NodeText=2, NodeComment=3, NodeDoctype=4,
-// NodeDocumentFragment=5); the standard says 9, 1, 3, 8, 10, 11. A page cannot
-// see the internal kind - it only ever sees this number - so passing the field
-// through would give `document.nodeType === 0`, which is what killed a whole
-// family of real pages: jQuery 3.6's Sizzle setup gate is
-// `doc.nodeType !== 9 || !doc.documentElement` and returns on the first
-// comparison, leaving the library un-configured. On www.gov.vn that made the
-// reveal of `<form id="form1" style="display:none">` (the entire body, 11,859
-// visible characters) never happen, and Goosie painted 0 ink pixels where
-// Chromium painted 501,735 - with rc 0 and not one line on stderr.
 // qc:BR-188
 func TestNodeTypeUsesDOMStandardOrdinals(t *testing.T) {
 	doc := domtest.Parse(`<html><head><title>t</title></head><body><p id="p">hi</p></body></html>`)
@@ -40,8 +27,6 @@ func TestNodeTypeUsesDOMStandardOrdinals(t *testing.T) {
 	if err := r.Run(src, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	// `out` is an array; read it back through a second script instead of
-	// forcing the host to marshal one.
 	if err := r.Run(`var joined = out.slice(0, 5).join(","); var strict = out[5]+"/"+out[6]+"/"+out[7];`, "inline"); err != nil {
 		t.Fatal(err)
 	}
@@ -55,10 +40,6 @@ func TestNodeTypeUsesDOMStandardOrdinals(t *testing.T) {
 	}
 }
 
-// jQuery 3.6's setup gate is the consumer this property exists for. The script
-// below is the gate and its consequence, written out: pass the gate and the
-// hidden block is revealed, fail it and nothing after the gate runs. This is
-// the shape measured on www.gov.vn, reduced to what can be checked offline.
 // qc:BR-188
 func TestLibrarySetupGatePassesTheDocument(t *testing.T) {
 	doc := domtest.Parse(`<html><head></head><body><div id="gate"></div></body></html>`)

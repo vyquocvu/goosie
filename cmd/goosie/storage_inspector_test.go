@@ -14,13 +14,11 @@ func TestStorageRegistryInspection(t *testing.T) {
 	reg := js.NewOriginStorageRegistry("", false)
 	origin := "https://example.com:443"
 
-	// Initially empty
 	entries := reg.DumpLocalStorage(origin)
 	if len(entries) != 0 {
 		t.Fatalf("expected 0 entries initially, got %d", len(entries))
 	}
 
-	// Add items
 	reg.SetLocalStorageItem(origin, "token", "abc123secret")
 	reg.SetLocalStorageItem(origin, "theme", "dark")
 
@@ -35,14 +33,12 @@ func TestStorageRegistryInspection(t *testing.T) {
 		t.Errorf("entry 1 mismatch: %+v", entries[1])
 	}
 
-	// Remove item
 	reg.RemoveLocalStorageItem(origin, "token")
 	entries = reg.DumpLocalStorage(origin)
 	if len(entries) != 1 || entries[0].Key != "theme" {
 		t.Fatalf("expected 1 entry (theme) after remove, got %+v", entries)
 	}
 
-	// Clear all
 	reg.ClearLocalStorage(origin)
 	entries = reg.DumpLocalStorage(origin)
 	if len(entries) != 0 {
@@ -62,21 +58,18 @@ func TestInspectPageStorageAndCookies(t *testing.T) {
 	}
 	tab.SetSession(sess)
 
-	// Set up storage
 	origin := js.OriginOf("https://example.com/app")
 	storageReg := js.NewOriginStorageRegistry("", false)
 	storageReg.SetLocalStorageItem(origin, "user_pref", "compact_mode")
 	storageReg.SetLocalStorageItem(origin, "app_lang", "vi")
 	f.storage = storageReg
 
-	// Set up cookies
 	netClient := net.DefaultClient()
 	defer netClient.Close()
 	u, _ := url.Parse("https://example.com/app")
 	netClient.Jar().Store(u, []string{"session_token=secret999; Path=/; Secure; HttpOnly"})
 	f.client = netClient
 
-	// 1. Verify inspect page displays localStorage and cookies
 	title, htmlContent := f.buildInternalPageHTML("goosie://inspect")
 	if !strings.Contains(title, "Web Inspector") {
 		t.Fatalf("expected title Web Inspector, got %q", title)
@@ -97,19 +90,16 @@ func TestInspectPageStorageAndCookies(t *testing.T) {
 		t.Error("expected html to contain HttpOnly and Secure cookie badges")
 	}
 
-	// 2. Action: delete single localStorage item
 	f.buildInternalPageHTML("goosie://inspect?action=storage_del&key=user_pref")
 	if len(f.storage.DumpLocalStorage(origin)) != 1 {
 		t.Fatalf("expected 1 item after delete user_pref, got %d", len(f.storage.DumpLocalStorage(origin)))
 	}
 
-	// 3. Action: clear all localStorage items
 	f.buildInternalPageHTML("goosie://inspect?action=storage_clear")
 	if len(f.storage.DumpLocalStorage(origin)) != 0 {
 		t.Fatalf("expected 0 items after storage_clear, got %d", len(f.storage.DumpLocalStorage(origin)))
 	}
 
-	// 4. Action: clear cookies
 	f.buildInternalPageHTML("goosie://inspect?action=cookies_clear")
 	if len(f.client.Jar().AllCookies()) != 0 {
 		t.Fatalf("expected 0 cookies after cookies_clear, got %d", len(f.client.Jar().AllCookies()))

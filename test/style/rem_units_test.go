@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// rem is relative to the root font size (16px by default), never the element's
-// own font size. Resolving it like em inflated every rem length on a large-font
-// element: an h1 at font-size:2.5rem with margin-top:6.5rem took 260px instead
-// of 104px, which pushed whole page headers far too tall.
 func TestRemResolvesAgainstRootNotElement(t *testing.T) {
 	sheet := `h1 { font-size: 2.5rem; margin-top: 6.5rem; padding: 1rem; line-height: 3.25rem; }`
 	cs := styleFor(t, `<html><body><h1>x</h1></body></html>`, sheet, "h1")
@@ -21,9 +17,9 @@ func TestRemResolvesAgainstRootNotElement(t *testing.T) {
 			t.Errorf("%s = %v, want %v", name, got, want)
 		}
 	}
-	near("FontSize", cs.FontSize, 40)     // 2.5rem * 16
-	near("MarginTop", cs.MarginTop, 104)  // 6.5rem * 16
-	near("PaddingTop", cs.PaddingTop, 16) // 1rem * 16
+	near("FontSize", cs.FontSize, 40)
+	near("MarginTop", cs.MarginTop, 104)
+	near("PaddingTop", cs.PaddingTop, 16)
 }
 
 func TestRemUsesComputedRootFontSize(t *testing.T) {
@@ -41,7 +37,6 @@ func TestRemUsesComputedRootFontSize(t *testing.T) {
 	}
 }
 
-// em, by contrast, stays relative to the element's own font size.
 func TestEmStillResolvesAgainstElementFontSize(t *testing.T) {
 	sheet := `h1 { font-size: 40px; margin-top: 2em; }`
 	cs := styleFor(t, `<html><body><h1>x</h1></body></html>`, sheet, "h1")
@@ -53,8 +48,6 @@ func TestEmStillResolvesAgainstElementFontSize(t *testing.T) {
 	}
 }
 
-// TestRemBoxPropertiesUseComputedRootFontSize verifies that box model properties
-// (margin, padding, width, height, gap) properly resolve rem against the computed root font size.
 func TestRemBoxPropertiesUseComputedRootFontSize(t *testing.T) {
 	sheet := `
 		:root { font-size: 10px; }
@@ -75,15 +68,13 @@ func TestRemBoxPropertiesUseComputedRootFontSize(t *testing.T) {
 			t.Errorf("%s = %v, want %v", name, got, want)
 		}
 	}
-	near("MarginTop", cs.MarginTop, 20)     // 2rem * 10px
-	near("PaddingLeft", cs.PaddingLeft, 15) // 1.5rem * 10px
-	near("Width", cs.Width, 100)            // 10rem * 10px
-	near("RowGap", cs.RowGap, 10)           // 1rem * 10px
-	near("ColumnGap", cs.ColumnGap, 25)     // 2.5rem * 10px
+	near("MarginTop", cs.MarginTop, 20)
+	near("PaddingLeft", cs.PaddingLeft, 15)
+	near("Width", cs.Width, 100)
+	near("RowGap", cs.RowGap, 10)
+	near("ColumnGap", cs.ColumnGap, 25)
 }
 
-// TestCalcWithRemUsesComputedRootFontSize verifies that calc() and math functions
-// properly resolve rem units against the root element's font size.
 func TestCalcWithRemUsesComputedRootFontSize(t *testing.T) {
 	sheet := `
 		:root { font-size: 10px; }
@@ -103,12 +94,11 @@ func TestCalcWithRemUsesComputedRootFontSize(t *testing.T) {
 			t.Errorf("%s = %v, want %v", name, got, want)
 		}
 	}
-	near("MarginTop", cs.MarginTop, 35)         // 2*10 + 15 = 35px
-	near("PaddingTop", cs.PaddingTop, 30)       // min(3*10, 50) = 30px
-	near("PaddingBottom", cs.PaddingBottom, 10) // max(1*10, 5) = 10px
+	near("MarginTop", cs.MarginTop, 35)
+	near("PaddingTop", cs.PaddingTop, 30)
+	near("PaddingBottom", cs.PaddingBottom, 10)
 }
 
-// TestTwoValueGapShorthand verifies row-gap and column-gap in 2-value gap shorthand.
 func TestTwoValueGapShorthand(t *testing.T) {
 	sheet := `div { gap: 12px 24px; }`
 	cs := styleFor(t, `<html><body><div>x</div></body></html>`, sheet, "div")

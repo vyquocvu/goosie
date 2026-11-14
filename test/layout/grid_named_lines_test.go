@@ -4,13 +4,6 @@ import (
 	"testing"
 )
 
-// TestGridNamedLinesPinItems guards custom-ident line placement: a "[name]"
-// group in the track list names the line before the next track, and
-// "start-name / end-name" resolves to those lines. Before line names existed
-// each "[...]" group parsed as a phantom auto track - shifting every column
-// after it - and every named placement fell back to a single auto-placed
-// cell, which is what scattered the named-lines section of the grid-complete
-// parity fixture (72.6% against Chromium).
 func TestGridNamedLinesPinItems(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; width: 760px; grid-template-columns: [sidebar-start] 200px [sidebar-end content-start] 1fr [content-end];">
@@ -39,10 +32,6 @@ func TestGridNamedLinesPinItems(t *testing.T) {
 	}
 }
 
-// TestGridNumericLinePlacementPinsItems guards the numbered form of the same
-// mechanism: "1 / 3" starts at line 1 and spans two tracks instead of taking
-// an auto-placed span of two. The explicit-placement parity section happened
-// to score 99.6% through placement luck; this pins the behavior directly.
 func TestGridNumericLinePlacementPinsItems(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; width: 800px; grid-template-columns: repeat(4, 1fr);">
@@ -55,8 +44,6 @@ func TestGridNumericLinePlacementPinsItems(t *testing.T) {
 	if len(divs) != 3 {
 		t.Fatalf("found %d divs, want 3 (container + 2 items)", len(divs))
 	}
-	// Source order is B then A, but line placement beats document order: A
-	// takes columns 1-2 of row 0 and B takes columns 3-4.
 	a, b := divs[2], divs[1]
 	if !almostEqual(a.X, 0) || !almostEqual(a.W, 400) {
 		t.Errorf("a = {X:%v W:%v}, want columns 1-2 (400px at X 0)", a.X, a.W)
@@ -69,8 +56,6 @@ func TestGridNumericLinePlacementPinsItems(t *testing.T) {
 	}
 }
 
-// TestGridNamedRowLines guards the row axis: named row lines pin the item's
-// row the same way column lines pin its column.
 func TestGridNamedRowLines(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: grid; width: 400px; grid-template-rows: [top-start] 60px [top-end bottom-start] 1fr [bottom-end];">

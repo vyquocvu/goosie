@@ -34,7 +34,6 @@ func TestPopoverTarget_ButtonClickTogglesPopover(t *testing.T) {
 		toggleEvents++
 	}, false)
 
-	// Click the button to open
 	bx, by := clickPoint(t, s, "btn")
 	if !s.ClickAt(bx, by) {
 		t.Fatal("expected ClickAt on button to return true")
@@ -47,7 +46,6 @@ func TestPopoverTarget_ButtonClickTogglesPopover(t *testing.T) {
 		t.Fatalf("expected 1 toggle event, got %d", toggleEvents)
 	}
 
-	// Click the button again to close
 	if !s.ClickAt(bx, by) {
 		t.Fatal("expected ClickAt on button to return true")
 	}
@@ -79,25 +77,21 @@ func TestPopoverTarget_ActionShowAndHide(t *testing.T) {
 	showX, showY := clickPoint(t, s, "showBtn")
 	hideX, hideY := clickPoint(t, s, "hideBtn")
 
-	// Click show button
 	s.ClickAt(showX, showY)
 	if !pop.IsPopoverOpen {
 		t.Fatal("expected popover to be open after show click")
 	}
 
-	// Click show button again (should stay open)
 	s.ClickAt(showX, showY)
 	if !pop.IsPopoverOpen {
 		t.Fatal("expected popover to remain open after redundant show click")
 	}
 
-	// Click hide button
 	s.ClickAt(hideX, hideY)
 	if pop.IsPopoverOpen {
 		t.Fatal("expected popover to be closed after hide click")
 	}
 
-	// Click hide button again (should stay closed)
 	s.ClickAt(hideX, hideY)
 	if pop.IsPopoverOpen {
 		t.Fatal("expected popover to remain closed after redundant hide click")
@@ -122,13 +116,11 @@ func TestPopover_LightDismissOnClickOutside(t *testing.T) {
 	pop := s.Doc.ElementByID("pop")
 	btnX, btnY := clickPoint(t, s, "btn")
 
-	// Open popover via button
 	s.ClickAt(btnX, btnY)
 	if !pop.IsPopoverOpen {
 		t.Fatal("expected popover to be open")
 	}
 
-	// Click on outside area
 	outX, outY := clickPoint(t, s, "outside")
 	s.ClickAt(outX, outY)
 
@@ -156,7 +148,6 @@ func TestPopover_EscapeKeyDismissesPopover(t *testing.T) {
 		t.Fatal("expected popover to be open")
 	}
 
-	// Press Escape key
 	s.PressKey("Escape", false, false, false, false)
 
 	if pop.IsPopoverOpen {
@@ -181,18 +172,15 @@ func TestPopover_EscapeOrderWithModalDialog(t *testing.T) {
 	dlg := s.Doc.ElementByID("dlg")
 	pop := s.Doc.ElementByID("pop")
 
-	// Open dialog modally
 	dlg.SetAttribute("open", "")
 	dlg.IsModal = true
 
-	// Open popover
 	s.ShowPopover(pop)
 
 	if !pop.IsPopoverOpen || !dlg.HasAttribute("open") {
 		t.Fatal("expected both dialog and popover to be open")
 	}
 
-	// First Escape: closes the topmost auto popover, dialog remains open
 	s.PressKey("Escape", false, false, false, false)
 	if pop.IsPopoverOpen {
 		t.Fatal("expected popover to be closed on first Escape")
@@ -201,7 +189,6 @@ func TestPopover_EscapeOrderWithModalDialog(t *testing.T) {
 		t.Fatal("expected dialog to remain open after popover is closed on first Escape")
 	}
 
-	// Second Escape: closes the modal dialog
 	s.PressKey("Escape", false, false, false, false)
 	if dlg.HasAttribute("open") {
 		t.Fatal("expected modal dialog to close on second Escape")

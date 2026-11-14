@@ -17,13 +17,11 @@ func TestRefreshScrollOnlyIsNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Scroll-only plan should be a no-op.
 	plan := engine.Plan{
 		Viewport: frame.Viewport{Offset: frame.Point{Y: 100}, Size: frame.Size{W: 512, H: 512}},
 		Reasons:  engine.Scroll,
 	}
 
-	// Capture the original arena pointer to verify it's unchanged.
 	origArena := sess.Arena
 
 	done := sess.Refresh(plan, nil, 512)

@@ -6,25 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// The radial-gradient header: ending shape, size keyword and position. All of
-// it is measured, not recalled: scripts/verify-radialgrad-geometry.js prints
-// Chromium 1.63 on this host (2026-11-06) answering
-//
-//	SYNTAX circle-default         kept=YES computed=radial-gradient(circle, …)
-//	SYNTAX circle-closest-side    kept=YES computed=radial-gradient(circle closest-side at 25% 25%, …)
-//	SYNTAX circle-farthest-side   kept=YES computed=radial-gradient(circle farthest-side at 25% 25%, …)
-//	SYNTAX circle-closest-corner  kept=YES computed=radial-gradient(circle closest-corner at 25% 25%, …)
-//	SYNTAX ellipse-default        kept=YES computed=radial-gradient(…) - shape and size default away
-//	SYNTAX ellipse-closest-side   kept=YES computed=radial-gradient(closest-side, …) - bare size without a shape
-//	SYNTAX px-position            kept=YES computed=radial-gradient(circle at 30px 30px, …)
-//	SYNTAX header-invalid         kept=DROPPED computed=none - an unknown token drops the declaration
-//	SYNTAX explicit-radii         kept=YES computed=radial-gradient(100px 50px, …) - recorded as a residual, not built
-//
-// Goosie matched whole header arguments instead of their space-separated
-// tokens, so every form but a bare "circle" or "ellipse" failed the stop
-// reader and dropped the whole gradient: `circle closest-side at 25% 25%`
-// painted nothing at all, not the wrong shape.
-
 func radialOf(t *testing.T, css string) style.RadialGradient {
 	t.Helper()
 	s := styleFor(t, `<html><body><div>x</div></body></html>`, css, "div")
@@ -81,10 +62,6 @@ func TestRadialHeaderParsesShapeSizeAndPosition(t *testing.T) {
 	}
 }
 
-// A centre component written as a <length> is a distance from the edge, not a
-// fraction: the box it divides by does not exist until layout, so it rides the
-// PxSet pair exactly the way length stop positions do.
-//
 // qc:BR-074
 func TestRadialHeaderLengthPositionRidesUnresolved(t *testing.T) {
 	g := radialOf(t, `div { background: radial-gradient(circle at 30px 30px,#f00,#00f); }`)
@@ -97,8 +74,6 @@ func TestRadialHeaderLengthPositionRidesUnresolved(t *testing.T) {
 	}
 }
 
-// One percent and one length can share a position, each on its own axis.
-//
 // qc:BR-074
 func TestRadialHeaderMixedPositionComponents(t *testing.T) {
 	g := radialOf(t, `div { background: radial-gradient(circle at 25% 40px,#f00,#00f); }`)
@@ -111,9 +86,6 @@ func TestRadialHeaderMixedPositionComponents(t *testing.T) {
 	}
 }
 
-// An unknown header token drops the declaration, the same answer Chromium
-// gives: kept=DROPPED computed=none.
-//
 // qc:BR-074
 func TestRadialHeaderInvalidTokenDropsTheGradient(t *testing.T) {
 	g := radialOf(t, `div { background: radial-gradient(circle nonsense,#f00,#00f); }`)

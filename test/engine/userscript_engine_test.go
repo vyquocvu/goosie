@@ -100,7 +100,7 @@ var flag = "untouched";
 		Name:    "Disabled Script",
 		RunAt:   userscript.RunAtDocumentEnd,
 		Code:    `window.flag = "modified";`,
-		Enabled: false, // Disabled!
+		Enabled: false,
 	}
 
 	sess, err := engine.NewSession(html, nil, 800,

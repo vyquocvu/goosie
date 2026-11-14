@@ -21,9 +21,6 @@ func session(t *testing.T, html string, viewportW float32) *layout.Arena {
 	return sessionH(t, html, viewportW, 0)
 }
 
-// sessionH lays a document out in a viewport of the given size. The height is
-// what a percentage height on the root element resolves against; pass 0 when no
-// viewport is modelled, which makes a percentage height behave as auto.
 func sessionH(t *testing.T, html string, viewportW, viewportH float32) *layout.Arena {
 	t.Helper()
 	doc := domtest.Parse(html)
@@ -69,7 +66,6 @@ func TestBlockLayout(t *testing.T) {
 	if div.H != 100 {
 		t.Errorf("div.H = %v, want 100", div.H)
 	}
-	// Div should be positioned inside body's padding
 	if div.X != 10 {
 		t.Errorf("div.X = %v, want 10", div.X)
 	}
@@ -91,7 +87,6 @@ func TestAutoWidth(t *testing.T) {
 	if div == nil {
 		t.Fatal("div not found")
 	}
-	// Div auto width should fill body's content area: 800 - 10 - 10 = 780
 	if div.W != 780 {
 		t.Errorf("div.W = %v, want 780 (auto width in 800px viewport with 10px padding)", div.W)
 	}
@@ -106,8 +101,6 @@ func TestAutoHeight(t *testing.T) {
 	if body == nil {
 		t.Fatal("body not found")
 	}
-	// H is the content height: the child's 100px, with the padding added back by
-	// BorderRect at the edges.
 	if body.H != 100 {
 		t.Errorf("body.H = %v, want 100 (auto content height from children)", body.H)
 	}
@@ -128,8 +121,6 @@ func TestNestedPositioning(t *testing.T) {
 	}
 	inner := divs[2]
 
-	// The innermost div must sit at the accumulated content origin of its
-	// ancestors: outer padding 10 + middle padding 5.
 	if inner.X != 15 {
 		t.Errorf("inner.X = %v, want 15", inner.X)
 	}
@@ -150,23 +141,15 @@ func TestMarginCollapsing(t *testing.T) {
 	}
 	div1, div2 := divs[0], divs[1]
 
-	// First div: margin-top 20px, positioned inside body (no padding)
 	if div1.Y != 20 {
 		t.Errorf("div1.Y = %v, want 20", div1.Y)
 	}
 
-	// Second div: margins collapse between siblings.
-	// div1 bottom margin = 20, div2 top margin = 30, collapsed = max(20, 30) = 30
-	// div2.Y = div1.Y + div1.H + collapsed margin = 20 + 50 + 30 = 100
 	if div2.Y != 100 {
 		t.Errorf("div2.Y = %v, want 100 (margin collapsing)", div2.Y)
 	}
 }
 
-// A wrapper with no border or padding does not push the margins of its own
-// children apart: they meet the wrapper's siblings as if the wrapper were not
-// there, so the largest of them wins once and the wrapper's box starts where that
-// collapsed margin ends.
 func TestMarginCollapsingThroughAWrapper(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <p style="margin: 0 0 16px; height: 18px">one</p>
@@ -187,18 +170,12 @@ func TestMarginCollapsingThroughAWrapper(t *testing.T) {
 		t.Fatal("section or h3 not found")
 	}
 
-	// The heading's 20px collapses with the first paragraph's 16px across the
-	// section's top edge, so the section sits 20px below the paragraph rather
-	// than 36px, and the heading is flush inside it.
 	if want := float32(38); !almostEqual(h3.Y, want) {
 		t.Errorf("h3.Y = %v, want %v", h3.Y, want)
 	}
 	if want := float32(38); !almostEqual(section.Y, want) {
 		t.Errorf("section.Y = %v, want %v", section.Y, want)
 	}
-	// The last paragraph's bottom margin carries out of the section instead of
-	// adding to its height, and then collapses with the next sibling's zero top
-	// margin: 16px, not 16px of height plus 16px of gap.
 	if want := float32(59); !almostEqual(section.H, want) {
 		t.Errorf("section.H = %v, want %v", section.H, want)
 	}
@@ -207,9 +184,6 @@ func TestMarginCollapsingThroughAWrapper(t *testing.T) {
 	}
 }
 
-// TestBlockInInline covers the block child of an inline box. CSS splits the
-// inline box around it, so the content below takes a line of its own rather than
-// vanishing into the parent's inline run.
 func TestBlockInInline(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div>
@@ -232,8 +206,6 @@ func TestBlockInInline(t *testing.T) {
 	if nested == nil {
 		t.Fatal("the paragraph inside the span was never placed below the first one")
 	}
-	// An inline box carrying block content fills the line like the anonymous
-	// block CSS splits it into.
 	if want := float32(800); !almostEqual(nested.W, want) {
 		t.Errorf("nested p.W = %v, want %v", nested.W, want)
 	}
@@ -249,9 +221,6 @@ func TestBlockInInline(t *testing.T) {
 	}
 }
 
-// TestFixedPositioning covers the viewport-side of the positioning pass: a fixed
-// box is out of the flow, and its insets resolve against the viewport rect the
-// pass is handed rather than the containing block of the nearest ancestor.
 func TestFixedPositioning(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="position: fixed; top: 0; left: 0; right: 0; height: 40px">bar</div>
@@ -275,9 +244,6 @@ func TestFixedPositioning(t *testing.T) {
 	if want := float32(40); !almostEqual(bar.H, want) {
 		t.Errorf("bar.H = %v, want %v", bar.H, want)
 	}
-	// The bar takes no part in the flow, so the paragraph is placed as if it were
-	// the first child: 16px down, which is its own margin riding out through body
-	// and html, not 40px of bar plus that margin.
 	p := findByTag(arena, "p")
 	if p == nil {
 		t.Fatal("p not found")
@@ -288,16 +254,11 @@ func TestFixedPositioning(t *testing.T) {
 	if want := float32(100); !almostEqual(foot.W, want) {
 		t.Errorf("foot.W = %v, want %v", foot.W, want)
 	}
-	// `bottom` needs a viewport height: the box's bottom edge lands on the
-	// viewport's.
 	if want := float32(600); !almostEqual(foot.Y+foot.H, want) {
 		t.Errorf("foot bottom edge = %v, want %v", foot.Y+foot.H, want)
 	}
 }
 
-// collectArenaTexts walks the arena kid chain from id and returns every text
-// payload still reachable through FirstKid/NextSibling links. Paint walks the
-// same links, so this is exactly what the display list will contain.
 func collectArenaTexts(a *layout.Arena, id layout.ObjectID, out *[]string) {
 	for kid := id; kid != 0; kid = a.Get(kid).NextSibling {
 		obj := a.Get(kid)
@@ -320,9 +281,6 @@ func containsStr(list []string, want string) bool {
 }
 
 func TestFlexRow(t *testing.T) {
-	// The gate fixture's row shape: a fixed-height flex container with three
-	// equal cells padded 0 8px. Cells must sit side by side, one third of the
-	// row each, and stretch to the row's content height.
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; height: 40px;">
   <div style="flex: 1; padding: 0 8px;"></div>
@@ -347,15 +305,12 @@ func TestFlexRow(t *testing.T) {
 	if !almostEqual(c3.X, 2*share) {
 		t.Errorf("c3.X = %v, want %v", c3.X, 2*share)
 	}
-	// Content width is the share minus the 8px padding on each side.
 	if !almostEqual(c1.W, share-16) {
 		t.Errorf("c1.W = %v, want %v", c1.W, share-16)
 	}
-	// All cells start at the row's content top.
 	if c1.Y != 0 || c2.Y != 0 || c3.Y != 0 {
 		t.Errorf("cells Y = %v %v %v, want 0 0 0", c1.Y, c2.Y, c3.Y)
 	}
-	// align-items: stretch — auto-height cells fill the row's content height.
 	if c1.H != 40 || c2.H != 40 || c3.H != 40 {
 		t.Errorf("cells H = %v %v %v, want 40 (stretched)", c1.H, c2.H, c3.H)
 	}
@@ -365,10 +320,6 @@ func TestFlexRow(t *testing.T) {
 }
 
 func TestFlexRowItemWithBlockChild(t *testing.T) {
-	// A flex item whose content is a block child - a nav cell wrapping a
-	// block-level link - has no inline extent of its own. It must still size to
-	// its block content and sit in its justify-content slot, not collapse to
-	// zero width and pile onto its siblings.
 	arena := session(t, `<html><body style="margin: 0;">
 <ul style="display: flex; justify-content: space-between; width: 600px; margin: 0; padding: 0; list-style: none;">
   <li><span style="display: block;">Alpha</span></li>
@@ -390,15 +341,11 @@ func TestFlexRowItemWithBlockChild(t *testing.T) {
 	if !(first.X < mid.X && mid.X < last.X) {
 		t.Errorf("items not spread: X = %v %v %v", first.X, mid.X, last.X)
 	}
-	// space-between pins the last item's right edge to the container's.
 	if right := last.X + last.W; right < 560 {
 		t.Errorf("last item right edge = %v, want near 600 (space-between)", right)
 	}
 }
 
-// findWordObject returns the inline-pass word object whose text payload is
-// word, or nil. Word objects exist only after the inline pass splits a text
-// node, and paint walks exactly these objects to emit text commands.
 func findWordObject(a *layout.Arena, word string) *layout.Object {
 	for i := range a.Objects {
 		obj := &a.Objects[i]
@@ -426,9 +373,6 @@ func TestLineHeightCentersText(t *testing.T) {
 		t.Fatal("word objects not found")
 	}
 
-	// Half-leading: the run's content area is the face's ascent plus descent,
-	// 16px for a 16px em with no metrics provider, and it centers in the 40px
-	// line box.
 	wantY := (float32(40) - 16) / 2
 	if !almostEqual(hello.Y, wantY) {
 		t.Errorf("hello.Y = %v, want %v (centered in the 40px line)", hello.Y, wantY)
@@ -436,9 +380,6 @@ func TestLineHeightCentersText(t *testing.T) {
 	if !almostEqual(divs[0].H, 40) {
 		t.Errorf("div.H = %v, want 40 (one line of the declared line-height)", divs[0].H)
 	}
-	// The second div sits below the first (which has height 40), so its content
-	// top is at Y=40. Its line box is the face's own normal height, so the
-	// content area drops by half the surplus leading.
 	if !almostEqual(plain.Y, 40+(19.2-16)/2) {
 		t.Errorf("plain.Y = %v, want %v (half-leading below the 40px first div)", plain.Y, 40+(19.2-16)/2)
 	}
@@ -460,15 +401,11 @@ func TestInlineWordRelink(t *testing.T) {
 	var texts []string
 	collectArenaTexts(arena, div.FirstKid, &texts)
 
-	// Every word of every text node must remain reachable after the inline
-	// pass splits text nodes into word objects, including words that come
-	// after an inline element sibling.
 	for _, want := range []string{"alpha", "beta", "gamma", "delta"} {
 		if !containsStr(texts, want) {
 			t.Errorf("word %q not reachable from div kid chain; got %v", want, texts)
 		}
 	}
-	// The original text nodes must have been replaced by words, not kept.
 	for _, got := range texts {
 		if got == "alpha beta " || got == " delta" {
 			t.Errorf("original text node %q still in the chain", got)
@@ -477,9 +414,6 @@ func TestInlineWordRelink(t *testing.T) {
 }
 
 func TestInlineWordRelinkLarge(t *testing.T) {
-	// Many text nodes spread over enough words that inlineInto's Alloc calls
-	// force the arena slice to grow partway through, which invalidates any
-	// object pointer held across an Alloc.
 	var sb strings.Builder
 	for i := 0; i < 40; i++ {
 		sb.WriteString("<b>x</b> lorem ipsum ")
@@ -530,9 +464,6 @@ func TestMarginAutoCentering(t *testing.T) {
 	}
 }
 
-// A block whose width comes from max-width rather than width still centres:
-// §10.4 re-solves the margin equation with the clamped width, which is what
-// `max-width: 60rem; margin: 0 auto` - the usual centered page column - needs.
 func TestMarginAutoCenteringAfterMaxWidthClamp(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -578,8 +509,6 @@ func TestMarginAutoWithRoomToSpareStaysAtTheStart(t *testing.T) {
 	}
 }
 
-// Closed details content keeps layout boxes for CSSOM geometry but is hidden by
-// the UA rule and the paint path.
 func TestDetailsClosedContentKeepsHiddenLayoutBoxes(t *testing.T) {
 	hidden := session(t, `<html><body style="margin:0">
 <details><summary>more</summary><ul><li>a</li></ul></details>
@@ -600,8 +529,6 @@ func TestDetailsClosedContentKeepsHiddenLayoutBoxes(t *testing.T) {
 	}
 }
 
-// An inline-block sitting on a line of text shrinks to its content rather than
-// filling the line, so the siblings after it stay on the same row.
 func TestInlineBlockOnALineShrinksToContent(t *testing.T) {
 	arena := session(t, `<html><body style="margin:0">
 <div style="font-size: 16px">title<span style="display: inline-block"><b>one</b> <b>two</b></span>tail</div>
@@ -654,7 +581,6 @@ func TestPseudoElementLayout(t *testing.T) {
 
 	arena := layout.Build(doc, styles, pseudoStyles)
 
-	// Run layout passes
 	layout.Block(arena, layout.ObjectID(1), 800, 600)
 	layout.Inline(arena, layout.ObjectID(1))
 
@@ -667,7 +593,6 @@ func TestPseudoElementLayout(t *testing.T) {
 		}
 	}
 
-	// Find the div
 	div := findByTag(arena, "div")
 	if div == nil {
 		t.Fatal("div not found")
@@ -675,18 +600,15 @@ func TestPseudoElementLayout(t *testing.T) {
 
 	t.Logf("div obj: FirstKid=%v LastKid=%v", div.FirstKid, div.LastKid)
 
-	// Walk all children of div
 	for kid := div.FirstKid; kid != 0; kid = arena.Get(kid).NextSibling {
 		k := arena.Get(kid)
 		t.Logf("  child obj[%d]: node=%v type=%d content=%q X=%v Y=%v W=%v H=%v", kid, k.Node.ID, k.Node.Type, k.Node.DataContent, k.X, k.Y, k.W, k.H)
 	}
 
-	// Check that the div has children (the pseudo-element should be first child)
 	if div.FirstKid == 0 {
 		t.Fatal("div has no children, pseudo-element not injected")
 	}
 
-	// The first child should be the ::before pseudo-element
 	firstKid := arena.Get(div.FirstKid)
 	if firstKid.Node == nil || firstKid.Node.Type != 2 {
 		t.Fatalf("first child is not a text node: type=%d", firstKid.Node.Type)

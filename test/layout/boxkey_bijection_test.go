@@ -11,13 +11,8 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// longText is ~200 words, enough to wrap many lines at the 800px viewport so the
-// inline pass allocates many word boxes.
 var longText = strings.Repeat("alpha bravo charlie delta echo foxtrot golf hotel india juliet ", 20)
 
-// buildBijectionArena lays a fragment out through the full pipeline (Build,
-// Block, Inline, Positioning) so generated word and anonymous boxes exist. The
-// css argument is injected as a <style> sheet; pass "" for none.
 func buildBijectionArena(t *testing.T, html, cssText string) *layout.Arena {
 	t.Helper()
 	doc := domtest.Parse(`<html><head><style>` + cssText + `</style></head><body>` + html + `</body></html>`)
@@ -41,7 +36,6 @@ func buildBijectionArena(t *testing.T, html, cssText string) *layout.Arena {
 	return arena
 }
 
-// keyedBoxes walks the arena and returns every object that carries a non-zero Key.
 func keyedBoxes(a *layout.Arena) []layout.ObjectID {
 	var ids []layout.ObjectID
 	for i := 1; i < len(a.Objects); i++ {

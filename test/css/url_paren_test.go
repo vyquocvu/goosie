@@ -6,20 +6,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestParseBorderImageSourceURLParen is the per-site INT oracle for
-// internal/css/border_image.go's borderImageURL (§2.3 row 2). border-image-source
-// is parsed by the same second-pass url() reader shape that cut a payload at the
-// first ')': strings.IndexByte(rest, ')') followed by a quote trim. A quoted
-// payload containing ')' must reach BorderImage.Source whole, the
-// parenthesis-free and unquoted forms must keep working, and the malformed forms
-// must fail closed.
 // qc:BR-212
 func TestParseBorderImageSourceURLParen(t *testing.T) {
 	const svgRGB = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><rect fill='rgb(0,0,255)'/></svg>`
 	const svgHash = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><rect fill='%230000ff'/></svg>`
-	// Stray single quotes inside a single-quoted payload: the lenient form the
-	// engine accepted before the shared scanner landed, and the one
-	// test/engine/vector_bg_test.go depends on for backgrounds.
 	const svgStray = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect fill='rgb(0,0,255)'/%3E%3C/svg%3E`
 	cases := []struct {
 		name  string
@@ -43,9 +33,6 @@ func TestParseBorderImageSourceURLParen(t *testing.T) {
 		{"empty url()", `url()`, ""},
 		{"empty value", ``, ""},
 		{"unterminated quote fails closed", `url("abc`, ""},
-		// A `\X` pair is an escape, not a broken token, and the URL a reader
-		// fetches is the decoded one (GOOSIE-CSSURLESCAPE-001). Measured in
-		// Chromium 2026-11-12; test/css/url_escape_test.go holds the table.
 		{"escaped quote decodes", `url("a\"b")`, `a"b`},
 		{"escaped paren in an unquoted token decodes", `url(a\)b.png)`, "a)b.png"},
 		{"hex escape decodes", `url("a\41 b.png")`, "aAb.png"},
@@ -59,11 +46,6 @@ func TestParseBorderImageSourceURLParen(t *testing.T) {
 	}
 }
 
-// TestBorderImageShorthandURLParen drives the border-image shorthand splitter,
-// which splits on whitespace before it knows where the url() token ends. Both
-// payload shapes matter: with the inner ')' glued to the url close, and with a
-// space after it — the second one used to end the source at the interior ')'
-// and pour the rest of the URI into the slice section.
 // qc:BR-212
 func TestBorderImageShorthandURLParen(t *testing.T) {
 	cases := []struct{ name, svg string }{

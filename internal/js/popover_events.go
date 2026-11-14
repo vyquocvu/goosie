@@ -6,8 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// PopoverInvoker returns the current invoker associated with an open popover.
-// Layout uses this relationship as the implicit anchor for position-area:auto.
 func (r *Runtime) PopoverInvoker(node *dom.Node) *dom.Node {
 	if r == nil || node == nil || !node.IsPopoverOpen || r.popoverInvokers == nil {
 		return nil
@@ -48,10 +46,6 @@ func (r *Runtime) isFullyActiveDocument(doc *dom.Document) bool {
 	if r == nil {
 		return false
 	}
-	// Documents with no browsing context (for example, synthetic documents
-	// created by DOM APIs) are not made inactive by iframe lifecycle changes.
-	// Only enforce the fully-active rule for this runtime's document or a
-	// document tracked as an iframe browsing context.
 	if doc == nil {
 		return true
 	}
@@ -75,8 +69,6 @@ func (r *Runtime) isFullyActiveBrowsingContext() bool {
 	if r == nil {
 		return false
 	}
-	// Top-level realms without a Document, including dedicated and shared
-	// workers, are not nested browsing contexts and remain active.
 	if r.iframeParent == nil {
 		return true
 	}
@@ -373,8 +365,6 @@ func (r *Runtime) focusAutofocusInPopover(popover *dom.Node) {
 	}
 }
 
-// closePopoverSubtree removes disconnected popovers from the open state
-// without firing beforetoggle. The follow-up toggle event remains queued.
 func (r *Runtime) closePopoverSubtree(root *dom.Node) {
 	if root == nil {
 		return
@@ -411,8 +401,6 @@ func (r *Runtime) handleTestDriverPointerUp(target *dom.Node, pointerID string, 
 	down := r.testDriverPointerDown[pointerID]
 	delete(r.testDriverPointerDown, pointerID)
 	if down == nil && len(r.testDriverPointerDown) == 1 {
-		// WebDriver creates a fresh pointer source identifier for separate
-		// Actions objects. Preserve the single held pointer across that boundary.
 		for id, pendingDown := range r.testDriverPointerDown {
 			down = pendingDown
 			delete(r.testDriverPointerDown, id)

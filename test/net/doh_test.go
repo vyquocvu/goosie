@@ -48,7 +48,6 @@ func TestDoHResolverSuccessAndCache(t *testing.T) {
 	resolver := transport.NewDoHResolver(ts.URL)
 	ctx := context.Background()
 
-	// 1. Initial resolution
 	ips, err := resolver.LookupIP(ctx, "example.com")
 	if err != nil {
 		t.Fatalf("LookupIP failed: %v", err)
@@ -61,7 +60,6 @@ func TestDoHResolverSuccessAndCache(t *testing.T) {
 		t.Fatalf("queryCount = %d, want 1", count)
 	}
 
-	// 2. Second resolution should hit cache and NOT issue HTTP query
 	ipsCached, err := resolver.LookupIP(ctx, "example.com")
 	if err != nil {
 		t.Fatalf("LookupIP cached failed: %v", err)
@@ -79,13 +77,11 @@ func TestDoHLiteralIP(t *testing.T) {
 	resolver := transport.NewDoHResolver("http://invalid.endpoint")
 	ctx := context.Background()
 
-	// Literal IPv4
 	ips, err := resolver.LookupIP(ctx, "127.0.0.1")
 	if err != nil || len(ips) != 1 || ips[0].String() != "127.0.0.1" {
 		t.Errorf("literal IPv4 lookup failed: %v, %v", ips, err)
 	}
 
-	// Literal IPv6
 	ips6, err := resolver.LookupIP(ctx, "::1")
 	if err != nil || len(ips6) != 1 || ips6[0].String() != "::1" {
 		t.Errorf("literal IPv6 lookup failed: %v, %v", ips6, err)
@@ -95,7 +91,7 @@ func TestDoHLiteralIP(t *testing.T) {
 func TestDoHNXDOMAIN(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]interface{}{
-			"Status": 3, // NXDOMAIN
+			"Status": 3,
 		}
 		w.Header().Set("Content-Type", "application/dns-json")
 		_ = json.NewEncoder(w).Encode(resp)

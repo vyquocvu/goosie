@@ -7,12 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// Chromium 1.63 measured (scripts/verify-br087-text-parity.js, 2026-11-04):
-// "a" is 8.906px wide and "a" plus any of these controls is still 8.906px, and
-// a lone control occupies 0px. A default-ignorable code point therefore costs
-// no advance and carries no ink, even on a host whose faces do map it - which
-// is exactly where Goosie used to differ: the host drew U+200D and U+200F as
-// phantom boxes and charged U+00AD a 5.328px hyphen.
 // qc:BR-087
 func TestDefaultIgnorableControlsCostNothingAndInkNothing(t *testing.T) {
 	f, err := raster.NewFonts()
@@ -20,14 +14,14 @@ func TestDefaultIgnorableControlsCostNothingAndInkNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range []rune{
-		'\u00AD', // soft hyphen
-		'\u200B', // zero-width space
-		'\u200C', // zero-width non-joiner
-		'\u200D', // zero-width joiner
-		'\u200E', // left-to-right mark
-		'\u200F', // right-to-left mark
-		'\uFEFF', // zero-width no-break space (BOM)
-		'\uFE0F', // variation selector-16
+		'\u00AD',
+		'\u200B',
+		'\u200C',
+		'\u200D',
+		'\u200E',
+		'\u200F',
+		'\uFEFF',
+		'\uFE0F',
 	} {
 		for _, slot := range fontSlots {
 			if adv := f.GlyphAdvanceFixed(16, r, slot); adv != 0 {
@@ -47,8 +41,6 @@ func TestDefaultIgnorableControlsCostNothingAndInkNothing(t *testing.T) {
 	}
 }
 
-// Combining marks are the opposite case and must not be swept up by the rule:
-// Chromium advances them 0 yet inks the accent, so ế keeps its tone mark.
 // qc:BR-087
 func TestCombiningMarksStillInkAfterTheIgnorableRule(t *testing.T) {
 	f, err := raster.NewFonts()

@@ -4,11 +4,6 @@ import (
 	"testing"
 )
 
-// TestFlexColumnItemDoesNotDoubleShift guards the place pass of a column flex
-// container: each item's box and its inline descendants must advance by the
-// item's own main-axis extent, once. A declared-height item used to have its
-// box shifted twice (assigned an absolute Y and then shifted again by the same
-// delta), so the box landed roughly 2x too far down while its text stayed put.
 func TestFlexColumnItemDoesNotDoubleShift(t *testing.T) {
 	arena := session(t, `<html><body style="margin: 0;">
 <div style="display: flex; flex-direction: column; width: 278px;">
@@ -31,25 +26,14 @@ func TestFlexColumnItemDoesNotDoubleShift(t *testing.T) {
 	if h3 == nil || p == nil {
 		t.Fatal("missing h3 or p")
 	}
-	// The figure occupies [0, 200); the h3 box must start right after it.
 	if !almostEqual(h3.Y, 200) {
 		t.Errorf("h3.Y = %v, want 200 (must not double-shift below the figure)", h3.Y)
 	}
-	// The p follows the h3's own measured height, not the doubled figure span.
 	if !(p.Y >= h3.Y && p.Y < 260) {
 		t.Errorf("p.Y = %v, want just after h3 (in [%v, 260))", p.Y, h3.Y)
 	}
 }
 
-// TestFlexColumnCenteredItemSizesToItsContent covers the cross axis of a column
-// flex container. Only `align-items: stretch` fills the line, so a centered
-// item's width is its fit-content size: max-content clamped to the container.
-// Leaving auto-width items at the full container width - which the centre branch
-// skipped because it only ran for a declared width - made every centered block
-// span the container and pin its text to the start edge. Measured against
-// Chromium at a 400px container: "short" is 32px wide at X=184, a 120px child
-// makes its parent 120px wide at X=140, and text that overflows 400px keeps the
-// full width and wraps.
 func TestFlexColumnCenteredItemSizesToItsContent(t *testing.T) {
 	t.Run("text item takes its max-content width", func(t *testing.T) {
 		arena := session(t, `<html><body style="margin: 0;">

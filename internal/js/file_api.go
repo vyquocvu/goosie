@@ -52,17 +52,12 @@ type browserFile struct {
 	isFile       bool
 }
 
-// FileSelection is one file selected by an <input type="file"> at the moment a
-// submission is assembled.
 type FileSelection struct {
 	Name        string
 	ContentType string
 	Data        []byte
 }
 
-// SelectedFiles returns the files selected on a file input, in FileList order.
-// It returns nil for any other node. The data slice is shared with the live
-// File object and must be treated as read-only.
 func (r *Runtime) SelectedFiles(node *dom.Node) []FileSelection {
 	if node == nil || node.Data != "input" || !strings.EqualFold(node.GetAttribute("type"), "file") {
 		return nil
@@ -82,8 +77,6 @@ func (r *Runtime) SelectedFiles(node *dom.Node) []FileSelection {
 	return files
 }
 
-// SetSelectedFiles replaces the FileList of a file input with files chosen by
-// the host's picker. It reports whether node is a file control.
 func (r *Runtime) SetSelectedFiles(node *dom.Node, selections []FileSelection) bool {
 	if node == nil || node.Data != "input" || !strings.EqualFold(node.GetAttribute("type"), "file") {
 		return false
@@ -110,9 +103,6 @@ func (r *Runtime) SetSelectedFiles(node *dom.Node, selections []FileSelection) b
 	return true
 }
 
-// requestFilePicker records that script asked the host to open the picker for
-// this control. Only one request is kept: a picker is modal, so a newer request
-// replaces one that has not been serviced yet.
 func (r *Runtime) requestFilePicker(node *dom.Node) {
 	if node == nil {
 		return
@@ -122,8 +112,6 @@ func (r *Runtime) requestFilePicker(node *dom.Node) {
 	r.filePickerMu.Unlock()
 }
 
-// TakeFilePickerRequest returns and clears the control whose picker script
-// asked the host to open.
 func (r *Runtime) TakeFilePickerRequest() (*dom.Node, bool) {
 	r.filePickerMu.Lock()
 	node := r.filePickerRequest

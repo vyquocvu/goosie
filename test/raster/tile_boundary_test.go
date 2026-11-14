@@ -8,10 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// A glyph whose ink straddles a tile boundary must appear in both tiles. Tile
-// selection consults the command's bounds, so an under-reported run loses the
-// part of the glyph right of its origin pixel — the visible form of this bug
-// was an em dash rendered at half width.
 func TestRasterizeTileGlyphInkCrossingTileEdge(t *testing.T) {
 	f, g := mustFonts(t)
 	dl := build(t, paint.DisplayCmd{

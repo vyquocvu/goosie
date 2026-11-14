@@ -11,7 +11,6 @@ import (
 )
 
 func TestBuildContextMenuItems(t *testing.T) {
-	// 1. Link click context menu
 	items := BuildContextMenuItems("https://example.com/page", "", "", "", false, true, false)
 	hasOpenNewTab := false
 	hasCopyLink := false
@@ -27,7 +26,6 @@ func TestBuildContextMenuItems(t *testing.T) {
 		t.Fatalf("link context menu missing actions: %+v", items)
 	}
 
-	// 2. Image click context menu
 	imgItems := BuildContextMenuItems("", "https://example.com/logo.png", "", "", false, false, false)
 	hasOpenImgTab := false
 	hasCopyImg := false
@@ -43,7 +41,6 @@ func TestBuildContextMenuItems(t *testing.T) {
 		t.Fatalf("image context menu missing actions: %+v", imgItems)
 	}
 
-	// 3. Text selection context menu
 	selItems := BuildContextMenuItems("", "", "hello world", "", false, true, true)
 	hasCopy := false
 	hasSearch := false
@@ -59,7 +56,6 @@ func TestBuildContextMenuItems(t *testing.T) {
 		t.Fatalf("selection context menu missing actions: %+v", selItems)
 	}
 
-	// 4. Editable field context menu
 	editItems := BuildContextMenuItems("", "", "", "input text", true, true, false)
 	hasCut := false
 	hasPaste := false
@@ -103,38 +99,32 @@ func TestContextMenuGeometryAndHitTesting(t *testing.T) {
 		t.Fatalf("invalid menu rect: %v", rect)
 	}
 
-	// Hit Option 1
 	it, ok := cm.HitItem(frame.Point{X: 110, Y: 110}, scale)
 	if !ok || it.Action != "act1" {
 		t.Fatalf("hit item want act1, got ok=%v it=%+v", ok, it)
 	}
 
-	// Separator should not hit
 	_, okSep := cm.HitItem(frame.Point{X: 110, Y: cm.Y + int32(menuPadding*scale) + int32(menuItemHeight*scale) + 2}, scale)
 	if okSep {
 		t.Fatal("separator should not be clickable")
 	}
 
-	// Disabled item should not hit
 	disY := cm.Y + int32(menuPadding*scale) + int32(menuItemHeight*scale) + 6*scale + int32(menuItemHeight*scale) + 4
 	_, okDis := cm.HitItem(frame.Point{X: 110, Y: disY}, scale)
 	if okDis {
 		t.Fatal("disabled item should not be clickable")
 	}
 
-	// Outside should not hit
 	_, okOut := cm.HitItem(frame.Point{X: 50, Y: 50}, scale)
 	if okOut {
 		t.Fatal("outside point should not hit")
 	}
 
-	// Hover update
 	changed := cm.UpdateHover(frame.Point{X: 110, Y: 110}, scale)
 	if !changed || cm.Hover != 0 {
 		t.Fatalf("hover update failed, changed=%v hover=%d", changed, cm.Hover)
 	}
 
-	// Hide
 	cm.Hide()
 	if cm.Visible || !cm.Rect().Empty() {
 		t.Fatal("menu should be hidden")
@@ -157,7 +147,6 @@ func TestContextMenuRendering(t *testing.T) {
 	cm.Show(50, 50, 400, 400, items, 1)
 	cm.Draw(buf, fonts, 1)
 
-	// Context menu card background should be white/grey
 	px := buf.At(55, 55)
 	if px.A() != 255 {
 		t.Fatalf("context menu was not drawn on bitmap: pixel=%v", px)
@@ -187,7 +176,6 @@ func TestContextMenuInterception(t *testing.T) {
 		actionTriggered = action
 	}
 
-	// 1. Right click in content area opens context menu
 	rClick := surface.Event{
 		Kind:   surface.EvPointer,
 		Action: surface.PointerPress,
@@ -199,7 +187,6 @@ func TestContextMenuInterception(t *testing.T) {
 		t.Fatalf("right click did not trigger context menu: consumed=%v opened=%v visible=%v", consumed, contextMenuOpened, cw.contextMenu.Visible)
 	}
 
-	// 2. Click on item in context menu triggers action and hides menu
 	itemClick := surface.Event{
 		Kind:   surface.EvPointer,
 		Action: surface.PointerPress,
@@ -211,11 +198,10 @@ func TestContextMenuInterception(t *testing.T) {
 		t.Fatalf("context menu click item failed: consumed=%v action=%s visible=%v", consumedClick, actionTriggered, cw.contextMenu.Visible)
 	}
 
-	// 3. Re-open and press Escape to dismiss
 	cw.contextMenu.Show(100, 100, 800, 600, []ContextMenuItem{{Label: "Action 1", Action: "act1"}}, 1)
 	escKey := surface.Event{
 		Kind: surface.EvKey,
-		Key:  0x1B, // Escape
+		Key:  0x1B,
 	}
 	consumedEsc := cw.intercept(escKey)
 	if !consumedEsc || cw.contextMenu.Visible {

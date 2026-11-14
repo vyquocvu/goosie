@@ -58,14 +58,12 @@ type chromeWindow struct {
 	outBitmap         *frame.Bitmap
 	lastChromeH       int32
 	fonts             *raster.Fonts
-	hover             surface.Cursor // last shape sent to the platform, for change detection
+	hover             surface.Cursor
 
-	// Bookmarks bar
 	bookmarks        *bookmarks.Store
 	showBookmarksBar bool
 	hoverBookmark    int
 
-	// Context menu
 	contextMenu             *ContextMenu
 	mainMenu                *ContextMenu
 	onContextMenu           func(contentX, contentY, winX, winY int32)
@@ -75,52 +73,26 @@ type chromeWindow struct {
 	onAccessibilitySetValue func(contentX, contentY int32, value string) bool
 	onAccessibilityChanged  func()
 
-	// Full screen mode & sizing
-	fullscreen bool
-	// extentMu guards the presented window geometry the pump goroutine reads
-	// (menu clamping, bookmark pills, content resize) while the surface loop
-	// writes it in Present. A bitmap's internals are immutable once constructed,
-	// so only the last-presented size and the bitmap pointers are shared.
+	fullscreen          bool
 	extentMu            sync.Mutex
 	lastWinW            int32
 	lastWinH            int32
 	onFullscreenChanged func(fullscreen bool)
 	onDeviceEmulation   func()
 
-	// pressTab/pressX/pressing track a press that may become a tab drag.
-	// Pump-thread only, like everything else in intercept.
 	pressTab uint64
 	pressX   int32
 	pressing bool
 
-	// tickInterval paces the onTick hook (the host's JS and media pumps); zero
-	// disables it, which keeps every literal construction (tests especially)
-	// exactly as before. Both are read by the pump under tickMu, because the host
-	// installs them after constructing the window.
 	tickMu       sync.Mutex
 	tickInterval time.Duration
 	onTick       func()
 
-	// onMediaControl is consulted on a left press before links and focus, so a
-	// click on a video's painted controls reaches the player instead of starting a
-	// text selection over it. It reports whether it handled the press.
 	onMediaControl func(contentX, contentY int32) bool
 
-	// filePicker overrides the platform window's picker. Tests install a fake
-	// here; production leaves it nil and the embedded window's capability is
-	// used when it has one.
 	filePicker platform.FilePicker
 }
 
-// setTick installs the host's per-vsync hook. It is safe after construction,
-// which is how the host wires it: the pump reads the configuration each time
-// around its loop rather than snapshotting it once at startup.
-//
-// Snapshotting was a race the pump usually lost by luck. The constructor starts
-// the pump, the host assigns the hook on the next line, and whichever ran first
-// decided whether the browser ever ticked at all — no timers, no fetch
-// completions, and no video frames. Reading under a mutex makes the order
-// irrelevant instead of fortunate.
 func (cw *chromeWindow) setTick(interval time.Duration, fn func()) {
 	cw.tickMu.Lock()
 	cw.tickInterval = interval
@@ -189,9 +161,6 @@ func (cw *chromeWindow) sc() int32 {
 	return cw.scale
 }
 
-// openMainMenu shows the chrome menu anchored below the menu button. The
-// overflow Back/Forward/Reload entries keep those actions reachable at narrow
-// widths where ComputeLayout collapses the standalone buttons into this menu.
 func (cw *chromeWindow) openMainMenu() {
 	sc := cw.sc()
 	w := cw.toolbar.BoundsWidth() / sc
@@ -213,10 +182,6 @@ func (cw *chromeWindow) openMainMenu() {
 	cw.mainMenu.Show(x, y, maxW, maxH, items, sc)
 }
 
-// ChooseFiles forwards the optional file-picker capability of the platform
-// window. chromeWindow embeds surface.Window, and an interface method is not
-// promoted from the dynamic value, so the capability has to be forwarded by
-// name for framePath's type assertion to see it.
 func (cw *chromeWindow) ChooseFiles(accept string, multiple bool) ([]string, bool, error) {
 	if cw.filePicker != nil {
 		return cw.filePicker.ChooseFiles(accept, multiple)
@@ -227,9 +192,6 @@ func (cw *chromeWindow) ChooseFiles(accept string, multiple bool) ([]string, boo
 	return nil, false, nil
 }
 
-// SetAccessibility preserves the document tree while adding the browser's
-// own tabs and toolbar controls. chromeWindow embeds surface.Window, which
-// otherwise hides optional capabilities from framePath's type assertion.
 func (cw *chromeWindow) SetAccessibility(nodes []ax.Node) {
 	aw, ok := cw.Window.(surface.AccessibilityWindow)
 	if !ok {
@@ -358,9 +320,6 @@ func (cw *chromeWindow) accessibilityChrome() []ax.Node {
 		address.Focused = addressFocused
 		toolChildren = append(toolChildren, address)
 	}
-	// The transient zoom badge is readable here only because the toolbar hands
-	// back the same rect and label the address bar paints, and reports it hidden
-	// by the same predicate: no node exists unless the pixels show the badge.
 	if zoomValue, badgeRect, shown := cw.toolbar.ZoomBadge(width); shown {
 		appendTool(ax.RoleMeter, "goosie.zoom", "Zoom level", zoomValue, badgeRect, false, false)
 	}
@@ -437,9 +396,6 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	}
 
 	cw.chromeBitmap.FillRect(frame.Rect4(0, 0, int32(cw.chromeBitmap.W), chromeH), frame.RGB(255, 255, 255), nil)
-	// Draw and hit-testing share one clamped strip offset: TabScrollFor keeps
-	// the value inside the legal range for the painted width, so a resize
-	// cannot strand the strip past its content between wheel events.
 	n := int32(cw.tabMgr.Count())
 	stripW := int32(cw.chromeBitmap.W) / cw.sc()
 	stripOff := cw.tabMgr.TabScroll()
@@ -452,11 +408,6 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 		cw.drawBookmarksBar(cw.chromeBitmap)
 	}
 
-	// The loop's backing store is the content viewport, so buf is window-minus-
-	// chrome tall. The window surface is the whole window, so the presented
-	// bitmap has to carry the chrome rows on top and the content rows shifted
-	// down by chromeH; presenting buf directly would show a short frame and let
-	// the chrome paint over the top of the document.
 	outH := int32(buf.H) + chromeH
 	outResized := cw.outBitmap == nil || int32(cw.outBitmap.W) != int32(buf.W) || int32(cw.outBitmap.H) != outH
 	if outResized {
@@ -479,10 +430,6 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	if fullCopy {
 		copyBitmapRegion(out, buf, buf.Bounds(), chromeH)
 	} else {
-		// The loop's backing bitmap is updated in place, but out is the coherent
-		// window image retained by the platform. Copy only pixels the composer
-		// says changed; copying the entire document here on every vsync made an
-		// idle page a full-surface memory copy at display refresh rate.
 		for _, r := range damage {
 			copyBitmapRegion(out, buf, r, chromeH)
 		}
@@ -529,9 +476,6 @@ func (cw *chromeWindow) Present(buf *frame.Bitmap, damage []frame.Rect) error {
 	return cw.Window.Present(out, merged)
 }
 
-// bitmapRegionEqual checks the chrome rows against the last composed window
-// image. The chrome is redrawn into chromeBitmap each frame, but unchanged pixels
-// do not need to be uploaded to the native surface or recommitted to Core Animation.
 func bitmapRegionEqual(a, b *frame.Bitmap, rows int32) bool {
 	if a == nil || b == nil || a.W != b.W || rows < 0 || rows > int32(a.H) || rows > int32(b.H) {
 		return false
@@ -547,10 +491,6 @@ func bitmapRegionEqual(a, b *frame.Bitmap, rows int32) bool {
 	return true
 }
 
-// copyBitmapRegion updates only a source rectangle in the retained window image.
-// dy maps content coordinates below the browser chrome; it is zero for chrome-free
-// surfaces. Both rectangles are clipped so a damaged edge can safely touch a bitmap
-// boundary.
 func copyBitmapRegion(dst, src *frame.Bitmap, r frame.Rect, dy int32) {
 	if dst == nil || src == nil || r.Empty() {
 		return
@@ -608,14 +548,6 @@ func (cw *chromeWindow) Run() {
 
 func (cw *chromeWindow) pump() {
 	defer close(cw.events)
-	// The tick shares the pump select so the host's pumps run on the same thread
-	// as every input callback: sessions never see two threads at once from this
-	// side. No extra lifecycle: the ticker dies with the pump, which dies when the
-	// window's events run out.
-	//
-	// The ticker is built on the first iteration that finds a hook installed
-	// rather than before the loop, so a host that configures the window a moment
-	// after constructing it still gets its ticks.
 	var tick <-chan time.Time
 	var tickFn func()
 	var ticker *time.Ticker
@@ -768,9 +700,6 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			}
 			toolbarY := ev.Pos.Y - tabH
 			if toolbarY >= 0 && toolbarY < toolH {
-				// Every phase reaches the toolbar so a press can start a drag
-				// selection, motion extends it, and release ends it. Non-left
-				// presses are ignored inside; hover motion is a no-op there.
 				adjusted := ev.Pos
 				adjusted.Y = toolbarY
 				cw.toolbar.HandlePointer(adjusted, ev.Button, ev.Action)
@@ -819,9 +748,6 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				}
 			}
 			if cw.toolbar.GetFocus() == toolbar.FocusAddress {
-				// Presses and releases outside defocus the bar; motion extends
-				// an active drag so it clamps to the nearer end like a normal
-				// input instead of freezing at the bar's edge.
 				if ev.Action == surface.PointerPress || ev.Action == surface.PointerRelease || ev.Action == surface.PointerMotion {
 					adjusted := ev.Pos
 					adjusted.Y = toolbarY
@@ -829,9 +755,6 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				}
 			}
 		}
-		// Link and focus handling is a press concern; a drag's motion and
-		// release must not re-trigger them. Whatever a press leaves behind goes
-		// to the drag selector, which decides per action whether to consume it.
 		contentX := ev.Pos.X
 		contentY := ev.Pos.Y - cw.chromeHeight()
 		if cw.onContentDrag != nil && ev.Button == surface.ButtonLeft &&
@@ -852,10 +775,6 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			}
 		}
 		if press {
-			// Media controls come first. A video's painted buttons sit inside the
-			// document, so without this a press on the play button would fall
-			// through to focus and then to the drag selector and start a text
-			// selection over the thing the user was aiming at.
 			if cw.onMediaControl != nil && cw.onMediaControl(contentX, contentY) {
 				if activeChanged && cw.onActiveStyle != nil {
 					cw.onActiveStyle()
@@ -885,9 +804,6 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvKey:
-		// A release only completes a held Space/Enter activation in the page.
-		// Shortcuts and address-bar editing belong to the press; routing a
-		// release through them would re-run a command or insert text.
 		if ev.KeyAction == surface.KeyRelease {
 			return cw.onContentKey != nil && cw.onContentKey(ev.Key, ev.Mods, ev.KeyAction)
 		}
@@ -895,28 +811,25 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			return true
 		}
 		if cw.contextMenu != nil && cw.contextMenu.IsVisible() {
-			if ev.Key == 0x1B { // Escape
+			if ev.Key == 0x1B {
 				cw.contextMenu.Hide()
 				return true
 			}
 		}
 		if cw.mainMenu != nil && cw.mainMenu.IsVisible() {
-			if ev.Key == 0x1B { // Escape
+			if ev.Key == 0x1B {
 				cw.mainMenu.Hide()
 				return true
 			}
 		}
-		if cw.fullscreen && ev.Key == 0x1B { // Escape exits fullscreen
+		if cw.fullscreen && ev.Key == 0x1B {
 			cw.toggleFullscreen()
 			return true
 		}
-		if ev.Key == 0xF70E || ev.Key == 0xFFC8 { // F11 toggles fullscreen
+		if ev.Key == 0xF70E || ev.Key == 0xFFC8 {
 			cw.toggleFullscreen()
 			return true
 		}
-		// Address-bar edit shortcuts win over browser shortcuts while the
-		// bar is focused: Cmd+C there copies the URL selection, it must not
-		// fall through to the content copy below.
 		if cw.toolbar.GetFocus() == toolbar.FocusAddress && addressEditKey(ev.Key, ev.Mods) {
 			cw.toolbar.HandleKeyEvent(ev.Key, ev.Mods)
 			cw.notifyAccessibilityChanged()
@@ -941,10 +854,6 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 		}
 		return false
 	case surface.EvScroll:
-		// A scroll over the tab bar moves the strip when tabs overflow; anywhere
-		// else, or when everything fits, it belongs to the document and falls
-		// through to the loop. Both axes feed the strip, so a vertical wheel
-		// over the tabs behaves like every other browser's.
 		tabH := int32(tabs.TabBarHeight) * cw.sc()
 		if !cw.fullscreen && !cw.isStandalone() && ev.Pos.Y < tabH && cw.toolbar != nil {
 			stripW := cw.toolbar.BoundsWidth() / cw.sc()
@@ -967,18 +876,9 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 			contentDevH = 0
 		}
 		if cw.onResize != nil {
-			// The shim reports device pixels; the host keeps logical sizes and
-			// multiplies by the DPR itself.
 			sc := int(cw.sc())
 			cw.onResize(int(ev.Size.W)/sc, int(contentDevH)/sc)
 		}
-		// The loop's surface is the content viewport, not the whole window, so
-		// it must learn the content size: forwarding the window size makes the
-		// scheduler size a buffer this method then grows again by the chrome
-		// band, and the platform stretches that over-long bitmap to fit -
-		// putting every pointer event's hit below the pixels it names. The
-		// rewritten event ends the pump's read chain, so the resize is consumed
-		// here rather than returned to the pump.
 		cw.events <- surface.Event{Kind: surface.EvResize, Size: frame.Size{W: ev.Size.W, H: contentDevH}, Scale: ev.Scale}
 		return true
 	default:
@@ -986,11 +886,6 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 	}
 }
 
-// updateHoverCursor resolves the pointer shape for buttonless motion: the
-// toolbar hit tests its own buttons and bar, the document area defers to the
-// host's resolver, and everywhere else asks for the default arrow. The shape
-// is only sent to the platform when it changes, because motion arrives per
-// pixel and each call crosses into platform code.
 func (cw *chromeWindow) updateHoverCursor(pos frame.Point, chromeH int32) {
 	c := surface.CursorDefault
 	switch {
@@ -1016,9 +911,6 @@ func (cw *chromeWindow) updateHoverCursor(pos frame.Point, chromeH int32) {
 	}
 }
 
-// stripGeom returns the tab strip's tab list, count, logical width and
-// clamped scroll offset. A non-positive width means nothing is painted yet
-// and there is nothing to hit.
 func (cw *chromeWindow) stripGeom() (tabList []*tabs.Tab, n, stripW, stripOff int32) {
 	if cw.toolbar != nil {
 		stripW = cw.toolbar.BoundsWidth() / cw.sc()
@@ -1035,9 +927,6 @@ func (cw *chromeWindow) stripGeom() (tabList []*tabs.Tab, n, stripW, stripOff in
 	return tabList, n, stripW, stripOff
 }
 
-// tabAt maps a window point onto the tab painted under it. It shares TabRect
-// and the clamped strip offset with drawing and left-press hit testing, so a
-// right press targets the same tab a left press would.
 func (cw *chromeWindow) tabAt(pos frame.Point) *tabs.Tab {
 	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
 	tabList, n, stripW, stripOff := cw.stripGeom()
@@ -1053,8 +942,6 @@ func (cw *chromeWindow) tabAt(pos frame.Point) *tabs.Tab {
 	return nil
 }
 
-// showTabMenuAt opens the actions menu for tabID at a window point, clamped to
-// the window the same way the content menu is.
 func (cw *chromeWindow) showTabMenuAt(tabID uint64, pos frame.Point) {
 	if cw.contextMenu == nil {
 		return
@@ -1076,16 +963,12 @@ func (cw *chromeWindow) showTabMenuAt(tabID uint64, pos frame.Point) {
 		BuildTabContextMenuItems(tab, index, int(n), cw.tabMgr.CanReopenTab()), cw.sc())
 }
 
-// setPresentedSize publishes the last presented window size under extentMu so
-// the pump goroutine can read it without racing the surface loop's Present.
 func (cw *chromeWindow) setPresentedSize(w, h int32) {
 	cw.extentMu.Lock()
 	cw.lastWinW, cw.lastWinH = w, h
 	cw.extentMu.Unlock()
 }
 
-// windowExtent reports the last presented window size in device pixels,
-// falling back to the constructed bitmaps and finally the default window.
 func (cw *chromeWindow) windowExtent() (winW, winH int32) {
 	cw.extentMu.Lock()
 	w, h := cw.lastWinW, cw.lastWinH
@@ -1105,15 +988,10 @@ func (cw *chromeWindow) windowExtent() (winW, winH int32) {
 
 func (cw *chromeWindow) handleTabBarPress(pos frame.Point) {
 	lp := frame.Point{X: pos.X / cw.sc(), Y: pos.Y / cw.sc()}
-	// The strip is as wide as the window: the toolbar bounds carry the same
-	// device width DrawTabBar painted at, so clicks map onto the tabs the
-	// pixels show. Without painted geometry yet there is nothing to hit.
 	tabList, n, stripW, stripOff := cw.stripGeom()
 	if stripW <= 0 {
 		return
 	}
-	// The scroll chevrons overlay the strip's right end, so they win ties
-	// against the tabs sliding underneath. Same rects DrawTabBar painted.
 	if left, right, ok := tabs.ChevronRects(n, stripW); ok {
 		if lp.X >= left.X0 && lp.X < left.X1 && lp.Y >= left.Y0 && lp.Y < left.Y1 {
 			cw.tabMgr.SetTabScroll(stripOff-tabs.TabScrollPage(n, stripW), n, stripW)
@@ -1155,9 +1033,6 @@ func (cw *chromeWindow) handleTabBarPress(pos frame.Point) {
 	}
 }
 
-// handleTabBarDrag extends a press into a reorder once it travels past the
-// threshold; smaller motions stay clicks. The dragged tab follows the
-// pointer through the manager state DrawTabBar reads.
 func (cw *chromeWindow) handleTabBarDrag(pos frame.Point) {
 	if !cw.pressing {
 		return
@@ -1181,9 +1056,6 @@ func (cw *chromeWindow) handleTabBarDrag(pos frame.Point) {
 	cw.tabMgr.MoveDrag(lp.X)
 }
 
-// handleTabBarRelease commits a drag to its drop slot and ends the gesture.
-// A release without a drag is a no-op: the press already switched, closed
-// or opened whatever it hit.
 func (cw *chromeWindow) handleTabBarRelease(pos frame.Point) {
 	cw.pressing = false
 	id, x, dragging := cw.tabMgr.Dragging()
@@ -1196,8 +1068,6 @@ func (cw *chromeWindow) handleTabBarRelease(pos frame.Point) {
 		return
 	}
 	if cw.tabMgr.MoveTab(id, int(tabs.DropIndexAt(x, n, stripW, stripOff))) {
-		// The moved tab is active (press switched first): keep it visible
-		// the same way a keyboard switch does.
 		cw.tabMgr.SetTabScroll(tabs.EnsureTabVisible(cw.tabMgr.ActiveIndex(), n, stripW, cw.tabMgr.TabScroll()), n, stripW)
 	}
 }
@@ -1275,8 +1145,6 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 		cw.SetIME(false)
 		cw.notifyAccessibilityChanged()
 		if shift {
-			// Reopening selects the first match; step backward to wrap to the
-			// last, which is what "previous" means from a closed bar.
 			cw.toolbar.StepFind(true)
 		}
 		return true
@@ -1364,10 +1232,6 @@ func (cw *chromeWindow) handleTabShortcut(key rune, mods surface.KeyMod) bool {
 	return false
 }
 
-// addressEditKey reports whether a key event is an address-bar edit shortcut
-// that must reach the focused URL bar rather than a browser shortcut. Cmd+C
-// with the bar focused copies the URL selection; without this priority the
-// content copy in handleTabShortcut would steal it.
 func addressEditKey(key rune, mods surface.KeyMod) bool {
 	if mods&(surface.ModCommand|surface.ModControl) == 0 {
 		return false
@@ -1385,7 +1249,6 @@ func (cw *chromeWindow) drawBookmarksBar(buf *frame.Bitmap) {
 	barH := int32(bookmarksBarHeight) * scale
 	barW := int32(buf.W)
 
-	// Background and 1px separator line at bottom
 	buf.FillRect(frame.Rect4(0, barY, barW, barY+barH), frame.RGB(248, 249, 250), nil)
 	buf.FillRect(frame.Rect4(0, barY+barH-scale, barW, barY+barH), frame.RGB(218, 220, 224), nil)
 

@@ -7,14 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// A backslash escapes the next byte anywhere in the token stream (CSS Syntax L3
-// 4.3.8), so an escaped quote can neither open nor close a string - including
-// inside an unquoted url(), where minified data URIs are full of `\'`. Goosie
-// skipped escapes only once a string was already open, so the first `\'` still
-// started one and nothing after it in the sheet survived. Every expectation here
-// is what Chromium computed on the same input, measured 2026-10-26
-// (GOOSIE-CSSSTRING-003).
-
 // qc:BR-191
 func TestEscapedQuoteInUnquotedURLKeepsEveryRule(t *testing.T) {
 	sheet := css.Parse(".u{background-image:url(data:image/svg+xml,%3csvg width=\\'26\\' height=\\'26\\'%3e%3c/svg%3e);" +
@@ -33,8 +25,6 @@ func TestEscapedQuoteInUnquotedURLKeepsEveryRule(t *testing.T) {
 
 // qc:BR-191
 func TestOddApostropheCountInURLDoesNotEatTheSheet(t *testing.T) {
-	// The shape the old scanner survived only by luck: with an even number of
-	// quote characters the state happened to close again.
 	sheet := css.Parse(".o{background:url(data:x\\'y);width:30px}\n.p{color:#00f;width:20px}\n.q{color:#0f0}\n")
 	mustNotLeakCSS(t, sheet)
 
@@ -47,8 +37,6 @@ func TestOddApostropheCountInURLDoesNotEatTheSheet(t *testing.T) {
 
 // qc:BR-191
 func TestEscapedDoubleQuoteInsideStringContinuesIt(t *testing.T) {
-	// Chromium computes content as the literal `"a\"b"`, so the escape belongs to
-	// the value and the string ends at the last quote: all three declarations stay.
 	sheet := css.Parse(".c{content:\"a\\\"b\"; width:40px; height:40px}\n.d{color:#0f0}\n")
 	mustNotLeakCSS(t, sheet)
 
@@ -80,9 +68,6 @@ func TestEscapedQuoteInsideSelectorAttributeKeepsFollowingRules(t *testing.T) {
 
 // qc:BR-191
 func TestUnescapedApostropheInURLLosesOnlyItsDeclaration(t *testing.T) {
-	// Control for the case above: an unescaped apostrophe is not an escape, and
-	// Chromium drops that one declaration (background-image computes to none)
-	// while the sizes and the next rule survive.
 	sheet := css.Parse(".o{background:url(data:x'y);width:30px;height:30px}\n.p{color:#00f;width:20px}\n")
 	mustNotLeakCSS(t, sheet)
 
@@ -94,8 +79,6 @@ func TestUnescapedApostropheInURLLosesOnlyItsDeclaration(t *testing.T) {
 	}
 }
 
-// selectorStrs is a failure-message helper: an attribute selector keeps its
-// whole text, so a lookup that returns nothing needs the real keys printed.
 func selectorStrs(sheet *css.Stylesheet) []string {
 	var out []string
 	for _, r := range sheet.Rules {

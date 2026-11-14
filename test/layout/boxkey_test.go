@@ -9,10 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// A BoxKey packs the originating node, the box kind and an ordinal into
-// disjoint bit ranges, so every distinct input triple must produce a distinct
-// key. This is the collision-freedom contract the arena's future byKey index
-// depends on.
 func TestBoxKeyIsCollisionFree(t *testing.T) {
 	nodes := []uint32{0, 1, 2, 0xFFFFFFFF}
 	kinds := []layout.BoxKind{
@@ -64,8 +60,6 @@ func TestBoxKeyIsCollisionFree(t *testing.T) {
 	}
 }
 
-// The same inputs must always produce the same key: callers rebuild the arena
-// on every reflow and rely on the key surviving that rebuild.
 func TestBoxKeyIsDeterministic(t *testing.T) {
 	first := layout.NewBoxKey(42, layout.BoxKindInline, 9)
 	second := layout.NewBoxKey(42, layout.BoxKindInline, 9)
@@ -74,9 +68,6 @@ func TestBoxKeyIsDeterministic(t *testing.T) {
 	}
 }
 
-// Build is the one place that can name a box from stable inputs, so every
-// object it creates for a DOM node must carry a key, and two objects must not
-// share one.
 func TestBuildAssignsUniqueBoxKeys(t *testing.T) {
 	doc := domtest.Parse(`<html><body><div><span>hi</span></div><p>text</p></body></html>`)
 	arena := layout.Build(doc, style.Resolve(doc, nil, nil), nil)

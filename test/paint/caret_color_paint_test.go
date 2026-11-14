@@ -18,7 +18,6 @@ func TestCaretColorPainting(t *testing.T) {
 		t.Fatalf("NewSession failed: %v", err)
 	}
 
-	// Focus the input element
 	sess.FocusNext()
 
 	dl, err := sess.PaintChecked(1.0)

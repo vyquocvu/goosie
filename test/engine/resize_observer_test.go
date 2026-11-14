@@ -16,10 +16,6 @@ func observersRuntime(t *testing.T) *js.Runtime {
 	return rt
 }
 
-// TestResizeObserverFollowsLayoutChanges is the BR-117 engine oracle: the
-// ResizeObserver callback must fire once for the initial observation and once
-// per real box-size change, never for a reflow that leaves the box alone.
-//
 // qc:BR-117
 func TestResizeObserverFollowsLayoutChanges(t *testing.T) {
 	html := `<html><head><style>

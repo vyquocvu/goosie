@@ -227,8 +227,6 @@ func TestResumeRestartsWhenServerIgnoresRange(t *testing.T) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 		if rh := r.Header.Get("Range"); rh != "" {
 			rangeHeader.Store(rh)
-			// Ignore the range and send the whole entity: the client must
-			// restart from byte zero instead of appending a second copy.
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write(payload)
 			return
@@ -320,7 +318,6 @@ func TestStreamingDownloadWithoutContentLengthReportsBytes(t *testing.T) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", `attachment; filename="unknown.bin"`)
 		w.WriteHeader(http.StatusOK)
-		// Committing headers without Content-Length makes the body chunked.
 		w.(http.Flusher).Flush()
 		_, _ = w.Write(payload[:split])
 		w.(http.Flusher).Flush()

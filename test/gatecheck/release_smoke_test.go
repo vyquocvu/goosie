@@ -1,13 +1,3 @@
-// The release workflow's "Smoke test" step is CI code with no assertions of its own, so
-// it is tested here the way scripts/v2-gate-check.sh is. Until round seven that step ran
-// no binary at all: it chmod +x'd a path with `|| true` and then echoed PASS for every
-// os/arch in the matrix, so a dist/ directory holding nothing - or a binary that dies on
-// its first syscall - was published with a green smoke test next to it.
-//
-// The exit-status contract is the one v2-gate-check.sh already uses: 0 for a pass, 1 for a
-// verdict that the artifact is bad, 2 for a run that produced no verdict at all. A step
-// that exits 2 has to fail the job as loudly as 1 does; the distinction is for the human
-// reading it, who needs to know whether to look at goosie or at the checker.
 package gatecheck
 
 import (
@@ -21,11 +11,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/archtest"
 )
 
-// smokeReport is goosie's headless bench transcript, captured from
-// `goosie -bench -frames 16 -scene checkerboard -out /tmp/smoke.json` on darwin/arm64
-// rather than typed from the source. Field order matters to the parse, so every line is
-// verbatim except the two frame counts, which are left as the stub's own $n so a test can
-// hand the checker any -frames it likes.
 const smokeReport = `goosie: run backend=headless requested="headless" interactive=false frames=$n stamped=$n elapsed_s=0.08 fps=199.3 scene=checkerboard size=2880x1800 window=2880x1800 dpr=2
 goosie: timings mean_ms=23.423 p50_ms=25.147 p99_ms=33.564 max_ms=33.564 present_mean_ms=1.285 present_p99_ms=2.499 zero_work_frames=3
 goosie: counters rasterized=264 reused=499 failed=0 refused=0 deferred=0 panics=0 writes=19669248 bytes=72351744 budget=785383424 evictions=0 miss_pct=34.60 presents=16 idle=0 dropped_vsyncs=2968 plans_published=1 plans_superseded=0
@@ -33,12 +18,8 @@ goosie: env goos=darwin goarch=arm64 go=go1.26.5 cpu=10 workers=4
 goosie: present queued=16 dropped=0 committed=16
 `
 
-// writeReport is the line a healthy binary leaves the JSON artifact behind with. The two
-// cases that grade its absence edit it, so it is spelled once.
 const writeReport = `printf '{"report":{"frames":16}}\n' > "$out"`
 
-// smokeScript locates the checker. Unlike the gate script it needs no jq - it grades
-// plain text - so the only thing that can make it untestable is bash.
 func smokeScript(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
@@ -59,9 +40,6 @@ func smokeScript(t *testing.T) string {
 	return path
 }
 
-// stubScript writes an executable stand-in for a built binary. It records the argv it was
-// given at $ARGV_LOG so a test can assert the checker passed the flags it claims to, and
-// otherwise behaves exactly as its body describes.
 func stubScript(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "goosie")
@@ -71,9 +49,6 @@ func stubScript(t *testing.T, body string) string {
 	return path
 }
 
-// goodStub is a binary that works: it writes the JSON report where -out pointed, prints
-// the transcript the real build prints, and exits 0. The transcript is an unquoted heredoc
-// so the frame counts carry the -frames the stub was handed, which is what goosie does.
 func goodStub(t *testing.T) string {
 	return stubScript(t, `
 out=""
@@ -94,8 +69,6 @@ exit 0
 `)
 }
 
-// editedStub returns goodStub with one literal fragment replaced. The replacement must
-// exist: a case that silently fails to mutate would assert nothing.
 func editedStub(t *testing.T, old, new string) string {
 	t.Helper()
 	path := goodStub(t)
@@ -111,14 +84,10 @@ func editedStub(t *testing.T, old, new string) string {
 	return stubScript(t, out)
 }
 
-// runSmoke executes scripts/release-smoke.sh against binary and returns its output and
-// exit status. binary is "" for the cases probing the argument handling itself.
 func runSmoke(t *testing.T, binary string, args ...string) (string, int) {
 	t.Helper()
 	argv := append([]string{binary}, args...)
 	cmd := exec.Command("bash", append([]string{smokeScript(t)}, argv...)...)
-	// A test that wants the argv read back sets ARGV_LOG itself; everyone else gets a
-	// throwaway path so the stub always has somewhere to write.
 	if os.Getenv("ARGV_LOG") == "" {
 		cmd.Env = append(os.Environ(), "ARGV_LOG="+filepath.Join(t.TempDir(), "argv.txt"))
 	}
@@ -147,9 +116,6 @@ func TestReleaseSmokePassesOnAHealthyBinary(t *testing.T) {
 	}
 }
 
-// The non-vacuity half: each assertion below is one the checker could drop while still
-// printing PASS, so each is broken at its own source and has to be caught.
-
 func TestReleaseSmokeFailsWhenTheBinaryExitsNonZero(t *testing.T) {
 	out, code := runSmoke(t, stubScript(t, `exit 3`))
 	wantSmokeExit(t, 1, code, out)
@@ -166,8 +132,6 @@ func TestReleaseSmokeMissingBinaryExitsTwo(t *testing.T) {
 	}
 }
 
-// A step handed a directory, or a file nothing can execute, never ran anything. That is
-// how the workflow's previous smoke test behaved, and it must not be a PASS.
 func TestReleaseSmokeUnrunnableBinaryExitsTwo(t *testing.T) {
 	dir := t.TempDir()
 	notExecutable := filepath.Join(dir, "plain")
@@ -180,8 +144,6 @@ func TestReleaseSmokeUnrunnableBinaryExitsTwo(t *testing.T) {
 	wantSmokeExit(t, 2, code, out)
 }
 
-// Exit 0 without saying anything: there is no measurement to grade, so this is a broken
-// transcript rather than a passing one.
 func TestReleaseSmokeSilentBinaryExitsTwo(t *testing.T) {
 	out, code := runSmoke(t, stubScript(t, `exit 0`))
 	wantSmokeExit(t, 2, code, out)
@@ -212,9 +174,6 @@ func TestReleaseSmokeReportsFailures(t *testing.T) {
 	}
 }
 
-// The release binary has to draw headless: a CI runner has no display session, and a run
-// that reported some other backend measured a different code path than the one the report
-// describes.
 func TestReleaseSmokeRejectsANonHeadlessRun(t *testing.T) {
 	out, code := runSmoke(t, editedStub(t, "backend=headless", "backend=native"))
 	wantSmokeExit(t, 1, code, out)
@@ -223,9 +182,6 @@ func TestReleaseSmokeRejectsANonHeadlessRun(t *testing.T) {
 	}
 }
 
-// A transcript from a different run than the one requested is not evidence about this run.
-// The stub is broken by making it ignore -frames, so it reports the burst it defaults to
-// while the checker asked for another one.
 func TestReleaseSmokeRejectsAForeignFrameCount(t *testing.T) {
 	out, code := runSmoke(t, editedStub(t, `-frames) n="$2"; shift 2 ;;`, `-frames) shift 2 ;;`), "-frames", "23")
 	wantSmokeExit(t, 2, code, out)
@@ -234,8 +190,6 @@ func TestReleaseSmokeRejectsAForeignFrameCount(t *testing.T) {
 	}
 }
 
-// The JSON artifact is what the nightly gate later consumes, so writing it is part of the
-// release path being smoke-tested.
 func TestReleaseSmokeRequiresTheReportFile(t *testing.T) {
 	out, code := runSmoke(t, editedStub(t, writeReport, "true"))
 	wantSmokeExit(t, 1, code, out)
@@ -244,13 +198,11 @@ func TestReleaseSmokeRequiresTheReportFile(t *testing.T) {
 	}
 }
 
-// An empty report file is the same absence wearing a name.
 func TestReleaseSmokeRejectsAnEmptyReport(t *testing.T) {
 	out, code := runSmoke(t, editedStub(t, writeReport, `: > "$out"`))
 	wantSmokeExit(t, 1, code, out)
 }
 
-// Flags the checker promises to pass are only promises until the argv is read back.
 func TestReleaseSmokePassesHeadlessAndFramesToTheBinary(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "argv.txt")
 	t.Setenv("ARGV_LOG", logPath)
@@ -268,8 +220,6 @@ func TestReleaseSmokePassesHeadlessAndFramesToTheBinary(t *testing.T) {
 	}
 }
 
-// t.Setenv puts ARGV_LOG in one test's environment; runSmoke leaves a set value alone so
-// that test can read the argv back.
 func TestReleaseSmokeBadInvocationExitsTwo(t *testing.T) {
 	out, code := runSmoke(t, "")
 	wantSmokeExit(t, 2, code, out)

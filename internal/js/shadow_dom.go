@@ -7,7 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// setupShadowDOM installs the Shadow DOM API on element prototypes.
 func (r *Runtime) setupShadowDOM() {
 	if r.nodeProto == nil {
 		return
@@ -141,12 +140,10 @@ func (r *Runtime) setupShadowDOM() {
 		return goja.Undefined()
 	})
 
-	// Add attachShadow to nodeProto
 	_ = r.nodeProto.Set("attachShadow", func(call goja.FunctionCall) goja.Value {
 		return r.jsAttachShadow(call)
 	})
 
-	// Add shadowRoot getter to nodeProto
 	_ = r.vm.Set("__nodeProto__", r.nodeProto)
 	_, _ = r.vm.RunString(`
 		Object.defineProperty(__nodeProto__, 'shadowRoot', {
@@ -161,7 +158,6 @@ func (r *Runtime) setupShadowDOM() {
 	`)
 	_ = r.vm.Set("__nodeProto__", nil)
 
-	// Install __getShadowRoot__ on document
 	if doc := r.vm.Get("document"); doc != nil {
 		if docObj, ok := doc.(*goja.Object); ok {
 			_ = docObj.Set("__getShadowRoot__", func(call goja.FunctionCall) goja.Value {
@@ -171,10 +167,6 @@ func (r *Runtime) setupShadowDOM() {
 	}
 }
 
-// isValidShadowHost reports whether attachShadow is allowed on node. The HTML
-// Standard restricts hosts to a fixed element list plus valid custom element
-// names; anything else must fail with NotSupportedError rather than leave a
-// half-attached root that querySelector and closed-mode checks disagree about.
 func isValidShadowHost(node *dom.Node) bool {
 	if node == nil || !node.Element() || node.Namespace != dom.NSHTML {
 		return false
@@ -188,7 +180,6 @@ func isValidShadowHost(node *dom.Node) bool {
 	return dom.IsValidCustomElementName(node.Data)
 }
 
-// jsAttachShadow implements element.attachShadow(options).
 func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.This)
 	if node == nil {
@@ -199,12 +190,10 @@ func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 		panic(r.domError("NotSupportedError", "Element does not support shadow roots"))
 	}
 
-	// Check if already has shadow root
 	if node.ShadowRoot != nil {
 		panic(r.domError("NotSupportedError", "Shadow root already exists"))
 	}
 
-	// Parse options. mode is a required member, so omitting it is a TypeError.
 	var opts *goja.Object
 	if len(call.Arguments) >= 1 {
 		if value := call.Arguments[0]; !goja.IsUndefined(value) && !goja.IsNull(value) {
@@ -257,7 +246,6 @@ func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 		}
 	}
 
-	// Create shadow root
 	sr := &dom.ShadowRoot{
 		Host:                      node,
 		Mode:                      mode,
@@ -275,7 +263,6 @@ func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 	r.associateScopedRegistryWithDocument(registry, node.Doc)
 	node.ShadowRoot = sr
 
-	// Create JS wrapper for shadow root
 	srObj := r.vm.NewObject()
 	_ = srObj.SetPrototype(r.shadowRootProto)
 	_ = srObj.Set("host", call.This)
@@ -283,7 +270,6 @@ func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 
 	r.installShadowRootTreeMethods(srObj, node, sr)
 
-	// Store shadow root wrapper
 	r.mu.Lock()
 	nodeID := r.wrapCache[node]
 	if nodeID > 0 {
@@ -306,7 +292,6 @@ func (r *Runtime) jsAttachShadow(call goja.FunctionCall) goja.Value {
 	return srObj
 }
 
-// jsGetShadowRoot implements document.__getShadowRoot__(nodeID).
 func (r *Runtime) jsGetShadowRoot(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) < 1 {
 		return goja.Null()
@@ -324,7 +309,6 @@ func (r *Runtime) jsGetShadowRoot(call goja.FunctionCall) goja.Value {
 		return srObj
 	}
 
-	// Check if the underlying DOM node has a shadow root (e.g. Declarative Shadow DOM)
 	if node, ok := r.nodeRegistry[nodeID]; ok && node.ShadowRoot != nil {
 		if node.ShadowRoot.Mode == "closed" && !allowClosed {
 			return goja.Null()

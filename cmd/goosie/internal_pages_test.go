@@ -47,8 +47,6 @@ func TestNormalizeURLInternalPages(t *testing.T) {
 	}
 }
 
-// TestAboutBlankIsAnEmptyDocument pins about:blank to an empty page rather
-// than the internal index that an unknown goosie:// host falls back to.
 func TestAboutBlankIsAnEmptyDocument(t *testing.T) {
 	f := newNavTestPath(t)
 	title, htmlContent := f.buildInternalPageHTML("goosie://blank")
@@ -80,7 +78,6 @@ func TestBuildInternalPageHTML(t *testing.T) {
 	f.bookmarks = bmStore
 	f.history = histStore
 
-	// 1. Version page
 	title, htmlContent := f.buildInternalPageHTML("goosie://version")
 	if title != "About Goosie" {
 		t.Errorf("version title = %q, want 'About Goosie'", title)
@@ -92,7 +89,6 @@ func TestBuildInternalPageHTML(t *testing.T) {
 		t.Error("version page missing Go Version label")
 	}
 
-	// 2. Bookmarks page
 	title, htmlContent = f.buildInternalPageHTML("goosie://bookmarks")
 	if title != "Bookmarks" {
 		t.Errorf("bookmarks title = %q, want 'Bookmarks'", title)
@@ -101,7 +97,6 @@ func TestBuildInternalPageHTML(t *testing.T) {
 		t.Error("bookmarks page missing saved bookmark link")
 	}
 
-	// 3. History page
 	title, htmlContent = f.buildInternalPageHTML("goosie://history")
 	if title != "Browsing History" {
 		t.Errorf("history title = %q, want 'Browsing History'", title)
@@ -110,13 +105,11 @@ func TestBuildInternalPageHTML(t *testing.T) {
 		t.Error("history page missing visited entry")
 	}
 
-	// 4. Downloads page
 	title, htmlContent = f.buildInternalPageHTML("goosie://downloads")
 	if title != "Downloads" {
 		t.Errorf("downloads title = %q, want 'Downloads'", title)
 	}
 
-	// 5. Unknown internal page falls back to index
 	title, htmlContent = f.buildInternalPageHTML("goosie://nonexistent")
 	if title != "Goosie Pages" {
 		t.Errorf("index title = %q, want 'Goosie Pages'", title)
@@ -254,10 +247,6 @@ func TestNavigateToInternalPage(t *testing.T) {
 	}
 }
 
-// TestNavigateToManagementInternalPagesByURL opens each management page the
-// way the address bar does and checks it lands as a real document with the
-// expected title and an intact rendered layer, so the action links on the page
-// have something to act on.
 // qc:BR-138
 func TestNavigateToManagementInternalPagesByURL(t *testing.T) {
 	dir := t.TempDir()
@@ -325,7 +314,6 @@ func TestInspectPageHTMLWithActiveTab(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}
 
-	// Create a web tab with an actual HTML document
 	sampleHTML := `<!DOCTYPE html><html><head><title>Test Subject</title><style>h1 { color: red; }</style></head><body><h1 id="headline" class="title">Hello World</h1><p class="desc">A sample paragraph.</p></body></html>`
 	sess, err := engine.NewSession(sampleHTML, nil, 800)
 	if err != nil {
@@ -338,7 +326,6 @@ func TestInspectPageHTMLWithActiveTab(t *testing.T) {
 	tab.SetSession(sess)
 	f.tabMgr.SwitchTo(tab.ID())
 
-	// Build inspector page inspecting this active tab
 	title, htmlContent := f.buildInternalPageHTML("goosie://inspect")
 	if title != "Web Inspector" {
 		t.Errorf("title = %q, want 'Web Inspector'", title)
@@ -349,18 +336,15 @@ func TestInspectPageHTMLWithActiveTab(t *testing.T) {
 	if !strings.Contains(htmlContent, "https://example.com/test") {
 		t.Errorf("HTML should show URL 'https://example.com/test'")
 	}
-	// Verify DOM tree serialization
 	if !strings.Contains(htmlContent, "headline") || !strings.Contains(htmlContent, "title") {
 		t.Errorf("HTML should show DOM node attributes 'headline' and 'title'")
 	}
 	if !strings.Contains(htmlContent, "Hello World") {
 		t.Errorf("HTML should show text content 'Hello World'")
 	}
-	// Verify metrics summary
 	if !strings.Contains(htmlContent, "DOM Nodes") || !strings.Contains(htmlContent, "Tree Depth") {
 		t.Errorf("HTML should show DOM metrics summary")
 	}
-	// Verify CSS Box Model
 	if !strings.Contains(htmlContent, "Computed CSS Box Model") {
 		t.Errorf("HTML should contain box model visualizer")
 	}
@@ -374,7 +358,6 @@ func TestInspectPageHTMLEval(t *testing.T) {
 	tab.SetURL("https://example.com/eval")
 	tab.SetTitle("Eval Tab")
 
-	// Session with JS runtime
 	rt, err := js.New(js.Options{URL: "https://example.com/eval"})
 	if err != nil {
 		t.Fatalf("js.New failed: %v", err)
@@ -388,7 +371,6 @@ func TestInspectPageHTMLEval(t *testing.T) {
 	tab.SetSession(sess)
 	f.tabMgr.SwitchTo(tab.ID())
 
-	// Evaluate 10 + 20
 	_, htmlContent := f.buildInternalPageHTML(fmt.Sprintf("goosie://inspect?tab=%d&eval=10+%%2B+20", tab.ID()))
 	if !strings.Contains(htmlContent, "10 + 20") {
 		t.Errorf("HTML should contain eval expression '10 + 20'")
@@ -404,19 +386,16 @@ func TestInspectShortcut(t *testing.T) {
 		onInspect: func() { inspectCalls++ },
 	}
 
-	// Cmd+Option+I -> onInspect
 	handled := cw.handleTabShortcut('i', surface.ModCommand|surface.ModOption)
 	if !handled || inspectCalls != 1 {
 		t.Fatalf("Cmd+Option+I ('i'): handled=%v, inspectCalls=%d", handled, inspectCalls)
 	}
 
-	// Cmd+Option+I (uppercase 'I') -> onInspect
 	handled = cw.handleTabShortcut('I', surface.ModCommand|surface.ModOption)
 	if !handled || inspectCalls != 2 {
 		t.Fatalf("Cmd+Option+I ('I'): handled=%v, inspectCalls=%d", handled, inspectCalls)
 	}
 
-	// Plain Cmd+I (without Option) should not trigger inspect
 	handled = cw.handleTabShortcut('i', surface.ModCommand)
 	if handled || inspectCalls != 2 {
 		t.Fatalf("Plain Cmd+I should not trigger inspect: handled=%v, inspectCalls=%d", handled, inspectCalls)
@@ -498,33 +477,27 @@ func TestShortcutsDuplicateAndReader(t *testing.T) {
 		onReaderMode:   func() { readerCalls++ },
 	}
 
-	// Cmd+Shift+D -> onDuplicateTab
 	handled := cw.handleTabShortcut('d', surface.ModCommand|surface.ModShift)
 	if !handled || dupCalls != 1 {
 		t.Fatalf("Cmd+Shift+D ('d'): handled=%v, dupCalls=%d", handled, dupCalls)
 	}
 
-	// Cmd+Shift+D uppercase 'D' -> onDuplicateTab
 	handled = cw.handleTabShortcut('D', surface.ModCommand|surface.ModShift)
 	if !handled || dupCalls != 2 {
 		t.Fatalf("Cmd+Shift+D ('D'): handled=%v, dupCalls=%d", handled, dupCalls)
 	}
 
-	// Cmd+Shift+R -> onReaderMode
 	handled = cw.handleTabShortcut('r', surface.ModCommand|surface.ModShift)
 	if !handled || readerCalls != 1 {
 		t.Fatalf("Cmd+Shift+R ('r'): handled=%v, readerCalls=%d", handled, readerCalls)
 	}
 
-	// Cmd+Shift+R uppercase 'R' -> onReaderMode
 	handled = cw.handleTabShortcut('R', surface.ModCommand|surface.ModShift)
 	if !handled || readerCalls != 2 {
 		t.Fatalf("Cmd+Shift+R ('R'): handled=%v, readerCalls=%d", handled, readerCalls)
 	}
 }
 
-// TestBookmarkShortcutInvokesBookmarkCommand verifies Cmd+D reaches the
-// bookmark action once and does not collide with Cmd+Shift+D (duplicate tab).
 // qc:BR-046
 func TestBookmarkShortcutInvokesBookmarkCommand(t *testing.T) {
 	bookmarkCalls := 0
@@ -545,9 +518,6 @@ func TestBookmarkShortcutInvokesBookmarkCommand(t *testing.T) {
 	}
 }
 
-// TestToggleBookmarkPersistsActivePage verifies the Cmd+D action stores the
-// active tab's URL and title once, survives a reload from disk, and removes
-// rather than duplicating when pressed again on the same page.
 // qc:BR-046 BR-048
 func TestToggleBookmarkPersistsActivePage(t *testing.T) {
 	f := newNavTestPath(t)
@@ -585,10 +555,6 @@ func TestToggleBookmarkPersistsActivePage(t *testing.T) {
 	}
 }
 
-// TestApplyNavResultForClosedTabDoesNotResurrect verifies that a load which
-// finishes after its tab was closed is dropped: the closed tab is not put
-// back, the active tab keeps its identity and document, and a stale serial
-// for a live tab cannot replace what the user is reading.
 // qc:BR-037 BR-170
 func TestApplyNavResultForClosedTabDoesNotResurrect(t *testing.T) {
 	f := newNavTestPath(t)
@@ -610,7 +576,6 @@ func TestApplyNavResultForClosedTabDoesNotResurrect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// applyNavResult owns the session for a vanished tab and must close it.
 	f.applyNavResult(navResult{tabID: doomedID, serial: 1, session: late, url: "https://late.example/"})
 
 	if got := f.tabMgr.Count(); got != 1 {

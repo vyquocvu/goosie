@@ -10,7 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// formatSel returns a compact string representation of sel for caching purposes.
 func formatSel(sel Selector) string {
 	var b strings.Builder
 	for i, part := range sel.Parts {
@@ -47,18 +46,15 @@ func formatSel(sel Selector) string {
 	return b.String()
 }
 
-// Selector is a compiled CSS selector.
 type Selector struct {
 	Parts []SelectorPart
 }
 
-// SelectorPart is one segment of a compound selector, connected by a combinator.
 type SelectorPart struct {
 	Combinator byte
 	Conditions []Condition
 }
 
-// Condition is one test on a node.
 type Condition struct {
 	Type            ConditionType
 	Value           string
@@ -66,43 +62,23 @@ type Condition struct {
 	Op              string
 	Pseudo          string
 	CaseInsensitive bool
-	// compiled holds the Pseudo selector arguments parsed once at stylesheet
-	// parse time. Functional pseudo-classes otherwise re-parse their argument
-	// on every element they test (:not, :is, :has, nth-of), which is O(argument
-	// length) of tokenizer work per element per candidate. The pointer is
-	// shared by every copy of the Condition; nil means precompilation did not
-	// apply (a hand-built Condition, or a pseudo without selector args), and
-	// match falls back to parsing live.
-	compiled *pseudoCompiled
-	// scope is the node :scope stands for when this condition came from
-	// Selector.WithScope, i.e. from a DOM query whose scoping root is not a
-	// style pass. nil keeps the cascade meaning: the shadow-host marker on
-	// dom.Node.IsScopeRoot.
-	scope *dom.Node
+	compiled        *pseudoCompiled
+	scope           *dom.Node
 }
 
-// pseudoCompiled holds selector arguments parsed once.
 type pseudoCompiled struct {
-	// sels serves :not (exactly one) and :is/:where (the comma-separated list).
-	sels []Selector
-	// has serves :has alternatives with their leading combinators preserved.
-	has []hasArg
-	// of serves :nth-child(An+B of S) filters.
-	of []Selector
-	// nthExpr is the An+B microsyntax before `of`, so match skips the split.
+	sels    []Selector
+	has     []hasArg
+	of      []Selector
 	nthExpr string
 	hasNth  bool
 }
 
-// hasArg is one :has() alternative: the relationship plus the selector it applies to.
 type hasArg struct {
 	combinator byte
 	sel        Selector
 }
 
-// precompile parses the selector arguments of functional pseudo-classes once.
-// It runs at stylesheet parse time; match code uses the result when present
-// and parses live otherwise, so behavior is identical either way.
 func (c *Condition) precompile() {
 	if c.Type != CondPseudoClass || c.Pseudo == "" {
 		return
@@ -136,8 +112,6 @@ func (c *Condition) precompile() {
 	}
 }
 
-// compileHasArgs splits a :has() argument the way matchHas evaluates it: comma
-// alternatives, each with an optional leading combinator.
 func compileHasArgs(arg string) []hasArg {
 	var out []hasArg
 	for _, selStr := range splitSelectorList(arg) {
@@ -166,7 +140,6 @@ func compileHasArgs(arg string) []hasArg {
 	return out
 }
 
-// ConditionType identifies the kind of selector condition.
 type ConditionType uint8
 
 const (
@@ -179,7 +152,6 @@ const (
 	CondPseudoElement
 )
 
-// Specificity returns the (a, b, c) specificity of the selector.
 func (s Selector) Specificity() (a, b, c int) {
 	for _, part := range s.Parts {
 		for _, cond := range part.Conditions {
@@ -189,14 +161,12 @@ func (s Selector) Specificity() (a, b, c int) {
 			case CondClass, CondAttr:
 				b++
 			case CondPseudoClass:
-				// :where() contributes zero specificity.
 				if cond.Value == "where" {
 					continue
 				}
-				// :is(), :not(), and :host() take the specificity of their arguments.
 				if cond.Value == "is" || cond.Value == "not" || cond.Value == "host" {
 					if cond.Value == "host" {
-						b++ // :host itself contributes 1 pseudo-class
+						b++
 					}
 					var sels []Selector
 					if cond.compiled != nil {
@@ -218,7 +188,6 @@ func (s Selector) Specificity() (a, b, c int) {
 					c += maxC
 					continue
 				}
-				// :has() takes the highest specificity of its arguments.
 				if cond.Value == "has" {
 					var args []hasArg
 					if cond.compiled != nil && len(cond.compiled.has) > 0 {
@@ -238,10 +207,6 @@ func (s Selector) Specificity() (a, b, c int) {
 					c += maxC
 					continue
 				}
-				// Other pseudo-classes contribute (0, 1, 0), and an `of`
-				// selector list in a functional one adds its most specific
-				// argument on top, the way `:nth-child(2 of #id)` outranks a
-				// lone class.
 				b++
 				switch cond.Value {
 				case "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type":
@@ -267,7 +232,6 @@ func (s Selector) Specificity() (a, b, c int) {
 	return
 }
 
-// CompareSpecificity returns -1, 0, or 1 comparing two specificity tuples.
 func CompareSpecificity(a1, b1, c1, a2, b2, c2 int) int {
 	if a1 != a2 {
 		if a1 > a2 {
@@ -290,27 +254,11 @@ func CompareSpecificity(a1, b1, c1, a2, b2, c2 int) int {
 	return 0
 }
 
-// ParseSelector parses a CSS selector string. Malformed input yields whatever
-// the lenient grammar could recover from it, because a stylesheet drops an
-// unparsable selector instead of failing the sheet. Callers that must reject
-// bad input, such as the DOM query API, use ParseSelectorList.
 func ParseSelector(s string) Selector {
 	sel, _ := parseSelector(s)
 	return sel
 }
 
-// ParseSelectorList parses a comma-separated selector list for the DOM query
-// API, which is specified to raise a SyntaxError for a selector it cannot
-// parse instead of silently matching nothing. The selectors it returns are the
-// same values ParseSelector produces, in source order.
-//
-// A list is rejected when it is empty, when an alternative is empty (a
-// trailing or doubled comma), when a combinator has no compound selector on
-// one side, when an id/class/attribute name or an attribute value is missing,
-// when a functional pseudo-class argument is invalid, and when a pseudo-class
-// or pseudo-element name is not one the engine can match. Recovery follows
-// CSS error recovery where the grammar has it: an unclosed '[' or '(' is
-// closed at end of input, exactly as ParseSelector and the cascade do.
 func ParseSelectorList(s string) ([]Selector, error) {
 	if s == "" {
 		return nil, errors.New("css: the provided selector is empty")
@@ -330,10 +278,6 @@ func ParseSelectorList(s string) ([]Selector, error) {
 	return out, nil
 }
 
-// parseSelector is ParseSelector plus the verdict ParseSelectorList needs: ok
-// is false for input the CSS grammar cannot express. It reports ok without
-// changing the Selector it returns, so a lenient caller sees exactly what it
-// saw before the verdict existed.
 func parseSelector(s string) (Selector, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -364,10 +308,6 @@ func parseSelector(s string) (Selector, bool) {
 		if i < len(s) {
 			switch s[i] {
 			case '>', '+', '~':
-				// A combinator relates two compound selectors. One without a
-				// left-hand compound ("&gt; div", "div > > p") cannot be matched,
-				// so it is not a valid selector even though the loop below can
-				// still recover a Selector from it.
 				if len(current.Conditions) == 0 {
 					ok = false
 				}
@@ -380,15 +320,11 @@ func parseSelector(s string) (Selector, bool) {
 		}
 
 		if i >= len(s) {
-			// A dangling combinator ("div >") has no right-hand compound.
 			ok = false
 			break
 		}
 
 		if combinator != 0 && len(current.Conditions) > 0 {
-			// A combinator relates its left-hand part to the part that follows it,
-			// and matchParts reads it off the right-hand side, so the flushed part
-			// keeps the combinator that introduced it and the new one takes this.
 			parts = append(parts, current)
 			current = SelectorPart{Combinator: combinator}
 		}
@@ -413,10 +349,6 @@ func parseSelector(s string) (Selector, bool) {
 	return Selector{Parts: parts}, ok
 }
 
-// validCondition reports whether one parsed condition is a selector a browser
-// would accept. raw is the condition's own source text, which is the only
-// place two spellings that parse alike can be told apart: "[a=]" and `[a=""]`
-// both arrive as Op "=" with an empty Value.
 func validCondition(c Condition, raw string) bool {
 	switch c.Type {
 	case CondUniversal:
@@ -438,18 +370,11 @@ func validCondition(c Condition, raw string) bool {
 	return true
 }
 
-// validIdent reports whether s is an identifier the CSS grammar accepts as a
-// tag, id, class, or attribute name. The lexer has no escape handling, so the
-// shapes it can produce that a browser rejects are the ones that do not start
-// like an identifier: "#1a", ".1", "[1a]", "[.]", "[*]". Chromium throws a
-// SyntaxError for all of them, so the query API must too.
 func validIdent(s string) bool {
 	if s == "" {
 		return false
 	}
 	if s[0] == '-' {
-		// "-" alone is not an identifier, nor is "-1"; "--", "-a", and
-		// an escaped second code point are.
 		if len(s) < 2 || (s[1] != '-' && !isIdentStart(s[1]) && !isValidCSSEscapeAt(s, 1)) {
 			return false
 		}
@@ -464,9 +389,6 @@ func isValidCSSEscapeAt(s string, i int) bool {
 	return i+1 < len(s) && s[i] == '\\' && s[i+1] != '\n' && s[i+1] != '\r' && s[i+1] != '\f'
 }
 
-// consumeCSSIdent reads a CSS identifier and decodes its escapes. It returns
-// the decoded value, the byte after the identifier, and false for a trailing
-// backslash or an escaped newline.
 func consumeCSSIdent(s string, start int) (string, int, bool) {
 	var out strings.Builder
 	i := start
@@ -517,10 +439,6 @@ func isCSSWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
 }
 
-// validAttrCondition reports whether one attribute selector is well formed.
-// raw is the condition's own source text, which is the only place two
-// spellings that parse alike can be told apart: "[a=]" and `[a=""]` both
-// arrive as Op "=" with an empty Value.
 func validAttrCondition(c Condition, raw string) bool {
 	if !validIdent(c.Attr) {
 		return false
@@ -533,13 +451,11 @@ func validAttrCondition(c Condition, raw string) bool {
 	inner = strings.TrimSuffix(inner, "]")
 	eq := strings.IndexByte(inner, '=')
 	if eq < 0 || eq+1 >= len(inner) {
-		// "[a=]" has no value at all.
 		return false
 	}
 	val := strings.TrimSpace(inner[eq+1:])
 	if n := len(val); n >= 2 && (val[n-2] == ' ' || val[n-2] == '\t') &&
 		(val[n-1] == 'i' || val[n-1] == 'I' || val[n-1] == 's' || val[n-1] == 'S') {
-		// The i flag is accepted; Chromium rejects the s flag outright.
 		if val[n-1] == 's' || val[n-1] == 'S' {
 			return false
 		}
@@ -549,22 +465,11 @@ func validAttrCondition(c Condition, raw string) bool {
 		return false
 	}
 	if val[0] == '"' || val[0] == '\'' {
-		// An empty quoted value is legal and matches a present, empty
-		// attribute. A string must be the whole value: bytes after its closing
-		// quote are a syntax error, and Chromium throws for both `[a="x"y]` and
-		// `[a="x\"y"c]` (measured 2026-11-12). A string that never closes is
-		// recovered at end of input, so it stays valid and matches nothing.
 		return strings.TrimSpace(val[quotedRunEnd(val, 0):]) == ""
 	}
-	// An unquoted value is an identifier: "[a=1]" is a syntax error.
 	return validIdent(val)
 }
 
-// validPseudoClass reports whether c is a pseudo-class the engine knows and,
-// for the functional ones, whether its argument parses. The name list is the
-// set the query API accepts: pseudo-classes the cascade matches plus the ones
-// Chromium 153 accepts syntactically. A name outside it is a syntax error in
-// every browser, so it must not silently match nothing.
 func validPseudoClass(c Condition) bool {
 	switch strings.ToLower(c.Value) {
 	case "first-child", "last-child", "only-child", "first-of-type",
@@ -583,9 +488,6 @@ func validPseudoClass(c Condition) bool {
 	case "state":
 		return validIdent(strings.TrimSpace(c.Pseudo))
 	case "not":
-		// Selectors 4 lets :not() take a selector list ("p:not(.a, .c)"),
-		// which the cascade matcher already evaluates as a list; a
-		// pseudo-element argument is invalid, as is an empty one.
 		return validSelectorList(c.Pseudo, false)
 	case "is", "where":
 		return validForgivingSelectorList(c.Pseudo)
@@ -597,8 +499,6 @@ func validPseudoClass(c Condition) bool {
 			return false
 		}
 		if len(of) == 0 {
-			// "nth-child(2 of )" splits to no filters, which is not the same
-			// as having no "of" clause at all.
 			return !nthHasOfClause(c.Pseudo)
 		}
 		return validSelectorList(strings.Join(of, ","), false)
@@ -606,9 +506,6 @@ func validPseudoClass(c Condition) bool {
 	return false
 }
 
-// validPseudoElement reports whether c is a pseudo-element the query API can
-// accept. Pseudo-elements never match an element, so a known name yields an
-// empty result rather than an error, which is what a browser does.
 func validPseudoElement(c Condition) bool {
 	switch strings.ToLower(c.Value) {
 	case "before", "after", "first-line", "first-letter", "marker",
@@ -622,9 +519,6 @@ func validPseudoElement(c Condition) bool {
 	return false
 }
 
-// validSelectorList reports whether s is a comma-separated selector list. A
-// relative list (the :has() argument) may start an alternative with a
-// combinator; an ordinary one may not.
 func validSelectorList(s string, relative bool) bool {
 	alts, ok := splitSelectorListExact(s)
 	if !ok || len(alts) == 0 {
@@ -647,16 +541,11 @@ func validSelectorList(s string, relative bool) bool {
 	return true
 }
 
-// validForgivingSelectorList implements the selector filtering used by :is()
-// and :where(): invalid alternatives and pseudo-element selectors are ignored.
-// The resulting list may be empty, in which case the pseudo-class is valid and
-// matches nothing.
 func validForgivingSelectorList(s string) bool {
 	_, splitOK := splitSelectorListExact(s)
 	return splitOK
 }
 
-// hasPseudoElement reports whether sel carries a pseudo-element condition.
 func hasPseudoElement(sel Selector) bool {
 	for _, part := range sel.Parts {
 		for _, c := range part.Conditions {
@@ -668,9 +557,6 @@ func hasPseudoElement(sel Selector) bool {
 	return false
 }
 
-// nthHasOfClause reports whether an An+B argument carries an "of S" clause,
-// even one whose selector list is empty. splitNthOf answers the filters, which
-// loses that distinction.
 func nthHasOfClause(arg string) bool {
 	for i := 0; i+4 <= len(arg); i++ {
 		if arg[i] != ' ' && arg[i] != '\t' && arg[i] != '\n' {
@@ -689,19 +575,6 @@ func nthHasOfClause(arg string) bool {
 	return false
 }
 
-// unquoteCSSValue turns the source spelling of an attribute-selector value into
-// the string it denotes: a matched quote pair comes off, and CSS escapes decode
-// (CSS Syntax L3 4.3.7 strings, 4.3.10 identifiers for the unquoted form).
-//
-// A cutset Trim cannot do this job. It eats the closing quote of `"a\""` - the
-// exact spelling that carries an escaped quote - because that character is in
-// the cutset, and it strips a mismatched pair like `"a'` down to `a`. So the
-// payload is what the string's own run covers: the pair comes off only when the
-// run started at the opening quote ends exactly at the last byte.
-//
-// Anything else decodes as an identifier would, which leaves text without
-// escapes byte-identical - the common case, and the reason this is safe to apply
-// to every attribute value.
 func unquoteCSSValue(v string) string {
 	if n := len(v); n >= 2 && (v[0] == '"' || v[0] == '\'') && v[n-1] == v[0] && quotedRunEnd(v, 0) == n {
 		return DecodeEscapes(v[1 : n-1])
@@ -709,12 +582,6 @@ func unquoteCSSValue(v string) string {
 	return DecodeEscapes(v)
 }
 
-// quotedRunEnd returns the index just past the string that starts at s[i],
-// which must be its opening quote. Each \X pair belongs to the string, so a
-// quote carrying an escape can neither open nor close a run (CSS Syntax L3
-// 4.3.7). An unterminated string runs past the end of the input, which is how
-// CSS error recovery treats it: Chromium parses `[a="b]` and matches nothing
-// rather than throwing (measured 2026-11-12).
 func quotedRunEnd(s string, i int) int {
 	quote := s[i]
 	i++
@@ -730,14 +597,6 @@ func quotedRunEnd(s string, i int) int {
 	return i
 }
 
-// attrConditionEnd returns the index of the ']' that closes the attribute
-// condition starting at s[i], or len(s) when there is none. A ']' inside a
-// quoted value is a byte of that value, not the end of the condition:
-// `[data-x="a]b"]` is one condition matching the value `a]b`, which Chromium
-// matches (measured 2026-11-12), so the scan steps over escape pairs and whole
-// quoted runs. An unterminated quote runs to the end of the input, which is how
-// error recovery closes the condition; Chromium parses that shape too and finds
-// no match rather than throwing.
 func attrConditionEnd(s string, i int) int {
 	for i < len(s) {
 		switch c := s[i]; c {
@@ -858,10 +717,6 @@ func parseCondition(s string, i int) (Condition, int) {
 			cond.precompile()
 			return cond, i
 		}
-		// The four original pseudo-elements keep their single-colon spellings
-		// for compatibility (CSS 2.1 §5.12.3): :before means ::before, and
-		// matching them as pseudo-classes would never find an element. Every
-		// float clearfix in the wild (.row:after) depends on this.
 		switch strings.ToLower(name) {
 		case "before", "after", "first-line", "first-letter":
 			return Condition{Type: CondPseudoElement, Value: strings.ToLower(name)}, i
@@ -882,13 +737,10 @@ func parseCondition(s string, i int) (Condition, int) {
 	return Condition{}, i
 }
 
-// Matches reports whether the selector matches the given node.
 func (s Selector) Matches(n *dom.Node) bool {
 	return s.MatchesIndexed(n, nil)
 }
 
-// MatchesPart applies a selector containing ::part() to a part element using
-// host conditions before ::part and part conditions after it.
 func (s Selector) MatchesPart(host, target *dom.Node) bool {
 	if host == nil || target == nil || len(s.Parts) == 0 {
 		return false
@@ -928,13 +780,6 @@ func (s Selector) MatchesPart(host, target *dom.Node) bool {
 	return matchConditions(s.Parts[partPart].Conditions[partCond+1:], target, nil)
 }
 
-// WithScope returns a copy of s in which :scope stands for root instead of the
-// shadow-host marker the cascade uses. The DOM query API scopes a selector to
-// the node it was called on, which is not necessarily a shadow host, so it
-// matches through this copy rather than a second matcher.
-//
-// The copy is deep where it has to be: functional pseudo-class arguments are
-// scoped too, so :not(:scope) and :has(:scope > p) mean the same thing there.
 func (s Selector) WithScope(root *dom.Node) Selector {
 	out := Selector{Parts: make([]SelectorPart, len(s.Parts))}
 	for i, part := range s.Parts {
@@ -949,9 +794,6 @@ func (s Selector) WithScope(root *dom.Node) Selector {
 	return out
 }
 
-// scopeCompiled applies WithScope to the selector arguments of one
-// pseudo-class, copying rather than mutating: compiled is shared by every copy
-// of its Condition and by every element the cascade tests.
 func scopeCompiled(pc *pseudoCompiled, root *dom.Node) *pseudoCompiled {
 	if pc == nil {
 		return nil
@@ -969,11 +811,6 @@ func scopeCompiled(pc *pseudoCompiled, root *dom.Node) *pseudoCompiled {
 	return out
 }
 
-// UsesScope reports whether s mentions :scope anywhere, including inside the
-// selector arguments of :not/:is/:where/:has and the "of S" list of an nth-
-// pseudo-class. The DOM query API scopes a selector list to the node the query
-// was called on, and only a list that mentions :scope needs the per-call copy
-// WithScope makes; everything else can match the cached selector directly.
 func (s Selector) UsesScope() bool {
 	for _, part := range s.Parts {
 		for _, c := range part.Conditions {
@@ -1006,7 +843,6 @@ func (s Selector) UsesScope() bool {
 	return false
 }
 
-// SelectorsUseScope reports whether any selector in sels mentions :scope.
 func SelectorsUseScope(sels []Selector) bool {
 	for _, sel := range sels {
 		if sel.UsesScope() {
@@ -1016,15 +852,6 @@ func SelectorsUseScope(sels []Selector) bool {
 	return false
 }
 
-// MatchesIndexed is Matches with a per-pass sibling cache. A style
-// resolution pass tests thousands of elements against selectors containing
-// :nth-child/:nth-of-type/:has, and the naive evaluation counts element
-// siblings per tested node: O(siblings) each, O(siblings²) per parent. A
-// 4000-row list with `li:nth-child(2n)` spends ~50ms in counting alone.
-// The index builds each touched parent's element order once per pass, so
-// counting drops to O(1) amortized. DOM is frozen during a pass, hence no
-// invalidation. A nil index keeps the old live-walk behavior for callers
-// outside a resolution pass.
 func (s Selector) MatchesIndexed(n *dom.Node, ix *SiblingIndex) bool {
 	if len(s.Parts) == 0 {
 		return false
@@ -1032,15 +859,10 @@ func (s Selector) MatchesIndexed(n *dom.Node, ix *SiblingIndex) bool {
 	return matchParts(s.Parts, len(s.Parts)-1, n, ix)
 }
 
-// MatchesPseudoElement reports whether the selector matches the given
-// pseudo-element (::before, ::after, etc.) of the given node. The key compound
-// must have a CondPseudoElement condition for the given name; the rest of the
-// selector is matched against the node normally.
 func (s Selector) MatchesPseudoElement(n *dom.Node, pseudo string) bool {
 	return s.MatchesPseudoElementIndexed(n, pseudo, nil)
 }
 
-// MatchesPseudoElementIndexed is MatchesPseudoElement with a sibling cache.
 func (s Selector) MatchesPseudoElementIndexed(n *dom.Node, pseudo string, ix *SiblingIndex) bool {
 	if len(s.Parts) == 0 {
 		return false
@@ -1059,8 +881,6 @@ func (s Selector) MatchesPseudoElementIndexed(n *dom.Node, pseudo string, ix *Si
 	return matchPartsPseudo(s.Parts, len(s.Parts)-1, n, pseudo, ix)
 }
 
-// matchPartsPseudo is like matchParts but skips CondPseudoElement conditions
-// for the given pseudo name in the key compound.
 func matchPartsPseudo(parts []SelectorPart, idx int, n *dom.Node, pseudo string, ix *SiblingIndex) bool {
 	if idx < 0 || n == nil || !n.Element() {
 		return false
@@ -1100,8 +920,6 @@ func matchPartsPseudo(parts []SelectorPart, idx int, n *dom.Node, pseudo string,
 	return false
 }
 
-// matchConditionsPseudo is like matchConditions but skips CondPseudoElement
-// conditions for the given pseudo name when isKey is true.
 func matchConditionsPseudo(conds []Condition, n *dom.Node, pseudo string, isKey bool, ix *SiblingIndex) bool {
 	for _, c := range conds {
 		if isKey && c.Type == CondPseudoElement && c.Value == pseudo {
@@ -1263,10 +1081,6 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		}
 		return true
 	case "is", "where":
-		// :is() and :where() take a comma-separated selector list and match if
-		// any selector in the list matches. The difference is specificity:
-		// :is() takes the highest specificity of its arguments, :where() is zero.
-		// Specificity is handled in the Specificity() method; here we just match.
 		if c.Pseudo == "" {
 			return false
 		}
@@ -1287,8 +1101,6 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 		}
 		return false
 	case "link", "any-link":
-		// Match any hyperlink element (<a href>, <area href>, <link href>).
-		// We have no navigation history, so all links are treated as unvisited.
 		tag := strings.ToLower(n.Data)
 		return (tag == "a" || tag == "area" || tag == "link") && n.HasAttribute("href")
 	case "lang":
@@ -1298,8 +1110,6 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 	case "state":
 		return n.CustomStates != nil && n.CustomStates[c.Pseudo]
 	case "visited":
-		// The engine does not retain navigation history for :visited and does
-		// not expose it to selectors, avoiding leakage of unrelated session state.
 		return false
 	case "active":
 		return IsActive(n)
@@ -1335,8 +1145,6 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 	case "focus-within":
 		return matchesFocusWithin(n)
 	case "scope":
-		// A DOM query scopes :scope to the node the query was rooted at; the
-		// cascade scopes it to the shadow host being styled.
 		if c.scope != nil {
 			return n == c.scope
 		}
@@ -1386,13 +1194,6 @@ func matchPseudoClass(c Condition, n *dom.Node, ix *SiblingIndex) bool {
 	case "placeholder-shown":
 		return placeholderIsShown(n)
 	case "has":
-		// :has() is a relational pseudo-class: it matches if the selector
-		// argument matches at least one element relative to this element.
-		// The argument may start with a combinator:
-		//   :has(.child)     - descendant
-		//   :has(> .child)   - direct child
-		//   :has(+ .sibling) - adjacent next sibling
-		//   :has(~ .sibling) - general next sibling
 		if c.Pseudo == "" {
 			return false
 		}
@@ -1494,12 +1295,9 @@ func constraintControlInvalid(n *dom.Node) bool {
 			})
 			return !checked
 		case "file":
-			// A file control's value is its FileList, not a text value.
 			return n.InputFileCount == 0
 		}
 	}
-	// The constraint is about what the control currently holds, not the value
-	// content attribute, which is only the default after the user edits it.
 	value := n.InputControlValue()
 	if n.Data == "select" {
 		value = ""
@@ -1576,10 +1374,6 @@ func formHasInvalidControl(form *dom.Node) bool {
 	return invalid
 }
 
-// matchesDirectionality implements :dir() for explicit HTML directionality
-// and inherited direction. Whitespace around the argument is insignificant,
-// as required for a CSS function argument. Invalid dir attributes inherit from
-// their parent; documents without an explicit direction default to ltr.
 func matchesDirectionality(n *dom.Node, argument string) bool {
 	want := strings.ToLower(strings.TrimSpace(argument))
 	if want != "ltr" && want != "rtl" {
@@ -1670,19 +1464,8 @@ func placeholderIsShown(n *dom.Node) bool {
 	}
 }
 
-// IsPlaceholderShown reports whether an input or textarea currently presents
-// its placeholder text, using the live control value for input elements.
 func IsPlaceholderShown(n *dom.Node) bool { return placeholderIsShown(n) }
 
-// matchHas implements the :has() relational pseudo-class. The argument is a
-// selector list that may start with a combinator to specify the relationship:
-//
-//	:has(.child)     - any descendant
-//	:has(> .child)   - direct child
-//	:has(+ .sibling) - adjacent next sibling
-//	:has(~ .sibling) - general next sibling
-//
-// Returns true if at least one relative element matches any selector in the list.
 func matchHas(arg string, n *dom.Node, ix *SiblingIndex) bool {
 	selectors := splitSelectorList(arg)
 	for _, selStr := range selectors {
@@ -1690,8 +1473,7 @@ func matchHas(arg string, n *dom.Node, ix *SiblingIndex) bool {
 		if selStr == "" {
 			continue
 		}
-		// Check for leading combinator
-		combinator := byte(' ') // default: descendant
+		combinator := byte(' ')
 		rest := selStr
 		if len(selStr) > 0 {
 			switch selStr[0] {
@@ -1712,31 +1494,27 @@ func matchHas(arg string, n *dom.Node, ix *SiblingIndex) bool {
 		sel := ParseSelector(rest)
 		switch combinator {
 		case '>':
-			// Direct child
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				if c.Type == dom.NodeElement && sel.MatchesIndexed(c, ix) {
 					return true
 				}
 			}
 		case '+':
-			// Adjacent next sibling
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
 				if sib.Type == dom.NodeElement {
 					if sel.MatchesIndexed(sib, ix) {
 						return true
 					}
-					break // only check the first element sibling
+					break
 				}
 			}
 		case '~':
-			// General next siblings
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
 				if sib.Type == dom.NodeElement && sel.MatchesIndexed(sib, ix) {
 					return true
 				}
 			}
 		default:
-			// Descendant (any depth)
 			if hasDescendantMatching(n, sel, ix) {
 				return true
 			}
@@ -1745,37 +1523,31 @@ func matchHas(arg string, n *dom.Node, ix *SiblingIndex) bool {
 	return false
 }
 
-// matchHasCompiled evaluates :has() against pre-parsed alternatives: same
-// relationships as matchHas, without re-splitting or re-parsing per element.
 func matchHasCompiled(args []hasArg, n *dom.Node, ix *SiblingIndex) bool {
 	for _, a := range args {
 		switch a.combinator {
 		case '>':
-			// Direct child
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				if c.Type == dom.NodeElement && a.sel.MatchesIndexed(c, ix) {
 					return true
 				}
 			}
 		case '+':
-			// Adjacent next sibling
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
 				if sib.Type == dom.NodeElement {
 					if a.sel.MatchesIndexed(sib, ix) {
 						return true
 					}
-					break // only check the first element sibling
+					break
 				}
 			}
 		case '~':
-			// General next siblings
 			for sib := n.NextSibling; sib != nil; sib = sib.NextSibling {
 				if sib.Type == dom.NodeElement && a.sel.MatchesIndexed(sib, ix) {
 					return true
 				}
 			}
 		default:
-			// Descendant (any depth)
 			if hasDescendantMatching(n, a.sel, ix) {
 				return true
 			}
@@ -1784,9 +1556,7 @@ func matchHasCompiled(args []hasArg, n *dom.Node, ix *SiblingIndex) bool {
 	return false
 }
 
-// hasDescendantMatching checks if any descendant of n matches the selector.
 func hasDescendantMatching(n *dom.Node, sel Selector, ix *SiblingIndex) bool {
-	// Use cached result if available (from :has() matching on same parent+sel)
 	if ix != nil {
 		selKey := formatSel(sel)
 		key := descCacheKey{parent: n, sel: selKey}
@@ -1804,7 +1574,6 @@ func hasDescendantMatching(n *dom.Node, sel Selector, ix *SiblingIndex) bool {
 				return true
 			}
 			if hasDescendantMatching(c, sel, ix) {
-				// Cache intermediate results when found in subtree
 				if ix != nil {
 					ix.hasDesc[descCacheKey{parent: n, sel: formatSel(sel)}] = true
 				}
@@ -1813,15 +1582,12 @@ func hasDescendantMatching(n *dom.Node, sel Selector, ix *SiblingIndex) bool {
 		}
 	}
 
-	// Cache negative result too to avoid re-computation
 	if ix != nil {
 		ix.hasDesc[descCacheKey{parent: n, sel: formatSel(sel)}] = false
 	}
 	return false
 }
 
-// matchNth resolves an An+B expression against the node's position among its
-// element siblings.
 func matchNth(arg string, n *dom.Node, ofType, fromEnd bool, ix *SiblingIndex) bool {
 	expr, ofStrs := splitNthOf(arg)
 	var of []Selector
@@ -1831,8 +1597,6 @@ func matchNth(arg string, n *dom.Node, ofType, fromEnd bool, ix *SiblingIndex) b
 	return matchNthParsed(expr, of, n, ofType, fromEnd, ix, nil)
 }
 
-// matchNthC is matchNth for a parsed Condition: precompiled `of` filters and
-// the An+B microsyntax come from the sidecar, so matching parses nothing.
 func matchNthC(c Condition, n *dom.Node, ofType, fromEnd bool, ix *SiblingIndex) bool {
 	if c.compiled != nil && c.compiled.hasNth {
 		return matchNthParsed(c.compiled.nthExpr, c.compiled.of, n, ofType, fromEnd, ix, any(c.compiled))
@@ -1845,9 +1609,6 @@ func matchNthParsed(expr string, of []Selector, n *dom.Node, ofType, fromEnd boo
 	if !ok {
 		return false
 	}
-	// `:nth-child(An+B of S)` counts only siblings matching S, and the
-	// element itself must match one of them. Without the filter every `of`
-	// form silently matched nothing.
 	if len(of) > 0 {
 		matched := false
 		for _, sel := range of {
@@ -1874,10 +1635,6 @@ func matchNthParsed(expr string, of []Selector, n *dom.Node, ofType, fromEnd boo
 	return d%a == 0 && d/a >= 0
 }
 
-// matchLang implements :lang(): any comma-separated range matching wins. A
-// range matches when the nearest ancestor-or-self language (lang, else
-// xml:lang) equals it or starts with it plus a hyphen (BCP47 prefix rule).
-// An empty range list never matches; `*` matches every element.
 func matchLang(arg string, n *dom.Node) bool {
 	matched := false
 	for _, part := range splitSelectorList(arg) {
@@ -1897,11 +1654,6 @@ func matchLang(arg string, n *dom.Node) bool {
 }
 
 func matchOneLang(lang string, n *dom.Node) bool {
-	// Each level decides in order: an XML-namespaced xml:lang wins ties on
-	// its own level, plain lang answers otherwise, and an empty level defers
-	// upward. Only setAttributeNS creates namespaced attributes - the HTML
-	// parser never does, so static xml:lang stays invisible here exactly
-	// like the reference engine.
 	for el := n; el != nil; el = el.Parent {
 		if !el.Element() {
 			continue
@@ -1923,8 +1675,6 @@ func matchOneLang(lang string, n *dom.Node) bool {
 	return n.Doc.ContentLanguage != "" && langMatches(firstLanguageTag(n.Doc.ContentLanguage), lang)
 }
 
-// xmlLangOf reads the XML-namespaced xml:lang only; a parser-produced
-// literal of the same spelling does not count.
 func xmlLangOf(el *dom.Node) (string, bool) {
 	for _, a := range el.Attr {
 		if a.Namespace == dom.NSXML && strings.EqualFold(a.Name, "xml:lang") {
@@ -1957,15 +1707,11 @@ func firstLanguageTag(value string) string {
 	return strings.TrimSpace(value)
 }
 
-// langMatches reports BCP47 prefix equality: en covers en-US but not
-// english or fr.
 func langMatches(have, want string) bool {
 	have = strings.ToLower(strings.TrimSpace(have))
 	return have == want || strings.HasPrefix(have, want+"-")
 }
 
-// splitNthOf splits "An+B of S1, S2" into the microsyntax and the selector
-// list. `of` needs whitespace around it; without it there is no filter.
 func splitNthOf(arg string) (expr string, of []string) {
 	lower := strings.ToLower(arg)
 	for i := 0; i+4 <= len(arg); i++ {
@@ -1987,18 +1733,12 @@ func splitNthOf(arg string) (expr string, of []string) {
 	return arg, nil
 }
 
-// SiblingIndex caches per-parent element-child order for one style resolution
-// pass, turning :nth-child/:nth-of-type counting from O(siblings) per tested
-// node into O(1) amortized. The DOM is frozen while a pass runs, so entries
-// need no invalidation; the whole index is dropped with the pass.
 type SiblingIndex struct {
 	lists   map[*dom.Node]*siblingList
 	filt    map[filterKey]*filteredSibs
-	hasDesc map[descCacheKey]bool // caches has() descendant matches by (parent, selString)
+	hasDesc map[descCacheKey]bool
 }
 
-// siblingList is one parent's element children in document order plus the
-// ranks derived from it in the same single walk.
 type siblingList struct {
 	elems    []*dom.Node
 	pos      map[*dom.Node]int
@@ -2006,30 +1746,21 @@ type siblingList struct {
 	tagTotal map[string]int
 }
 
-// descCacheKey identifies one :has() descendant check on a parent.
-// Reserved for future caching; currently unused but kept to document the
-// intended key shape.
 type descCacheKey struct {
 	parent *dom.Node
 	sel    string
 }
 
-// filterKey identifies one `:nth-child(An+B of S)` filter set on one parent.
-// cond is the Condition's *pseudoCompiled: shared by every copy of the
-// Condition, distinct per parsed rule, hence a correct cache identity. A nil
-// cond (hand-built Condition) disables caching for that call.
 type filterKey struct {
 	parent *dom.Node
 	cond   any
 }
 
-// filteredSibs is the per-child rank among filter-matching siblings.
 type filteredSibs struct {
 	rank  []int
 	total int
 }
 
-// NewSiblingIndex returns an empty per-pass cache.
 func NewSiblingIndex() *SiblingIndex {
 	return &SiblingIndex{
 		lists:   make(map[*dom.Node]*siblingList),
@@ -2038,7 +1769,6 @@ func NewSiblingIndex() *SiblingIndex {
 	}
 }
 
-// listOf returns parent's element children, building the entry once.
 func (ix *SiblingIndex) listOf(parent *dom.Node) *siblingList {
 	if l, ok := ix.lists[parent]; ok {
 		return l
@@ -2062,9 +1792,6 @@ func (ix *SiblingIndex) listOf(parent *dom.Node) *siblingList {
 	return l
 }
 
-// filteredOf returns the matching-rank table for one filter set on a parent,
-// building it once per (parent, cond). A nil cond still uses the cached child
-// list but rebuilds ranks every call, exactly like the old live walk.
 func (ix *SiblingIndex) filteredOf(parent *dom.Node, key any, filters []Selector) *filteredSibs {
 	if key != nil {
 		k := filterKey{parent: parent, cond: key}
@@ -2092,17 +1819,10 @@ func buildFiltered(l *siblingList, filters []Selector, ix *SiblingIndex) *filter
 	return f
 }
 
-// nthIndex returns the node's 1-based position among its element siblings and
-// how many such siblings exist. ofType restricts both counts to the same tag
-// name, which is what separates nth-child from nth-of-type.
 func nthIndex(n *dom.Node, ofType bool) (index, total int) {
 	return nthIndexFiltered(n, ofType, nil)
 }
 
-// nthIndexFiltered is nthIndex with an additional selector filter for the
-// `:nth-child(An+B of S)` form: only siblings matching one of the selectors
-// count. Filters arrive pre-parsed: parsing them here would redo the work for
-// every sibling of every tested element.
 func nthIndexFiltered(n *dom.Node, ofType bool, of []string) (index, total int) {
 	var filters []Selector
 	for _, selStr := range of {
@@ -2111,11 +1831,6 @@ func nthIndexFiltered(n *dom.Node, ofType bool, of []string) (index, total int) 
 	return nthIndexFilteredSel(n, ofType, filters, nil, nil)
 }
 
-// nthIndexFilteredSel is nthIndexFiltered over pre-parsed filters with an
-// optional per-pass sibling cache. With a cache, unfiltered counting is two
-// map lookups and a filtered one is a table read; a nil cache walks siblings
-// exactly like the old code. fkey identifies the filter set for caching and
-// must be the Condition's *pseudoCompiled (or nil to disable filter caching).
 func nthIndexFilteredSel(n *dom.Node, ofType bool, filters []Selector, ix *SiblingIndex, fkey any) (index, total int) {
 	if n.Parent == nil {
 		return 0, 0
@@ -2138,8 +1853,6 @@ func nthIndexFilteredSel(n *dom.Node, ofType bool, filters []Selector, ix *Sibli
 	return f.rank[p-1], f.total
 }
 
-// nthIndexLive is the original sibling walk, kept for callers outside a
-// cached resolution pass.
 func nthIndexLive(n *dom.Node, ofType bool, filters []Selector) (index, total int) {
 	counts := func(c *dom.Node) bool {
 		if !c.Element() || (ofType && c.Data != n.Data) {
@@ -2167,9 +1880,6 @@ func nthIndexLive(n *dom.Node, ofType bool, filters []Selector) (index, total in
 	return index, total
 }
 
-// parseNth reads the An+B microsyntax along with the odd and even keywords. The
-// argument arrives with its whitespace intact, so the whole expression is
-// squeezed first and only then split around the `n`.
 func parseNth(arg string) (a, b int, ok bool) {
 	s := strings.ToLower(strings.Join(strings.Fields(arg), ""))
 	switch s {
@@ -2245,8 +1955,6 @@ func isLastElementChild(n *dom.Node) bool {
 	return false
 }
 
-// splitSelectorList splits a comma-separated selector list into individual selectors.
-// Handles nested parentheses (e.g., :is(.a, .b:not(.c))).
 func splitSelectorList(s string) []string {
 	all, _ := splitSelectorListExact(s)
 	result := make([]string, 0, len(all))
@@ -2258,11 +1966,6 @@ func splitSelectorList(s string) []string {
 	return result
 }
 
-// splitSelectorListExact is splitSelectorList without the recovery: it keeps
-// empty alternatives, which are a syntax error at the top level of a query
-// selector but are simply skipped by the cascade, and reports ok=false when a
-// ')' closes a parenthesis that was never opened. An unclosed '(' is not an
-// error: CSS error recovery closes it at end of input.
 func splitSelectorListExact(s string) ([]string, bool) {
 	var result []string
 	var current strings.Builder
@@ -2279,10 +1982,6 @@ func splitSelectorListExact(s string) ([]string, bool) {
 		}
 		switch ch {
 		case '"', '\'':
-			// A quoted attribute value carries the whole run: the comma inside
-			// `[data-x="a,b"]` is a byte of the value, not a list separator, and
-			// Chromium matches that one selector (measured 2026-11-12). Its
-			// parentheses must not move the functional-notation depth either.
 			end := quotedRunEnd(s, i)
 			current.WriteString(s[i:end])
 			i = end - 1
@@ -2297,7 +1996,6 @@ func splitSelectorListExact(s string) ([]string, bool) {
 			current.WriteByte(ch)
 		case ',':
 			if depth == 0 {
-				// End of one selector.
 				result = append(result, strings.TrimSpace(current.String()))
 				current.Reset()
 			} else {
@@ -2312,7 +2010,6 @@ func splitSelectorListExact(s string) ([]string, bool) {
 	return result, ok
 }
 
-// SplitSelectorList is the exported version of splitSelectorList for testing.
 func SplitSelectorList(s string) []string {
 	return splitSelectorList(s)
 }

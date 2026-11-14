@@ -20,10 +20,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// TestInputInteractionPipelineWork exercises the browser's actual focus and
-// keyboard callbacks while measuring the session pipeline. It is headless and
-// asserts work counts, so it catches duplicate layout or paint work without a
-// display or machine-dependent timing threshold.
 func TestInputInteractionPipelineWork(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}
@@ -408,8 +404,6 @@ func TestHoverWithoutPseudoClassDoesNotRepaint(t *testing.T) {
 	f.hoverContent(x2, y2)
 	f.hoverContent(x1, y1)
 	assertWorkDelta(t, "hover across text without :hover", sess.WorkCounts(), before, engine.WorkCounts{})
-	// The zero delta must mean "hover changed but painted nothing", not
-	// "hit-testing never fired": a→b→a dispatches three mouseenter events.
 	got, err := sess.EvaluateJS(`document.body.getAttribute('data-enters')`)
 	if err != nil {
 		t.Fatal(err)
@@ -778,7 +772,6 @@ func settleInputTiles(t *testing.T, sched *raster.Scheduler, layer *frame.Layer,
 			t.Fatalf("raster failures: %+v", sched.Stats())
 		}
 		idle := work.Needed == 0 && layer.Grid.Stats().PaintingBytes == 0
-		// A deferred swap may need the frame after the last worker completes.
 		if idle && quiet {
 			return
 		}
@@ -794,10 +787,6 @@ func (h *inputTileHarness) settle(t *testing.T) {
 }
 
 // qc:BR-173 BR-081
-//
-// A static page that has already settled must not restyle, relayout, rebuild a
-// display list, or rasterize a tile just because vsyncs keep arriving. The
-// counters are what a gate can assert without timing anything.
 func TestStaticPageIdleFramesDoNoPipelineOrTileWork(t *testing.T) {
 	h := newInputTileHarness(t, 1)
 	tab := h.f.tabMgr.Active()
@@ -865,11 +854,6 @@ func TestStaticPageIdleFramesDoNoPipelineOrTileWork(t *testing.T) {
 }
 
 // qc:BR-082
-//
-// A page whose animation-frame and timer callbacks only read state reschedules
-// itself forever. The pump must run them without inventing pipeline work, so a
-// loop that never mutates anything cannot spin the scheduler or grow a counter
-// without bound.
 func TestStateOnlyRAFAndTimerLoopDoesNotAmplifyWork(t *testing.T) {
 	h := newTileHarness(t, 1, 512, 512, `<html><head><style>
 		html, body { margin: 0; padding: 0; }
@@ -939,10 +923,6 @@ func TestStateOnlyRAFAndTimerLoopDoesNotAmplifyWork(t *testing.T) {
 }
 
 // qc:BR-080
-//
-// A style change on one small box must damage only the tiles that box covers.
-// Everything else keeps the exact bitmap it had, and the pixels outside the
-// box - not just outside the tile - are byte-identical after the repaint.
 func TestSmallDOMChangeDamagesOnlyItsOwnTiles(t *testing.T) {
 	h := newInputTileHarness(t, 1)
 	tab := h.f.tabMgr.Active()
@@ -1025,10 +1005,6 @@ func TestSmallDOMChangeDamagesOnlyItsOwnTiles(t *testing.T) {
 }
 
 // qc:BR-078
-//
-// 100% -> 125% -> 100% scales the painted page, keeps pointer targets aligned
-// with what is on screen, and replaces the old layer when the factor returns so
-// no pixel of the previous scale survives.
 func TestZoomRoundTripScalesPaintKeepsClicksAndClearsOldImage(t *testing.T) {
 	h := newInputTileHarness(t, 1)
 	tab := h.f.tabMgr.Active()
@@ -1043,8 +1019,6 @@ func TestZoomRoundTripScalesPaintKeepsClicksAndClearsOldImage(t *testing.T) {
 	baseBounds := baseLayer.Bounds
 	input100 := h.bounds(t, "q")
 	marker100 := h.bounds(t, "marker")
-	// A point that belongs to the marker at 125% but to the page background at
-	// 100%: whatever the zoom pass leaves there is detectable afterwards.
 	staleX, staleY := int32(220), int32(140)
 	if marker100.X0 <= staleX && staleX < marker100.X1 && marker100.Y0 <= staleY && staleY < marker100.Y1 {
 		t.Fatalf("fixture point (%d,%d) is already inside the 100%% marker %v", staleX, staleY, marker100)

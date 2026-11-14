@@ -29,15 +29,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/viewsource"
 )
 
-// loadURLCtx is like loadURL but respects context cancellation. With
-// deferImages the session collects image references without fetching them, so
-// the first frame can go out immediately and LoadDeferredImages repaints once
-// they land.
 func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool, extra ...any) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: viewport: %w", err)
 	}
-	// Check context before starting the fetch.
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
 	}
@@ -90,9 +85,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var stream *net.StreamResponse
 	var err error
 	if strings.EqualFold(request.Method, "POST") {
-		// A form submission is buffered by definition: the body is the encoded
-		// control set, and streaming a request body is not what StreamingHTTP
-		// offers. Redirects are the client's job, including the 302-to-GET rule.
 		resp, err = client.Post(ctx, fetchURL, request.ContentType, strings.NewReader(request.Body))
 	} else if streamer, ok := client.(net.StreamingHTTP); ok && isHTTPURL(fetchURL) {
 		stream, err = streamer.GetStream(ctx, fetchURL)
@@ -160,8 +152,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		streamBody = io.MultiReader(bytes.NewReader(prefix), stream.Body)
 		streamIsPDF = !isAttachment && pdf.IsPDF(prefix, contentType, resp.URL)
 		if download.ShouldDownload(contentType, contentDisposition) && !isAttachment && !streamIsPDF {
-			// Unknown binary content is downloaded directly to a temporary file;
-			// it never passes through the 16 MiB document response buffer.
 			isAttachment = true
 		}
 		if !isAttachment || streamIsPDF {
@@ -176,9 +166,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: read response: %w", readErr)
 			}
 			resp.Body = body
-			// The body is now buffered; if PDF parsing declines the response,
-			// the existing bounded Save path must use resp.Body rather than the
-			// already-consumed stream reader.
 			stream = nil
 		}
 	}
@@ -331,27 +318,10 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
 	}
-	// Family deadline contexts: the engine's fetch budgets stop new spawns past
-	// their deadline, but only context aborts work already in flight. Each
-	// synchronous family gets a deadline child of the navigation context, so a
-	// hung host settles at the budget instead of the 30s client timeout; tab
-	// close and shutdown still cancel everything through the parent. Deferred
-	// families keep the plain navigation context: their work starts after this
-	// function returns, and post-paint arrivals carry no total deadline by
-	// design (superseded results are still dropped by serial).
 	cssCtx, cssCancel := context.WithTimeout(ctx, engine.CSSFetchBudget)
 	defer cssCancel()
 	imgCtx := ctx
 	if !deferImages {
-		// Deliberately not deferred. A parsed <img> fetches and decodes inside
-		// this call, but a page that runs script can create an image after it
-		// has returned (`new Image(); img.src = ...`), and the loader starts
-		// that fetch on its own goroutine as soon as the script assigns src.
-		// Canceling on return aborted every one of those before the request
-		// reached the network (GOOSIE-PUMP-001). The lifetime is instead the
-		// engine's ImageFetchBudget deadline below - the same window the
-		// parse-time image pool gets - and the parent navigation context, which
-		// tab close and shutdown cancel. Do not widen that budget.
 		var imgCancel context.CancelFunc
 		imgCtx, imgCancel = context.WithTimeout(ctx, engine.ImageFetchBudget)
 		_ = imgCancel
@@ -362,9 +332,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		fontCtx, fontCancel = context.WithTimeout(ctx, engine.FontFetchBudget)
 		defer fontCancel()
 	}
-	// External scripts are a synchronous family like stylesheets: the
-	// document cannot run them before they arrive, so they share the
-	// deadline-child shape. The engine resolves srcs before calling.
 	scriptCtx, scriptCancel := context.WithTimeout(ctx, engine.ScriptFetchBudget)
 	defer scriptCancel()
 	origin := perms.NormalizeOrigin(resp.URL)
@@ -382,15 +349,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return resp.Body, nil
 	}
-	// fetch()/XMLHttpRequest transport for page scripts. Unlike the
-	// families above these fire after the load (event handlers, beacons),
-	// so they ride the navigation context rather than a load-scoped
-	// deadline: post-paint arrivals carry no total deadline by the same
-	// design as deferred images and fonts.
 	jsFetch := jsTransport{client: client, ctx: subresourceCtx(ctx, resp.URL)}
-	// Linked style sheets are fetched with the same client and the same
-	// cancellation: the linker sees absolute http(s) URLs only, because the
-	// engine resolves hrefs against the final document URL before calling.
 	linker := func(base, href string) (string, error) {
 		resp, err := client.Get(subresourceCtx(cssCtx, base), href)
 		if err != nil {
@@ -401,8 +360,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return resp.Text(), nil
 	}
-	// Image subresources use the same client and cancellation. The engine hands
-	// absolute http(s) URLs only, so the fetcher just reads the response bytes.
 	imageFetcher := func(base, url string) ([]byte, error) {
 		if !imgAllowed {
 			return nil, fmt.Errorf("goosie: image loading blocked by site permissions")
@@ -515,9 +472,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return frameDoc, nil
 	}
-	// @font-face resources use the same client. The fetcher is the same shape
-	// as the image fetcher, plus the response headers the engine's font CORS
-	// check reads; the engine resolves src URLs before calling.
 	fontFetcher := func(base, url string) (engine.FontResult, error) {
 		resp, err := client.Get(subresourceCtx(fontCtx, base), url)
 		if err != nil {
@@ -525,15 +479,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return engine.FontResult{Data: resp.Body, Headers: resp.Headers}, nil
 	}
-	// Check context after the fetch in case it was cancelled during the network call.
 	if ctx.Err() != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", ctx.Err()
 	}
-	// A per-document JS runtime executes the page's classic scripts during
-	// the build below. A runtime that fails to construct degrades to no
-	// scripting rather than failing the load. The session owns it
-	// afterwards and closes it with itself (see applyNavResult/closeTab), so
-	// every error return below must close what it created.
 	var cookieStore js.CookieStore
 	if client != nil && cookiesAllowed {
 		cookieStore = client.Jar()
@@ -598,9 +546,6 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		engine.WithJS(rt),
 		engine.WithDarkMode(appMode.dark),
 		engine.WithHighContrast(appMode.highContrast),
-		// Every load gets a fresh invalidation batch: JS-driven DOM
-		// mutations record here so the vsync pump reflows exactly the
-		// documents that changed.
 		engine.WithInvalidation(&engine.Invalidation{}),
 		imageOption(deferImages, resp.URL, imageFetcher),
 		fontOption(deferFonts, resp.URL, fontFetcher, fonts),
@@ -661,19 +606,6 @@ func makeTextDocument(text string) *dom.Document {
 	return doc
 }
 
-// reportScriptErrors writes one line naming the document's uncaught script
-// errors, and nothing at all when there are none.
-//
-// It exists because the engine used to throw these errors away, so every page
-// of GOOSIE-LIVE-001 - nine real sites, 0 ink pixels - reported rc 0 with an
-// empty stderr: no reason for the sweep to record, the operator to read, or the
-// bug to cite. The reason was there all along (21 uncaught script errors on
-// www.gov.vn, the first one naming the page's jQuery bundle); it was just
-// discarded one layer down. The session bounds how many are kept and how
-// long each message can be, so a hostile document cannot grow this line.
-// Nothing here changes what is rendered: it is a report, after the paint. The
-// destination is a parameter so a test can read the line without taking over
-// the process's stderr.
 func reportScriptErrors(w io.Writer, rawURL string, sess *engine.Session) {
 	total := sess.ScriptErrorCount()
 	errs := sess.ScriptErrors()
@@ -684,22 +616,6 @@ func reportScriptErrors(w io.Writer, rawURL string, sess *engine.Session) {
 		total, rawURL, errs[0])
 }
 
-// reportRefusedDocument writes one line naming the status the source answered
-// with and how many bytes of that refusal Goosie rendered instead of a page.
-//
-// A 401/403 body is an ordinary document to the pipeline: it parses, it lays
-// out, and it paints nothing, because a bot-management interstitial shows its
-// text only after its own script runs. Nothing else separates "the server
-// refused us and we rendered the refusal" from "this page is genuinely empty",
-// so both end up rc 0 with an empty stderr and the same sweep label. Six of the
-// eight zero-output pages of GOOSIE-LIVE-001 are this branch, measured with the
-// client the browser itself uses: 403 / 5,581 B apnews.com, 403 / 771 B
-// nytimes.com, 403 / 5,613 B japantimes.co.jp, 401 / 774 B reuters.com,
-// 403 / 779 B etsy.com, 403 / 5,607 B newegg.com. The media path already
-// refuses a non-200 answer (internal/engine/media_download.go); the document
-// path renders it, so the status is the one fact that makes the two cases
-// tellable apart. Like the line above it, this is a report written after the
-// paint - it changes nothing about what is rendered.
 func reportRefusedDocument(w io.Writer, resp *net.Response) {
 	fmt.Fprintf(w, "goosie: the source refused %s with HTTP %d; rendered %d bytes of that refusal, not the page\n",
 		resp.URL, resp.StatusCode, len(resp.Body))

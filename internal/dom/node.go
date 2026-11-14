@@ -6,7 +6,6 @@ import (
 	"sync"
 )
 
-// NodeType identifies the kind of node in the DOM tree.
 type NodeType uint8
 
 const (
@@ -20,12 +19,8 @@ const (
 	NodeProcessingInstruction
 )
 
-// NodeID is a stable, unique identifier for a node within a document. It is
-// assigned at creation time and never reused, so style and layout can index
-// their per-node data by it without a map.
 type NodeID uint32
 
-// Namespace is the XML namespace of an element.
 type Namespace uint8
 
 const (
@@ -33,13 +28,9 @@ const (
 	NSSVG
 	NSMathML
 	NSOther
-	// NSXML marks attributes in the XML namespace, which only
-	// setAttributeNS can create: the HTML parser never puts xml:lang there,
-	// and :lang() only honors the namespaced form.
 	NSXML
 )
 
-// Attribute is one name-value pair on an element.
 type Attribute struct {
 	Namespace    Namespace
 	NamespaceURI string
@@ -48,8 +39,6 @@ type Attribute struct {
 	Value        string
 }
 
-// Node is one node in the DOM tree. Elements, text, comments, and the document
-// itself are all nodes; NodeType selects which fields are meaningful.
 type Node struct {
 	ID           NodeID
 	Type         NodeType
@@ -57,152 +46,89 @@ type Node struct {
 	NamespaceURI string
 	Prefix       string
 
-	// Element fields.
 	Data     string
 	DataAtom Atom
 	Attr     []Attribute
 
-	// Text / comment / doctype fields.
 	DataContent string
-	// DataUTF16 preserves code units that Go strings cannot represent, such as
-	// an isolated UTF-16 surrogate. Nil means DataContent encodes the full value.
 	DataUTF16   []uint16
 	DoctypeName string
 	PublicID    string
 	SystemID    string
 
-	// Tree pointers.
 	Parent      *Node
 	FirstChild  *Node
 	LastChild   *Node
 	NextSibling *Node
 	PrevSibling *Node
 
-	// Shadow DOM.
-	ShadowRoot          *ShadowRoot
-	TemplateContentNode *Node
-	// TemplateHost links a template's inert content fragment back to its host
-	// for host-including ancestor checks. Ordinary ParentNode traversal still
-	// stops at the fragment, preserving the disconnected DOM tree boundary.
-	TemplateHost *Node
-	// FormOwner records parser-assigned form ownership for controls whose
-	// owner comes from the tree builder's form element pointer rather than
-	// ancestor traversal.
-	FormOwner *Node
-	// SVGScriptReady is set by the HTML parser only when an SVG script is
-	// properly ended or uses the foreign-content self-closing flag. An SVG
-	// script popped by foreign-content breakout or EOF must not execute.
-	SVGScriptReady bool
-	// ScriptAlreadyStarted tracks the HTML script element's one-shot execution
-	// state across insertion, adoption, and cloning.
+	ShadowRoot           *ShadowRoot
+	TemplateContentNode  *Node
+	TemplateHost         *Node
+	FormOwner            *Node
+	SVGScriptReady       bool
 	ScriptAlreadyStarted bool
 
-	// Dialog element state.
 	IsModal     bool
 	ReturnValue string
 
-	// Popover element state.
 	IsPopoverOpen bool
 
-	// CSS Scoping state.
 	IsScopeRoot bool
 
-	// Form-associated custom-element validity is stored on the DOM node so
-	// form algorithms and CSS pseudo-class matching share the same state.
-	FormAssociatedCustomElement bool
-	CustomElementValid          bool
-	// CustomElementUndefined remains true while an HTML custom-element
-	// candidate is unresolved and throughout its constructor.
-	CustomElementUndefined bool
-	CustomStates           map[string]bool
-	// ValueChangedByUser tracks the last-value-change mode used by maxlength
-	// constraint validation. Script changes to the value attribute clear it.
-	ValueChangedByUser bool
-	// InputValue is the live value for input states where the value IDL
-	// attribute is in value mode. It is separate from the value content
-	// attribute, which remains the default value.
-	InputValue            string
-	InputValueType        string
-	InputValueMultiple    bool
-	InputValueInitialized bool
-	InputValueDirty       bool
-	// InputUserEditValue preserves the text displayed while a user is editing
-	// controls whose live DOM value is sanitized (currently email inputs).
-	InputUserEditValue       string
-	InputUserEditValueActive bool
-	// InputBadInput records user-entered text that cannot be represented by
-	// the control's value (for example, an incomplete number exponent).
-	InputBadInput bool
-	// InputCheckedness is the current checked state, separate from the checked
-	// content attribute (defaultChecked) once script or user interaction makes
-	// the state dirty.
-	InputCheckedness            bool
-	InputCheckednessInitialized bool
-	InputCheckednessDirty       bool
-	InputIndeterminate          bool
-	// OptionSelectedness is the live selected state of an option, separate
-	// from its selected content attribute (defaultSelected) after it is dirtied.
+	FormAssociatedCustomElement   bool
+	CustomElementValid            bool
+	CustomElementUndefined        bool
+	CustomStates                  map[string]bool
+	ValueChangedByUser            bool
+	InputValue                    string
+	InputValueType                string
+	InputValueMultiple            bool
+	InputValueInitialized         bool
+	InputValueDirty               bool
+	InputUserEditValue            string
+	InputUserEditValueActive      bool
+	InputBadInput                 bool
+	InputCheckedness              bool
+	InputCheckednessInitialized   bool
+	InputCheckednessDirty         bool
+	InputIndeterminate            bool
 	OptionSelectedness            bool
 	OptionSelectednessInitialized bool
 	OptionSelectednessDirty       bool
-	// SelectNoSelection preserves an explicitly cleared selection even for a
-	// display-size-one select, whose initial default would otherwise be option 0.
-	SelectNoSelection bool
-	// OutputDefaultValueOverride records HTMLOutputElement's default value
-	// override. The corresponding current value lives in descendant text.
+	SelectNoSelection             bool
 	OutputDefaultValueOverride    string
 	OutputDefaultValueOverrideSet bool
-	// CustomValidityMessage stores the native form control custom error string.
-	CustomValidityMessage string
-	// UserInteracted records that the user has attempted to use this control or
-	// the form that owns it, which is what separates :user-invalid/:user-valid
-	// from :invalid/:valid. It travels with the document rather than in a
-	// process-wide registry.
-	UserInteracted bool
-	// InputFileCount mirrors the FileList length for a file input so constraint
-	// validation and CSS pseudo-classes can see the selection without reaching
-	// into the scripting runtime.
-	InputFileCount int
-	// PatternMismatch caches the latest native input pattern check for CSS
-	// constraint pseudo-classes, which depend on the same form-control state.
-	PatternMismatch bool
-	// TypeMismatch caches native email/URL syntax validity for CSS selectors.
-	TypeMismatch bool
-	// Numeric constraint flags are cached so CSS pseudo-classes share the
-	// ValidityState result used by native form validation.
-	RangeUnderflow bool
-	RangeOverflow  bool
-	StepMismatch   bool
-	RangeLimited   bool
+	CustomValidityMessage         string
+	UserInteracted                bool
+	InputFileCount                int
+	PatternMismatch               bool
+	TypeMismatch                  bool
+	RangeUnderflow                bool
+	RangeOverflow                 bool
+	StepMismatch                  bool
+	RangeLimited                  bool
 
-	// Document back-pointer.
 	Doc *Document
 }
 
-// ShadowRoot is the root of a shadow tree attached to a host element.
 type ShadowRoot struct {
-	Host                      *Node
-	FirstChild                *Node
-	LastChild                 *Node
-	Mode                      string // "open" or "closed"
-	Declarative               bool
-	DelegatesFocus            bool
-	SlotAssignment            string // "named" or "manual"
-	Clonable                  bool
-	CustomElementRegistryNull bool
-	// CustomElementRegistryNullDeclarative distinguishes the permanent null
-	// registry boundary created by the declarative shadow-root attribute from
-	// an imperative null association that can be recomputed after adoption.
+	Host                                 *Node
+	FirstChild                           *Node
+	LastChild                            *Node
+	Mode                                 string
+	Declarative                          bool
+	DelegatesFocus                       bool
+	SlotAssignment                       string
+	Clonable                             bool
+	CustomElementRegistryNull            bool
 	CustomElementRegistryNullDeclarative bool
 	AdoptedStyleSheetTexts               []string
 	ManualSlots                          map[*Node][]*Node
 }
 
-// Element reports whether the node is an element.
 func (n *Node) Element() bool { return n.Type == NodeElement }
 
-// InputValueMode reports whether an input type keeps a live value separate
-// from its value content attribute.
 func InputValueMode(typ string) bool {
 	switch strings.ToLower(typ) {
 	case "hidden", "checkbox", "radio", "file", "submit", "image", "reset", "button":
@@ -212,9 +138,6 @@ func InputValueMode(typ string) bool {
 	}
 }
 
-// inputTypeAttributeChanged applies the value-mode transitions required when
-// an input's type state changes. The caller has already written or removed the
-// type attribute and captured the previous live value before that mutation.
 func (n *Node) inputTypeAttributeChanged(oldType, newType, oldValue string) {
 	if n == nil || n.Data != "input" {
 		return
@@ -223,24 +146,15 @@ func (n *Node) inputTypeAttributeChanged(oldType, newType, oldValue string) {
 	isValueMode := InputValueMode(newType)
 	switch {
 	case wasValueMode && !isValueMode && !strings.EqualFold(newType, "file") && oldValue != "":
-		// The current value becomes the default when leaving value mode for a
-		// default/default-on state. Keep the dirty flag; the reflected property
-		// in the new state reads the attribute directly.
 		n.SetAttribute("value", oldValue)
 	case !wasValueMode && isValueMode:
-		// Re-entering value mode starts from the content attribute and clears
-		// dirtiness, after which the new state's sanitizer is applied by JS.
 		n.InputValueDirty = false
 		n.SyncInputControlValueFromAttribute()
 	case !strings.EqualFold(oldType, "file") && strings.EqualFold(newType, "file"):
-		// The filename state always starts with an empty value. Runtime-owned
-		// FileList state is cleared by RefreshInputPatternMismatch.
 		n.InputValue = ""
 	}
 }
 
-// InputControlValue returns the live value of input and textarea controls,
-// including the checkbox and radio default of "on".
 func (n *Node) InputControlValue() string {
 	if n == nil {
 		return ""
@@ -270,8 +184,6 @@ func (n *Node) InputControlValue() string {
 	return n.GetAttribute("value")
 }
 
-// InputChecked returns the current checkedness for an input. The checked
-// content attribute supplies the initial state until checkedness is changed.
 func (n *Node) InputChecked() bool {
 	if n == nil || n.Data != "input" {
 		return false
@@ -283,8 +195,6 @@ func (n *Node) InputChecked() bool {
 	return n.InputCheckedness
 }
 
-// SetInputChecked stores current checkedness and marks it dirty when the
-// change comes from script or user interaction.
 func (n *Node) SetInputChecked(checked, dirty bool) {
 	if n == nil || n.Data != "input" {
 		return
@@ -299,8 +209,6 @@ func (n *Node) SetInputChecked(checked, dirty bool) {
 	}
 }
 
-// ResetInputChecked restores current checkedness from the checked content
-// attribute and clears the dirty-checkedness flag.
 func (n *Node) ResetInputChecked() {
 	if n == nil || n.Data != "input" {
 		return
@@ -317,8 +225,6 @@ func (n *Node) syncInputCheckednessFromAttribute() {
 	}
 }
 
-// OptionSelected returns an option's current selectedness. The selected
-// content attribute supplies the initial state until selectedness is changed.
 func (n *Node) OptionSelected() bool {
 	if n == nil || n.Data != "option" {
 		return false
@@ -330,9 +236,6 @@ func (n *Node) OptionSelected() bool {
 	return n.OptionSelectedness
 }
 
-// SetOptionSelected updates current selectedness and marks it dirty when the
-// change comes from script or user interaction. A selected option clears the
-// other options in its single-select owner without changing their attributes.
 func (n *Node) SetOptionSelected(selected, dirty bool) {
 	if n == nil || n.Data != "option" {
 		return
@@ -374,8 +277,6 @@ func (n *Node) setOptionSelectedness(selected bool) {
 	}
 }
 
-// ResetOptionSelectedness restores an option's current state from its
-// selected content attribute and clears its dirty flag.
 func (n *Node) ResetOptionSelectedness() {
 	if n == nil || n.Data != "option" {
 		return
@@ -398,8 +299,6 @@ func (n *Node) syncOptionSelectednessFromAttribute() {
 	}
 }
 
-// OptionDisabled reports whether the option is disabled directly or through
-// an ancestor optgroup.
 func (n *Node) OptionDisabled() bool {
 	if n == nil || n.Data != "option" {
 		return false
@@ -415,8 +314,6 @@ func (n *Node) OptionDisabled() bool {
 	return n.HasAttribute("disabled")
 }
 
-// IsDisabledByFieldset reports inherited disabledness for disableable HTML
-// elements, honoring the first-legend exception for each disabled fieldset.
 func IsDisabledByFieldset(node *Node) bool {
 	if node == nil || !node.Element() || node.Namespace != NSHTML {
 		return false
@@ -453,18 +350,10 @@ func IsDisabledByFieldset(node *Node) bool {
 	return false
 }
 
-// IsFormControlDisabled reports whether a form-associated control is disabled
-// by its own attribute or by an ancestor fieldset.
 func IsFormControlDisabled(node *Node) bool {
 	return node != nil && (node.HasAttribute("disabled") || IsDisabledByFieldset(node))
 }
 
-// IsDisableableFormControl reports whether node is a form control whose
-// disabled state suppresses pointer input: input, button, select, textarea, or
-// a form-associated custom element. Two measured shapes stay outside this set
-// (Chromium 131.0.6778.33, 2026-11-13): a click that lands on a disabled
-// <fieldset> still dispatches to the fieldset, and a stray `disabled`
-// attribute on an element that is not a control changes nothing at all.
 func IsDisableableFormControl(node *Node) bool {
 	if node == nil || !node.Element() || node.Namespace != NSHTML {
 		return false
@@ -510,7 +399,6 @@ func (n *Node) selectAttributeChanged(name string) {
 	}
 }
 
-// NearestSelect returns the closest ancestor select for an option.
 func NearestSelect(option *Node) *Node {
 	for parent := optionParent(option); parent != nil; parent = parent.Parent {
 		if parent.Data == "select" {
@@ -527,7 +415,6 @@ func optionParent(option *Node) *Node {
 	return option.Parent
 }
 
-// SelectOptions returns option descendants in tree order.
 func SelectOptions(selectNode *Node) []*Node {
 	if selectNode == nil || selectNode.Data != "select" {
 		return nil
@@ -579,10 +466,6 @@ func normalizeSelectsAfterTreeMutation(changed, owner *Node) {
 			}
 		}
 		walk(changed)
-		// An option inserted with selectedness already true wins over the
-		// current selection in a single-select control, as required by the
-		// option insertion steps. This also handles a selected option moved
-		// back into a select after being detached.
 		for _, option := range selectedOptions {
 			if selectNode := NearestSelect(option); selectNode != nil && !selectNode.HasAttribute("multiple") {
 				option.SetOptionSelected(true, false)
@@ -595,8 +478,6 @@ func normalizeSelectsAfterTreeMutation(changed, owner *Node) {
 	}
 }
 
-// NormalizeSelectSelectedness enforces single-select exclusivity and applies
-// the display-size-one first-enabled-option default when no option is selected.
 func NormalizeSelectSelectedness(selectNode *Node) {
 	if selectNode == nil || selectNode.Data != "select" || selectNode.HasAttribute("multiple") {
 		return
@@ -620,11 +501,6 @@ func NormalizeSelectSelectedness(selectNode *Node) {
 	}
 }
 
-// SelectedOption returns the option a select currently shows as selected. It
-// normalises selectedness first, so a tie between several "selected"
-// attributes resolves the same way everywhere: the last one in tree order
-// wins. A single-line single-select with no selected option reports its first
-// enabled option, while a multiple select reports its first selected option.
 func (n *Node) SelectedOption() *Node {
 	if n == nil || n.Data != "select" {
 		return nil
@@ -638,27 +514,6 @@ func (n *Node) SelectedOption() *Node {
 	return nil
 }
 
-// OptionLabel returns the text a control displays and a listbox row shows for
-// an option: the label content attribute when it is not the empty string,
-// otherwise the option's text content, each normalised by NormalizeOptionText.
-// The value content attribute does not participate; the display is what the
-// user reads, whether or not a value overrides what the form submits.
-//
-// Measured by scripts/verify-br101-option-dom.js (Chromium 1.63, 2026-11-04,
-// lines "AX label-vs-text", "AX label shapes" and "AX value-only shapes"), on
-// options whose text content is "WWWWW":
-//
-//	label="IIIII"         -> option name "IIIII", combobox value "IIIII"
-//	label="  My   Label  " -> option name " My Label ", combobox value "My   Label"
-//	label=""              -> combobox value "WWWWW"   (the empty attribute is the absent one)
-//	label="   "           -> combobox value absent     (blank, NOT the text)
-//	value="V", no text    -> option name ""            (a value never names an option)
-//
-// The listbox rows read this fully normalised form; the closed select paints
-// OptionDisplayStyle instead, measured by scripts/verify-optionax-paint.js
-// (2026-11-06): the popup is a native surface outside every headless probe, so
-// the rows keep the normalised spelling while the control shows the display
-// one. The accessibility tree reads OptionAccessibleName, a third spelling.
 func (n *Node) OptionLabel() string {
 	if n == nil {
 		return ""
@@ -669,14 +524,6 @@ func (n *Node) OptionLabel() string {
 	return NormalizeOptionText(n.TextContent())
 }
 
-// NormalizeOptionText is the normalisation Chromium applies to an option's text
-// content before it becomes a value or a label: leading and trailing ASCII
-// whitespace stripped, every internal run of ASCII whitespace collapsed to a
-// single U+0020. Measured by scripts/verify-task037-option-value.js, which also
-// shows what must NOT be touched - a U+00A0 on either edge survives verbatim,
-// so strings.TrimSpace and unicode.IsSpace are both wrong here. Whitespace is
-// ASCII and cannot occur inside a multi-byte UTF-8 sequence, so the byte scan
-// below is safe on any input.
 func NormalizeOptionText(text string) string {
 	var result strings.Builder
 	result.Grow(len(text))
@@ -695,11 +542,6 @@ func NormalizeOptionText(text string) string {
 	return result.String()
 }
 
-// isOptionSpace reports the bytes Chromium collapses in an option's text
-// content: U+0009, U+000A, U+000C, U+000D and U+0020. U+000B (vertical tab) is
-// deliberately absent - the same measurement shows "a\v\vb" keeps its vertical
-// tabs while "a\f\fb" collapses, so this is HTML's ASCII whitespace set and not
-// CSS's or unicode.IsSpace's.
 func isOptionSpace(b byte) bool {
 	switch b {
 	case '\t', '\n', '\f', '\r', ' ':
@@ -708,10 +550,6 @@ func isOptionSpace(b byte) bool {
 	return false
 }
 
-// SelectValueMissing reports the required-value-missing state for a select.
-// A required select is missing a value when it has no selected option, or
-// when its only selected option is the placeholder label option of a
-// single-line, single-select control.
 func SelectValueMissing(selectNode *Node) bool {
 	if selectNode == nil || selectNode.Data != "select" || !selectNode.HasAttribute("required") {
 		return false
@@ -773,10 +611,6 @@ func selectDisplaySize(selectNode *Node) int {
 	return value
 }
 
-// SelectIsPopupStyle reports whether a select is drawn as a closed box that has
-// to raise a listbox for a pointer to pick an option, rather than as an inline
-// listbox that already shows its rows. A multiple control, or one whose display
-// size is greater than one, shows its rows inline.
 func SelectIsPopupStyle(selectNode *Node) bool {
 	if selectNode == nil || selectNode.Data != "select" {
 		return false
@@ -784,14 +618,6 @@ func SelectIsPopupStyle(selectNode *Node) bool {
 	return !selectNode.HasAttribute("multiple") && selectDisplaySize(selectNode) == 1
 }
 
-// SelectAnnouncesListbox reports the role the accessibility tree gives a select:
-// listbox when its used display size is above 1, combobox otherwise. This is
-// deliberately not SelectIsPopupStyle - scripts/verify-optionax-roles.js
-// (Chromium 153.0.8010.12) answers a <select multiple size="1"> as a combobox, so
-// `multiple` does not decide the role even though it decides whether rows show
-// inline, and it answers size="0", size="less" and size="-1" on a multiple control
-// as listboxes because those fall back to the default used size of 4. What the
-// control looks like and what it is called are two questions with two answers.
 func SelectAnnouncesListbox(selectNode *Node) bool {
 	if selectNode == nil || selectNode.Data != "select" {
 		return false
@@ -799,15 +625,6 @@ func SelectAnnouncesListbox(selectNode *Node) bool {
 	return selectDisplaySize(selectNode) > 1
 }
 
-// OptionAccessibleName is the name Chromium announces for an option node. It
-// differs from OptionLabel by one clause, and the difference is measured:
-// scripts/verify-optionax-surfaces.js (Chromium 153.0.8010.12) reports the
-// accessible name of an option whose label attribute is "  My   Label  " as
-// " My Label " - every run of HTML ASCII whitespace becomes a single space and
-// a run touching an edge keeps that space, so a whitespace-only label
-// announces two spaces - while its text content "  My   Label  " announces the
-// fully normalised "My Label". A label attribute is therefore collapsed, never
-// trimmed; a vertical tab is not one of the bytes it collapses.
 func (n *Node) OptionAccessibleName() string {
 	if n == nil {
 		return ""
@@ -818,17 +635,6 @@ func (n *Node) OptionAccessibleName() string {
 	return NormalizeOptionText(n.TextContent())
 }
 
-// OptionDisplayStyle is the spelling Chromium puts in the closed select's
-// accessible value AND paints in the closed control: the edges go and the
-// interior stays exactly as written, so label="  My   Label  " displays
-// "My   Label" where the option's own name collapses it to " My Label ". Text
-// content has already been normalised by NormalizeOptionText before the edges
-// are trimmed. U+000B joins the edge set here even though the name keeps it -
-// the value half measured on the same run, the paint half by
-// scripts/verify-optionax-paint.js (2026-11-06), which answers the authored
-// interior baselines byte-identically and leaves a first ink unshifted by the
-// edge run. A control whose display is empty exposes no value at all, which
-// callers read as the empty string.
 func (n *Node) OptionDisplayStyle() string {
 	if n == nil {
 		return ""
@@ -839,9 +645,6 @@ func (n *Node) OptionDisplayStyle() string {
 	return trimOptionDisplayEdges(NormalizeOptionText(n.TextContent()))
 }
 
-// collapseOptionNameWhitespace turns every run of HTML ASCII whitespace into a
-// single space and keeps one space for each edge run, the accessible-name
-// spelling measured above.
 func collapseOptionNameWhitespace(text string) string {
 	lead := len(text) > 0 && isOptionSpace(text[0])
 	trail := len(text) > 0 && isOptionSpace(text[len(text)-1])
@@ -879,9 +682,6 @@ func collapseOptionNameWhitespace(text string) string {
 	return out.String()
 }
 
-// trimOptionDisplayEdges removes the leading and trailing run of the display
-// edge set: HTML ASCII whitespace plus U+000B, which the name keeps and the
-// display drops.
 func trimOptionDisplayEdges(text string) string {
 	isEdge := func(b byte) bool { return isOptionSpace(b) || b == '\v' }
 	start, end := 0, len(text)
@@ -894,11 +694,6 @@ func trimOptionDisplayEdges(text string) string {
 	return text[start:end]
 }
 
-// TextareaSubmissionValue returns a textarea's API value after the hard-wrap
-// transformation used for form submission. It deliberately leaves the live
-// value untouched. This implementation inserts LF after at most cols Unicode
-// scalar values on each line; the form encoding path later normalizes LF to
-// CRLF as required by the form submission algorithms.
 func (n *Node) TextareaSubmissionValue() string {
 	if n == nil || n.Data != "textarea" {
 		return ""
@@ -927,10 +722,6 @@ func (n *Node) TextareaSubmissionValue() string {
 	return out.String()
 }
 
-// TextareaCols and TextareaRows return the visual dimensions with HTML's
-// defaults and forgiving integer parsing. Layout caps extreme dimensions to
-// keep untrusted attributes from creating unbounded geometry; reflected IDL
-// values retain their separate Web IDL bounds.
 func (n *Node) TextareaCols() int {
 	if n == nil || n.Data != "textarea" {
 		return 20
@@ -973,8 +764,6 @@ func parseTextareaPositiveAttribute(attribute string, fallback, ceiling int) int
 	return value
 }
 
-// SetInputControlValue updates an input's live value without changing its
-// default-value content attribute.
 func (n *Node) SetInputControlValue(value string, dirty bool) {
 	if n == nil || (n.Data != "input" && n.Data != "textarea") ||
 		(n.Data == "input" && !InputValueMode(n.GetAttribute("type"))) {
@@ -995,8 +784,6 @@ func (n *Node) SetInputControlValue(value string, dirty bool) {
 	}
 }
 
-// SyncInputControlValueFromAttribute applies the current default-value
-// attribute to an input whose live value is not dirty.
 func (n *Node) SyncInputControlValueFromAttribute() {
 	if n == nil || n.InputValueDirty {
 		return
@@ -1020,8 +807,6 @@ func (n *Node) SyncInputControlValueFromAttribute() {
 	n.InputValueInitialized = true
 }
 
-// ResetInputControlValue clears the dirty flag and restores the input's
-// current value from its value content attribute.
 func (n *Node) ResetInputControlValue() {
 	if n == nil || (n.Data != "input" && n.Data != "textarea") {
 		return
@@ -1031,8 +816,6 @@ func (n *Node) ResetInputControlValue() {
 	n.SyncInputControlValueFromAttribute()
 }
 
-// OutputDefaultValue returns the output element's default value, which is an
-// override when present and otherwise its descendant text content.
 func (n *Node) OutputDefaultValue() string {
 	if n == nil || n.Data != "output" {
 		return ""
@@ -1043,9 +826,6 @@ func (n *Node) OutputDefaultValue() string {
 	return n.TextContent()
 }
 
-// ResetOutputControlValue returns the output's reset value and clears its
-// default-value override. The caller replaces the descendant text with the
-// returned value as part of the reset algorithm.
 func (n *Node) ResetOutputControlValue() string {
 	if n == nil || n.Data != "output" {
 		return ""
@@ -1060,9 +840,6 @@ func normalizeTextareaValue(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
 }
 
-// SyncTextareaValueFromTextMutation propagates a descendant CharacterData
-// change into a clean textarea's live value. Dirty textareas keep their edited
-// value while their child text continues to define defaultValue.
 func (n *Node) SyncTextareaValueFromTextMutation() {
 	for parent := n.Parent; parent != nil; parent = parent.Parent {
 		if parent.Data == "textarea" {
@@ -1074,19 +851,14 @@ func (n *Node) SyncTextareaValueFromTextMutation() {
 	}
 }
 
-// Text reports whether the node is a text node.
 func (n *Node) Text() bool { return n.Type == NodeText }
 
-// DocumentFragment reports whether the node is a document fragment.
 func (n *Node) DocumentFragment() bool { return n.Type == NodeDocumentFragment }
 
-// IsHTMLTemplate distinguishes the HTML template element from foreign-content
-// elements that happen to have the same local name (for example SVG <template>).
 func (n *Node) IsHTMLTemplate() bool {
 	return n != nil && n.Type == NodeElement && n.Namespace == NSHTML && n.Data == "template"
 }
 
-// CloneNode returns a duplicate of node n. If deep is true, descendants are also recursively cloned.
 func (n *Node) CloneNode(deep bool) *Node {
 	if n == nil {
 		return nil
@@ -1178,7 +950,6 @@ func (n *Node) CloneNode(deep bool) *Node {
 	return clone
 }
 
-// TemplateContent returns the inert document fragment associated with a template.
 func (n *Node) TemplateContent() *Node {
 	if !n.IsHTMLTemplate() {
 		return nil
@@ -1197,9 +968,6 @@ func (n *Node) TemplateContent() *Node {
 	return n.TemplateContentNode
 }
 
-// TemplateContentsOwnerDocument returns the inert document shared by this
-// document's template contents. It has no browsing context and is separate
-// from the document that owns the <template> elements.
 func (d *Document) TemplateContentsOwnerDocument() *Document {
 	if d == nil {
 		return nil
@@ -1213,13 +981,10 @@ func (d *Document) TemplateContentsOwnerDocument() *Document {
 	return d.templateContentsDocument
 }
 
-// IsTemplateContentsOwnerDocument reports whether d is the inert owner
-// document shared by HTML template contents.
 func (d *Document) IsTemplateContentsOwnerDocument() bool {
 	return d != nil && d.templateContentsOwner
 }
 
-// ImportNode creates a copy of a node from an external document and adopts it into d.
 func (d *Document) ImportNode(n *Node, deep bool) *Node {
 	if n == nil || d == nil {
 		return nil
@@ -1229,8 +994,6 @@ func (d *Document) ImportNode(n *Node, deep bool) *Node {
 	return clone
 }
 
-// adopt assigns targetDoc and allocates new NodeIDs throughout the subtree
-// rooted at n if n comes from another document or lacks a valid NodeID.
 func (n *Node) adopt(targetDoc *Document) {
 	if n == nil || targetDoc == nil {
 		return
@@ -1256,11 +1019,8 @@ func (n *Node) adopt(targetDoc *Document) {
 	walk(n, targetDoc)
 }
 
-// AdoptInto changes the node's owner document and assigns target-document IDs
-// throughout its ordinary, shadow, and template-content subtrees.
 func (n *Node) AdoptInto(targetDoc *Document) { n.adopt(targetDoc) }
 
-// AppendChild adds c as the last child of n.
 func (n *Node) AppendChild(c *Node) {
 	if c.Parent != nil {
 		if root := c.Parent.ShadowRoot; root == nil || !root.RemoveChild(c) {
@@ -1298,7 +1058,6 @@ func (n *Node) AppendChild(c *Node) {
 	normalizeSelectsAfterTreeMutation(c, owner)
 }
 
-// RemoveChild removes c from n's children.
 func (n *Node) RemoveChild(c *Node) {
 	if c.Parent != n {
 		return
@@ -1332,19 +1091,11 @@ func (n *Node) RemoveChild(c *Node) {
 	normalizeSelectsAfterTreeMutation(nil, owner)
 }
 
-// InsertBefore inserts newChild before refChild among n's children.
 func (n *Node) InsertBefore(newChild, refChild *Node) {
 	if refChild == nil {
 		n.AppendChild(newChild)
 		return
 	}
-	// Inserting a node before itself is a no-op everywhere else in the tree,
-	// and letting it through would splice the node's own pointers into a
-	// cycle: PrevSibling/NextSibling would point back at the node and every
-	// later walk (style, layout, serialization) would loop forever. Script
-	// callers reach this with `el.insertBefore(el.firstChild, el.firstChild)`
-	// and worse, so the guard belongs in the primitive, not only at the
-	// binding.
 	if newChild == refChild {
 		return
 	}
@@ -1384,23 +1135,11 @@ func (n *Node) InsertBefore(newChild, refChild *Node) {
 	normalizeSelectsAfterTreeMutation(newChild, owner)
 }
 
-// InsertNode runs the DOM Standard's "pre-insert" steps: insert newChild before
-// refChild, where a DocumentFragment contributes its own children in order and
-// is left empty afterwards, so the same fragment can be filled and inserted
-// again. refChild nil appends, as InsertBefore already does.
-//
-// InsertBefore keeps its single-node behaviour on purpose: the HTML parser,
-// layout and every internal caller already passes a real element, and making
-// the primitive move fragment children would silently change the node count
-// those paths reason about. Only the script-facing mutation APIs need the
-// fragment rule, because only they can be handed a fragment by a page.
 func (n *Node) InsertNode(newChild, refChild *Node) {
 	if newChild == nil {
 		return
 	}
 	if newChild.DocumentFragment() {
-		// Snapshot the children first: each move unlinks the node from the
-		// fragment, so walking NextSibling would skip every other child.
 		var kids []*Node
 		for c := newChild.FirstChild; c != nil; c = c.NextSibling {
 			kids = append(kids, c)
@@ -1413,9 +1152,6 @@ func (n *Node) InsertNode(newChild, refChild *Node) {
 	n.InsertBefore(newChild, refChild)
 }
 
-// ReplaceNode runs the DOM Standard's "replace one" steps: newNode goes where
-// oldChild was and oldChild is detached. A DocumentFragment newNode inserts all
-// of its children and removes oldChild once, matching browsers.
 func (n *Node) ReplaceNode(newChild, oldChild *Node) {
 	if newChild == nil || oldChild == nil {
 		return
@@ -1447,9 +1183,6 @@ func (n *Node) ReplaceNode(newChild, oldChild *Node) {
 	n.RemoveChild(oldChild)
 }
 
-// ChildNodes returns n's children in document order as a snapshot slice. The
-// binding hands pages a plain array rather than a live NodeList: see
-// internal/js/node_api.go for the recorded consequence of that choice.
 func (n *Node) ChildNodes() []*Node {
 	var out []*Node
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -1458,9 +1191,6 @@ func (n *Node) ChildNodes() []*Node {
 	return out
 }
 
-// Contains reports whether other is n itself or a descendant of it, which is
-// the DOM Standard's Node.contains rule. jQuery's `:has` and `$.contains` both
-// walk up Parent instead of down, so this only serves the API itself.
 func (n *Node) Contains(other *Node) bool {
 	if n == nil || other == nil {
 		return false
@@ -1478,9 +1208,6 @@ func (n *Node) Contains(other *Node) bool {
 	return false
 }
 
-// IsConnected reports whether the node is attached to its document, the DOM
-// Standard's isConnected. It stops at the document node so a node whose Parent
-// chain dangles on a detached subtree reads false.
 func (n *Node) IsConnected() bool {
 	if n == nil {
 		return false
@@ -1498,7 +1225,6 @@ func (n *Node) IsConnected() bool {
 	return false
 }
 
-// AppendChild adds c as the last child of the shadow root.
 func (sr *ShadowRoot) AppendChild(c *Node) {
 	if c.Parent != nil {
 		c.Parent.RemoveChild(c)
@@ -1526,9 +1252,6 @@ func (sr *ShadowRoot) AppendChild(c *Node) {
 	}
 }
 
-// RemoveChild detaches a direct child from sr. Shadow-root children store the
-// host in Node.Parent for composed-tree traversal, so ordinary parent removal
-// must first distinguish this child list from the host's light-DOM children.
 func (sr *ShadowRoot) RemoveChild(c *Node) bool {
 	if sr == nil || c == nil || sr.Host == nil || c.Parent != sr.Host {
 		return false
@@ -1563,10 +1286,6 @@ func (sr *ShadowRoot) RemoveChild(c *Node) bool {
 	return true
 }
 
-// GetAttribute returns the value of the named attribute, or "" if not present.
-// Attribute names are lowercased by the HTML parser, so the exact match below
-// hits without allocating; the EqualFold fallback only serves mixed-case names
-// installed via SetAttribute from script.
 func (n *Node) GetAttribute(name string) string {
 	for _, a := range n.Attr {
 		if a.Name == name || strings.EqualFold(a.Name, name) {
@@ -1576,8 +1295,6 @@ func (n *Node) GetAttribute(name string) string {
 	return ""
 }
 
-// GetAttributeNS returns the value of the attribute matching namespace URI and
-// qualified name. The bool distinguishes an absent attribute from an empty one.
 func (n *Node) GetAttributeNS(namespaceURI, qualifiedName string) (string, bool) {
 	for _, a := range n.Attr {
 		if a.NamespaceURI == namespaceURI && strings.EqualFold(a.Name, qualifiedName) {
@@ -1587,15 +1304,11 @@ func (n *Node) GetAttributeNS(namespaceURI, qualifiedName string) (string, bool)
 	return "", false
 }
 
-// isQueryAttr reports whether an attribute write can retarget the id,
-// class, or tag query caches.
 func isQueryAttr(name string) bool {
 	return name == "id" || name == "class" ||
 		strings.EqualFold(name, "id") || strings.EqualFold(name, "class")
 }
 
-// SetAttribute sets the named attribute, replacing an existing value
-// case-insensitively or appending a new pair.
 func (n *Node) SetAttribute(name, value string) {
 	typeChanged := n.Data == "input" && strings.EqualFold(name, "type")
 	oldType, oldValue := "", ""
@@ -1632,8 +1345,6 @@ func (n *Node) SetAttribute(name, value string) {
 			if typeChanged {
 				n.inputTypeAttributeChanged(oldType, value, oldValue)
 			}
-			// Only id/class writes can retarget the query caches; anything
-			// else leaves them valid.
 			if n.Doc != nil && isQueryAttr(name) {
 				n.Doc.MarkQueryDirty()
 			}
@@ -1659,8 +1370,6 @@ func (n *Node) SetAttribute(name, value string) {
 	}
 }
 
-// SetAttributeNS sets an attribute identified by namespace URI and local name.
-// Qualified names from distinct namespaces may share the same spelling.
 func (n *Node) SetAttributeNS(namespaceURI, qualifiedName, value string) bool {
 	if namespaceURI == "" {
 		before, had := "", false
@@ -1715,8 +1424,6 @@ func attributeLocalName(qualifiedName string) string {
 	return qualifiedName
 }
 
-// RemoveAttributeNS removes the attribute with the given namespace URI and
-// local name, independent of its prefix.
 func (n *Node) RemoveAttributeNS(namespaceURI, localName string) bool {
 	for i := range n.Attr {
 		if n.Attr[i].NamespaceURI == namespaceURI && attributeLocalName(n.Attr[i].Name) == localName {
@@ -1745,7 +1452,6 @@ func (n *Node) RemoveAttributeNS(namespaceURI, localName string) bool {
 	return false
 }
 
-// HasAttribute reports whether the named attribute is present.
 func (n *Node) HasAttribute(name string) bool {
 	for _, a := range n.Attr {
 		if a.Name == name || strings.EqualFold(a.Name, name) {
@@ -1755,7 +1461,6 @@ func (n *Node) HasAttribute(name string) bool {
 	return false
 }
 
-// RemoveAttribute removes the named attribute from the element.
 func (n *Node) RemoveAttribute(name string) {
 	typeChanged := n.Data == "input" && strings.EqualFold(name, "type")
 	oldType, oldValue := "", ""
@@ -1799,10 +1504,6 @@ func (n *Node) RemoveAttribute(name string) {
 	}
 }
 
-// IsDraggable reports the effective draggable state of an element: an explicit
-// draggable="true"/"false" attribute always wins; without one, images and
-// links with an href are draggable by default, matching the HTML spec's
-// "auto" default for those elements. Non-elements are never draggable.
 func IsDraggable(n *Node) bool {
 	if n == nil || !n.Element() {
 		return false
@@ -1822,7 +1523,6 @@ func IsDraggable(n *Node) bool {
 	return false
 }
 
-// ClassList returns the space-separated class names on the element.
 func (n *Node) ClassList() []string {
 	v := n.GetAttribute("class")
 	if v == "" {
@@ -1831,7 +1531,6 @@ func (n *Node) ClassList() []string {
 	return strings.Fields(v)
 }
 
-// ChildElements returns only the element children.
 func (n *Node) ChildElements() []*Node {
 	var els []*Node
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -1842,7 +1541,6 @@ func (n *Node) ChildElements() []*Node {
 	return els
 }
 
-// TextContent returns the concatenation of all descendant text nodes.
 func (n *Node) TextContent() string {
 	var sb strings.Builder
 	n.collectText(&sb)
@@ -1859,8 +1557,6 @@ func (n *Node) collectText(sb *strings.Builder) {
 	}
 }
 
-// Walk traverses the subtree rooted at n in pre-order depth-first order.
-// If fn returns false, the walk stops early.
 func (n *Node) Walk(fn func(*Node) bool) bool {
 	if n == nil {
 		return true
@@ -1876,8 +1572,6 @@ func (n *Node) Walk(fn func(*Node) bool) bool {
 	return true
 }
 
-// Document is the root of a DOM tree. It owns the node-ID allocator and
-// provides the entry points for tree queries.
 type Document struct {
 	Node                     Node
 	nextID                   NodeID
@@ -1886,49 +1580,28 @@ type Document struct {
 	nextRemovalCallbackID    uint64
 	templateContentsDocument *Document
 	templateContentsOwner    bool
-	// ContentLanguage is the first HTTP Content-Language value supplied by the
-	// embedding document loader, used only when no element declares a language.
-	ContentLanguage string
-	CharacterSet    string
-	ContentType     string
-	// ParserInput retains admitted XML source for browsing contexts that bind
-	// their runtime before parsing parser-inserted scripts and custom elements.
-	ParserInput       string
-	HTML              *Node
-	Head              *Node
-	Body              *Node
-	DocType           *Node
-	QuirksMode        bool
-	LimitedQuirksMode bool
-	DesignMode        bool
-	// IsXML is true for documents parsed as XML (text/xml, application/xml,
-	// application/xhtml+xml, image/svg+xml). When true, element creation
-	// preserves tag name case and tagName returns the original case rather
-	// than the HTML-spec uppercase form.
-	IsXML bool
-	// IsDOMParserDocument marks documents returned by DOMParser. They remain
-	// XML documents for parsing and serialization, but expose the Document
-	// interface rather than the legacy XMLDocument interface.
-	IsDOMParserDocument bool
-	// idIdx caches id→first-element for ElementByID, tagIdx caches
-	// atom→elements in document order, tagStrIdx caches unknown-atom tags
-	// by literal Data, and classIdx caches class→elements. All are rebuilt
-	// together lazily on query after any structural, id, or class mutation
-	// (MarkQueryDirty). Linear scans per query are O(N); scripts polling
-	// these APIs turn them into O(queries×N), seconds on large documents.
-	idIdx        map[string]*Node
-	tagIdx       map[Atom][]*Node
-	tagStrIdx    map[string][]*Node
-	classIdx     map[string][]*Node
-	qValid       bool
-	propertiesMu sync.RWMutex
-	properties   map[string]PropertyDefinition
+	ContentLanguage          string
+	CharacterSet             string
+	ContentType              string
+	ParserInput              string
+	HTML                     *Node
+	Head                     *Node
+	Body                     *Node
+	DocType                  *Node
+	QuirksMode               bool
+	LimitedQuirksMode        bool
+	DesignMode               bool
+	IsXML                    bool
+	IsDOMParserDocument      bool
+	idIdx                    map[string]*Node
+	tagIdx                   map[Atom][]*Node
+	tagStrIdx                map[string][]*Node
+	classIdx                 map[string][]*Node
+	qValid                   bool
+	propertiesMu             sync.RWMutex
+	properties               map[string]PropertyDefinition
 }
 
-// RegisterBeforeNodeRemovalCallback registers a callback run immediately
-// before a child is detached from its parent. It returns a function that
-// unregisters the callback. The document snapshots callbacks before invoking
-// them so a callback can safely remove itself or register another callback.
 func (d *Document) RegisterBeforeNodeRemovalCallback(callback func(parent, child *Node)) func() {
 	if d == nil || callback == nil {
 		return func() {}
@@ -1963,18 +1636,10 @@ func (d *Document) runBeforeNodeRemoval(parent, child *Node) {
 	}
 }
 
-// MarkQueryDirty drops the id/tag/class caches after a structural edit
-// (append, remove, insert) or an id/class-attribute write. Anything else
-// leaves the caches valid. Exported because the JS runtime performs DOM
-// writes through direct slice edits alongside the Node methods.
 func (d *Document) MarkQueryDirty() {
 	d.qValid = false
 }
 
-// rebuildQueryIndex walks the tree once in document order, filling every
-// query cache with exactly what the linear scans returned: first element
-// per id, document-order element lists per tag atom (unknown atoms by
-// literal Data), and per class (once per node even with repeats).
 func (d *Document) rebuildQueryIndex() {
 	idm := make(map[string]*Node)
 	tm := make(map[Atom][]*Node)
@@ -2022,20 +1687,16 @@ func (d *Document) rebuildQueryIndex() {
 	d.qValid = true
 }
 
-// queryIntact reports whether the query caches are trustworthy for d: Doc
-// back-pointers must be intact (see ElementByID).
 func (d *Document) queryIntact() bool {
 	return d.Node.Doc == d
 }
 
-// ensureQueryIndex rebuilds the caches when stale.
 func (d *Document) ensureQueryIndex() {
 	if !d.qValid {
 		d.rebuildQueryIndex()
 	}
 }
 
-// NewDocument creates an empty document with a document node.
 func NewDocument() *Document {
 	doc := &Document{CharacterSet: "UTF-8"}
 	doc.Node = Node{
@@ -2052,15 +1713,10 @@ func (d *Document) allocID() NodeID {
 	return id
 }
 
-// AllocateNodeID reserves a unique ID in this document for a node assembled
-// by a caller that needs to transfer an existing tree into a new document.
 func (d *Document) AllocateNodeID() NodeID {
 	return d.allocID()
 }
 
-// NewElement creates a new element node with the given tag name.
-// For HTML documents the name is lowercased per the HTML spec; for XML
-// documents the original case is preserved.
 func (d *Document) NewElement(tagName string) *Node {
 	name := tagName
 	if !d.IsXML {
@@ -2076,7 +1732,6 @@ func (d *Document) NewElement(tagName string) *Node {
 	return n
 }
 
-// NewText creates a new text node.
 func (d *Document) NewText(data string) *Node {
 	return &Node{
 		ID:          d.allocID(),
@@ -2086,19 +1741,14 @@ func (d *Document) NewText(data string) *Node {
 	}
 }
 
-// NewCDATASection creates a CDATA section node for XML documents.
 func (d *Document) NewCDATASection(data string) *Node {
 	return &Node{ID: d.allocID(), Type: NodeCDATASection, DataContent: data, Doc: d}
 }
 
-// NewProcessingInstruction creates a ProcessingInstruction node. The target
-// is stored in Data and the instruction data in DataContent.
 func (d *Document) NewProcessingInstruction(target, data string) *Node {
 	return &Node{ID: d.allocID(), Type: NodeProcessingInstruction, Data: target, DataContent: data, Doc: d}
 }
 
-// NewDocumentFragment creates an empty document fragment owned by d. Scripts
-// reach it through document.createDocumentFragment().
 func (d *Document) NewDocumentFragment() *Node {
 	return &Node{
 		ID:   d.allocID(),
@@ -2107,7 +1757,6 @@ func (d *Document) NewDocumentFragment() *Node {
 	}
 }
 
-// NewComment creates a new comment node.
 func (d *Document) NewComment(data string) *Node {
 	return &Node{
 		ID:          d.allocID(),
@@ -2117,7 +1766,6 @@ func (d *Document) NewComment(data string) *Node {
 	}
 }
 
-// NewDoctype creates a new doctype node.
 func (d *Document) NewDoctype(data string) *Node {
 	return &Node{
 		ID:          d.allocID(),
@@ -2127,8 +1775,6 @@ func (d *Document) NewDoctype(data string) *Node {
 	}
 }
 
-// ElementsByClassName returns all elements that have the given class name
-// among their space-separated class list.
 func (d *Document) ElementsByClassName(class string) []*Node {
 	if !d.queryIntact() {
 		var result []*Node
@@ -2159,21 +1805,10 @@ func collectByClass(n *Node, class string, result *[]*Node) {
 	}
 }
 
-// ElementByID returns the first element with the given ID, or nil.
 func (d *Document) ElementByID(id string) *Node {
-	// An empty id matched the first element under the old linear scan
-	// (missing attributes read as ""); keep that path verbatim rather than
-	// redefining it here.
 	if id == "" {
 		return findByID(&d.Node, id)
 	}
-	// The index is only trustworthy when Doc back-pointers are intact: a
-	// zero-value Document (&Document{}, as hand-built trees use) has nil
-	// Doc everywhere, so dirty marks from mutations can never reach this
-	// struct and a cached index would go stale. Parsed documents always
-	// carry intact pointers (NewDocument + AppendChild propagation), so the
-	// real browser path stays indexed while degenerate trees keep the
-	// always-correct linear scan.
 	if !d.queryIntact() {
 		return findByID(&d.Node, id)
 	}
@@ -2193,8 +1828,6 @@ func findByID(n *Node, id string) *Node {
 	return nil
 }
 
-// DatalistOptions returns the suggested values associated with an input element
-// via its list attribute pointing to a <datalist id="..."> element.
 func (d *Document) DatalistOptions(input *Node) []string {
 	if input == nil || input.Doc == nil {
 		return nil
@@ -2238,7 +1871,6 @@ func datalistOptionDisabled(option, datalist *Node) bool {
 	return false
 }
 
-// DatalistOptions returns the list options if n is an input with a valid list attribute.
 func (n *Node) DatalistOptions() []string {
 	if n == nil || n.Doc == nil {
 		return nil
@@ -2246,7 +1878,6 @@ func (n *Node) DatalistOptions() []string {
 	return n.Doc.DatalistOptions(n)
 }
 
-// ElementsByTagName returns all elements with the given tag name.
 func (d *Document) ElementsByTagName(tag string) []*Node {
 	var result []*Node
 	collectByTag(&d.Node, tag, &result)
@@ -2277,7 +1908,6 @@ func matchesTagName(node *Node, tag string, xmlDocument bool) bool {
 	return strings.EqualFold(node.Data, tag)
 }
 
-// PropertyDefinition describes a CSS custom property registered via @property or CSS.registerProperty.
 type PropertyDefinition struct {
 	Name         string
 	Syntax       string
@@ -2285,8 +1915,6 @@ type PropertyDefinition struct {
 	InitialValue string
 }
 
-// RegisterProperty registers a CSS custom property descriptor on the document.
-// It returns false if the property was already registered.
 func (d *Document) RegisterProperty(def PropertyDefinition) bool {
 	d.propertiesMu.Lock()
 	defer d.propertiesMu.Unlock()
@@ -2300,7 +1928,6 @@ func (d *Document) RegisterProperty(def PropertyDefinition) bool {
 	return true
 }
 
-// GetProperty retrieves a registered CSS custom property descriptor if present.
 func (d *Document) GetProperty(name string) (PropertyDefinition, bool) {
 	d.propertiesMu.RLock()
 	defer d.propertiesMu.RUnlock()
@@ -2311,7 +1938,6 @@ func (d *Document) GetProperty(name string) (PropertyDefinition, bool) {
 	return def, ok
 }
 
-// RegisteredProperties returns a snapshot map of all registered custom properties.
 func (d *Document) RegisteredProperties() map[string]PropertyDefinition {
 	d.propertiesMu.RLock()
 	defer d.propertiesMu.RUnlock()

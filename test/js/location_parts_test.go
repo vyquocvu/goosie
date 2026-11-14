@@ -8,39 +8,12 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// window.location, as the parts pages read.
-//
-// This is the file that fixes the error which survived every other repair on
-// the saved vnexpress home page. Its inline boot script ends with
-//
-//	if (window.location.hostname.indexOf(...) < 0) { ... }
-//
-// and before this cluster `location` carried exactly one property - href - so
-// the read was `Cannot read property 'indexOf' of undefined or null`: a
-// missing property, not a missing method, throwing a TypeError that took the
-// rest of the boot script with it.
-//
-// The measured reads on that 201,234-byte saved page (counted with grep over
-// the file, `.host` minus the `.hostname` it also matches):
-//
-//	location.href 7, location.search 6, location.hash 5, location.pathname 4,
-//	location.hostname 4, location.origin 3, location.host 2, location.protocol 2
-//	location.port 0, location.searchParams 0, location.assign 0, location.replace 0
-//
-// Each part is an accessor over one parsed *url.URL the runtime holds, not a
-// snapshot string set at boot, because history.pushState/replaceState move the
-// document's URL and a page that reads location.pathname afterwards has to see
-// the new one.
-
 func locationRuntime(t *testing.T, url string) *js.Runtime {
 	t.Helper()
 	doc := domtest.Parse(`<html><head></head><body></body></html>`)
 	return newRuntime(t, js.Options{URL: url, DOM: doc})
 }
 
-// Every part of a full URL, with the spellings the URL Standard uses: protocol
-// and hash and search carry their own punctuation, port is the empty string
-// when the URL does not write one, and origin is scheme://host with no path.
 // qc:BR-207
 func TestLocationPartsOfAFullURL(t *testing.T) {
 	rt := locationRuntime(t, "https://news.example.test:8443/muc-duc/tin-moi.html?tag=1&lang=vi#top")
@@ -60,10 +33,6 @@ func TestLocationPartsOfAFullURL(t *testing.T) {
 	}
 }
 
-// An origin-only URL still reports a path, because that is what the URL
-// serializer produces and pages build URLs by concatenating location.pathname
-// with a route: an empty string here would turn "https://host" + "login" into
-// "https://hostlogin". A port the URL does not write reads as "".
 // qc:BR-207
 func TestLocationPartsOfAnOriginOnlyURL(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test")
@@ -80,9 +49,6 @@ func TestLocationPartsOfAnOriginOnlyURL(t *testing.T) {
 	}
 }
 
-// The exact read that threw on the real page: a method call on hostname. A
-// location whose hostname is undefined fails here as a TypeError the page
-// cannot catch its way out of.
 // qc:BR-207
 func TestLocationHostnameSupportsARealPagePattern(t *testing.T) {
 	rt := locationRuntime(t, "https://vnexpress.net/tin-tuc-24h?utm_source=rss")
@@ -105,8 +71,6 @@ func TestLocationHostnameSupportsARealPagePattern(t *testing.T) {
 	}
 }
 
-// location is the same object as a string: coercing it gives href, which is
-// what `window.location + ""` and `String(location)` do in a page.
 // qc:BR-207
 func TestLocationCoercesToHref(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/a/b?c=d#e")
@@ -121,14 +85,6 @@ func TestLocationCoercesToHref(t *testing.T) {
 	}
 }
 
-// document.location is the same object as window.location, and the pattern that
-// proves it is worth pinning: the Google Analytics async snippet, quoted from
-// the saved vietnamnet home page, reads the protocol off document -
-//
-//	ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + ...
-//
-// and with no document.location the whole statement was that page's first
-// surviving error, `Cannot read property 'protocol' of undefined`.
 // qc:BR-207
 func TestDocumentLocationIsTheSameObjectAsWindowLocation(t *testing.T) {
 	rt := locationRuntime(t, "https://vietnamnet.vn/vn/thoi-su?a=1")
@@ -153,10 +109,6 @@ func TestDocumentLocationIsTheSameObjectAsWindowLocation(t *testing.T) {
 	}
 }
 
-// history.pushState and replaceState move the document's URL, and the parts are
-// accessors over that URL, so a route change is visible in every part
-// afterwards - including a relative argument, which the standard resolves
-// against the document's own URL rather than storing as-is.
 // qc:BR-207
 func TestLocationPartsFollowHistory(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/start?old=1")
@@ -180,8 +132,6 @@ func TestLocationPartsFollowHistory(t *testing.T) {
 	}
 }
 
-// Fragment writes perform same-document navigation while other URL component
-// writes remain unsupported because they require a full document navigation.
 // qc:BR-207
 func TestLocationHashWriteUpdatesSameDocumentURL(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/page?a=1")
@@ -206,13 +156,6 @@ func TestLocationHashWriteUpdatesSameDocumentURL(t *testing.T) {
 	}
 }
 
-// The navigation members are deliberately absent, and a call on one is a loud
-// TypeError naming the member rather than a silent no-op. Measured reason for
-// keeping them absent: the saved vnexpress page calls `location.reload()` once,
-// inside `validateCachePage`, after `new Image(1,1).src = ...` - and that Image
-// constructor is the error the page actually stops on (see the task doc), so
-// reload is not reached offline. A no-op reload would also be the one API here
-// that could turn a snapshot render into a loop.
 // qc:BR-207
 func TestLocationNavigationMembersAreAbsent(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/page")
@@ -234,9 +177,6 @@ func TestLocationNavigationMembersAreAbsent(t *testing.T) {
 	}
 }
 
-// A URL this host gave that Go cannot parse still yields an object: href reads
-// back exactly what the host passed, and the derived parts are empty strings
-// rather than a partial parse. This is the file://-and-scheme-less-host case.
 // qc:BR-207
 func TestLocationOfAnUnparseableURL(t *testing.T) {
 	rt := locationRuntime(t, "://not-a-url")
@@ -252,7 +192,6 @@ func TestLocationOfAnUnparseableURL(t *testing.T) {
 	if got := evalString(t, rt, `out`); got != want {
 		t.Fatalf("unparseable URL parts = %q, want %q", got, want)
 	}
-	// String coercion keeps the raw value too.
 	if got := evalString(t, rt, `String(location)`); got != "://not-a-url" {
 		t.Fatalf("String(location) = %q, want the raw host string", got)
 	}

@@ -31,7 +31,6 @@ func TestPictureElementSourceResolution(t *testing.T) {
 </picture>
 </body></html>`
 
-	// 1. Mobile viewport (400px wide) -> should choose /mobile.png
 	requestedURL = ""
 	sMobile, err := engine.NewSession(html, nil, 400,
 		engine.WithMetrics(&fixedMetrics{advance: 7}),
@@ -44,7 +43,6 @@ func TestPictureElementSourceResolution(t *testing.T) {
 		t.Errorf("at viewport 400px, expected /mobile.png, got %q", requestedURL)
 	}
 
-	// 2. Desktop viewport (800px wide) -> should choose /desktop.png
 	requestedURL = ""
 	sDesktop, err := engine.NewSession(html, nil, 800,
 		engine.WithMetrics(&fixedMetrics{advance: 7}),

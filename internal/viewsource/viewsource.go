@@ -1,4 +1,3 @@
-// Package viewsource formats and syntax-highlights source code for view-source presentation.
 package viewsource
 
 import (
@@ -12,8 +11,6 @@ import (
 
 const viewSourcePrefix = "view-source:"
 
-// IsViewSourceURL checks if rawURL starts with the view-source: scheme.
-// If so, it returns the unadorned target URL and true.
 func IsViewSourceURL(rawURL string) (targetURL string, isViewSource bool) {
 	if strings.HasPrefix(strings.ToLower(rawURL), viewSourcePrefix) {
 		return strings.TrimSpace(rawURL[len(viewSourcePrefix):]), true
@@ -21,7 +18,6 @@ func IsViewSourceURL(rawURL string) (targetURL string, isViewSource bool) {
 	return rawURL, false
 }
 
-// WrapViewSourceURL formats targetURL into a view-source: URL.
 func WrapViewSourceURL(targetURL string) string {
 	if strings.HasPrefix(strings.ToLower(targetURL), viewSourcePrefix) {
 		return targetURL
@@ -36,7 +32,6 @@ var (
 	reAttr    = regexp.MustCompile(`([a-zA-Z0-9:-]+)(?:=("(?:[^"]*)"|'(?:[^']*)'|[^>\s]+))?`)
 )
 
-// HighlightHTML applies syntax highlighting to raw HTML markup.
 func HighlightHTML(src, baseURL string) string {
 	var b strings.Builder
 	idx := 0
@@ -93,7 +88,6 @@ func HighlightHTML(src, baseURL string) string {
 			}
 		}
 
-		// Text token
 		nextOpen := strings.IndexByte(src[idx:], '<')
 		if nextOpen == -1 {
 			b.WriteString(html.EscapeString(src[idx:]))
@@ -107,7 +101,6 @@ func HighlightHTML(src, baseURL string) string {
 }
 
 func highlightSingleTag(rawTag string, resolveLink func(string) string) string {
-	// Parse opening < or </
 	prefix := "<"
 	inner := rawTag[1 : len(rawTag)-1]
 	suffix := ">"
@@ -120,7 +113,6 @@ func highlightSingleTag(rawTag string, resolveLink func(string) string) string {
 		suffix = "/>"
 	}
 
-	// Extract tag name
 	tagNameEnd := strings.IndexAny(inner, " \t\r\n")
 	tagName := inner
 	attrsPart := ""
@@ -177,7 +169,6 @@ func highlightSingleTag(rawTag string, resolveLink func(string) string) string {
 	return b.String()
 }
 
-// RenderHTML formats raw source code into an HTML view-source document with line numbers.
 func RenderHTML(source, targetURL string, darkMode bool) string {
 	lines := strings.Split(source, "\n")
 	totalLines := len(lines)

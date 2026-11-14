@@ -12,25 +12,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// Real parity comparison: Goosie vs Chromium reference.
-//
-// Each test loads the same HTML fixture used by the Playwright reference
-// script (scripts/interaction-parity-reference.js), performs the same
-// interaction sequence, and compares the captured event log against the
-// Chromium reference committed at testdata/interaction-parity/.
-//
-// Regenerate the reference with: node scripts/interaction-parity-reference.js
-// Mismatches are reported with full diff, not silently accepted.
-// ---------------------------------------------------------------------------
-
 var parityFixtureDir = filepath.Join("..", "..", "testdata", "interaction-parity")
 var parityReferencePath = filepath.Join(parityFixtureDir, "reference-events.json")
 var parityStatePath = filepath.Join(parityFixtureDir, "reference-state.json")
 
-// parityStateExpr is evaluated on both sides: the Playwright reference script
-// runs it after each interaction sequence and the Go tests run it through the
-// document runtime. It records focus, checked controls, and the URL fragment.
 const parityStateExpr = `(function(){
   var a = document.activeElement;
   var ids = ['cb1','cb2','r1','r2','r3'];
@@ -43,9 +28,6 @@ const parityStateExpr = `(function(){
   return 'active=' + active + ';checked=' + checked.join('+') + ';hash=' + location.hash;
 })()`
 
-// captureParity writes Goosie's own event log for a fixture into
-// goosie-events.json when GOOSIE_CAPTURE_PARITY=1, so both sides of the
-// comparison are persisted as reproducible artifacts.
 func captureParity(fixture, got string) {
 	if os.Getenv("GOOSIE_CAPTURE_PARITY") != "1" {
 		return
@@ -95,10 +77,6 @@ func getParityState(t *testing.T, rt *js.Runtime) string {
 	return state
 }
 
-// clickCenterWithFocus mirrors the host pointer sequence: the press focuses the
-// element under the cursor, then the click runs its default action. Chromium
-// focuses buttons and links on mousedown, so the final-state comparison has to
-// drive both steps to stay comparable.
 func clickCenterWithFocus(t *testing.T, s *engine.Session, id string) bool {
 	t.Helper()
 	if s.Arena == nil {
@@ -166,9 +144,6 @@ func assertParityMatch(t *testing.T, fixture string, got, want string) {
 	}
 }
 
-// TestParityRef_EventOrder compares capture/bubble ordering against Chromium,
-// including the focused element the click leaves behind.
-//
 // qc:BR-178
 func TestParityRef_EventOrder(t *testing.T) {
 	ref := loadParityReference(t)
@@ -186,8 +161,6 @@ func TestParityRef_EventOrder(t *testing.T) {
 	}
 }
 
-// TestParityRef_StopPropagation compares stopPropagation behavior.
-//
 // qc:BR-178
 func TestParityRef_StopPropagation(t *testing.T) {
 	ref := loadParityReference(t)
@@ -205,8 +178,6 @@ func TestParityRef_StopPropagation(t *testing.T) {
 	}
 }
 
-// TestParityRef_MultipleListeners compares multiple listener ordering.
-//
 // qc:BR-178
 func TestParityRef_MultipleListeners(t *testing.T) {
 	ref := loadParityReference(t)
@@ -224,9 +195,6 @@ func TestParityRef_MultipleListeners(t *testing.T) {
 	}
 }
 
-// TestParityRef_CheckboxRadio compares checkbox/radio change events and the
-// checked set the sequence leaves behind.
-//
 // qc:BR-178
 func TestParityRef_CheckboxRadio(t *testing.T) {
 	ref := loadParityReference(t)
@@ -247,12 +215,6 @@ func TestParityRef_CheckboxRadio(t *testing.T) {
 	}
 }
 
-// TestParityRef_FocusTab compares Tab-order focus traversal against Chromium.
-// The reference clicks #a then presses Tab three times (a->b->c->d); Goosie
-// mirrors this by focusing #a then calling FocusNext three times. focus/blur
-// fire non-bubbling at the target, matching the DOM spec and Chromium. The
-// final state must be the same focused element Chromium ends on.
-//
 // qc:BR-178
 func TestParityRef_FocusTab(t *testing.T) {
 	ref := loadParityReference(t)
@@ -273,11 +235,6 @@ func TestParityRef_FocusTab(t *testing.T) {
 	}
 }
 
-// TestParityRef_PreventDefault compares preventDefault behavior. Inline <a>
-// boxes now carry a union rect, so clickCenter resolves the link and its
-// preventDefault listener fires, matching Chromium. The final state also shows
-// that neither the form submission nor the fragment navigation took effect.
-//
 // qc:BR-178
 func TestParityRef_PreventDefault(t *testing.T) {
 	ref := loadParityReference(t)
@@ -296,13 +253,6 @@ func TestParityRef_PreventDefault(t *testing.T) {
 	}
 }
 
-// TestParityRef_Keyboard compares the full keyboard-event sequence against
-// Chromium. The reference clicks #a (focus) then presses Tab twice. Goosie
-// focuses #a then drives PressKey("Tab"), which emits keydown on the old focus,
-// runs the focus-move default action (blur/focus), then keyup on the new focus.
-// event.key must be observable to JS as "Tab".
-// Reference: a:focus,a:keydown:Tab,a:blur,b:focus,b:keyup:Tab,b:keydown:Tab,b:blur,c:focus,c:keyup:Tab
-//
 // qc:BR-178
 func TestParityRef_Keyboard(t *testing.T) {
 	ref := loadParityReference(t)

@@ -22,10 +22,6 @@ import (
 var wptGetSubstitution = regexp.MustCompile(`\{\{GET\[([^\]]+)\]\}\}`)
 var wptPortSubstitution = regexp.MustCompile(`\{\{ports\[([a-zA-Z]+)\]\[([0-9]+)\]\}\}`)
 
-// Server serves WPT test files over HTTP. WPT tests use absolute paths like
-// /resources/testharness.js and /css/support/... which only resolve correctly
-// when served from the repository root. The server maps HTTP requests to files
-// in the WPT checkout directory.
 type Server struct {
 	mu             sync.Mutex
 	listener       net.Listener
@@ -38,8 +34,6 @@ type Server struct {
 	dispatchPOSTs  int
 }
 
-// NewServer creates an HTTP server rooted at the WPT checkout directory.
-// The server is not started until Start is called.
 func NewServer(wptRoot string) *Server {
 	return &Server{
 		root:           wptRoot,
@@ -47,10 +41,6 @@ func NewServer(wptRoot string) *Server {
 	}
 }
 
-// Start binds to a random available port and begins serving. The server URL
-// is available via URL() after Start returns. The wpt.localhost origin is a
-// loopback alias and gives substituted sibling hosts a shared domain suffix
-// for cross-origin and document.domain coverage.
 func (s *Server) Start() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,21 +66,18 @@ func (s *Server) Start() error {
 	return nil
 }
 
-// URL returns the base URL of the running server, e.g. "http://wpt.localhost:12345".
 func (s *Server) URL() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return fmt.Sprintf("http://wpt.localhost:%d", s.port)
 }
 
-// Port returns the port the server is listening on.
 func (s *Server) Port() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.port
 }
 
-// Stop shuts down the server gracefully.
 func (s *Server) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -102,10 +89,7 @@ func (s *Server) Stop() error {
 	return s.server.Shutdown(ctx)
 }
 
-// handleRequest serves files from the WPT checkout. Path traversal is prevented
-// by cleaning the path and verifying it stays within the root directory.
 func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
-	// Clean the path to prevent directory traversal.
 	cleanPath := filepath.Clean(r.URL.Path)
 	if cleanPath == "." || cleanPath == "/" {
 		cleanPath = "/"
@@ -130,13 +114,10 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		s.serveFormFileSubmission(w, r)
 		return
 	}
-	// A few pinned upstream tests still request the old generated bundle name.
-	// Current WPT checkouts place the same WebIDL2 global at this path.
 	if strings.EqualFold(cleanPath, "/resources/WebIDLParser.js") {
 		cleanPath = "/resources/webidl2/lib/webidl2.js"
 	}
 
-	// Build the full filesystem path and verify it stays within root.
 	fullPath := filepath.Join(s.root, cleanPath)
 	absRoot, err := filepath.Abs(s.root)
 	if err != nil {
@@ -148,20 +129,16 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	// Verify the resolved path is within the root directory.
 	rel, err := filepath.Rel(absRoot, absPath)
 	if err != nil || len(rel) >= 2 && rel[:2] == ".." {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
-	// Set appropriate content types for WPT resources.
 	switch {
 	case filepath.Ext(absPath) == ".xhtml" || filepath.Ext(absPath) == ".xht":
 		w.Header().Set("Content-Type", "application/xhtml+xml")
 	case filepath.Ext(absPath) == ".html" || filepath.Ext(absPath) == ".htm":
-		// Do not invent a transport charset: parser and meta-encoding WPTs
-		// rely on the response matching the test server's actual metadata.
 		w.Header().Set("Content-Type", "text/html")
 	case filepath.Ext(absPath) == ".js":
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
@@ -206,8 +183,6 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 			}
 			return []byte(html.EscapeString(r.URL.Query().Get(string(parts[1]))))
 		})
-		// WPT .sub. resources use distinct loopback hostnames so their runtime
-		// origins remain distinct even though the single listener serves them.
 		data = bytes.ReplaceAll(data, []byte("{{host}}"), []byte("wpt.localhost"))
 		data = bytes.ReplaceAll(data, []byte("{{domains[www1]}}"), []byte("www1.wpt.localhost"))
 		data = bytes.ReplaceAll(data, []byte("{{domains[www2]}}"), []byte("www2.wpt.localhost"))
@@ -228,8 +203,6 @@ func (s *Server) handleRequest(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, absPath)
 }
 
-// serveDispatcher implements the small stateful HTTP queue used by upstream
-// WPT helpers to pass messages among windows, workers, and service workers.
 func (s *Server) serveDispatcher(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -420,9 +393,6 @@ func (s *Server) serveFormEcho(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, encoded.String())
 }
 
-// serveFormSubmissionCheck implements the small pinned WPT handler used by
-// submit-entity-body.html. It checks encoded form bodies without running the
-// Python WPT server or exposing a general-purpose script handler.
 func (s *Server) serveFormSubmissionCheck(w http.ResponseWriter, r *http.Request) {
 	const maxBody = 4 << 20
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))

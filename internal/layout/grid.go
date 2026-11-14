@@ -8,32 +8,20 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// gridTrack is one column or row of a grid as declared. min is the track's
-// definite floor, or -1 when the declaration said auto; max is its definite
-// ceiling, or -1 for no ceiling; fr is its flex weight.
 type gridTrack struct {
-	min float32
-	max float32
-	fr  float32
-	// content is true for minmax() with a definite upper bound, min-content, and
-	// max-content. These tracks size to their items rather than stretching to
-	// fill leftover space.
-	content bool
-	// autoRepeat marks repeat(auto-fill|auto-fit, ...), whose count depends on
-	// the container's own width and so cannot be resolved by the cascade.
+	min        float32
+	max        float32
+	fr         float32
+	content    bool
 	autoRepeat bool
-	// fit distinguishes auto-fit, which collapses tracks no item reached, from
-	// auto-fill, which keeps them.
-	fit bool
+	fit        bool
 }
 
-// gridArea is the rectangle a grid-template-areas name covers, in track indexes.
 type gridArea struct {
 	col, row         int
 	colSpan, rowSpan int
 }
 
-// gridItem is a grid item: its placement and the extents that placement gave it.
 type gridItem struct {
 	id       ObjectID
 	name     string
@@ -54,13 +42,6 @@ type gridItem struct {
 	contentW float32
 }
 
-// layoutGrid lays out a grid container.
-//
-// The subset is the one real declarations use: fixed and fractional tracks,
-// repeat(n, ...) and repeat(auto-fill|auto-fit, minmax(px, 1fr)), a named
-// grid-template-areas template, row-major auto-placement honouring
-// grid-column/grid-row spans, one gap value on both axes, and
-// justify-items/align-items/justify-content/align-content.
 func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	obj := a.Get(id)
 	contentX := obj.X + obj.BorderLeft + obj.PaddingLeft
@@ -165,7 +146,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 
 	switch {
 	case len(cols) == 0:
-		// An untemplated grid still needs one implicit column to place into.
 		cols = autoTracks(max(areaCols, 1))
 	case areaCols > len(cols):
 		cols = append(cols, autoTracks(areaCols-len(cols))...)
@@ -195,8 +175,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
-	// Columns settle first, because an item's width decides how its text wraps and
-	// so decides how tall the row it lands in has to be.
 	colW := make([]float32, len(cols))
 	sizeGridTracks(cols, colW, contentW, gapX, normalizeAxis(container.JustifyContent) == "",
 		measureAutoCols(a, items, cols))
@@ -231,14 +209,9 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		it.GridRow = p.row
 		it.GridColSpan = p.colSpan
 		it.GridRowSpan = p.rowSpan
-		// The horizontal origin is already final, so descendants block layout puts
-		// under this item land where they belong; only Y moves after sizing.
 		it.X = xs[p.col]
 		it.Y = contentY
 		if p.justify != "" && it.Style.Width < 0 {
-			// A content-sized item takes its max-content width: laid out at an
-			// effectively infinite width its text cannot wrap, so the span the words
-			// actually took is the span the item gets.
 			blockInto(a, p.id, maxFlexMeasureWidth)
 			it = a.Get(p.id)
 			inlineInto(a, p.id)
@@ -258,9 +231,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		p.borderH = it.BorderH()
 	}
 
-	// Rows: a declared row keeps its size, and every other row takes the tallest
-	// item sitting wholly inside it. rowSpecs was parsed with the columns; the
-	// content height it resolved against has not changed since.
 	nRows := len(rowSpecs)
 	if maxRow+1 > nRows {
 		nRows = maxRow + 1
@@ -289,8 +259,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			rowH[p.row] = h
 		}
 	}
-	// An item taller than the rows it spans has nowhere to go but down, so the
-	// deficit lands on the last auto row of its span.
 	for i := range items {
 		p := &items[i]
 		if p.rowSpan < 2 || p.row >= nRows {
@@ -312,8 +280,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 
-	// In a container of definite height, align-content: normal stretches the auto
-	// rows to fill it. That is what gives align-items room to align within.
 	if contentH > trackSize(rowH, 0, nRows, gapY) && normalizeAxis(container.AlignContent) == "" {
 		auto := 0
 		for _, tr := range rowSpecs[:nRows] {
@@ -358,8 +324,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			finalX = xs[p.col] + colRect - p.borderW - p.mRight
 		}
 		if p.align == "" && it.Style.Height < 0 {
-			// Stretch, the default: the item grows into its rows, which is only extra
-			// space when a row has a size of its own.
 			inner := rowRect - p.mTop - p.mBottom -
 				(it.PaddingTop + it.PaddingBottom + it.BorderTop + it.BorderBottom)
 			if inner > it.H {
@@ -378,8 +342,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		dx := finalX - it.X
 		dy := finalY - it.Y
 		if p.measured {
-			// The words are still where the measurement pass left them, so they
-			// travel with the item instead of being allocated a second time.
 			extra := float32(0)
 			if spare := it.W - p.contentW; spare > 0 {
 				switch it.Style.TextAlign {
@@ -408,8 +370,6 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	return maxBottom
 }
 
-// shiftBlockKids moves an item's block descendants, which shiftInlineContent
-// reaches through without moving itself.
 func shiftBlockKids(a *Arena, id ObjectID, dx, dy float32) {
 	obj := a.Get(id)
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
@@ -419,9 +379,6 @@ func shiftBlockKids(a *Arena, id ObjectID, dx, dy float32) {
 	}
 }
 
-// collectGridItems takes the in-flow children of a grid container. Raw text and
-// out-of-flow boxes are not items, but a skipped text node still has its content
-// cleared so the paint pass cannot draw it at the box's zero position.
 func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, container *style.ComputedStyle, areas map[string]gridArea, colLines, rowLines map[string][]int, nCols, nRows int) []gridItem {
 	obj := a.Get(id)
 	var out []gridItem
@@ -473,10 +430,6 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 			p.colSpan, p.rowSpan = ar.colSpan, ar.rowSpan
 			p.fixedPos = true
 		}
-		// Explicit line placement pins the item: "2 / 5" and
-		// "sidebar-start / content-end" both reduce to a start line and a
-		// span. A bare "span N" (or anything unresolvable) keeps the
-		// span/auto-placement path the style layer always produced.
 		if st, sp, ok := resolveGridPlacement(k.Style.GridColumn, colLines, nCols); ok {
 			p.col, p.colSpan, p.fixedPos = st, sp, true
 		} else if sp > 0 {
@@ -492,33 +445,19 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 	return out
 }
 
-// autoPlaceGridItems gives every item a cell: an item named by
-// grid-template-areas keeps that rectangle, and the rest take the first free slot
-// scanning row-major from the placement cursor, which is CSS's sparse packing. It
-// reports the deepest row used.
-//
-// Performance optimization using per-row interval tracking:
-// - Each row maintains sorted intervals of occupied cells [start, end)
-// - Finding available position: O(intervals_per_row × span_check) per item
-// - Marking position: O(intervals_per_row) with merge
-// - Typical case (sparse grid): O(n) where n = number of items
-// - Worst case (dense grid): O(n × m) where m = average intervals per row (usually << k)
 func autoPlaceGridItems(items []gridItem, k int) int {
 	if k < 1 {
 		k = 1
 	}
 
-	// occupied[row] holds sorted, non-overlapping [start, end) intervals
 	type iv struct{ s, e int }
 	occupied := make([][]iv, 4096)
 
-	// fits checks if [c, c+span) fits in row r without overlapping occupied intervals
 	fits := func(r, c, span int) bool {
 		if r < 0 || r >= len(occupied) || c+span > k {
 			return false
 		}
 		for _, iv := range occupied[r] {
-			// Overlap: c < iv.e && iv.s < c+span
 			if c < iv.e && iv.s < c+span {
 				return false
 			}
@@ -526,7 +465,6 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 		return true
 	}
 
-	// mark reserves [c, c+span) in row r by merging overlapping intervals
 	mark := func(r, c, span int) {
 		if r < 0 || r >= len(occupied) {
 			return
@@ -537,9 +475,7 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 
 		for _, existing := range occupied[r] {
 			if merged == nil {
-				// First pass: detect overlap and create merged interval
 				if existing.s <= newIV.e && newIV.s < existing.e {
-					// Overlaps - extend merged interval
 					skipped = true
 					if existing.s < newIV.s {
 						newIV.s = existing.s
@@ -551,7 +487,6 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 					merged = append(merged, existing)
 				}
 			} else {
-				// Second pass: collect remaining intervals
 				result = append(result, existing)
 			}
 		}
@@ -566,7 +501,6 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 		}
 	}
 
-	// First pass: reserve positions for fixed-position items
 	for i := range items {
 		if items[i].colSpan > k {
 			items[i].colSpan = k
@@ -576,7 +510,6 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 		}
 	}
 
-	// Second pass: auto-place remaining items incrementally
 	curRow := 0
 	for i := range items {
 		p := &items[i]
@@ -586,7 +519,6 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 
 		placed := false
 		for curRow < 4096 && !placed {
-			// Search for first fitting column position
 			for col := 0; col <= k-p.colSpan; col++ {
 				if fits(curRow, col, p.colSpan) {
 					p.row, p.col = curRow, col
@@ -601,7 +533,6 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 		}
 	}
 
-	// Compute highest row used
 	lowest := 0
 	for _, p := range items {
 		if end := p.row + p.rowSpan; end > lowest {
@@ -611,22 +542,11 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 	return lowest - 1
 }
 
-// parseGridTracks splits a track-list value into tracks. repeat(n, ...) expands
-// here; repeat(auto-fill|auto-fit, ...) stays one marked track until the
-// container's width is known. em and rem resolve against fontSize, and a
-// percentage against inlineSize, which is 0 for a track axis with no definite
-// size - a percentage row of an auto-height grid is then left to size itself.
 func parseGridTracks(v string, fontSize, inlineSize float32) []gridTrack {
 	tracks, _ := parseGridTracksAndLines(v, fontSize, inlineSize)
 	return tracks
 }
 
-// parseGridTracksAndLines is parseGridTracks plus the custom-ident line names
-// each "[...]" group declares. N tracks imply N+1 lines, numbered from 1: a
-// group names the line before the next track, so "[a] 200px [b] 1fr [c]" puts
-// a on line 1, b on line 2, c on line 3. A name may repeat; placement takes
-// the first line carrying it. Names match case-insensitively, the same
-// normalization the track parser already applies to the whole list.
 func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrack, map[string][]int) {
 	v = strings.TrimSpace(strings.ToLower(v))
 	lines := map[string][]int{}
@@ -634,7 +554,6 @@ func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrac
 		return nil, lines
 	}
 	var out []gridTrack
-	// line is the 1-based number the next track starts on.
 	line := 1
 	record := func(group string) {
 		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(group, "["), "]"))
@@ -664,11 +583,6 @@ func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrac
 				t.fit = head == "auto-fit"
 				out = append(out, t)
 			}
-			// The repeated count is unknowable until the container measures,
-			// so names inside cannot map to lines yet; the tracks still parse.
-			// The cursor advances by the body's declared tracks so a group
-			// after the repeat still names the right line when the repeat
-			// expands to exactly its body.
 			line += countTopTracks(body)
 			continue
 		}
@@ -690,9 +604,6 @@ func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrac
 	return out, lines
 }
 
-// countTopTracks counts the tracks a repeat body declares without parsing
-// them, for the auto-fill/auto-fit line cursor the engine cannot map names
-// onto anyway. Numeric repeats expand; anything else counts once.
 func countTopTracks(body string) int {
 	n := 0
 	for _, tok := range splitGridTracks(body) {
@@ -714,9 +625,6 @@ func countTopTracks(body string) int {
 	return n
 }
 
-// resolveGridLine maps one side of a "start / end" placement to a 1-based line
-// number: a bare number, or the first line carrying a custom-ident name.
-// "span N" is not a line and reports false; the caller keeps the span form.
 func resolveGridLine(side string, lines map[string][]int, nTracks int) (int, bool) {
 	side = strings.TrimSpace(side)
 	if side == "" || side == "auto" {
@@ -727,7 +635,6 @@ func resolveGridLine(side string, lines map[string][]int, nTracks int) (int, boo
 	}
 	if num, err := strconv.Atoi(side); err == nil && num != 0 {
 		if num < 0 {
-			// Negative lines count back from the explicit grid's end line.
 			num = nTracks + 2 + num
 		}
 		if num >= 1 {
@@ -752,11 +659,6 @@ func parseGridSpanValue(s string) int {
 	return 1
 }
 
-// resolveGridPlacement reduces a grid-column/grid-row value to a 0-based
-// start and a span against a template of nTracks tracks with the given line
-// names. "a / b" pins both lines; a lone line pins the start with span 1; a
-// bare "span N" reports false with span N for auto-placement.
-// Against an explicit template (nTracks > 0) starts clamp into it and spans clamp to fit.
 func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (start, span int, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || raw == "auto" {
@@ -769,7 +671,6 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 		left := strings.TrimSpace(raw[:i])
 		right := strings.TrimSpace(raw[i+1:])
 
-		// Case 1: left is "span N", right is a line: span N / line
 		if strings.HasPrefix(left, "span") {
 			sp := parseGridSpanValue(left)
 			e, eOk := resolveGridLine(right, lines, nTracks)
@@ -795,7 +696,6 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 			return s - 1, sp, true
 		}
 
-		// Case 2: left is a line, right is "span N": line / span N
 		if strings.HasPrefix(right, "span") {
 			s, sOk := resolveGridLine(left, lines, nTracks)
 			if !sOk {
@@ -816,7 +716,6 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 			return s - 1, sp, true
 		}
 
-		// Case 3: both are lines
 		s, sOk := resolveGridLine(left, lines, nTracks)
 		e, eOk := resolveGridLine(right, lines, nTracks)
 		if !sOk || !eOk || e <= s {
@@ -879,10 +778,6 @@ func parseGridTrack(tok string, fontSize, inlineSize float32) gridTrack {
 	return gridTrack{min: -1, max: -1}
 }
 
-// gridLen reads a definite length out of a track declaration. Track lists stay
-// text down to layout because a percentage track means the container's width,
-// which the cascade has no way to know, so the units resolve here against the
-// size layout already has.
 func gridLen(s string, fontSize, inlineSize float32) (float32, bool) {
 	s = strings.TrimSpace(s)
 	if strings.HasSuffix(s, "%") {
@@ -919,11 +814,6 @@ func gridLen(s string, fontSize, inlineSize float32) (float32, bool) {
 	return 0, false
 }
 
-// splitGridTracks splits a track list on whitespace and top-level commas so that
-// "repeat(3, minmax(50px, 1fr))" survives as one token. A "[name ...]" line-name
-// group survives as one token too: without the bracket depth its inner space
-// would split it into two broken tokens, each of which parsed as a phantom
-// auto track and shifted every column after it.
 func splitGridTracks(v string) []string {
 	var out []string
 	depth := 0
@@ -959,8 +849,6 @@ func splitGridTracks(v string) []string {
 	return out
 }
 
-// splitTopLevel splits an argument list on the commas that are not inside a
-// nested function.
 func splitTopLevel(v string) []string {
 	var out []string
 	depth := 0
@@ -983,8 +871,6 @@ func splitTopLevel(v string) []string {
 	return append(out, strings.TrimSpace(v[start:]))
 }
 
-// expandAutoTracks resolves repeat(auto-fill|auto-fit, ...) into as many copies as
-// fit at their own minimum, never zero.
 func expandAutoTracks(tracks []gridTrack, avail, gap float32) []gridTrack {
 	start := -1
 	end := -1
@@ -1040,11 +926,6 @@ func autoTracks(n int) []gridTrack {
 	return out
 }
 
-// measureAutoCols probes each auto-sized or content-sized column's items at an
-// effectively infinite width and reports the widest outer box one of them asks
-// for. Content tracks always need measurement; auto tracks are measured only
-// when the template also has flexible tracks (otherwise the leftover split
-// handles them).
 func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 	frs, hasContent, hasAuto := 0, false, false
 	for _, t := range cols {
@@ -1063,7 +944,6 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 	}
 	out := make([]float32, len(cols))
 
-	// Track which items we've already measured to avoid redundant work
 	measured := make(map[ObjectID]bool)
 
 	for i := range items {
@@ -1079,7 +959,6 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 			continue
 		}
 
-		// Skip if already measured this item
 		if measured[p.id] {
 			continue
 		}
@@ -1092,10 +971,6 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 	return out
 }
 
-// gridItemMaxContentW is an item's max-content contribution to its column: the
-// outer width its content takes when nothing wraps, including the box and the
-// margins that ride with it. A declared width wins over the measurement, because
-// an item that was told how wide to be never asks for more.
 func gridItemMaxContentW(a *Arena, id ObjectID) float32 {
 	it := a.Get(id)
 	blockInto(a, id, maxFlexMeasureWidth)
@@ -1120,8 +995,6 @@ func gridItemMaxContentW(a *Arena, id ObjectID) float32 {
 	if contentW < 0 {
 		contentW = 0
 	}
-	// The probe left the subtree wrapped to the wide measure, so the inline pass
-	// has to run again at the width the column actually gets.
 	clearInlineLaidOut(a, id)
 	mLeft, mRight := it.Style.MarginLeft, it.Style.MarginRight
 	if mLeft == style.MarginAuto {
@@ -1133,12 +1006,6 @@ func gridItemMaxContentW(a *Arena, id ObjectID) float32 {
 	return contentW + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight + mLeft + mRight
 }
 
-// sizeGridTracks resolves track sizes against the space available: a definite
-// track keeps its floor, a content track takes its items' size clamped to its
-// bounds, an auto track takes the width its items ask for, and fractional
-// tracks share what the definite ones left in proportion to their weights.
-// An auto track grows on a stretching axis only when nothing else claimed the
-// leftover; content tracks never stretch.
 func sizeGridTracks(tracks []gridTrack, sizes []float32, avail, gap float32, stretch bool, content []float32) {
 	n := len(tracks)
 	if n == 0 || len(sizes) < n {
@@ -1253,9 +1120,6 @@ func sizeGridTracks(tracks []gridTrack, sizes []float32, avail, gap float32, str
 	}
 }
 
-// axisPacking turns justify-content or align-content into the leading offset and
-// the per-track gap that place a fixed-size track list in its container: the space
-// the tracks did not use is what the alignment has to work with.
 func axisPacking(mode string, avail, gap float32, n int, sizes []float32) (lead, trackGap float32) {
 	trackGap = gap
 	if n == 0 || n > len(sizes) {
@@ -1268,8 +1132,6 @@ func axisPacking(mode string, avail, gap float32, n int, sizes []float32) (lead,
 	return distributeFlex(normalizeAxis(mode), false, remaining, gap, n)
 }
 
-// normalizeAxis maps the grid keywords onto the flexbox ones the packing helper
-// speaks. An empty result means normal: pack at the start, stretch what can.
 func normalizeAxis(v string) string {
 	switch s := strings.TrimSpace(strings.ToLower(v)); s {
 	case "start", "self-start", "left":
@@ -1283,7 +1145,6 @@ func normalizeAxis(v string) string {
 	}
 }
 
-// trackSize is the distance a run of tracks covers, the gaps between them included.
 func trackSize(sizes []float32, start, span int, gap float32) float32 {
 	if start >= len(sizes) || span <= 0 {
 		return 0
@@ -1312,8 +1173,6 @@ func minIdx(a, b int) int {
 	return b
 }
 
-// parseGridAreas reads grid-template-areas into named rectangles and reports the
-// row and column counts the template implies.
 func parseGridAreas(v string) (rows, cols int, areas map[string]gridArea) {
 	areas = map[string]gridArea{}
 	if strings.TrimSpace(v) == "" {

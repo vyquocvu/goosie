@@ -5,16 +5,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// PseudoKey identifies a pseudo-element of a specific node.
 type PseudoKey struct {
 	NodeID dom.NodeID
 	Pseudo string
 }
 
-// ResolvePseudoElements computes styles for ::before and ::after pseudo-elements.
-// It scans the stylesheet for selectors matching pseudo-elements of each element,
-// computes their styles (inheriting from the originating element), and returns
-// a map keyed by (NodeID, pseudo name).
 func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementStyles map[dom.NodeID]*ComputedStyle, fonts *CustomFonts) map[PseudoKey]*ComputedStyle {
 	return NewResolver(sheets).ResolvePseudoElements(doc, elementStyles, fonts)
 }
@@ -40,10 +35,6 @@ func resolvePseudoElements(doc *dom.Document, index *ruleIndex, elementStyles ma
 						continue
 					}
 					if pseudo == "first-line" {
-						// ::first-line does not require content; it styles the
-						// first formatted line of the block. Filter out properties
-						// the spec does not allow on ::first-line (margin, padding,
-						// border, etc.) before storing.
 						filterFirstLineProperties(cs)
 						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 					} else if pseudo == "first-letter" {
@@ -51,11 +42,6 @@ func resolvePseudoElements(doc *dom.Document, index *ruleIndex, elementStyles ma
 							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 						}
 					} else {
-						// An explicitly set empty string (content:"") is generated
-						// content - an empty box - not no content: float-clearing
-						// clearfixes depend on that box existing. Only the unset
-						// default ("normal", which computes to none on pseudos) and
-						// an explicit none suppress generation.
 						if len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none") {
 							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 						}
@@ -129,8 +115,6 @@ func reResolvePseudoSubtree(roots []*dom.Node, index *ruleIndex, elementStyles m
 	}
 }
 
-// computePseudoStyle computes the style for a pseudo-element of the given node.
-// It returns nil if no rules match.
 func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *ComputedStyle, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
 	candidates := index.candidates(n)
 	var matchingDecls []css.Declaration

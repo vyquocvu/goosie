@@ -19,8 +19,6 @@ func (r *Runtime) setupSelectCollectionProto() {
 	r.defineConstructor("HTMLOptionsCollection", r.htmlOptionsCollectionProto)
 }
 
-// newHTMLSelectElementProxy supplies the indexed properties exposed directly
-// by HTMLSelectElement (select[0]), backed by its live options list.
 func (r *Runtime) newHTMLSelectElementProxy(target *goja.Object, selectNode *dom.Node) *goja.Object {
 	item := func(index int) goja.Value {
 		options := dom.SelectOptions(selectNode)
@@ -244,10 +242,6 @@ func (r *Runtime) selectOptionsCollection(selectNode *dom.Node, selectedOnly boo
 	return result
 }
 
-// setSelectOptionAt implements the indexed setters on HTMLSelectElement and
-// HTMLOptionsCollection. Null removes the option at the index; an option value
-// inserts or replaces through the ordinary DOM mutation path so custom-element
-// reactions and mutation bookkeeping run normally.
 func (r *Runtime) setSelectOptionAt(selectNode *dom.Node, index int, value goja.Value) {
 	if index < 0 || index >= maxSelectOptionsCollectionLength {
 		if index >= maxSelectOptionsCollectionLength {
@@ -281,10 +275,6 @@ func (r *Runtime) setSelectOptionAt(selectNode *dom.Node, index int, value goja.
 	r.jsReplaceChild(goja.FunctionCall{This: r.wrapNode(old.Parent), Arguments: []goja.Value{value, r.wrapNode(old)}})
 }
 
-// updateSelectSelectedContent mirrors the selected option's contents into the
-// selectedcontent element used by customizable selects. The copy is made via
-// the DOM clone and insertion paths so upgraded custom elements receive their
-// construction and connection reactions.
 func (r *Runtime) updateSelectSelectedContent(selectNode *dom.Node) {
 	if selectNode == nil || selectNode.HasAttribute("multiple") {
 		return

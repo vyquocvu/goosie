@@ -6,8 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// TestParseBorderImageSlice pins TRBL expansion, percentage marks, fill in
-// any position, and rejection of negatives and overlong lists.
 func TestParseBorderImageSlice(t *testing.T) {
 	bi, ok := css.ParseBorderImageSlice("40% 30% 20% 10%")
 	if !ok {
@@ -32,7 +30,6 @@ func TestParseBorderImageSlice(t *testing.T) {
 	}
 }
 
-// TestParseBorderImageWidthRepeat pins width units and repeat modes.
 func TestParseBorderImageWidthRepeat(t *testing.T) {
 	bi, ok := css.ParseBorderImageWidth("1px 5px 10px 15px")
 	if !ok {
@@ -60,8 +57,6 @@ func TestParseBorderImageWidthRepeat(t *testing.T) {
 	}
 }
 
-// TestParseBorderImageShorthand pins section splitting: source and slice
-// before the slash, width between, outset after, repeat anywhere.
 func TestParseBorderImageShorthand(t *testing.T) {
 	src, sl, w, o, rep, ok := css.ParseBorderImageShorthand(`url("a.png") 30 30 / 20px / 10px round`)
 	if !ok {

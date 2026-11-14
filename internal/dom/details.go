@@ -1,8 +1,5 @@
 package dom
 
-// DetailsTreeScope returns a walker and the root of the exclusive tree scope
-// containing node. Shadow trees are separate scopes even though this DOM stores
-// their children with the host as Parent.
 func DetailsTreeScope(node *Node) (walk func(*Node, func(*Node)), root *Node) {
 	if node == nil {
 		return nil, nil
@@ -74,11 +71,6 @@ func shadowTreeContains(root, target *Node) bool {
 	return false
 }
 
-// CloseOtherNamedDetails applies the details name-group exclusivity rule for
-// node: every open details element in node's tree scope that shares node's
-// non-empty name is closed. It returns the peers it closed, in tree order, so
-// the caller can dispatch their toggle transitions. It changes tree state only;
-// event semantics belong to the caller.
 func CloseOtherNamedDetails(node *Node) []*Node {
 	if node == nil || !node.Element() || node.Data != "details" {
 		return nil

@@ -11,16 +11,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
-// TestLoadFontsFetchesConcurrently guards the @font-face fetch path. Real
-// pages declare several families and weights; fetched one after another the
-// per-fetch latency multiplies into the whole wall-clock budget (iana.org
-// measured 6 fonts × ~250ms = 1.5s of blank screen). A slow fetcher that
-// records its own peak in-flight count proves the loads overlap.
 func TestLoadFontsFetchesConcurrently(t *testing.T) {
 	const (
 		count      = 8
 		perFetch   = 100 * time.Millisecond
-		minOverlap = 4 // a serial walk would never exceed 1
+		minOverlap = 4
 	)
 	fonts, err := raster.NewFonts()
 	if err != nil {
@@ -40,8 +35,6 @@ func TestLoadFontsFetchesConcurrently(t *testing.T) {
 		time.Sleep(perFetch)
 		atomic.AddInt64(&inFlight, -1)
 		atomic.AddInt64(&fetched, 1)
-		// Garbage bytes: the fetch is what is timed; registration fails and
-		// the loop moves on, exactly as a corrupt download would.
 		return engine.FontResult{Data: []byte{1, 2, 3}}, nil
 	}
 	for i := 0; i < count; i++ {
@@ -62,8 +55,6 @@ func TestLoadFontsFetchesConcurrently(t *testing.T) {
 	if p := atomic.LoadInt64(&peak); p < minOverlap {
 		t.Fatalf("peak concurrent fetches = %d, want >= %d (loads are serialising)", p, minOverlap)
 	}
-	// Serialising 8 fetches at 100ms each needs ~0.8s; the pool must finish
-	// well inside that bound.
 	if serial := time.Duration(count) * perFetch; elapsed >= serial {
 		t.Fatalf("elapsed %v >= serial bound %v: fetches did not overlap", elapsed, serial)
 	}

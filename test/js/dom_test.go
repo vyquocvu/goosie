@@ -8,18 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// testDOM is a small HTML tree used by every DOM test. It has enough
-// structure to exercise tag, ID and class selectors without pulling in the
-// full parser.
-//
-//	<html>
-//	  <head><title>Test</title></head>
-//	  <body>
-//	    <p id="main" class="active">Hello</p>
-//	    <p class="info">World</p>
-//	    <div class="active">!</div>
-//	  </body>
-//	</html>
 func testDOM(t *testing.T) *dom.Document {
 	t.Helper()
 	doc := dom.NewDocument()
@@ -57,7 +45,6 @@ func testDOM(t *testing.T) *dom.Document {
 	return doc
 }
 
-// newDOMRuntime creates a JS runtime backed by d, registering cleanup.
 func newDOMRuntime(t *testing.T, d *dom.Document) *js.Runtime {
 	t.Helper()
 	r, err := js.New(js.Options{
@@ -70,10 +57,6 @@ func newDOMRuntime(t *testing.T, d *dom.Document) *js.Runtime {
 	t.Cleanup(func() { r.Close() })
 	return r
 }
-
-// ---------------------------------------------------------------------------
-// querySelector
-// ---------------------------------------------------------------------------
 
 func TestQuerySelectorByTag(t *testing.T) {
 	d := testDOM(t)
@@ -219,10 +202,6 @@ func TestQuerySelectorReturnsNullForMissing(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// querySelectorAll
-// ---------------------------------------------------------------------------
-
 func TestQuerySelectorAllByTag(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -238,7 +217,6 @@ func TestQuerySelectorAllByTag(t *testing.T) {
 		t.Fatalf("els.Kind = %v, want KindObject", v.Kind)
 	}
 
-	// Check the length via JS.
 	if err := r.Run(`var len = document.querySelectorAll("p").length;`, "inline"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -274,10 +252,6 @@ func TestQuerySelectorAllEmpty(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// createElement
-// ---------------------------------------------------------------------------
-
 func TestCreateElement(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -294,10 +268,6 @@ func TestCreateElement(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// appendChild
-// ---------------------------------------------------------------------------
-
 func TestAppendChild(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -311,15 +281,11 @@ func TestAppendChild(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Verify the child was attached by checking the DOM tree from Go.
-	// The created elements are not in the document tree, but the parent
-	// should have the child.
 	v, _ := r.Global("parent")
 	if v.Kind != js.KindObject {
 		t.Fatalf("parent.Kind = %v, want KindObject", v.Kind)
 	}
 
-	// Check via JS that the parent now contains the child.
 	if err := r.Run(`
 		var parent = document.createElement("div");
 		var child = document.createElement("p");
@@ -328,7 +294,6 @@ func TestAppendChild(t *testing.T) {
 	`, "inline"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	// textContent of an element with an empty child element is "".
 	v, _ = r.Global("found")
 	if v.Str != "" {
 		t.Errorf("textContent after appendChild = %q, want empty", v.Str)
@@ -346,7 +311,6 @@ func TestAppendChildToDocumentBody(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// The new <section> should now be findable via querySelector.
 	if err := r.Run(`var found = document.querySelector("section");`, "inline"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -355,10 +319,6 @@ func TestAppendChildToDocumentBody(t *testing.T) {
 		t.Errorf("querySelector('section') = %v, want an object (found)", v.Kind)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// textContent
-// ---------------------------------------------------------------------------
 
 func TestTextContentGet(t *testing.T) {
 	d := testDOM(t)
@@ -410,10 +370,6 @@ func TestTextContentSetOnCreatedElement(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// addEventListener
-// ---------------------------------------------------------------------------
-
 func TestAddEventListenerDoesNotThrow(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -440,23 +396,13 @@ func TestAddEventListenerOnCreatedElement(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// No DOM provided
-// ---------------------------------------------------------------------------
-
 func TestQuerySelectorUndefinedWithoutDOM(t *testing.T) {
-	// Without a DOM, document.querySelector is not defined, so calling it
-	// should produce a runtime error.
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 	err := r.Run(`document.querySelector("p");`, "inline")
 	if err == nil {
 		t.Error("expected error when calling querySelector without a DOM, got nil")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// setAttributeNS and id reflection
-// ---------------------------------------------------------------------------
 
 func TestSetAttributeNSStoresQualifiedName(t *testing.T) {
 	d := testDOM(t)

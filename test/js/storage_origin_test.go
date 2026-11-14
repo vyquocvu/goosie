@@ -7,13 +7,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// TestLocalStorageOriginScoping verifies that localStorage is shared by two
-// documents of one origin and invisible to a different origin.
 // qc:BR-122
 func TestLocalStorageOriginScoping(t *testing.T) {
 	reg := js.NewOriginStorageRegistry("", false)
 
-	// Runtime 1: https://example.com/page1
 	rt1, err := js.New(js.Options{
 		URL:     "https://example.com/page1",
 		Storage: reg,
@@ -23,7 +20,6 @@ func TestLocalStorageOriginScoping(t *testing.T) {
 	}
 	defer rt1.Close()
 
-	// Runtime 2: https://example.com/page2 (same origin)
 	rt2, err := js.New(js.Options{
 		URL:     "https://example.com/page2",
 		Storage: reg,
@@ -33,7 +29,6 @@ func TestLocalStorageOriginScoping(t *testing.T) {
 	}
 	defer rt2.Close()
 
-	// Runtime 3: https://other.org/page (different origin)
 	rt3, err := js.New(js.Options{
 		URL:     "https://other.org/page",
 		Storage: reg,
@@ -43,12 +38,10 @@ func TestLocalStorageOriginScoping(t *testing.T) {
 	}
 	defer rt3.Close()
 
-	// Set item in rt1
 	if err := rt1.Run("localStorage.setItem('auth_token', 'secret123');", "test"); err != nil {
 		t.Fatalf("rt1 setItem failed: %v", err)
 	}
 
-	// Verify rt2 (same origin) can read it
 	v2, err := rt2.Evaluate("localStorage.getItem('auth_token')")
 	if err != nil {
 		t.Fatalf("rt2 getItem failed: %v", err)
@@ -57,7 +50,6 @@ func TestLocalStorageOriginScoping(t *testing.T) {
 		t.Errorf("rt2 expected 'secret123', got %q", v2)
 	}
 
-	// Verify rt3 (different origin) cannot read it (must be null)
 	v3, err := rt3.Evaluate("localStorage.getItem('auth_token')")
 	if err != nil {
 		t.Fatalf("rt3 getItem failed: %v", err)
@@ -67,9 +59,6 @@ func TestLocalStorageOriginScoping(t *testing.T) {
 	}
 }
 
-// TestLocalStorageDiskPersistence verifies that values written in one runtime
-// are readable after a simulated browser restart on the same profile
-// directory, including the length property.
 // qc:BR-121
 func TestLocalStorageDiskPersistence(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "goosie-storage-test-*")
@@ -80,7 +69,6 @@ func TestLocalStorageDiskPersistence(t *testing.T) {
 
 	reg1 := js.NewOriginStorageRegistry(tempDir, false)
 
-	// Session 1: write items to localStorage
 	rt1, err := js.New(js.Options{
 		URL:     "https://shop.example.com/cart",
 		Storage: reg1,
@@ -97,13 +85,11 @@ func TestLocalStorageDiskPersistence(t *testing.T) {
 	}
 	_ = rt1.Close()
 
-	// Verify file was written to disk
 	files, err := os.ReadDir(tempDir)
 	if err != nil || len(files) == 0 {
 		t.Fatalf("expected storage file written to %s, got %v", tempDir, err)
 	}
 
-	// Session 2: simulate browser restart by creating new registry on same directory
 	reg2 := js.NewOriginStorageRegistry(tempDir, false)
 	rt2, err := js.New(js.Options{
 		URL:     "https://shop.example.com/checkout",
@@ -131,13 +117,10 @@ func TestLocalStorageDiskPersistence(t *testing.T) {
 	}
 }
 
-// TestSessionStorageTabIsolation verifies that sessionStorage written by one
-// tab is not visible to another tab of the same origin.
 // qc:BR-122
 func TestSessionStorageTabIsolation(t *testing.T) {
 	reg := js.NewOriginStorageRegistry("", false)
 
-	// Tab 1
 	rt1, err := js.New(js.Options{
 		URL:       "https://app.example.com/home",
 		Storage:   reg,
@@ -148,7 +131,6 @@ func TestSessionStorageTabIsolation(t *testing.T) {
 	}
 	defer rt1.Close()
 
-	// Tab 2 (same origin, different session ID)
 	rt2, err := js.New(js.Options{
 		URL:       "https://app.example.com/dashboard",
 		Storage:   reg,
@@ -163,21 +145,17 @@ func TestSessionStorageTabIsolation(t *testing.T) {
 		t.Fatalf("rt1 setItem failed: %v", err)
 	}
 
-	// Tab 1 sees it
 	v1, _ := rt1.Evaluate("sessionStorage.getItem('scroll_y')")
 	if v1 != "500" {
 		t.Errorf("tab 1 expected '500', got %q", v1)
 	}
 
-	// Tab 2 does NOT see it (sessionStorage is tab-isolated)
 	v2, _ := rt2.Evaluate("sessionStorage.getItem('scroll_y')")
 	if v2 != "null" {
 		t.Errorf("tab 2 expected null for isolated sessionStorage, got %q", v2)
 	}
 }
 
-// TestIncognitoStorageNoDisk verifies that private-session storage writes no
-// profile file and is not visible to a normal runtime on the same directory.
 // qc:BR-122
 func TestIncognitoStorageNoDisk(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "goosie-incognito-test-*")
@@ -186,7 +164,6 @@ func TestIncognitoStorageNoDisk(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Incognito registry
 	reg := js.NewOriginStorageRegistry(tempDir, true)
 	rt, err := js.New(js.Options{
 		URL:     "https://private.example.com/",
@@ -201,14 +178,11 @@ func TestIncognitoStorageNoDisk(t *testing.T) {
 		t.Fatalf("Run failed: %v", err)
 	}
 
-	// Verify nothing was written to tempDir
 	entries, _ := os.ReadDir(tempDir)
 	if len(entries) != 0 {
 		t.Errorf("Incognito storage must not write files to disk, found: %v", entries)
 	}
 
-	// A normal registry on the same profile directory must not see the
-	// private-session item.
 	normalReg := js.NewOriginStorageRegistry(tempDir, false)
 	normalRT, err := js.New(js.Options{
 		URL:     "https://private.example.com/",

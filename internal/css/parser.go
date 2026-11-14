@@ -7,17 +7,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// defaultMediaViewportWidth is the CSS px width @media min/max-width conditions
-// are tested against when the caller has no viewport to name. It is the desktop
-// viewport the parity references are captured at.
 const defaultMediaViewportWidth float32 = 1280
 
-// mediaDevicePixelRatio is the resolution @media device-pixel-ratio conditions
-// are tested against. Rendering is one device pixel per CSS pixel: no backend
-// scales the frame, and the parity references are captured at dpr 1.
 const mediaDevicePixelRatio float32 = 1
 
-// Declaration is one CSS property-value pair.
 type Declaration struct {
 	Property  string
 	Value     string
@@ -25,7 +18,6 @@ type Declaration struct {
 	Important bool
 }
 
-// Rule is one CSS rule: selectors + declarations.
 type Rule struct {
 	Selectors      []Selector
 	SelectorStrs   []string
@@ -37,12 +29,10 @@ type Rule struct {
 	StartingStyle  bool
 }
 
-// FontFaceRule is one @font-face rule: declarations only, no selectors.
 type FontFaceRule struct {
 	Declarations []Declaration
 }
 
-// FontPaletteValuesRule is one @font-palette-values rule.
 type FontPaletteValuesRule struct {
 	Name           string
 	FontFamily     string
@@ -50,35 +40,25 @@ type FontPaletteValuesRule struct {
 	OverrideColors map[int]string
 }
 
-// Stylesheet is a parsed CSS stylesheet.
 type Stylesheet struct {
-	Rules     []Rule
-	FontFaces []FontFaceRule
-	// Keyframes holds the parsed @keyframes rules from this stylesheet.
-	Keyframes []KeyframesRule
-	// Layers holds layer names declared via `@layer name1, name2;`.
-	Layers []string
-	// Properties holds parsed @property descriptors from this stylesheet.
-	Properties []dom.PropertyDefinition
-	// FontPalettes holds parsed @font-palette-values rules from this stylesheet.
+	Rules        []Rule
+	FontFaces    []FontFaceRule
+	Keyframes    []KeyframesRule
+	Layers       []string
+	Properties   []dom.PropertyDefinition
 	FontPalettes []FontPaletteValuesRule
 }
 
-// MediaOptions configures environment features for media query evaluation.
 type MediaOptions struct {
 	ViewportWidth float32
 	DarkMode      bool
 	HighContrast  bool
 }
 
-// Parse parses a CSS stylesheet, testing @media width conditions against the
-// default desktop viewport. A caller that knows the document's own width should
-// use ParseForViewport, since media conditions are resolved while parsing.
 func Parse(input string) *Stylesheet {
 	return ParseForViewport(input, defaultMediaViewportWidth)
 }
 
-// ParseWithOptions parses a CSS stylesheet with explicit media query options.
 func ParseWithOptions(input string, opts MediaOptions) *Stylesheet {
 	vw := opts.ViewportWidth
 	if vw <= 0 {
@@ -93,19 +73,10 @@ func ParseWithOptions(input string, opts MediaOptions) *Stylesheet {
 	return p.parse()
 }
 
-// ParseForViewport parses a CSS stylesheet, testing @media width conditions
-// against viewportWidthPx. The engine's viewport is passed here so each
-// document evaluates its media queries against its own width, not a
-// process-global value another document may have set earlier.
 func ParseForViewport(input string, viewportWidthPx float32) *Stylesheet {
 	return ParseWithOptions(input, MediaOptions{ViewportWidth: viewportWidthPx})
 }
 
-// stripCDATAMarkers removes `<![CDATA[` ... `]]>` wrappers from stylesheet
-// text. XHTML reference pages wrap their <style> content in CDATA, and the
-// DOM hands that text through verbatim; without stripping, the opener fuses
-// onto the first selector (`<![CDATA[ img`) and no rule ever matches. Only
-// the marker delimiters go - the CSS between them stays intact.
 func stripCDATAMarkers(in string) string {
 	if !strings.Contains(in, "<![CDATA[") {
 		return in
@@ -114,12 +85,6 @@ func stripCDATAMarkers(in string) string {
 	return strings.ReplaceAll(s, "]]>", " ")
 }
 
-// stripComments removes /* ... */ comment blocks from CSS source. A comment
-// cannot start or continue inside a quoted string, so the scan tracks quote
-// state and leaves anything between a real quote pair untouched, including a
-// `/*` that appears inside url("..."). Each comment is replaced by one space,
-// not nothing: the tokenizer reads `120/*c*/75%` as the two tokens `120` and
-// `75%`, and deleting the comment outright would fuse them into `12075%`.
 func stripComments(in string) string {
 	if !strings.Contains(in, "/*") {
 		return in
@@ -151,7 +116,6 @@ func stripComments(in string) string {
 		if c == '/' && i+1 < len(in) && in[i+1] == '*' {
 			end := strings.Index(in[i+2:], "*/")
 			if end < 0 {
-				// Unterminated comment swallows the rest of the sheet.
 				break
 			}
 			i += 2 + end + 2
@@ -164,20 +128,13 @@ func stripComments(in string) string {
 	return b.String()
 }
 
-// StripComments exposes comment stripping for declaration sources that never
-// pass through a stylesheet parse, notably inline style attributes: a comment
-// can sit inside the property name itself (`background/**/:limegreen`), and
-// only a pre-split strip keeps the declaration alive.
 func StripComments(in string) string {
 	return stripComments(in)
 }
 
 type parser struct {
-	input string
-	pos   int
-	// mediaWidth is the viewport this parser tests @media width conditions
-	// against. Nested blocks inherit it so an @media inside an @supports or
-	// inside another @media sees the document's width, not the default.
+	input                 string
+	pos                   int
 	mediaWidth            float32
 	darkMode              bool
 	highContrast          bool
@@ -194,8 +151,6 @@ func (p *parser) parse() *Stylesheet {
 	return sheet
 }
 
-// parseInto runs the top-level rule loop against a caller-owned sheet so that
-// an @media body can recurse into the same accumulation (Media Merge semantics).
 func (p *parser) parseInto(sheet *Stylesheet) {
 	for p.pos < len(p.input) {
 		p.skipWhitespace()
@@ -249,10 +204,8 @@ func (p *parser) parseInto(sheet *Stylesheet) {
 	}
 }
 
-// parseLayerRule enters a named or anonymous @layer block and appends its
-// rules with layer metadata. It also records layer-order statements (@layer a, b;).
 func (p *parser) parseLayerRule(sheet *Stylesheet) {
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
@@ -266,7 +219,7 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 	}
 	prelude := strings.TrimSpace(p.input[preludeStart:p.pos])
 	if p.input[p.pos] == ';' {
-		p.pos++ // ';'
+		p.pos++
 		if prelude != "" {
 			parts := strings.Split(prelude, ",")
 			for _, part := range parts {
@@ -281,7 +234,7 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 		}
 		return
 	}
-	p.pos++ // the '{'
+	p.pos++
 	layerName := prelude
 	if layerName == "" {
 		p.anonLayerCount++
@@ -308,7 +261,7 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // the final '}'
+		p.pos++
 	}
 	inner := &parser{
 		input:                 body,
@@ -325,10 +278,8 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 	p.anonLayerCount = inner.anonLayerCount
 }
 
-// parseContainerRule parses an @container at-rule and associates its condition
-// with the contained style rules.
 func (p *parser) parseContainerRule(sheet *Stylesheet) {
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
@@ -345,7 +296,7 @@ func (p *parser) parseContainerRule(sheet *Stylesheet) {
 		return
 	}
 	prelude := strings.TrimSpace(p.input[preludeStart:p.pos])
-	p.pos++ // the '{'
+	p.pos++
 	bodyStart := p.pos
 	depth := 1
 	for p.pos < len(p.input) && depth > 0 {
@@ -365,7 +316,7 @@ func (p *parser) parseContainerRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // the final '}'
+		p.pos++
 	}
 	cq := prelude
 	if p.currentContainerQuery != "" {
@@ -386,10 +337,8 @@ func (p *parser) parseContainerRule(sheet *Stylesheet) {
 	p.anonLayerCount = inner.anonLayerCount
 }
 
-// parseScopeRule parses an @scope at-rule and associates its scoping root
-// and optional scoping limit with the contained style rules.
 func (p *parser) parseScopeRule(sheet *Stylesheet) {
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
@@ -406,7 +355,7 @@ func (p *parser) parseScopeRule(sheet *Stylesheet) {
 		return
 	}
 	prelude := strings.TrimSpace(p.input[preludeStart:p.pos])
-	p.pos++ // the '{'
+	p.pos++
 
 	var root, limit string
 	open1 := strings.Index(prelude, "(")
@@ -453,7 +402,7 @@ func (p *parser) parseScopeRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // the final '}'
+		p.pos++
 	}
 
 	inner := &parser{
@@ -471,11 +420,9 @@ func (p *parser) parseScopeRule(sheet *Stylesheet) {
 	p.anonLayerCount = inner.anonLayerCount
 }
 
-// atRuleName reads an @rule name without consuming past its prelude, so the
-// caller can decide whether the block is entered (media) or skipped.
 func (p *parser) atRuleName() string {
 	save := p.pos
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
 		if c == '{' || c == ';' || c == ' ' || c == '\t' || c == '\n' || c == '\r' {
@@ -488,14 +435,9 @@ func (p *parser) atRuleName() string {
 	return name
 }
 
-// parseMediaRule tests an @media condition against the viewport width carried by
-// the parser (1280 for a bare Parse) and splices true bodies into the sheet in
-// place. Conditions on features this engine does not vary with - prefers-*,
-// resolution, pointer - read as true, which matches a desktop screen far more
-// often than false does.
 func (p *parser) parseMediaRule(sheet *Stylesheet) {
 	at := p.pos
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
@@ -512,7 +454,7 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 	} else {
 		cond = strings.TrimSpace(strings.TrimPrefix(cond, "@media"))
 	}
-	p.pos++ // the '{'
+	p.pos++
 	depth := 1
 	bodyStart := p.pos
 	for p.pos < len(p.input) && depth > 0 {
@@ -532,7 +474,7 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // the final '}'
+		p.pos++
 	}
 	if p.mediaConditionTrue(cond) {
 		inner := &parser{
@@ -551,14 +493,9 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 	}
 }
 
-// parseSupportsRule reads an @supports block and splices its body into the sheet
-// only when the condition tests a feature this engine actually lays out with, so
-// a progressive-enhancement rule (cards that only go flex once grid works) matches
-// the browser reference rather than silently dropping. Conditions we cannot judge
-// - selector(), an unknown property, a feature we lack - read as false and skip.
 func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 	at := p.pos
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
@@ -575,7 +512,7 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 	} else {
 		cond = strings.TrimSpace(strings.TrimPrefix(cond, "@supports"))
 	}
-	p.pos++ // the '{'
+	p.pos++
 	bodyStart := p.pos
 	depth := 1
 	for p.pos < len(p.input) && depth > 0 {
@@ -595,7 +532,7 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // the final '}'
+		p.pos++
 	}
 	if supportsConditionTrue(cond) {
 		inner := &parser{
@@ -614,11 +551,8 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 	}
 }
 
-// parseFontFaceRule reads an @font-face block and stores its declarations.
-// Font-face rules have no selectors, only properties like font-family, src,
-// font-weight, and font-style.
 func (p *parser) parseFontFaceRule(sheet *Stylesheet) {
-	p.pos++ // '@'
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
@@ -629,7 +563,7 @@ func (p *parser) parseFontFaceRule(sheet *Stylesheet) {
 		p.pos++
 		return
 	}
-	p.pos++ // the '{'
+	p.pos++
 	bodyStart := p.pos
 	depth := 1
 	for p.pos < len(p.input) && depth > 0 {
@@ -649,35 +583,28 @@ func (p *parser) parseFontFaceRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // the final '}'
+		p.pos++
 	}
-	// Parse the declarations inside the font-face block.
 	decls := parseDeclarations(body)
 	if len(decls) > 0 {
 		sheet.FontFaces = append(sheet.FontFaces, FontFaceRule{Declarations: decls})
 	}
 }
 
-// parseKeyframesRule reads a @keyframes block: the animation name, then the
-// body between braces (which itself contains nested blocks for each stop).
 func (p *parser) parseKeyframesRule(sheet *Stylesheet) {
-	p.pos++ // '@'
-	// Skip past the at-rule keyword ("keyframes" or "-webkit-keyframes").
+	p.pos++
 	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' {
 		p.pos++
 	}
-	// Skip whitespace to the animation name.
 	for p.pos < len(p.input) && (p.input[p.pos] == ' ' || p.input[p.pos] == '\t' || p.input[p.pos] == '\n' || p.input[p.pos] == '\r') {
 		p.pos++
 	}
-	// Read the animation name (up to '{' or whitespace).
 	nameStart := p.pos
 	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' {
 		p.pos++
 	}
 	name := strings.TrimSpace(p.input[nameStart:p.pos])
 
-	// Skip to the opening brace.
 	for p.pos < len(p.input) && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
 		p.pos++
 	}
@@ -687,9 +614,8 @@ func (p *parser) parseKeyframesRule(sheet *Stylesheet) {
 		}
 		return
 	}
-	p.pos++ // the '{'
+	p.pos++
 
-	// Read the body, tracking nested brace depth.
 	bodyStart := p.pos
 	depth := 1
 	for p.pos < len(p.input) && depth > 0 {
@@ -709,7 +635,7 @@ func (p *parser) parseKeyframesRule(sheet *Stylesheet) {
 	}
 	body := p.input[bodyStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // the final '}'
+		p.pos++
 	}
 
 	if name == "" {
@@ -727,9 +653,6 @@ func (p *parser) parseKeyframesRule(sheet *Stylesheet) {
 	})
 }
 
-// supportsConditionTrue evaluates a CSS @supports condition: an optional leading
-// `not`, and the boolean operators `or` (lowest precedence) then `and`, over
-// parenthesized `<prop>: <value>` tests.
 func supportsConditionTrue(cond string) bool {
 	cond = strings.TrimSpace(strings.ToLower(cond))
 	if strings.HasPrefix(cond, "not") {
@@ -754,9 +677,6 @@ func supportsConditionTrue(cond string) bool {
 	return supportsFeatureTrue(cond)
 }
 
-// supportsFeatureTrue judges a single `(prop: value)` test against what the engine
-// implements. Only `display` is consulted; every other property - or a selector
-// test - reads false so an @supports block gated on it stays out.
 func supportsFeatureTrue(test string) bool {
 	test = strings.TrimSpace(test)
 	if !strings.HasPrefix(test, "(") || !strings.HasSuffix(test, ")") {
@@ -774,8 +694,6 @@ func supportsFeatureTrue(test string) bool {
 	}
 	switch value {
 	case "grid", "inline-grid", "flex", "inline-flex", "subgrid":
-		// subgrid is named for completeness but the engine has no subgrid layout,
-		// so it is reported as unsupported alongside anything absent here.
 		return value != "subgrid"
 	case "block", "inline-block", "table", "table-row", "table-cell", "table-row-group":
 		return true
@@ -783,14 +701,10 @@ func supportsFeatureTrue(test string) bool {
 	return false
 }
 
-// SplitOutsideParens splits s on sep occurrences that sit at paren depth zero,
-// so `or`/`and` inside a `(...)` test are not treated as operators.
 func SplitOutsideParens(s, sep string) []string {
 	return splitOutsideParens(s, sep)
 }
 
-// splitOutsideParens splits s on sep occurrences that sit at paren depth zero,
-// so `or`/`and` inside a `(...)` test are not treated as operators.
 func splitOutsideParens(s, sep string) []string {
 	var out []string
 	depth, start := 0, 0
@@ -817,7 +731,6 @@ func splitOutsideParens(s, sep string) []string {
 	return append(out, strings.TrimSpace(s[start:]))
 }
 
-// MatchMediaWithOptions reports whether a media condition matches with custom options.
 func MatchMediaWithOptions(cond string, opts MediaOptions) bool {
 	cond = strings.TrimSpace(cond)
 	if cond == "" || strings.EqualFold(cond, "all") {
@@ -835,12 +748,10 @@ func MatchMediaWithOptions(cond string, opts MediaOptions) bool {
 	return p.mediaConditionTrue(cond)
 }
 
-// MatchMedia reports whether a media condition matches on screen for the given viewport width.
 func MatchMedia(cond string, viewportWidth float32) bool {
 	return MatchMediaWithOptions(cond, MediaOptions{ViewportWidth: viewportWidth})
 }
 
-// mediaConditionTrue reports whether any comma-separated group applies.
 func (p *parser) mediaConditionTrue(cond string) bool {
 	for _, group := range splitTopLevel(cond, ',') {
 		if p.mediaGroupTrue(group) {
@@ -868,10 +779,6 @@ func (p *parser) mediaGroupTrue(group string) bool {
 }
 
 func (p *parser) mediaPartsTrue(group string) bool {
-	// `or` binds looser than the implicit `and`, so a group of alternatives is
-	// true when any one of them is. Reading every connector as `and` made
-	// `(A) or (B)` require both, which is how a mobile-only rule survived onto a
-	// desktop viewport.
 	if alts := splitOutsideParens(group, " or "); len(alts) > 1 {
 		for _, a := range alts {
 			if p.mediaPartsTrue(strings.TrimSpace(a)) {
@@ -881,8 +788,6 @@ func (p *parser) mediaPartsTrue(group string) bool {
 		return false
 	}
 	for _, part := range splitTopLevel(group, ' ') {
-		// Media Queries 4 range syntax - `(width <= 769px)`, `(400px < width)` -
-		// carries no colon, so the feature switch below cannot see it.
 		if holds, ok := p.mediaRangeHolds(part); ok {
 			if !holds {
 				return false
@@ -893,7 +798,6 @@ func (p *parser) mediaPartsTrue(group string) bool {
 		if part == "" || part == "and" || part == "only" {
 			continue
 		}
-		// A bare media type: anything but print applies on screen.
 		if !strings.Contains(part, "(") {
 			if part == "print" {
 				return false
@@ -950,7 +854,6 @@ func (p *parser) mediaPartsTrue(group string) bool {
 	return true
 }
 
-// cssPx resolves the width units media queries actually use.
 func cssPx(v string) (float32, bool) {
 	v = strings.TrimSpace(v)
 	if strings.HasPrefix(v, "calc(") && strings.HasSuffix(v, ")") {
@@ -982,16 +885,11 @@ func mediaFeature(part string) (name, value string, ok bool) {
 	return strings.TrimSpace(inner), "", true
 }
 
-// calcPx evaluates the arithmetic media queries use: a sum of lengths, each
-// optionally scaled by a plain number (`1rem * 2`). No function other than calc
-// itself is resolved, and anything unparseable fails the whole expression - a
-// media feature the engine cannot measure must not read as satisfied.
 func calcPx(expr string) (float32, bool) {
 	expr = strings.ReplaceAll(expr, " ", "")
 	if expr == "" {
 		return 0, false
 	}
-	// Split on the top-level + and - that separate terms, keeping the sign.
 	var terms []string
 	start := 0
 	depth := 0
@@ -1028,8 +926,6 @@ func calcPx(expr string) (float32, bool) {
 	return total, true
 }
 
-// productPx reads `LENGTH * N` or `N * LENGTH`, the only product a media query
-// can legally contain. A calc with no length term is not a length.
 func productPx(term string) (float32, bool) {
 	scale := float32(1)
 	base := float32(-1)
@@ -1050,9 +946,6 @@ func productPx(term string) (float32, bool) {
 	return base * scale, true
 }
 
-// splitRange breaks a media range expression on its comparison operators,
-// keeping each operand verbatim so a `calc(1rem * 2 + 15rem)` with internal
-// spaces survives as one operand instead of shattering into words.
 func splitRange(inner string) (operands, ops []string) {
 	start, depth := 0, 0
 	for i := 0; i < len(inner); i++ {
@@ -1078,11 +971,6 @@ func splitRange(inner string) (operands, ops []string) {
 	return append(operands, inner[start:]), ops
 }
 
-// mediaRangeHolds evaluates a Media Queries 4 range expression - `(width <=
-// 769px)`, `(769px > width)`, `(400px <= width < 1200px)` - against the viewport
-// width. ok=false means "not a width range", leaving the caller to the classic
-// feature handling. The strict operators compare inclusively: the difference is
-// one pixel exactly at the breakpoint, and the engine has no sub-pixel viewport.
 func (p *parser) mediaRangeHolds(part string) (holds bool, ok bool) {
 	if !strings.HasPrefix(part, "(") || !strings.HasSuffix(part, ")") {
 		return false, false
@@ -1145,12 +1033,10 @@ func flipOp(op string) string {
 	return op
 }
 
-// SplitTopLevel splits on sep outside parentheses and brackets.
 func SplitTopLevel(s string, sep byte) []string {
 	return splitTopLevel(s, sep)
 }
 
-// splitTopLevel splits on sep outside parentheses and brackets.
 func splitTopLevel(s string, sep byte) []string {
 	var parts []string
 	depth := 0
@@ -1216,29 +1102,10 @@ func (p *parser) skipAtRule() {
 	}
 }
 
-// closesStringAt reports whether an open string ends at c. A newline ends it -
-// CSS Syntax L3 4.3.7 makes an unterminated string a bad-string at the line
-// break - so one stray quote costs a declaration instead of the rest of the
-// sheet. Chromium behaves this way; running to end of input made Goosie paint
-// the swallowed CSS as generated content. Callers must first skip the byte a
-// backslash escapes: 4.3.8 makes `\` + newline a valid escape *inside* a string,
-// so only an unescaped newline may close one as bad.
 func closesStringAt(quote, c byte) bool { return c == quote || c == '\n' }
 
-// startsEscape reports whether c opens a CSS escape sequence (CSS Syntax L3
-// 4.3.8). The byte after a backslash belongs to the token whatever it is, so it
-// can neither open nor close a string. Every quote-tracking scan below has to
-// test it in *both* states: honouring escapes only once a string is already open
-// is what let `url(...\'...\')` start a string that never ended, costing every
-// rule after it in the sheet (GOOSIE-CSSSTRING-003).
 func startsEscape(c byte) bool { return c == '\\' }
 
-// stripEscapedNewlines drops `\` + line-break pairs from inside quoted strings.
-// Chromium measured on `url("a\<newline>b")` computes the token value as `ab` -
-// the escape pair contributes no character - so a multi-line quoted data URI
-// both survives parsing and resolves (TASK-041 §7, 2026-10-26). Every other
-// backslash is left exactly as written: `content:"\2014"`, `"\A"`, and Windows
-// paths in `url()` must not be reinterpreted here.
 func stripEscapedNewlines(s string) string {
 	var b []byte
 	quote := byte(0)
@@ -1271,7 +1138,7 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
 		if startsEscape(c) && p.pos+1 < len(p.input) {
-			p.pos += 2 // 4.3.8: the escaped byte belongs to the token in either state
+			p.pos += 2
 			continue
 		}
 		if quote != 0 {
@@ -1290,7 +1157,7 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	if p.pos >= len(p.input) {
 		return rule, nil
 	}
-	p.pos++ // skip '{'
+	p.pos++
 
 	p.skipWhitespace()
 	declStart := p.pos
@@ -1300,7 +1167,7 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
 		if startsEscape(c) && p.pos+1 < len(p.input) {
-			p.pos += 2 // 4.3.8: the escaped byte belongs to the token in either state
+			p.pos += 2
 			continue
 		}
 		if quote != 0 {
@@ -1308,10 +1175,6 @@ func (p *parser) parseRule() (Rule, []Rule) {
 				quote = 0
 			}
 		} else if (c == '\'' || c == '"') && parens == 0 {
-			// 4.3.9: inside `url(...)` a quote is a parse error, not the start of a
-			// string, so it must not put the scan into string state and swallow the
-			// rest of the block with it. `depth` counts braces, so parens are tracked
-			// apart - a declaration body legitimately holds both.
 			quote = c
 		} else if c == '(' {
 			parens++
@@ -1331,7 +1194,7 @@ func (p *parser) parseRule() (Rule, []Rule) {
 	}
 	declText := p.input[declStart:p.pos]
 	if p.pos < len(p.input) {
-		p.pos++ // skip '}'
+		p.pos++
 	}
 
 	for _, sel := range splitSelectors(selectorText) {
@@ -1353,14 +1216,12 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 	i := 0
 	n := len(body)
 	for i < n {
-		// Skip whitespace
 		for i < n && (body[i] == ' ' || body[i] == '\t' || body[i] == '\n' || body[i] == '\r') {
 			i++
 		}
 		if i >= n {
 			break
 		}
-		// Skip CSS comments
 		if i+1 < n && body[i] == '/' && body[i+1] == '*' {
 			end := strings.Index(body[i+2:], "*/")
 			if end < 0 {
@@ -1369,7 +1230,6 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			i += end + 4
 			continue
 		}
-		// Nested at-rule
 		if body[i] == '@' {
 			atStart := i
 			for i < n && body[i] != ' ' && body[i] != '\t' && body[i] != '\n' && body[i] != '\r' && body[i] != '{' && body[i] != ';' {
@@ -1381,7 +1241,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			for i < n {
 				c := body[i]
 				if startsEscape(c) && i+1 < n {
-					i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+					i += 2
 					continue
 				}
 				if quote != 0 {
@@ -1403,14 +1263,14 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			if i >= n {
 				break
 			}
-			i++ // skip '{'
+			i++
 			innerBodyStart := i
 			depth := 1
 			quote = 0
 			for i < n && depth > 0 {
 				c := body[i]
 				if startsEscape(c) && i+1 < n {
-					i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+					i += 2
 					continue
 				}
 				if quote != 0 {
@@ -1431,14 +1291,13 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			}
 			innerBody := body[innerBodyStart:i]
 			if i < n {
-				i++ // skip '}'
+				i++
 			}
 			atRules := p.handleNestedAtRule(atName, prelude, innerBody, parentSelectors)
 			nestedRules = append(nestedRules, atRules...)
 			continue
 		}
 
-		// Either a declaration or a nested style rule
 		stmtStart := i
 		var quote byte
 		depth := 0
@@ -1448,7 +1307,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 		for i < n {
 			c := body[i]
 			if startsEscape(c) && i+1 < n {
-				i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+				i += 2
 				continue
 			}
 			if quote != 0 {
@@ -1459,7 +1318,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 					stmtBadString = true
 				}
 			} else if (c == '\'' || c == '"') && depth == 0 {
-				quote = c // 4.3.9: a quote inside `url(...)` is not a string
+				quote = c
 			} else if c == '(' {
 				depth++
 			} else if c == ')' {
@@ -1491,7 +1350,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			for i < n && depth > 0 {
 				c := body[i]
 				if startsEscape(c) && i+1 < n {
-					i += 2 // 4.3.8: the escaped byte belongs to the token in either state
+					i += 2
 					continue
 				}
 				if quote != 0 {
@@ -1512,7 +1371,7 @@ func (p *parser) parseBlockWithRules(body string, parentSelectors []string) ([]D
 			}
 			innerBody := body[innerBodyStart:i]
 			if i < n {
-				i++ // skip '}'
+				i++
 			}
 			expandedSelectors := ExpandNestedSelectors(parentSelectors, splitSelectors(nestedSelText))
 			if len(expandedSelectors) > 0 {
@@ -1725,7 +1584,6 @@ func (p *parser) handleNestedAtRule(atName, prelude, innerBody string, parentSel
 	return rules
 }
 
-// ExpandNestedSelectors expands parent selectors into nested selectors.
 func ExpandNestedSelectors(parentSelectors, nestedSelectors []string) []string {
 	if len(parentSelectors) == 0 {
 		return nestedSelectors
@@ -1750,14 +1608,13 @@ func ExpandNestedSelectors(parentSelectors, nestedSelectors []string) []string {
 	return result
 }
 
-// ExpandSingleNestedSelector combines one parent selector with one nested selector.
 func ExpandSingleNestedSelector(parent, nested string) string {
 	hasAmpersand := false
 	var quote byte
 	for i := 0; i < len(nested); i++ {
 		c := nested[i]
 		if startsEscape(c) && i+1 < len(nested) {
-			i++ // 4.3.8: the escaped byte belongs to the token in either state
+			i++
 			continue
 		}
 		if quote != 0 {
@@ -1778,7 +1635,7 @@ func ExpandSingleNestedSelector(parent, nested string) string {
 		for i := 0; i < len(nested); i++ {
 			c := nested[i]
 			if startsEscape(c) && i+1 < len(nested) {
-				i++ // 4.3.8: the escaped byte belongs to the token in either state
+				i++
 				continue
 			}
 			if quote != 0 {
@@ -1808,11 +1665,6 @@ func ExpandSingleNestedSelector(parent, nested string) string {
 	return parent + " " + trimmed
 }
 
-// splitSelectors cuts a stylesheet selector list at its top-level commas. A
-// comma inside a quoted attribute value, or escaped in an identifier, belongs to
-// that selector: `.d[data-x="a,b"]` is one rule Chromium matches against the
-// value `a,b` (measured 2026-11-12), so both are stepped over rather than
-// counted as separators.
 func splitSelectors(s string) []string {
 	var parts []string
 	depth := 0
@@ -1873,10 +1725,6 @@ func splitDeclarations(s string) []string {
 	return SplitDeclarations(s)
 }
 
-// SplitDeclarations cuts a declaration block on top-level semicolons.
-// Semicolons inside url(...) parens or quotes never split: a base64 data
-// URI (`url('data:image/png;base64,...')`) or a quoted string value would
-// otherwise truncate the declaration it sits in.
 func SplitDeclarations(s string) []string {
 	var parts []string
 	depth := 0
@@ -1885,7 +1733,7 @@ func SplitDeclarations(s string) []string {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		if startsEscape(c) && i+1 < len(s) {
-			i++ // 4.3.8: the escaped byte belongs to the token in either state
+			i++
 			continue
 		}
 		if quote != 0 {
@@ -1897,7 +1745,7 @@ func SplitDeclarations(s string) []string {
 		switch c {
 		case '\'', '"':
 			if depth == 0 {
-				quote = c // 4.3.9: a quote inside `url(...)` is not a string
+				quote = c
 			}
 		case '(':
 			depth++
@@ -1918,7 +1766,6 @@ func SplitDeclarations(s string) []string {
 	return parts
 }
 
-// Merge merges two stylesheets, appending rules from other after those in the receiver.
 func (s *Stylesheet) Merge(other *Stylesheet) {
 	if other == nil {
 		return

@@ -6,10 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// Blink's user-agent sheet zeroes the block-axis margins of every list nested
-// inside another list, so a `<ul>` hanging off an `<ol>` or a wiki `dl` starts
-// flush against its parent's text instead of pushing a blank line into it.
-// Only the block-axis margins go: the parent's indentation survives.
 func TestNestedListLosesItsBlockMargins(t *testing.T) {
 	nested := styleFor(t, `<html><body><ol><li><ul></ul></li></ol></body></html>`, "", "ul")
 	if nested == nil {

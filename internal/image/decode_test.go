@@ -63,9 +63,9 @@ func oversizedWebP(t *testing.T) []byte {
 	return []byte{
 		'R', 'I', 'F', 'F', 22, 0, 0, 0, 'W', 'E', 'B', 'P',
 		'V', 'P', '8', 'X', 10, 0, 0, 0,
-		0, 0, 0, 0, // flags and reserved bytes
-		0, 32, 0, // canvas width minus one: 8192
-		0, 0, 0, // canvas height minus one: 0
+		0, 0, 0, 0,
+		0, 32, 0,
+		0, 0, 0,
 	}
 }
 
@@ -148,8 +148,6 @@ func TestProbeRejectsJustOverPixelLimit(t *testing.T) {
 
 // qc:BR-165
 func TestProbeRejectsEncodedByteLimit(t *testing.T) {
-	// A valid 4x4 PNG padded past the cap: the config probe would accept it, so
-	// only a length check that runs before metadata decoding rejects it.
 	data := append(smallPNG(t), make([]byte, MaxEncodedImageBytes)...)
 	_, err := Probe(data)
 	if err == nil || !strings.Contains(err.Error(), "encoded size") {
@@ -159,7 +157,6 @@ func TestProbeRejectsEncodedByteLimit(t *testing.T) {
 
 // qc:BR-166
 func TestProbeRejectsPixelBombFromHeaderOnlyPNG(t *testing.T) {
-	// 4096x8192 RGBA would need 128 MiB decoded, but the file is only an IHDR.
 	data := headerOnlyPNG(t, 4096, 8192)
 	if len(data) > 128 {
 		t.Fatalf("header-only fixture = %d bytes, want a small file", len(data))
@@ -177,8 +174,8 @@ func headerOnlyPNG(t *testing.T, width, height int) []byte {
 	ihdr := make([]byte, 13)
 	binary.BigEndian.PutUint32(ihdr[0:], uint32(width))
 	binary.BigEndian.PutUint32(ihdr[4:], uint32(height))
-	ihdr[8] = 8 // bit depth
-	ihdr[9] = 6 // color type RGBA
+	ihdr[8] = 8
+	ihdr[9] = 6
 	writePNGChunk(&buf, "IHDR", ihdr)
 	writePNGChunk(&buf, "IEND", nil)
 	return buf.Bytes()

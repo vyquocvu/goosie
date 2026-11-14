@@ -34,21 +34,14 @@ func TestJourneyMalformedURLRecoversWithoutRetainingOldDoc(t *testing.T) {
 	recoveredURL := server.URL + "/recovered"
 	malformedURL := "http://127.0.0.1:99999/malformed"
 
-	// 1. Load initial valid page
 	browser.navigateViaAddressBar(t, initialURL)
 	browser.waitFor(t, "initial page loaded", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "initial-doc")
 		return ok && browser.activeURL() == initialURL
 	})
 
-	// 2. Navigate to malformed URL (port > 65535 is invalid syntax)
 	browser.navigateViaAddressBar(t, malformedURL)
 
-	// 3. Wait for error page:
-	// - Old document must NOT be retained as if load succeeded
-	// - Tab title reports problem loading page
-	// - Tab error state is non-empty
-	// - Accessibility tree shows error page content ("Try Again" link or error code)
 	browser.waitFor(t, "error page for malformed URL", func() bool {
 		tree := browser.window.AccessibilityTree()
 		_, initialStillPresent := findAXNode(tree, "initial-doc")
@@ -59,7 +52,6 @@ func TestJourneyMalformedURLRecoversWithoutRetainingOldDoc(t *testing.T) {
 				axContainsLabel(tree, "This Site Can’t Be Reached"))
 	})
 
-	// 4. Recover: navigate to a subsequent valid URL
 	browser.navigateViaAddressBar(t, recoveredURL)
 	browser.waitFor(t, "recovered page loaded successfully", func() bool {
 		_, ok := findAXNode(browser.window.AccessibilityTree(), "recovered-doc")
@@ -70,10 +62,6 @@ func TestJourneyMalformedURLRecoversWithoutRetainingOldDoc(t *testing.T) {
 
 // qc:BR-162
 func TestJourneyOversizedDocumentShowsErrorAndRecovers(t *testing.T) {
-	// The body is also millions of nodes, so an accepted document would fail
-	// during parse and never reach the page. The app's transport bound rejects
-	// such a response before the engine sees it; the engine's own byte cap is
-	// pinned separately by TestSessionRejectsOversizedHTMLBeforeParsing.
 	oversized := strings.Repeat("<p>", engine.MaxDocumentBytes/3+1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -113,11 +101,6 @@ func TestJourneyOversizedDocumentShowsErrorAndRecovers(t *testing.T) {
 
 // qc:BR-167
 func TestJourneyUnresponsiveScriptLeavesChromeOperable(t *testing.T) {
-	// A page whose inline script never returns must end in the prompt rather
-	// than a frozen browser: the engine stops the script, the tab keeps a real
-	// session to render, and the address bar still drives a later navigation.
-	// The second half is the acceptance criterion that no unit oracle covers -
-	// stopping the script is worthless if the chrome dies with it.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
@@ -146,8 +129,6 @@ func TestJourneyUnresponsiveScriptLeavesChromeOperable(t *testing.T) {
 			axContainsLabel(tree, "Reload without scripts")
 	})
 
-	// The chrome has to accept input after the stop: typing in the address bar
-	// and pressing Enter must reach the new document.
 	afterURL := server.URL + "/after"
 	browser.navigateViaAddressBar(t, afterURL)
 	browser.waitFor(t, "navigation after unresponsive script", func() bool {
@@ -159,7 +140,6 @@ func TestJourneyUnresponsiveScriptLeavesChromeOperable(t *testing.T) {
 
 // qc:BR-012
 func TestJourneyServerDownShowsRecognizableErrorAndAcceptsNextNav(t *testing.T) {
-	// Allocate a port and close immediately so the host is guaranteed dialable-down (connection refused)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen tcp: %v", err)
@@ -172,29 +152,19 @@ func TestJourneyServerDownShowsRecognizableErrorAndAcceptsNextNav(t *testing.T) 
 	browser := newBrowserE2E(t)
 	defer browser.close(t)
 
-	// 1. Navigate to unreachable server
 	browser.navigateViaAddressBar(t, deadURL)
 
-	// 2. Wait for error state:
-	// - Error page is rendered
-	// - Accessibility tree contains the failed host/address or recognizable error heading/code
-	// - Active tab reflects the failure
 	browser.waitFor(t, "error page for unreachable server", func() bool {
 		tree := browser.window.AccessibilityTree()
 		active := browser.f.tabMgr.Active()
 		if active == nil || active.Error() == "" {
 			return false
 		}
-		// The dead host is itself a label in the address bar, because it is the
-		// URL that was just typed, so matching it can pass before any error page
-		// exists. Require a label only the error page body carries, plus the
-		// title the next lines read.
 		return active.Title() == "Problem loading page" &&
 			(axContainsLabel(tree, "Unable to Connect") ||
 				axContainsLabel(tree, "ERR_CONNECTION_REFUSED"))
 	})
 
-	// 3. Verify app is fully responsive and accepts the next navigation
 	liveServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprint(w, `<!doctype html><html><body><h1 id="live-doc">Live Server</h1></body></html>`)

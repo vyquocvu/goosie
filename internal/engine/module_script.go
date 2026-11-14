@@ -12,10 +12,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// The embedded JS runtime does not implement ECMAScript Module Records. This
-// adapter handles the common static default-import form for modules whose
-// dependencies export a JSON-serializable default value. It intentionally
-// rejects other module syntax instead of running it as classic script.
 const (
 	maxModuleScripts    = 32
 	maxModuleGraphDepth = 8
@@ -148,9 +144,6 @@ func (s *Session) executeDefaultImportModule(runtime *js.Runtime, source, baseUR
 	if strings.Contains(source, "import ") || defaultExportLine.MatchString(source) || strings.Contains(source, "export ") {
 		return errors.New("module syntax is outside the supported static default-import subset")
 	}
-	// Module declarations are scoped to the module and top-level this is
-	// undefined. The strict function wrapper preserves those properties for
-	// scripts that do not need the unavailable native Module Record machinery.
 	wrapped := "(function(){\"use strict\";\n" + source + "\n}).call(undefined);"
 	return runtime.Run(wrapped, name)
 }
@@ -194,8 +187,6 @@ func (s *Session) moduleDefaultJSON(runtime *js.Runtime, source, baseURL string,
 		bindings.WriteString(";\n")
 	}
 	if strings.Contains(source, "import ") || strings.Contains(source, "export ") {
-		// The only accepted export is a single default expression at module
-		// scope. Parse below by replacing that declaration with a return.
 		loc := defaultExportLine.FindStringIndex(source)
 		if loc == nil {
 			return "", errors.New("module dependency must have one default export")

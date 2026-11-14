@@ -31,8 +31,6 @@ func TestFloatShapeOutsideContour(t *testing.T) {
 		t.Fatalf("topWord=%v, midWord=%v not found", topWord, midWord)
 	}
 
-	// Because of circular shape-outside, TopWord (at y ~ 0..20) intrudes less than MiddleWord (at y ~ 40..60),
-	// so topWord.X should be strictly less than midWord.X.
 	if topWord.X >= midWord.X {
 		t.Errorf("expected topWord.X (%v) to be less than midWord.X (%v) due to circular contour", topWord.X, midWord.X)
 	}

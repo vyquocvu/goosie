@@ -9,12 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// Sub-project 1 gives a page a window and a document stub and nothing else.
-// These tests fix what those stubs must answer to, and - just as important -
-// what they must refuse. An API that is quietly undefined is a page that
-// silently does nothing; a browser that cannot tell the difference teaches
-// nobody why their page is broken.
-
 func TestDocumentTitleRoundTripsThroughTheHost(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a", Title: "Initial"})
 	if got := r.Title(); got != "Initial" {
@@ -40,10 +34,6 @@ func TestWindowLocationIsTheDocumentsURL(t *testing.T) {
 	}
 }
 
-// console.log is the one part of the developer tools the engine can honour
-// today, and it goes to a writer the host handed over. Nothing in this package
-// may reach os.Stderr by itself: a per-document output channel that writes to a
-// process stream is global state with a log level on it.
 func TestConsoleWritesToTheHostWriter(t *testing.T) {
 	var buf bytes.Buffer
 	r := newRuntime(t, js.Options{URL: "https://example.test/a", Console: &buf})
@@ -63,9 +53,6 @@ func TestConsoleWithNoWriterIsDiscardedNotFatal(t *testing.T) {
 	}
 }
 
-// These belong to sub-projects 2 and 3. They have to fail with a message that
-// names the missing API so the gap stays visible from a page, and so a test
-// that exercises them today reports "not implemented" rather than a pass.
 func TestUnsupportedWebAPIsFailLoudly(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/a"})
 	for _, tc := range []struct{ src, missing string }{
@@ -82,10 +69,6 @@ func TestUnsupportedWebAPIsFailLoudly(t *testing.T) {
 	}
 }
 
-// Zero global state is not a style preference at this boundary: two tabs run
-// two realms, and a binding a page set in one must not appear in the other.
-// This is the test that would have caught the process-wide @font-face and
-// viewport registries, one sub-system at a time.
 func TestRuntimesAreIsolatedFromEachOther(t *testing.T) {
 	first := newRuntime(t, js.Options{URL: "https://example.test/a"})
 	second := newRuntime(t, js.Options{URL: "https://example.test/b"})
@@ -106,9 +89,6 @@ func TestRuntimesAreIsolatedFromEachOther(t *testing.T) {
 	}
 }
 
-// Every tab loads on its own goroutine, so two realms running at once is the
-// normal case rather than a stress case. Run under -race: this test's value is
-// in the report it does not make.
 func TestConcurrentRuntimesDoNotInterfere(t *testing.T) {
 	const pages = 8
 	var wg sync.WaitGroup

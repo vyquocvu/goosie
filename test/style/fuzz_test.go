@@ -9,15 +9,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// cascadeLimits are loose enough that a fuzzing input is almost always a document
-// rather than a refusal, which is what the matcher needs to see.
 var cascadeLimits = dom.ParseLimits{Nodes: 128, Depth: 16, Attributes: 8, AttributeBytes: 256}
 
-// FuzzResolveCascade drives the selector matcher with an arbitrary tree and two
-// arbitrary stylesheets, and requires that resolving [UA, a] is unchanged by an
-// intervening resolve of [UA, b] against the same document. That second property
-// is the reason this target exists: the rule index dedupes a query with a stamp
-// counter, and a stamp that outlived its index would show up here and nowhere else.
 func FuzzResolveCascade(f *testing.F) {
 	f.Add(`<html><body><p class="a" id="b">text`, `p.a#b { color: red }`, `* { margin: 0 }`)
 	f.Add(`<div><span>x</span></div>`, `@media (min-width: 100px){ div > span:hover::before{content:""} }`, `:not(p) em { color: rgb(1,2,3) }`)

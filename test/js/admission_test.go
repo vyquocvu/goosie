@@ -10,26 +10,11 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// Test doubles for the injected admission budgets.
-//
-// internal/js declares MutationBudget and SubresourceBudget so it never has to
-// import internal/engine; the engine supplies the concrete implementations. The
-// fakes below mirror that contract with SMALL caps so the JS wiring can be
-// exercised without building a million-node document or a 128 MiB response. The
-// engine-level test (test/engine/js_admission_test.go) proves the same wiring
-// against the real MaxDocumentNodes / MaxDocumentDepth / maxSubresourceBytes.
-// ---------------------------------------------------------------------------
-
 var (
 	errFakeNodes = errors.New("node limit exceeded")
 	errFakeDepth = errors.New("tree depth limit exceeded")
 )
 
-// fakeMutationBudget is a js.MutationBudget double. A cap of zero disables that
-// dimension. It charges on Reserve (only for children not already live under
-// its root, so a move is free) and credits on Release, exactly like the engine
-// budget, and rejects atomically without mutating its counter.
 type fakeMutationBudget struct {
 	mu       sync.Mutex
 	root     *dom.Node
@@ -118,8 +103,6 @@ func (b *fakeMutationBudget) depthOf(n *dom.Node) int {
 	return -1
 }
 
-// subtreeSize counts a node's subtree iteratively, bounded so a malformed or
-// cyclic tree cannot hang the test.
 func subtreeSize(n *dom.Node) int {
 	if n == nil {
 		return 0
@@ -140,7 +123,6 @@ func subtreeSize(n *dom.Node) int {
 	return size
 }
 
-// subtreeHeight returns the number of edges from n to its deepest descendant.
 func subtreeHeight(n *dom.Node) int {
 	if n == nil {
 		return 0
@@ -167,7 +149,6 @@ func subtreeHeight(n *dom.Node) int {
 	return maxH
 }
 
-// fakeSubresourceBudget is a js.SubresourceBudget double with a small byte cap.
 type fakeSubresourceBudget struct {
 	mu   sync.Mutex
 	cap  int
@@ -190,12 +171,6 @@ func (f *fakeSubresourceBudget) Used() int {
 	return f.used
 }
 
-// ---------------------------------------------------------------------------
-// Helpers.
-// ---------------------------------------------------------------------------
-
-// admissionDOM builds html>body under a properly constructed document node so
-// depth/live accounting has a real root to walk to.
 func admissionDOM() *dom.Document {
 	doc := dom.NewDocument()
 	html := doc.NewElement("html")
@@ -220,18 +195,10 @@ func newAdmissionRuntime(t *testing.T, doc *dom.Document, b js.MutationBudget) *
 	return r
 }
 
-// ---------------------------------------------------------------------------
-// B1: appendChild node-count admission.
-// ---------------------------------------------------------------------------
-
-// TestAdmissionAppendChildRejectsPastNodeCap pins the core hole: a script that
-// appends in a loop must be stopped at the document node cap with a catchable
-// QuotaExceededError, the live count must never exceed the cap, and the runtime
-// must stay usable afterward.
 func TestAdmissionAppendChildRejectsPastNodeCap(t *testing.T) {
 	doc := admissionDOM()
 	b := newFakeMutationBudget(doc)
-	b.maxNodes = b.count() + 3 // room for exactly three more nodes
+	b.maxNodes = b.count() + 3
 	r := newAdmissionRuntime(t, doc, b)
 
 	if err := r.Run(`
@@ -261,7 +228,6 @@ func TestAdmissionAppendChildRejectsPastNodeCap(t *testing.T) {
 		t.Errorf("live nodes = %d, want <= %d", got, b.maxNodes)
 	}
 
-	// The runtime is still usable: queries and reads work after a rejection.
 	if err := r.Run(`var divCount = document.getElementsByTagName('div').length;`, "inline"); err != nil {
 		t.Fatalf("runtime unusable after admission reject: %v", err)
 	}
@@ -270,13 +236,10 @@ func TestAdmissionAppendChildRejectsPastNodeCap(t *testing.T) {
 	}
 }
 
-// TestAdmissionAppendChildRejectsPastDepthCap pins deep-nesting admission: a
-// chain built one appendChild at a time must stop at the depth cap, and the
-// resulting tree must never exceed it.
 func TestAdmissionAppendChildRejectsPastDepthCap(t *testing.T) {
 	doc := admissionDOM()
 	b := newFakeMutationBudget(doc)
-	b.maxDepth = 6 // document=0, html=1, body=2 -> divs may reach depth 6
+	b.maxDepth = 6
 	r := newAdmissionRuntime(t, doc, b)
 
 	if err := r.Run(`
@@ -298,7 +261,6 @@ func TestAdmissionAppendChildRejectsPastDepthCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// body is depth 2; divs land at 3,4,5,6 then depth 7 is refused -> 4 divs.
 	if v, ok := r.Global("reached"); !ok || v.Num != 4 {
 		t.Errorf("reached = %+v, want 4", v)
 	}
@@ -309,10 +271,6 @@ func TestAdmissionAppendChildRejectsPastDepthCap(t *testing.T) {
 		t.Errorf("tree depth = %d, want <= %d", d, b.maxDepth)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// B2: repeated innerHTML cannot exceed the document cap in aggregate.
-// ---------------------------------------------------------------------------
 
 func TestAdmissionInnerHTMLAggregateCap(t *testing.T) {
 	doc := admissionDOM()
@@ -343,16 +301,10 @@ func TestAdmissionInnerHTMLAggregateCap(t *testing.T) {
 	if got := b.count(); got > b.maxNodes {
 		t.Errorf("live nodes after innerHTML flood = %d, want <= %d", got, b.maxNodes)
 	}
-	// The per-call parse cap (1024) is not the point: the document cap is. The
-	// flood must have been stopped well before 50 iterations.
 	if v, ok := r.Global("done"); !ok || v.Num >= 50 {
 		t.Errorf("done = %+v, want it stopped before 50", v)
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Atomicity: a rejected insertion leaves the DOM unchanged.
-// ---------------------------------------------------------------------------
 
 func TestAdmissionInnerHTMLRejectIsAtomic(t *testing.T) {
 	doc := admissionDOM()
@@ -364,7 +316,7 @@ func TestAdmissionInnerHTMLRejectIsAtomic(t *testing.T) {
 	div.AppendChild(p)
 
 	b := newFakeMutationBudget(doc)
-	b.maxNodes = b.count() // no room for anything new
+	b.maxNodes = b.count()
 	r := newAdmissionRuntime(t, doc, b)
 
 	if err := r.Run(`
@@ -378,7 +330,6 @@ func TestAdmissionInnerHTMLRejectIsAtomic(t *testing.T) {
 	if v, ok := r.Global("caught"); !ok || v.Str != "QuotaExceededError" {
 		t.Errorf("caught = %+v, want QuotaExceededError", v)
 	}
-	// Atomic: the existing <p>hello</p> must still be there, not cleared.
 	main := doc.ElementByID("main")
 	if main == nil {
 		t.Fatal("main is gone")
@@ -419,11 +370,6 @@ func TestAdmissionAppendChildRejectIsAtomic(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Release: removal credits the budget so remove/append does not monotonically
-// exhaust it.
-// ---------------------------------------------------------------------------
-
 func TestAdmissionReleaseOnRemove(t *testing.T) {
 	doc := admissionDOM()
 	b := newFakeMutationBudget(doc)
@@ -456,13 +402,9 @@ func TestAdmissionReleaseOnRemove(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Backwards compatibility: no budget means ungated (existing tests rely on it).
-// ---------------------------------------------------------------------------
-
 func TestAdmissionNoBudgetIsUngated(t *testing.T) {
 	doc := admissionDOM()
-	r := newAdmissionRuntime(t, doc, nil) // no budget installed
+	r := newAdmissionRuntime(t, doc, nil)
 
 	if err := r.Run(`
 		var n = 0;
@@ -475,12 +417,8 @@ func TestAdmissionNoBudgetIsUngated(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// B3: fetch charges the shared subresource budget.
-// ---------------------------------------------------------------------------
-
 func TestFetchChargesSubresourceBudget(t *testing.T) {
-	body := []byte("hello world") // 11 bytes
+	body := []byte("hello world")
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
 			"https://example.test/api": {Status: 200, StatusText: "OK", Body: body, OK: true},
@@ -533,10 +471,6 @@ func TestFetchSubresourceBudgetExhaustedRejects(t *testing.T) {
 	}
 }
 
-// TestFetchSubresourceBudgetConcurrentIsRaceSafe drives several fetches through
-// one shared budget from concurrent goroutines. Run under -race, it pins that
-// the budget's accounting is synchronized (the engine's real budget is a mutex-
-// guarded counter shared with CSS/fonts/images).
 func TestFetchSubresourceBudgetConcurrentIsRaceSafe(t *testing.T) {
 	m := &mockFetcher{
 		responses: map[string]*js.FetchResponse{
@@ -559,7 +493,6 @@ func TestFetchSubresourceBudgetConcurrentIsRaceSafe(t *testing.T) {
 	}
 }
 
-// treeMaxDepth measures the deepest node in a document (document node = 0).
 func treeMaxDepth(doc *dom.Document) int {
 	maxD := 0
 	stack := []struct {

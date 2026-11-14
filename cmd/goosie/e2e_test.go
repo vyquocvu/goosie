@@ -158,9 +158,6 @@ func (b *browserE2E) inject(t *testing.T, event surface.Event) {
 	}
 }
 
-// pressKey injects one complete keystroke: a press followed by its release.
-// Space and Enter hold their activation until the release, so a press alone
-// would leave a button :active and never clicked.
 func (b *browserE2E) pressKey(t *testing.T, key rune) {
 	t.Helper()
 	b.inject(t, surface.Event{Kind: surface.EvKey, Key: key})

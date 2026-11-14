@@ -8,23 +8,11 @@ import (
 	"github.com/dop251/goja"
 )
 
-// CookieStore is the cookie jar the document.cookie binding reads and writes.
-// It is defined here so internal/js does not import internal/net (archtest):
-// the host supplies an adapter around its real jar, exactly like HTTPFetcher.
-// A nil store keeps a per-document memory jar instead, which is enough for
-// pages that only round-trip their own values through the binding.
 type CookieStore interface {
-	// CookiesForDocument returns the "a=b; c=d" value for url, excluding
-	// HttpOnly cookies, which script must never see.
 	CookiesForDocument(url string) string
-	// SetCookieFromDocument stores one document.cookie assignment
-	// ("name=value[; attr...]") for url.
 	SetCookieFromDocument(url, assignment string)
 }
 
-// memCookieJar is the fallback store: an insertion-ordered session jar with
-// expiry-based deletion. Path/domain scoping is not enforced here; the jar
-// belongs to one document, so everything it holds was set for that document.
 type memCookieJar struct {
 	mu    sync.Mutex
 	order []string
@@ -35,7 +23,6 @@ func newMemCookieJar() *memCookieJar {
 	return &memCookieJar{vals: make(map[string]string)}
 }
 
-// CookiesForDocument implements CookieStore.
 func (m *memCookieJar) CookiesForDocument(url string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -48,7 +35,6 @@ func (m *memCookieJar) CookiesForDocument(url string) string {
 	return strings.Join(parts, "; ")
 }
 
-// SetCookieFromDocument implements CookieStore.
 func (m *memCookieJar) SetCookieFromDocument(url, assignment string) {
 	name, value, attrs, ok := splitCookiePair(assignment)
 	if !ok {
@@ -77,8 +63,6 @@ func (m *memCookieJar) SetCookieFromDocument(url, assignment string) {
 	m.vals[name] = value
 }
 
-// splitCookiePair splits an assignment into name, value and trailing
-// attributes. A missing '=' rejects the assignment, as in browsers.
 func splitCookiePair(assignment string) (name, value string, attrs []string, ok bool) {
 	segs := strings.Split(assignment, ";")
 	if len(segs) == 0 {
@@ -103,8 +87,6 @@ func splitAttr(a string) (string, string) {
 	return strings.TrimSpace(a), ""
 }
 
-// atoi parses a decimal integer without strconv, reporting ok=false for
-// anything else (a Max-Age that is not a number is ignored, per RFC 6265).
 func atoi(s string) (int, bool) {
 	s = strings.TrimSpace(s)
 	neg := false
@@ -130,10 +112,6 @@ func atoi(s string) (int, bool) {
 	return n, true
 }
 
-// setupCookies installs the document.cookie accessor. Reads format the
-// store's jar for this document's URL; writes hand the raw assignment to the
-// store. Both go through the same binding whether the host supplied a real
-// jar or the memory fallback, so pages cannot tell them apart.
 func (r *Runtime) setupCookies() {
 	docVal := r.vm.Get("document")
 	doc, ok := docVal.(*goja.Object)
@@ -155,9 +133,6 @@ func (r *Runtime) setupCookies() {
 		}
 		return goja.Undefined()
 	})
-	// The bridge lives on the document object (like the __get/__set helpers
-	// the other accessors call through): a temporary global would be gone by
-	// the time a script touches document.cookie.
 	_ = doc.Set("__cookieStore__", bridge)
 	_, _ = r.vm.RunString(`
 		Object.defineProperty(document, 'cookie', {

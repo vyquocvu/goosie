@@ -7,10 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/archtest"
 )
 
-// TestProductionHasNoArenaPointerMaps is the repo-wide half of the SP-4 L1 box
-// identity rule: paint and engine name boxes by BoxKey/ObjectID, never hold arena
-// pointers in a map, because a *layout.Object is invalidated by the next arena
-// growth. internal/ and cmd/ are the shipped tree; test/ and third_party/ are free.
 func TestProductionHasNoArenaPointerMaps(t *testing.T) {
 	root := moduleRoot(t)
 	for _, sub := range []string{"internal", "cmd"} {
@@ -24,10 +20,6 @@ func TestProductionHasNoArenaPointerMaps(t *testing.T) {
 	}
 }
 
-// The non-vacuity cases: a map keyed by *layout.Object is flagged, including under
-// a renamed import, while a map keyed by layout.BoxKey or layout.ObjectID is not.
-// A rule that reported nothing for any input would pass the repo-wide check above
-// and be worthless.
 func TestArenaPointerMapsFlagsPointerKeysOnly(t *testing.T) {
 	root := t.TempDir()
 	writePackageGo(t, filepath.Join(root, "p"), map[string]string{

@@ -7,47 +7,26 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// ruleIndex buckets selectors by what their key (rightmost) compound requires, so
-// resolving one element tests only the selectors that could match it.
-//
-// Without bucketing, resolution is O(selectors x elements): a site with ~2,000
-// selectors and ~13,000 elements asks 26M membership questions per document,
-// which is slow enough that the engine's style budget has to clip most of the
-// author stylesheet away. Every element already knows its own id, classes and
-// tag, and a selector that requires a class the element lacks cannot match it
-// regardless of its ancestors, so those selectors need never be tested.
 type ruleIndex struct {
-	byID    map[string][]*indexedSelector
-	byClass map[string][]*indexedSelector
-	byTag   map[string][]*indexedSelector
-	// unkeyed holds selectors whose key compound tests none of id, class or tag —
-	// `*`, `[type=text]`, `:hover` — which every element must still try.
-	unkeyed []*indexedSelector
-	part    []*indexedSelector
-	// declCount is the total declaration slots across all sheets, used to rank
-	// inline styles after every authored declaration.
+	byID       map[string][]*indexedSelector
+	byClass    map[string][]*indexedSelector
+	byTag      map[string][]*indexedSelector
+	unkeyed    []*indexedSelector
+	part       []*indexedSelector
 	declCount  int
 	stamp      int
 	properties map[string]dom.PropertyDefinition
 	selectors  []css.Selector
 }
 
-// indexedSelector is one selector of one rule plus the cascade facts derived
-// from it, so a resolution pass never revisits the sheet structure.
 type indexedSelector struct {
 	rule       *css.Rule
 	sel        css.Selector
 	origin     int
 	layerOrder int
 	a, b, c    int
-	// rank counts the declarations that precede this selector's own block in
-	// sheet, rule and selector order. Walking matches in rank order reproduces
-	// exactly the plain traversal the cascade is defined on, which is what keeps
-	// the index invisible to the result.
-	rank int
-	// mark is the stamp of the query that last collected this selector, used to
-	// drop duplicates when a key compound names several classes.
-	mark int
+	rank       int
+	mark       int
 }
 
 func buildRuleIndex(sheets []*css.Stylesheet) *ruleIndex {
@@ -67,7 +46,6 @@ func buildRuleIndex(sheets []*css.Stylesheet) *ruleIndex {
 	layerSeq := 0
 	layerMap := make(map[string]int)
 
-	// Step 1: Record all explicitly ordered layers across sheets (@layer name1, name2;)
 	for _, sheet := range sheets {
 		for _, name := range sheet.Layers {
 			if _, ok := layerMap[name]; !ok {
@@ -127,9 +105,6 @@ func selectorHasPart(sel css.Selector) bool {
 	return false
 }
 
-// insert files a selector under the tests its key compound requires. An id is
-// the narrowest possible key, then any class the compound demands (the selector
-// goes under each, since a node needs all of them), then the tag.
 func (ix *ruleIndex) insert(e *indexedSelector) {
 	part := e.sel.Parts
 	if len(part) == 0 {
@@ -165,9 +140,6 @@ func (ix *ruleIndex) insert(e *indexedSelector) {
 	}
 }
 
-// candidates returns every selector that could match n, in cascade traversal
-// order. The caller still has to run the full match: the key compound is a
-// necessary condition, not a sufficient one.
 func (ix *ruleIndex) candidates(n *dom.Node) []*indexedSelector {
 	ix.stamp++
 	stamp := ix.stamp
@@ -190,10 +162,6 @@ func (ix *ruleIndex) candidates(n *dom.Node) []*indexedSelector {
 	collect(ix.byTag[n.Data])
 	collect(ix.unkeyed)
 	collect(ix.part)
-	// Each bucket is already in rank order (buildRuleIndex appends in sheet
-	// order), so the merged slice is nearly sorted and almost always tiny:
-	// skip the sort for 0-1 candidates and insertion-sort the common small
-	// case instead of paying sort.Slice's interface dispatch per element.
 	switch len(out) {
 	case 0, 1:
 	case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16:

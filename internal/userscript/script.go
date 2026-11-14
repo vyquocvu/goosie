@@ -1,5 +1,3 @@
-// Package userscript manages user scripts (Greasemonkey/Tampermonkey style)
-// and their injection into web documents at specified lifecycle stages.
 package userscript
 
 import (
@@ -10,19 +8,14 @@ import (
 	"strings"
 )
 
-// RunAt specifies when during the document lifecycle the script should execute.
 type RunAt string
 
 const (
-	// RunAtDocumentStart executes after DOM tree and window creation, but before inline/external scripts run.
 	RunAtDocumentStart RunAt = "document-start"
-	// RunAtDocumentEnd executes after initial DOM parsing and inline/external scripts have executed.
-	RunAtDocumentEnd RunAt = "document-end"
-	// RunAtDocumentIdle executes after load event / initial paint.
-	RunAtDocumentIdle RunAt = "document-idle"
+	RunAtDocumentEnd   RunAt = "document-end"
+	RunAtDocumentIdle  RunAt = "document-idle"
 )
 
-// Script represents a user script with metadata and executable code.
 type Script struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -38,7 +31,6 @@ type Script struct {
 	Enabled     bool     `json:"enabled"`
 }
 
-// Parse extracts the ==UserScript== metadata header and code from raw JavaScript.
 func Parse(content, filename string) (*Script, error) {
 	s := &Script{
 		Enabled: true,
@@ -126,33 +118,27 @@ func Parse(content, filename string) (*Script, error) {
 	return s, scanner.Err()
 }
 
-// MatchesURL reports whether the script should execute on rawURL based on its
-// @match, @include, and @exclude directives.
 func (s *Script) MatchesURL(rawURL string) bool {
 	if !s.Enabled {
 		return false
 	}
 
-	// Any @exclude match vetoes execution immediately
 	for _, excl := range s.Excludes {
 		if MatchPattern(excl, rawURL) {
 			return false
 		}
 	}
 
-	// If no matches/includes specified, default is no-match
 	if len(s.Matches) == 0 && len(s.Includes) == 0 {
 		return false
 	}
 
-	// Check @match rules
 	for _, m := range s.Matches {
 		if MatchPattern(m, rawURL) {
 			return true
 		}
 	}
 
-	// Check @include rules (simple wildcard globs)
 	for _, inc := range s.Includes {
 		if MatchGlob(inc, rawURL) {
 			return true
@@ -162,7 +148,6 @@ func (s *Script) MatchesURL(rawURL string) bool {
 	return false
 }
 
-// MatchPattern tests a Chrome/Greasemonkey match pattern (<scheme>://<host>/<path> or <all_urls>).
 func MatchPattern(pattern, rawURL string) bool {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
@@ -192,7 +177,6 @@ func MatchPattern(pattern, rawURL string) bool {
 		urlPath += "?" + u.RawQuery
 	}
 
-	// Syntax: <scheme>://<host>/<path> or file:///<path>
 	parts := strings.SplitN(pattern, "://", 2)
 	if len(parts) != 2 {
 		return MatchGlob(pattern, rawURL)
@@ -201,7 +185,6 @@ func MatchPattern(pattern, rawURL string) bool {
 	schemePattern := strings.ToLower(parts[0])
 	rest := parts[1]
 
-	// Check scheme
 	if schemePattern == "*" {
 		if urlScheme != "http" && urlScheme != "https" {
 			return false
@@ -210,7 +193,6 @@ func MatchPattern(pattern, rawURL string) bool {
 		return false
 	}
 
-	// Split host and path
 	slashIdx := strings.Index(rest, "/")
 	if slashIdx == -1 {
 		return false
@@ -218,9 +200,7 @@ func MatchPattern(pattern, rawURL string) bool {
 	hostPattern := strings.ToLower(rest[:slashIdx])
 	pathPattern := rest[slashIdx:]
 
-	// Check host
 	if hostPattern == "*" {
-		// Matches any host
 	} else if strings.HasPrefix(hostPattern, "*.") {
 		suffix := hostPattern[2:]
 		if urlHostname != suffix && !strings.HasSuffix(urlHostname, "."+suffix) {
@@ -230,11 +210,9 @@ func MatchPattern(pattern, rawURL string) bool {
 		return false
 	}
 
-	// Check path with wildcards
 	return MatchGlob(pathPattern, urlPath)
 }
 
-// MatchGlob matches string against a wildcard pattern with '*' matching any characters.
 func MatchGlob(pattern, target string) bool {
 	if pattern == "*" {
 		return true

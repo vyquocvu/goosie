@@ -9,35 +9,16 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// tightLimits sits far below the engine's 50000 nodes / depth 128 caps, which
-// test/engine/bounds_test.go pins on its own: at these numbers the fuzzer crosses a
-// bound after a handful of tokens, so a node that escapes the accounting is a finding
-// rather than a needle in an 8 MB input. Nodes is deliberately small enough for a
-// 40-token input to exhaust it: at 128 the corpus never reaches the node bound, and
-// disabling that check leaves this file green.
 var tightLimits = dom.ParseLimits{Nodes: 50, Depth: 24, Attributes: 4, AttributeBytes: 8}
 
-// looseLimits dominates tightLimits in every field, which is what makes the second
-// parse meaningful: any token the tight parse accepted passes the loose checks too, so
-// the two parses agree up to the point where the tight one stopped, and everything the
-// loose parse then builds is attributable to the bound that stopped it.
 var looseLimits = dom.ParseLimits{Nodes: 4096, Depth: 64, Attributes: 32, AttributeBytes: 2048}
 
-// Each input lands in exactly one of three buckets, and every bucket carries an
-// assertion rather than an early return. TestParsePathCoverage measures the split on a
-// fixed corpus, because it cannot be measured during a search: `-fuzz` runs the target in
-// worker processes whose counters die with them (a 90 s search of 4,768,757 execs
-// incremented in-process accounting zero times).
 type bucket int
 
 const (
-	// parsed under the tight limits and walked against them
 	boundChecked bucket = iota
-	// refused tightly, built under looser limits, refusal traced to a bound
 	refusalExplained
-	// refused tightly while parsing tokens omitted from the final tree
 	refusalDropped
-	// refused under both limit sets, where the assertion thins to "both name a limit"
 	refusedBoth
 )
 
@@ -54,8 +35,6 @@ func FuzzParseDocument(f *testing.F) {
 	})
 }
 
-// assertParse is the target's whole claim, and TestParsePathCoverage runs the same
-// function so the deterministic corpus measures exactly what a search executes.
 func assertParse(t *testing.T, html string) bucket {
 	t.Helper()
 	doc, err := dom.ParseBounded(html, tightLimits)
@@ -79,10 +58,6 @@ func assertParse(t *testing.T, html string) bucket {
 	if stats.exceeds(tightLimits) {
 		return refusalExplained
 	}
-	// Refusals can name a bound no retained node breaks when the tree builder drops
-	// tokens. This includes oversized attributes on ignored tokens and nodes created
-	// then discarded because inserting them into a Document would violate pre-insertion
-	// validity. Such nodes still count against the parser's work budget.
 	if (isAttrRefusal(err) || strings.Contains(err.Error(), "HTML node limit exceeded")) && !stats.exceeds(tightLimits) {
 		return refusalDropped
 	}
@@ -116,15 +91,10 @@ type treeStats struct {
 	cycled                                  bool
 }
 
-// exceeds reports whether a built tree breaks any bound the limits impose. A tight
-// refusal this cannot explain is not the accounting firing - it is the parser refusing
-// for a reason it does not report.
 func (s treeStats) exceeds(l dom.ParseLimits) bool {
 	return s.nodes > l.Nodes || s.maxDepth > l.Depth || s.maxAttrs > l.Attributes || s.maxAttrBytes > l.AttributeBytes
 }
 
-// maxDepth counts edges from the document node, the same convention allowNode's parent
-// chain and engine.walkDocument use.
 func (s treeStats) String() string {
 	return fmt.Sprintf("%d nodes at most %d deep with at most %d attributes and a %d-byte attribute",
 		s.nodes, s.maxDepth, s.maxAttrs, s.maxAttrBytes)
@@ -170,9 +140,6 @@ func clip(s string) string {
 	return s[:120] + "…"
 }
 
-// corpusTokens are the shapes the tree builder branches on: elements that push and pop
-// the open stack, void and raw-text elements, table and SVG foster parenting, and the
-// malformed fragments a real document is full of.
 var corpusTokens = []string{
 	"<div>", "</div>", "<p>", "<main>", "<span>", "<em>", "<b>", "<blockquote>",
 	`<a href="x">`, "</a>", "<table>", "<tr>", "<td>", "</td>", "</tr>", "</table>",
@@ -182,8 +149,6 @@ var corpusTokens = []string{
 	"<font face='f' size=2 color=red width=9 height=8>",
 }
 
-// syntheticCorpus is seeded rather than random: the coverage numbers in this file's
-// log line have to mean the same corpus on every machine and every run.
 func syntheticCorpus(n int) []string {
 	r := rand.New(rand.NewSource(0))
 	out := make([]string, 0, n)
@@ -197,10 +162,6 @@ func syntheticCorpus(n int) []string {
 	return out
 }
 
-// TestParsePathCoverage is the audit of this file's own claim. A fuzz target that
-// returns early on refusals can report tens of millions of executions while checking
-// the bounds on a minority of them, so the split is measured on a fixed corpus here —
-// the only place it can be, since a search's executions happen in worker processes.
 func TestParsePathCoverage(t *testing.T) {
 	const inputs = 4000
 	var checked, explained, dropped, refused int

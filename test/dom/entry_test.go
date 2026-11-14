@@ -14,14 +14,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/archtest"
 )
 
-// TestNoUnboundedParseEntry is the fence behind this round's deletion of dom.Parse. A
-// package-level function that turns an input string into a Document and reports no error
-// is the exact shape that lets a caller skip the resource caps, and deleting it once is
-// not enough - the next urgent fix re-adds it. So the shape itself is what fails here.
-//
-// It reads signatures rather than names on purpose: an unchecked entry renamed to
-// MustParseHTML or buildDocument is the same hole, and NewDocument is legal because it
-// takes no input at all.
 func TestNoUnboundedParseEntry(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -75,9 +67,6 @@ func returnsError(fl *ast.FieldList) bool {
 	return anyField(fl, "error")
 }
 
-// anyField reports whether a parameter or result list names one of its types with the
-// given identifier. Reading the syntax rather than resolving types keeps this rule in the
-// same go/ast parse the archtest rules already do.
 func anyField(fl *ast.FieldList, name string) bool {
 	if fl == nil {
 		return false
@@ -92,8 +81,6 @@ func anyField(fl *ast.FieldList, name string) bool {
 	return false
 }
 
-// flatten returns the types one result or parameter field covers: `(a, b *Node)` is two
-// fields' worth of types under one ast.Field.
 func flatten(e ast.Expr) []ast.Expr {
 	switch x := e.(type) {
 	case *ast.StarExpr:

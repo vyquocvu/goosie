@@ -6,9 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// setDatasetAttribute applies a DOMStringMap write through the element's
-// attribute setter. Attribute reactions run for same-value writes, while
-// visual invalidation is limited to an actual stored-value change.
 func (r *Runtime) setDatasetAttribute(node *dom.Node, name, value string) {
 	if node == nil || !node.Element() {
 		return
@@ -22,8 +19,6 @@ func (r *Runtime) setDatasetAttribute(node *dom.Node, name, value string) {
 	}
 }
 
-// deleteDatasetAttribute queues the observed-attribute reaction only when a
-// data-* attribute was actually present and removed.
 func (r *Runtime) deleteDatasetAttribute(node *dom.Node, name string) {
 	if node == nil || !node.Element() {
 		return

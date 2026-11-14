@@ -8,26 +8,16 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// document.write
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteAfterParsingClearsAndWrites verifies that calling
-// document.write after the document has finished parsing clears the existing
-// content and replaces it with the new HTML.
 func TestDocumentWriteAfterParsingClearsAndWrites(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// Fire the lifecycle to transition to "complete".
 	r.FireDocumentLifecycle()
 
-	// Now call document.write.
 	if err := r.Run(`document.write('<p id="new">written</p>')`, "test"); err != nil {
 		t.Fatalf("document.write: %v", err)
 	}
 
-	// The old content should be gone.
 	val, err := r.Evaluate(`document.getElementById('main')`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -36,7 +26,6 @@ func TestDocumentWriteAfterParsingClearsAndWrites(t *testing.T) {
 		t.Errorf("old element #main still present after document.write, got %q", val)
 	}
 
-	// The new content should be present.
 	val, err = r.Evaluate(`document.getElementById('new')`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -46,18 +35,14 @@ func TestDocumentWriteAfterParsingClearsAndWrites(t *testing.T) {
 	}
 }
 
-// TestDocumentWriteDuringParsing verifies that document.write called while
-// readyState is "loading" appends content to the body.
 func TestDocumentWriteDuringParsing(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 
-	// readyState defaults to "loading" before FireDocumentLifecycle.
 	if err := r.Run(`document.write('<span class="injected">hi</span>')`, "test"); err != nil {
 		t.Fatalf("document.write during loading: %v", err)
 	}
 
-	// The span should be appended to the body.
 	val, err := r.Evaluate(`document.querySelector('span.injected') !== null`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -66,7 +51,6 @@ func TestDocumentWriteDuringParsing(t *testing.T) {
 		t.Errorf("expected span.injected to be in the document, got %q", val)
 	}
 
-	// Original content should still be present.
 	val, err = r.Evaluate(`document.getElementById('main') !== null`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -294,7 +278,6 @@ func TestDetachedDocumentOpenWriteCloseAndExistingChildren(t *testing.T) {
 	}
 }
 
-// TestDocumentWriteEmptyString verifies that document.write(”) is a no-op.
 func TestDocumentWriteEmptyString(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -303,7 +286,6 @@ func TestDocumentWriteEmptyString(t *testing.T) {
 		t.Fatalf("document.write(''): %v", err)
 	}
 
-	// Body should still have its original children.
 	val, err := r.Evaluate(`document.getElementById('main') !== null`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -313,26 +295,15 @@ func TestDocumentWriteEmptyString(t *testing.T) {
 	}
 }
 
-// TestDocumentWriteNoDOM verifies that document.write is a no-op when there
-// is no DOM document. The method should exist but do nothing.
 func TestDocumentWriteNoDOM(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 
-	// Should not panic or error. The method exists as a no-op stub.
 	if err := r.Run(`document.write('hello')`, "test"); err != nil {
 		t.Fatalf("document.write without DOM: %v", err)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.writeln
-// ---------------------------------------------------------------------------
-
-// TestDocumentWritelnAppendsNewline verifies that writeln appends a newline
-// after the text.
 func TestDocumentWritelnAppendsNewline(t *testing.T) {
-	// Use a fresh DOM so we can check exact text content without interference
-	// from pre-existing nodes.
 	doc := dom.NewDocument()
 	r := newDOMRuntime(t, doc)
 
@@ -340,7 +311,6 @@ func TestDocumentWritelnAppendsNewline(t *testing.T) {
 		t.Fatalf("document.writeln: %v", err)
 	}
 
-	// Check that the body's text content includes the newline.
 	val, err := r.Evaluate(`document.body.textContent`)
 	if err != nil {
 		t.Fatalf("evaluate body.textContent: %v", err)
@@ -353,8 +323,6 @@ func TestDocumentWritelnAppendsNewline(t *testing.T) {
 	}
 }
 
-// TestDocumentWritelnAfterParsing verifies writeln after parsing clears and
-// writes with trailing newline.
 func TestDocumentWritelnAfterParsing(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -364,7 +332,6 @@ func TestDocumentWritelnAfterParsing(t *testing.T) {
 		t.Fatalf("document.writeln after parse: %v", err)
 	}
 
-	// The new content should be present.
 	val, err := r.Evaluate(`document.querySelector('p') !== null`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -374,12 +341,6 @@ func TestDocumentWritelnAfterParsing(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.write with multiple elements
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteMultipleElements verifies that document.write can insert
-// multiple HTML elements at once.
 func TestDocumentWriteMultipleElements(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -397,12 +358,6 @@ func TestDocumentWriteMultipleElements(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.write with nested HTML
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteNestedHTML verifies that document.write correctly parses
-// nested HTML structures.
 func TestDocumentWriteNestedHTML(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -420,12 +375,6 @@ func TestDocumentWriteNestedHTML(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.write argument coercion
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteCoercesArgument verifies that non-string arguments are
-// coerced to strings per the spec.
 func TestDocumentWriteCoercesArgument(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -434,7 +383,6 @@ func TestDocumentWriteCoercesArgument(t *testing.T) {
 		t.Fatalf("document.write(42): %v", err)
 	}
 
-	// The body should contain text "42".
 	val, err := r.Evaluate(`document.body.textContent.indexOf('42') >= 0`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -444,13 +392,6 @@ func TestDocumentWriteCoercesArgument(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.write preserves document.body/documentElement references
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteUpdatesBodyReference verifies that after document.write
-// clears and rebuilds the document, document.body still returns a valid
-// element.
 func TestDocumentWriteUpdatesBodyReference(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -469,12 +410,6 @@ func TestDocumentWriteUpdatesBodyReference(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.write with special characters
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteSpecialCharacters verifies that HTML entities in the
-// written text are properly handled.
 func TestDocumentWriteSpecialCharacters(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -492,12 +427,6 @@ func TestDocumentWriteSpecialCharacters(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.write with a fresh DOM (no pre-existing body)
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteFreshDOM verifies document.write works on a document that
-// has no body or html element yet.
 func TestDocumentWriteFreshDOM(t *testing.T) {
 	doc := dom.NewDocument()
 	r := newDOMRuntime(t, doc)
@@ -506,7 +435,6 @@ func TestDocumentWriteFreshDOM(t *testing.T) {
 		t.Fatalf("document.write on fresh DOM: %v", err)
 	}
 
-	// The body should have been created and contain the paragraph.
 	val, err := r.Evaluate(`document.body !== null`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -515,7 +443,6 @@ func TestDocumentWriteFreshDOM(t *testing.T) {
 		t.Errorf("document.body should exist after document.write on fresh DOM")
 	}
 
-	// The paragraph should be in the body.
 	val, err = r.Evaluate(`document.querySelector('p') !== null`)
 	if err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -525,12 +452,6 @@ func TestDocumentWriteFreshDOM(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Verify document.write returns undefined
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteReturnsUndefined verifies that document.write returns
-// undefined per the spec.
 func TestDocumentWriteReturnsUndefined(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -544,8 +465,6 @@ func TestDocumentWriteReturnsUndefined(t *testing.T) {
 	}
 }
 
-// TestDocumentWritelnReturnsUndefined verifies that document.writeln returns
-// undefined per the spec.
 func TestDocumentWritelnReturnsUndefined(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -559,47 +478,31 @@ func TestDocumentWritelnReturnsUndefined(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Verify that document.write after parsing clears existing content
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteAfterParsingClearsEverything verifies that all existing
-// content is removed when document.write is called after parsing.
 func TestDocumentWriteAfterParsingClearsEverything(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
 	r.FireDocumentLifecycle()
 
-	// Verify we have content before.
 	val, _ := r.Evaluate(`document.getElementById('main') !== null`)
 	if val != "true" {
 		t.Fatalf("precondition: #main should exist before document.write")
 	}
 
-	// Write new content.
 	if err := r.Run(`document.write('<div id="replacement">new</div>')`, "test"); err != nil {
 		t.Fatalf("document.write: %v", err)
 	}
 
-	// Old content should be gone.
 	val, _ = r.Evaluate(`document.getElementById('main')`)
 	if val != "null" {
 		t.Errorf("old #main should be cleared, got %q", val)
 	}
 
-	// New content should be there.
 	val, _ = r.Evaluate(`document.getElementById('replacement') !== null`)
 	if val != "true" {
 		t.Errorf("#replacement should exist after document.write")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Verify writeln text content includes newline
-// ---------------------------------------------------------------------------
-
-// TestDocumentWritelnTextContentIncludesNewline verifies the exact text
-// content after writeln on a fresh document.
 func TestDocumentWritelnTextContentIncludesNewline(t *testing.T) {
 	doc := dom.NewDocument()
 	r := newDOMRuntime(t, doc)
@@ -608,7 +511,6 @@ func TestDocumentWritelnTextContentIncludesNewline(t *testing.T) {
 		t.Fatalf("writeln: %v", err)
 	}
 
-	// Ensure body exists after the write.
 	val, err := r.Evaluate(`document.body !== null`)
 	if err != nil {
 		t.Fatalf("evaluate body existence: %v", err)
@@ -629,12 +531,6 @@ func TestDocumentWritelnTextContentIncludesNewline(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// document.write exists as a function
-// ---------------------------------------------------------------------------
-
-// TestDocumentWriteExists verifies that document.write and document.writeln
-// are functions.
 func TestDocumentWriteExists(t *testing.T) {
 	d := testDOM(t)
 	r := newDOMRuntime(t, d)
@@ -656,8 +552,6 @@ func TestDocumentWriteExists(t *testing.T) {
 	}
 }
 
-// TestDocumentWriteNoDOMExists verifies that document.write exists even
-// without a DOM (as a no-op function).
 func TestDocumentWriteNoDOMExists(t *testing.T) {
 	r := newRuntime(t, js.Options{URL: "https://example.test/"})
 

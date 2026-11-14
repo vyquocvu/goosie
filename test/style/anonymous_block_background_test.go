@@ -9,36 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// These are the style-layer oracles for GOOSIE-ANONBG-001: an anonymous block box
-// re-composited its generating element's gradient, because style.AnonymousBlockStyle
-// copies that element's computed style verbatim and cleared only BackgroundColor.
-// The two sibling layers that actually paint, BackgroundGradient and
-// BackgroundRadialGradient, survived the copy, and internal/paint/builder_box.go
-// emits those layers for every box whose display is not inline - which an anonymous
-// block is, because AnonymousBlockStyle sets DisplayBlock.
-//
-// Measured on this host with cmd/goosie-headless at 400x120 DPR 1 over a 300x76 block
-// declaring `background:linear-gradient(rgba(200,0,0,.5),rgba(200,0,0,.5))` and
-// holding raw text, a 20px-tall div sibling and more raw text. cmd/dump-layout splices
-// exactly two anonymous boxes there, (0,0,300,18) and (0,38,300,18); those two bands
-// carried 9,693 px of (213,63,63), the twice-composited value, against Chromium's 0.
-// Clearing all four layers puts the block at 21,693 px of (227,127,127) and no doubled
-// pixel anywhere.
-//
-// The rule the fix implements is that a computed background belongs to the element that
-// declared it: css-backgrounds-3 §4 paints a background on the element's own boxes and
-// css-cascade-4 §6.4 lists background-color and background-image as non-inherited, so a
-// box layout invented to hold content owns none of them. AnonymousTableStyle already
-// collapsed all four; AnonymousBlockStyle was the inconsistent one, and the paint layer
-// cannot tell the two box kinds apart (layout keeps flagAnonymous unexported and gives an
-// anonymous box no BoxKey), which is why this belongs to the style stage.
-//
-// The controls matter as much as the collapse: the element keeps all four layers and the
-// anonymous box keeps the element's typography. A mechanism that zeroes the declaring
-// element's own background, or that drops everything the copy is for, goes red here.
-
-// abCascade resolves a document's cascade the way the engine's style pass does, and
-// returns the style table with the document so a case can name an element by id.
 func abCascade(t *testing.T, cssText string) (*dom.Document, map[dom.NodeID]*style.ComputedStyle) {
 	t.Helper()
 	html := `<!doctype html><html><head><style>` + cssText + `</style></head><body>` +
@@ -51,8 +21,6 @@ func abCascade(t *testing.T, cssText string) (*dom.Document, map[dom.NodeID]*sty
 	return doc, style.ResolveViewport(doc, sheets, style.Viewport{}, nil)
 }
 
-// abStyle returns the computed style of #gen, the box every case here generates
-// anonymous children from.
 func abStyle(t *testing.T, doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle) *style.ComputedStyle {
 	t.Helper()
 	el := doc.ElementByID("gen")
@@ -69,12 +37,8 @@ func abStyle(t *testing.T, doc *dom.Document, styles map[dom.NodeID]*style.Compu
 // qc:BR-200
 func TestAnonymousBlockStyleCarriesNoBackgroundLayers(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		css  string
-		// Which of the four layers the declaration is expected to fill on the
-		// element. Listed explicitly so a declaration that silently stops
-		// parsing cannot make the case pass by vacuity: zero layers on the
-		// element and zero on the anonymous box would look like a fix.
+		name         string
+		css          string
 		wantColor    bool
 		wantLinear   bool
 		wantRadial   bool
@@ -111,8 +75,6 @@ func TestAnonymousBlockStyleCarriesNoBackgroundLayers(t *testing.T) {
 			doc, styles := abCascade(t, tc.css)
 			parent := abStyle(t, doc, styles)
 
-			// Control first: the element that declared the background must still
-			// carry exactly the layers the declaration names.
 			if got := parent.BackgroundColor.A > 0; got != tc.wantColor {
 				t.Errorf("element BackgroundColor.A = %d, present=%v, want present=%v",
 					parent.BackgroundColor.A, got, tc.wantColor)
@@ -149,8 +111,6 @@ func TestAnonymousBlockStyleCarriesNoBackgroundLayers(t *testing.T) {
 					len(anon.BackgroundRadialGradient.Stops), anon.BackgroundRadialGradient.Stops)
 			}
 
-			// The copy is load-bearing for everything else: an anonymous block
-			// still draws its text in the element's font and colour.
 			if anon.Display != style.DisplayBlock {
 				t.Errorf("anonymous block Display = %v, want DisplayBlock", anon.Display)
 			}
@@ -162,10 +122,6 @@ func TestAnonymousBlockStyleCarriesNoBackgroundLayers(t *testing.T) {
 	}
 }
 
-// TestAnonymousBlockAndTableStyleCollapseBackgroundsAlike pins the invariant whose
-// absence was the defect: both anonymous style builders hand out no background layer.
-// Before this fix the table builder cleared four layers and the block builder cleared
-// one, so a gradient reached an anonymous block box that a table wrapper never got.
 // qc:BR-200
 func TestAnonymousBlockAndTableStyleCollapseBackgroundsAlike(t *testing.T) {
 	doc, styles := abCascade(t, `div{background:rgba(200,0,0,0.5) linear-gradient(rgba(0,0,200,0.5),rgba(0,200,0,0.5))}`)

@@ -9,71 +9,35 @@ import (
 	"strings"
 )
 
-// Curator selects WPT tests that goosie can meaningfully run. The selection is
-// conservative: a test that might require unsupported features is skipped rather
-// than run and misreported as a failure. The curation rules are encoded here
-// rather than in configuration so that the defaults are always correct for the
-// current engine state.
-
-// FeatureSupport describes what goosie can render. This is the single source
-// of truth for what the curator allows.
 type FeatureSupport struct {
-	// HTML parsing and basic rendering.
-	HTMLBasic bool
-	// CSS color, font-size, margin, padding, border, background.
-	CSSBasic bool
-	// CSS flexbox.
-	CSSFlexbox bool
-	// CSS grid.
-	CSSGrid bool
-	// CSS positioning (absolute, relative, fixed).
-	CSSPositioning bool
-	// CSS selectors (class, id, descendant, child).
-	CSSSelectors bool
-	// HTML tables.
-	HTMLTables bool
-	// HTML form rendering and the currently implemented form DOM surface.
-	HTMLForms bool
-	// HTML dialog elements and their lifecycle/interaction APIs.
-	HTMLDialogs bool
-	// HTML popover state and invoker interactions.
-	HTMLPopovers bool
-	// HTML contenteditable attribute parsing and reflected DOM properties.
+	HTMLBasic           bool
+	CSSBasic            bool
+	CSSFlexbox          bool
+	CSSGrid             bool
+	CSSPositioning      bool
+	CSSSelectors        bool
+	HTMLTables          bool
+	HTMLForms           bool
+	HTMLDialogs         bool
+	HTMLPopovers        bool
 	HTMLContentEditable bool
-	// HTML draggable attribute reflection and browser pointer-driven drag start.
-	HTMLDragAndDrop bool
-	// DOM Range and Selection boundary behavior.
-	DOMRanges bool
-	// DOM Node tree methods and document construction.
-	DOMNodes bool
-	// HTML lists (ol, ul, dl).
-	HTMLLists bool
-	// Canvas API.
-	Canvas bool
-	// SVG rendering.
-	SVG bool
-	// WebGL.
-	WebGL bool
-	// JavaScript DOM manipulation.
-	JSDOM bool
-	// Web Animations / CSS animations.
-	CSSAnimations bool
-	// Media queries.
-	MediaQueries bool
-	// CSS custom properties (variables).
-	CSSVariables bool
-	// CSS calc().
-	CSSCalc bool
-	// CSS gradients.
-	CSSGradients bool
-	// Pseudo-classes (:hover, :focus, etc.).
-	CSSPseudoClasses bool
-	// Pseudo-elements (::before, ::after).
-	CSSPseudoElements bool
+	HTMLDragAndDrop     bool
+	DOMRanges           bool
+	DOMNodes            bool
+	HTMLLists           bool
+	Canvas              bool
+	SVG                 bool
+	WebGL               bool
+	JSDOM               bool
+	CSSAnimations       bool
+	MediaQueries        bool
+	CSSVariables        bool
+	CSSCalc             bool
+	CSSGradients        bool
+	CSSPseudoClasses    bool
+	CSSPseudoElements   bool
 }
 
-// GoosieSupport returns the feature set goosie currently supports. This is
-// updated as the engine grows; the curator reads it to decide what to include.
 func GoosieSupport() FeatureSupport {
 	return FeatureSupport{
 		HTMLBasic:           true,
@@ -105,9 +69,6 @@ func GoosieSupport() FeatureSupport {
 	}
 }
 
-// CuratedDirs returns the WPT directories goosie should test, based on its
-// current feature support. Each entry maps a WPT directory to a human-readable
-// description of what it tests.
 func CuratedDirs(support FeatureSupport) []CuratedDir {
 	var dirs []CuratedDir
 
@@ -152,9 +113,6 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 			Description: "HTML event handler IDL attributes and processing",
 			Type:        TestHarness,
 		})
-		// Custom elements have a partial implementation. Keep the upstream
-		// registry/lifecycle suite discoverable so unsupported behavior is
-		// measured as failures instead of being hidden by the feature filter.
 		dirs = append(dirs, CuratedDir{
 			Path:        "custom-elements",
 			Description: "Custom element registry, upgrade, and lifecycle behavior",
@@ -361,9 +319,6 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 		})
 	}
 
-	// FileAPI is a dependency of HTML file inputs, form submission, workers,
-	// fetch, and other browser APIs. Keep its constructor suites measurable even
-	// while the implementation is incomplete.
 	dirs = append(dirs,
 		CuratedDir{Path: "FileAPI/blob", Description: "Blob construction, slicing, and byte access", Type: TestHarness},
 		CuratedDir{Path: "FileAPI/file", Description: "File construction and metadata", Type: TestHarness},
@@ -373,19 +328,12 @@ func CuratedDirs(support FeatureSupport) []CuratedDir {
 	return dirs
 }
 
-// CuratedDir is a WPT directory with metadata about why it was selected.
 type CuratedDir struct {
-	// Path is the WPT-relative directory path.
-	Path string
-	// Description explains what this directory tests.
+	Path        string
 	Description string
-	// Type is the kind of test expected in this directory.
-	Type TestType
+	Type        TestType
 }
 
-// DiscoverTests walks a WPT directory and returns candidate test files,
-// classified by type. Manual and unclassified pages remain in the result so
-// the runner can report them as explicit skips instead of hiding them.
 func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, error) {
 	absDir := filepath.Join(wptRoot, dir)
 	info, err := os.Stat(absDir)
@@ -399,7 +347,7 @@ func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, er
 	var tests []DiscoveredTest
 	err = filepath.Walk(absDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // skip errors
+			return nil
 		}
 		if info.IsDir() {
 			if path != absDir && strings.EqualFold(info.Name(), "resources") {
@@ -421,13 +369,11 @@ func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, er
 			return nil
 		}
 
-		// Check exclusions.
 		for _, pattern := range excludes {
 			matched, err := filepath.Match(pattern, filepath.Base(path))
 			if err == nil && matched {
 				return nil
 			}
-			// Also match against the relative path.
 			matched, err = filepath.Match(pattern, relPath)
 			if err == nil && matched {
 				return nil
@@ -445,7 +391,6 @@ func DiscoverTests(wptRoot, dir string, excludes []string) ([]DiscoveredTest, er
 			FullDir: dir,
 		}
 
-		// For reftests, find the reference file.
 		if testType == RefTest {
 			refPath, relation := findReference(path, wptRoot)
 			dt.RefPath = refPath
@@ -468,24 +413,15 @@ func isReferenceSupportFile(base string) bool {
 	return false
 }
 
-// DiscoveredTest is a WPT test file found during directory traversal.
 type DiscoveredTest struct {
-	// Path is the WPT-relative path.
-	Path string
-	// AbsPath is the absolute filesystem path.
-	AbsPath string
-	// Type is the test classification.
-	Type TestType
-	// FullDir is the curated directory this test belongs to.
-	FullDir string
-	// RefPath is the absolute path to the reference file (reftests only).
-	RefPath string
-	// RefRelation is "match" or "mismatch" (reftests only).
+	Path        string
+	AbsPath     string
+	Type        TestType
+	FullDir     string
+	RefPath     string
 	RefRelation string
 }
 
-// classifyTest determines the test type by reading the HTML file's content.
-// The classification is heuristic based on markers in the file.
 func classifyTest(path string) TestType {
 	if strings.HasSuffix(strings.ToLower(path), ".any.js") {
 		return TestHarness
@@ -507,7 +443,6 @@ func classifyTest(path string) TestType {
 		line := scanner.Text()
 		linesRead++
 
-		// Only scan the first 50 lines for classification markers.
 		if linesRead > 50 {
 			break
 		}
@@ -517,37 +452,27 @@ func classifyTest(path string) TestType {
 			return ManualTest
 		}
 
-		// HTML permits unquoted attribute values too; WPT commonly writes
-		// reftest links as <link rel=match href=...>.
 		if refLinkRe.MatchString(line) || refHrefFirstRe.MatchString(line) {
 			return RefTest
 		}
 
-		// Manual test marker
 		if strings.Contains(lower, "manual") && strings.Contains(lower, `rel="help"`) {
 			return ManualTest
 		}
 
-		// Testharness marker: inclusion of testharness.js
 		if strings.Contains(lower, "testharness.js") {
 			return TestHarness
 		}
 	}
 
-	// WPT crash regressions intentionally have no assertion harness; their
-	// oracle is process survival during a real document render.
 	if strings.Contains(base, "-crash.") {
 		return SmokeTest
 	}
-	// Default: keep unknown pages visible rather than silently dropping them.
 	return UnclassifiedTest
 }
 
 var formActionAttrRe = regexp.MustCompile(`(?is)<form\b[^>]*\baction\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
 
-// referencedBySiblingForm reports whether an unmarked HTML document is the
-// local form-action endpoint of a sibling testharness page. Such endpoints
-// participate in the parent test but are not standalone WPT cases.
 func referencedBySiblingForm(candidate string) bool {
 	dir := filepath.Dir(candidate)
 	entries, err := os.ReadDir(dir)
@@ -600,13 +525,9 @@ func referencedBySiblingForm(candidate string) bool {
 	return false
 }
 
-// refLinkRe matches <link rel="match" href="..."> and <link rel="mismatch" href="...">.
 var refLinkRe = regexp.MustCompile(`(?i)<link\b[^>]*\brel\s*=\s*["']?(match|mismatch)["']?[^>]*\bhref\s*=\s*["']?([^\s"'<>]+)`)
 var refHrefFirstRe = regexp.MustCompile(`(?i)<link\b[^>]*\bhref\s*=\s*["']?([^\s"'<>]+)["']?[^>]*\brel\s*=\s*["']?(match|mismatch)["']?`)
 
-// findReference locates the reference file for a reftest. It reads the test
-// file's <link rel="match" href="..."> or <link rel="mismatch" href="..."> to
-// find the reference path.
 func findReference(testPath, wptRoot string) (string, string) {
 	f, err := os.Open(testPath)
 	if err != nil {
@@ -619,7 +540,6 @@ func findReference(testPath, wptRoot string) (string, string) {
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Try rel first, then href first.
 		if m := refLinkRe.FindStringSubmatch(line); m != nil {
 			relation := m[1]
 			href := m[2]
@@ -636,8 +556,6 @@ func findReference(testPath, wptRoot string) (string, string) {
 	return "", ""
 }
 
-// resolveRefPath turns a reference href into an absolute filesystem path.
-// The href may be relative to the test file or absolute from the WPT root.
 func resolveRefPath(testPath, href, wptRoot string) string {
 	if strings.HasPrefix(href, "/") {
 		return filepath.Join(wptRoot, href)
@@ -645,8 +563,6 @@ func resolveRefPath(testPath, href, wptRoot string) string {
 	return filepath.Join(filepath.Dir(testPath), href)
 }
 
-// ShouldSkip returns true if a discovered test requires features goosie
-// does not support. The reason string explains why.
 func ShouldSkip(dt DiscoveredTest, support FeatureSupport) (bool, string) {
 	switch dt.Type {
 	case ManualTest:
@@ -657,7 +573,6 @@ func ShouldSkip(dt DiscoveredTest, support FeatureSupport) (bool, string) {
 		return true, "no automated WPT marker found; classification review required"
 	}
 
-	// Check for unsupported features by directory name.
 	dir := strings.ToLower(dt.FullDir)
 	path := strings.ToLower(dt.Path)
 

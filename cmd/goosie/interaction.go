@@ -20,8 +20,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/viewsource"
 )
 
-// focusClick focuses or blurs a form control under a content-area click, handles
-// activatable controls (checkbox, radio, submit/reset button), and repaints.
 func (f *framePath) focusClick(contentX, contentY int32) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -35,11 +33,6 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 		return true
 	}
 
-	// Check if click hit an activatable control (checkbox, radio, submit button, reset button)
-	// The click is a trusted gesture, and marking it as one around the dispatch is
-	// what lets a page's own click handler start playback: the engine refuses a
-	// play() that arrives from a timer or a synthetic event, and only the host can
-	// tell the difference.
 	tab.Session().SetUserActivation(true)
 	activated := tab.Session().ClickAt(dx, dy)
 	tab.Session().SetUserActivation(false)
@@ -79,10 +72,6 @@ type contentDragGesture struct {
 	startAttempt bool
 }
 
-// pointerDrag routes a content-area pointer gesture into the engine's HTML
-// drag-and-drop state machine. A gesture becomes a drag only after five CSS
-// pixels of movement; an un-dragged gesture on the original element falls
-// back to the normal click path on release.
 func (f *framePath) pointerDrag(action surface.PointerAction, contentX, contentY int32) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -160,8 +149,6 @@ func (f *framePath) pointerDrag(action surface.PointerAction, contentX, contentY
 	return false
 }
 
-// cancelPointerDrag implements Escape cancellation for an active drag. A
-// merely pending pointer gesture is discarded without synthesizing a click.
 func (f *framePath) cancelPointerDrag() bool {
 	g := f.contentDrag
 	if g == nil {
@@ -185,8 +172,6 @@ func (f *framePath) repaintDrag(tab *tabs.Tab) {
 	}
 }
 
-// hoverContent updates page hover state when the pointer changes its topmost
-// element. Re-resolve only when author CSS observes :hover.
 func (f *framePath) hoverContent(contentX, contentY int32) {
 	if f.tabMgr == nil {
 		return
@@ -200,9 +185,6 @@ func (f *framePath) hoverContent(contentX, contentY int32) {
 	if !sess.SetHover(dx, dy) {
 		return
 	}
-	// No :hover rules means no paint change; repainting anyway flashed the
-	// window over viewport-sized CSS-pixel damage. Pending DOM mutations are
-	// painted by the next PumpJS turn, not by a partial repaint here.
 	if !sess.HasPseudoClassRule("hover") || sess.CanDeferControlEditReflow() {
 		return
 	}
@@ -215,14 +197,9 @@ func (f *framePath) hoverContent(contentX, contentY int32) {
 			fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		}
 	}
-	// Empty damage diffs display lists in device pixels; the hovered border
-	// box is CSS pixels, misses descendant ink, and spans the document for body.
 	f.repaintTab(tab, frame.Rect{})
 }
 
-// setContentActive updates :active from primary-pointer input. Restyling is
-// deferred to the click/focus path on press so one interaction performs one
-// style/layout pass when both :active and :focus rules are present.
 func (f *framePath) setContentActive(contentX, contentY int32, pressed bool) bool {
 	if f.tabMgr == nil {
 		return false
@@ -235,8 +212,6 @@ func (f *framePath) setContentActive(contentX, contentY int32, pressed bool) boo
 	return tab.Session().SetActiveAt(dx, dy, pressed)
 }
 
-// refreshActiveContent applies a pending active-state change after event routing
-// when no focus/control path already included it in its pipeline update.
 func (f *framePath) refreshActiveContent() {
 	if f.tabMgr == nil {
 		return
@@ -245,31 +220,21 @@ func (f *framePath) refreshActiveContent() {
 	if tab == nil || tab.Session() == nil || !tab.Session().HasPseudoClassRule("active") {
 		return
 	}
-	// Pre-compute damage rect before reflow
 	prevRect := tab.Session().FocusDamageRect()
 	if err := tab.Session().RestyleAndReflow(float32(f.contentWidth())); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 	}
-	// Union old and new damage rects for accurate repaint
 	newRect := tab.Session().FocusDamageRect()
 	damageRect := prevRect.Union(newRect)
 	f.repaintTab(tab, damageRect)
 }
 
-// setWindowIME turns the platform input context on while a document control has
-// focus and off whenever focus moves anywhere else, so an IME can only compose
-// into the document.
 func (f *framePath) setWindowIME(on bool) {
 	if f.window != nil {
 		f.window.SetIME(on)
 	}
 }
 
-// imeEvent routes a platform composition event to the active tab's session. A
-// marked update synchronizes the active composition passage and reflows text
-// controls as needed; a commit replaces it with final text. Both are consumed
-// whether or not the session was waiting, because the platform input context
-// is only ever on for the active tab's control.
 func (f *framePath) imeEvent(ev surface.Event) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -292,9 +257,6 @@ func (f *framePath) imeEvent(ev surface.Event) bool {
 	return false
 }
 
-// dragSelect drives text selection from content-area pointer events. A press
-// starts a selection unless a form control is focused, motion extends the
-// active one, and release just ends the gesture.
 func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY int32) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -350,9 +312,6 @@ func (f *framePath) dragSelect(action surface.PointerAction, contentX, contentY 
 	return false
 }
 
-// extendDocumentSelection moves the page selection head with a Shift+Arrow
-// press, anchored where the selection started. Applies only when no editable
-// control owns the key; the caller checks that.
 func (f *framePath) extendDocumentSelection(tab *tabs.Tab, key rune) bool {
 	var dir engine.SelectDirection
 	switch key {
@@ -376,7 +335,6 @@ func (f *framePath) extendDocumentSelection(tab *tabs.Tab, key rune) bool {
 	return true
 }
 
-// copySelection puts the selected text on the system clipboard.
 func (f *framePath) copySelection() bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil || !tab.Session().HasSelection() {
@@ -393,10 +351,6 @@ func (f *framePath) reflowAfterControlEdit(tab *tabs.Tab) {
 		return
 	}
 	sess := tab.Session()
-	// Edit dispatches input synchronously. If its handler changed the DOM,
-	// PumpJS will re-resolve styles and reflow the final state on the next loop
-	// turn. Reflowing here as well would do a full layout immediately before
-	// that authoritative pass.
 	if sess.CanDeferControlEditReflow() {
 		return
 	}
@@ -413,9 +367,6 @@ func (f *framePath) reflowAfterControlEdit(tab *tabs.Tab) {
 	}
 }
 
-// contentKeyAction routes a key phase to the content path. Presses keep the
-// historical editing and scrolling behavior; releases only finish a held
-// Space/Enter activation, so a release can never type or scroll.
 func (f *framePath) contentKeyAction(key rune, mods surface.KeyMod, action surface.KeyAction) bool {
 	if action == surface.KeyRelease {
 		return f.releaseContentKey(key, mods)
@@ -423,9 +374,6 @@ func (f *framePath) contentKeyAction(key rune, mods surface.KeyMod, action surfa
 	return f.contentKey(key, mods)
 }
 
-// contentKey applies a keyboard edit to the focused control. The event is
-// consumed whenever a control is focused so the address bar is not the only
-// text sink; only edits that can affect layout trigger a reflow.
 func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	if f.tabMgr == nil {
 		return false
@@ -436,9 +384,6 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 
 	cmd := mods&surface.ModCommand != 0 || mods&surface.ModControl != 0
-	// A focused video owns the media keys before scrolling and before the page:
-	// space on a playing video is a pause, not a page down. The press is a trusted
-	// gesture, which is what lets the element start playing in response to it.
 	if !cmd && f.mediaKey(tab, key) {
 		return true
 	}
@@ -455,9 +400,6 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 			sess.SetUserActivation(true)
 			sess.KeyDown(keyName, mods&surface.ModShift != 0, false, mods&surface.ModOption != 0, false)
 			sess.SetUserActivation(false)
-			// The activation itself waits for release, so the control stays
-			// painted :active for as long as the key is physically held. A
-			// cancelled keydown painted nothing and needs no style pass.
 			if sess.HasHeldKey(keyName) && !sess.HeldKeyPrevented(keyName) {
 				f.refreshActiveContent()
 			}
@@ -465,8 +407,6 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 		}
 	}
 	if !cmd && mods&surface.ModShift != 0 && !tab.Session().FocusedEditable() && tab.Session().FocusedSelect() == nil {
-		// Shift+Arrow extends the page selection. It must run before the scroll
-		// block, which would otherwise read the held Shift as a scroll gesture.
 		if f.extendDocumentSelection(tab, key) {
 			return true
 		}
@@ -478,16 +418,10 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	} else if !cmd && (key == keyPageUp || key == keyPageDown) {
 		focused := tab.Session().Focused()
 		if focused == nil || focused.Data != "input" || !strings.EqualFold(focused.GetAttribute("type"), "range") {
-			// Page keys must never be treated as printable private-use characters
-			// by text controls. Range controls consume them as larger value steps.
 			return true
 		}
 	}
 
-	// Bare Tab drives the full key-event path (keydown → focus-move → keyup).
-	// It must work with nothing focused so it can start the tab cycle, so this
-	// is checked before the focused-control bail below. Cmd/Ctrl+Tab is a
-	// browser-tab shortcut and is consumed earlier in the chrome window.
 	if key == '\t' && !cmd {
 		shift := mods&surface.ModShift != 0
 		alt := mods&surface.ModOption != 0
@@ -627,11 +561,6 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	return true
 }
 
-// releaseContentKey applies the key-up phase of a held Space or Enter. The
-// press deferred activation to this point so the control could stay :active
-// while the key was down; the release now runs the click and its browser
-// defaults. A release for any other key, or for a key whose press the page
-// cancelled, is not ours to consume.
 func (f *framePath) releaseContentKey(key rune, mods surface.KeyMod) bool {
 	if f.tabMgr == nil {
 		return false
@@ -670,10 +599,6 @@ func (f *framePath) releaseContentKey(key rune, mods surface.KeyMod) bool {
 	return f.finishKeyActivation(tab, focused, enter)
 }
 
-// finishKeyActivation applies the browser defaults that follow a keyboard
-// activation: an anchor follows its href, a queued file picker opens, a
-// submitted form is handed to the navigation path, and anything else restyles
-// for the states the click changed.
 func (f *framePath) finishKeyActivation(tab *tabs.Tab, focused *dom.Node, enter bool) bool {
 	sess := tab.Session()
 	if sess == nil {
@@ -696,9 +621,6 @@ func (f *framePath) finishKeyActivation(tab *tabs.Tab, focused *dom.Node, enter 
 	return true
 }
 
-// scrollContentKey handles document navigation keys when an editable control does
-// not own focus. The viewport stores device pixels, so a page step uses its device
-// height and the active layer supplies the legal bottom edge.
 func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune, shift bool) bool {
 	if f.sched == nil || tab == nil || tab.Layer() == nil {
 		return false
@@ -718,9 +640,9 @@ func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune, shift bool) bool {
 		return f.scrollContentTo(tab, vp, vp.Offset.Y-page)
 	case keyPageDown:
 		return f.scrollContentTo(tab, vp, vp.Offset.Y+page)
-	case 0xF704: // Home
+	case 0xF704:
 		return f.scrollContentTo(tab, vp, 0)
-	case 0xF705: // End
+	case 0xF705:
 		return f.scrollContentTo(tab, vp, tab.Layer().Bounds.Y1-vp.Size.H)
 	default:
 		return false
@@ -744,7 +666,6 @@ func (f *framePath) scrollContentTo(tab *tabs.Tab, vp frame.Viewport, y int32) b
 		vp.Offset.Y = y
 		f.sched.SetViewport(vp)
 		tab.SetScrollY(y)
-		// Sync the JS runtime so window.scrollY reflects the painted position.
 		if sess := tab.Session(); sess != nil {
 			sess.SyncViewportScroll(float64(vp.Offset.X), float64(y))
 		}
@@ -753,7 +674,6 @@ func (f *framePath) scrollContentTo(tab *tabs.Tab, vp frame.Viewport, y int32) b
 	return true
 }
 
-// handleFormSubmission dispatches a form submission by resolving action and encoding parameters.
 func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmission) {
 	if tab == nil || sub == nil {
 		return
@@ -763,10 +683,6 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 		targetURL = tab.URL()
 	}
 	method := strings.ToUpper(sub.Method)
-	// target="_blank" submits into a new browsing context. _self, _top,
-	// _parent and the empty target all resolve to this tab at the top level.
-	// A named frame target has no host-side transport yet, so it stays here
-	// rather than silently opening the wrong context.
 	if strings.EqualFold(strings.TrimSpace(sub.Target), "_blank") {
 		f.newTab()
 	}
@@ -792,7 +708,6 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 	}
 }
 
-// handleContextMenu constructs the context menu for the clicked element.
 func (f *framePath) handleContextMenu(contentX, contentY, winX, winY int32) {
 	cw, ok := f.window.(*chromeWindow)
 	if !ok || cw.contextMenu == nil {
@@ -832,7 +747,6 @@ func (f *framePath) handleContextMenu(contentX, contentY, winX, winY int32) {
 	cw.contextMenu.Show(winX, winY, winW, winH, items, cw.sc())
 }
 
-// handleContextMenuAction executes the action chosen from the context menu.
 func (f *framePath) handleContextMenuAction(action, data string) {
 	switch action {
 	case "open_new_tab":
@@ -921,7 +835,6 @@ func (f *framePath) handleContextMenuAction(action, data string) {
 	}
 }
 
-// viewSourceCurrentTab opens the view-source representation of the current tab in a new tab.
 func (f *framePath) viewSourceCurrentTab() {
 	if f.tabMgr == nil {
 		return
@@ -934,7 +847,6 @@ func (f *framePath) viewSourceCurrentTab() {
 	f.navigateTab(viewsource.WrapViewSourceURL(active.URL()))
 }
 
-// printActiveTabToPDF exports the currently active tab document to PDF.
 func (f *framePath) printActiveTabToPDF() {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -949,8 +861,6 @@ func (f *framePath) printActiveTabToPDF() {
 }
 
 const (
-	// minZoom and maxZoom bound the page zoom factor; zoomStep is one
-	// Cmd+=/Cmd+- step.
 	minZoom  = 0.25
 	maxZoom  = 5.0
 	zoomStep = 0.1
@@ -966,12 +876,10 @@ func clampZoom(z float64) float64 {
 	return z
 }
 
-// ZoomReset restores the page to 100%.
 func (f *framePath) ZoomReset() {
 	f.handleZoom(0)
 }
 
-// ZoomPercent reports the current zoom as a whole-percent label, e.g. "125%".
 func (f *framePath) ZoomPercent() string {
 	return toolbar.FormatZoomPercent(f.zoom)
 }
@@ -984,7 +892,6 @@ func (f *framePath) handleZoom(delta float64) {
 	case delta == 0:
 		f.zoom = 1.0
 	case math.IsNaN(delta):
-		// A NaN step has no direction; keep the current level.
 	default:
 		f.zoom = clampZoom(f.zoom + delta)
 	}
@@ -1011,10 +918,6 @@ func (f *framePath) hitTestLink(contentX, contentY int32) string {
 	return tab.Session().HitTestLink(docX, docY)
 }
 
-// hoverCursor resolves the pointer shape for buttonless motion over the
-// document: the hand over a link, the I-beam over editable or selectable
-// text, and the default arrow everywhere else. Link wins over text because
-// a link's words are text too but only the link is clickable.
 func (f *framePath) hoverCursor(contentX, contentY int32) surface.Cursor {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -1030,8 +933,6 @@ func (f *framePath) hoverCursor(contentX, contentY int32) surface.Cursor {
 	return surface.CursorDefault
 }
 
-// runFind recomputes the match set for a new find query on the active tab and
-// jumps to the first hit.
 func (f *framePath) runFind(query string) {
 	f.findMu.Lock()
 	defer f.findMu.Unlock()
@@ -1064,8 +965,6 @@ func (f *framePath) runFind(query string) {
 	f.repaintTab(tab, frame.Rect{})
 }
 
-// findSignature is the pipeline work a find pass saw. A change means the
-// document was restyled or relaid out since the matches were computed.
 type findSignature struct {
 	styleResolves uint64
 	layoutBuilds  uint64
@@ -1076,11 +975,6 @@ func findSignatureOf(sess *engine.Session) findSignature {
 	return findSignature{styleResolves: wc.StyleResolves, layoutBuilds: wc.LayoutBuilds}
 }
 
-// refreshFind keeps an open find in step with the document. A page script that
-// adds, removes, or reflows text bumps the style/layout counters, which is the
-// cue to recompute matches without waiting for the next keystroke. The active
-// index is preserved when the new set still has it, so a highlight does not
-// jump to a different hit just because an unrelated node appeared.
 func (f *framePath) refreshFind() {
 	f.findMu.Lock()
 	defer f.findMu.Unlock()
@@ -1121,7 +1015,6 @@ func (f *framePath) refreshFind() {
 	f.repaintTab(tab, frame.Rect{})
 }
 
-// findStep moves to the next (or previous) match, wrapping around.
 func (f *framePath) findStep(backward bool) {
 	f.findMu.Lock()
 	defer f.findMu.Unlock()
@@ -1147,10 +1040,6 @@ func (f *framePath) findStep(backward bool) {
 	}
 }
 
-// scrollToMatchLocked brings the match's line into view, clamped to the
-// document so the last hits cannot scroll past the end, and records the offset
-// on the tab and the JS runtime the same way a wheel or key scroll does. The
-// caller holds findMu.
 func (f *framePath) scrollToMatchLocked(idx int) {
 	if idx < 0 || idx >= len(f.findMatches) {
 		return
@@ -1189,7 +1078,6 @@ func (f *framePath) scrollToMatchLocked(idx int) {
 	f.publishAccessibility()
 }
 
-// closeFind drops the match state; navigation and tab switches end find mode.
 func (f *framePath) closeFind() {
 	f.findMu.Lock()
 	defer f.findMu.Unlock()
@@ -1211,8 +1099,6 @@ func (f *framePath) closeFind() {
 	}
 }
 
-// clearFindHighlights repaints the active tab after CloseFind drops the
-// session's match marks, so the yellow and orange boxes disappear at once.
 func (f *framePath) clearFindHighlights() {
 	if f.tabMgr == nil {
 		return
@@ -1224,7 +1110,6 @@ func (f *framePath) clearFindHighlights() {
 	f.repaintTab(tab, frame.Rect{})
 }
 
-// switchTab saves the current tab's scroll and switches to the given tab.
 func (f *framePath) switchTab(id uint64) {
 	f.closeFind()
 	f.setWindowIME(false)
@@ -1232,9 +1117,6 @@ func (f *framePath) switchTab(id uint64) {
 	if cur != nil {
 		vp := f.sched.Viewport()
 		cur.SetScrollY(vp.Offset.Y)
-		// The departing tab stops making noise. Nothing resumes it when the user
-		// comes back, which is the same bargain a real browser strikes: a tab that
-		// restarts on its own is a tab that starts playing without being asked.
 		f.pauseMedia(cur)
 	}
 	f.tabMgr.SwitchTo(id)
@@ -1258,7 +1140,6 @@ func (f *framePath) switchTab(id uint64) {
 	f.publishAccessibility()
 }
 
-// newTab creates a new tab and switches to it.
 func (f *framePath) newTab() {
 	if f.tabMgr == nil {
 		return
@@ -1288,9 +1169,6 @@ func (f *framePath) newTab() {
 	f.publishAccessibility()
 }
 
-// ensureActiveTabVisible scrolls a clipped tab strip just enough to show the
-// active tab: keyboard switches, new tabs and session restores land on tabs
-// the pointer could never reach otherwise.
 func (f *framePath) ensureActiveTabVisible() {
 	if f.tabMgr == nil {
 		return
@@ -1301,9 +1179,6 @@ func (f *framePath) ensureActiveTabVisible() {
 	f.tabMgr.SetTabScroll(tabs.EnsureTabVisible(idx, n, w, f.tabMgr.TabScroll()), n, w)
 }
 
-// releaseTabState stops a tab's in-flight navigation and closes the document
-// behind it. Batch closures must do this for every tab they remove, exactly as
-// closing one tab does, or the loads keep running against tabs nothing paints.
 func releaseTabState(tab *tabs.Tab) {
 	if tab == nil {
 		return
@@ -1319,7 +1194,6 @@ func releaseTabState(tab *tabs.Tab) {
 	}
 }
 
-// closeTab closes a tab by ID and switches to the remaining active tab.
 func (f *framePath) closeTab(id uint64) {
 	if f.tabMgr == nil {
 		return
@@ -1333,7 +1207,6 @@ func (f *framePath) closeTab(id uint64) {
 	f.showActiveTabAfterBatch()
 }
 
-// closeOtherTabs closes every unpinned tab except keepID.
 func (f *framePath) closeOtherTabs(keepID uint64) {
 	if f.tabMgr == nil {
 		return
@@ -1350,7 +1223,6 @@ func (f *framePath) closeOtherTabs(keepID uint64) {
 	f.showActiveTabAfterBatch()
 }
 
-// closeTabsToRight closes every unpinned tab positioned after fromID.
 func (f *framePath) closeTabsToRight(fromID uint64) {
 	if f.tabMgr == nil {
 		return
@@ -1378,8 +1250,6 @@ func (f *framePath) closeTabsToRight(fromID uint64) {
 	f.showActiveTabAfterBatch()
 }
 
-// toggleTabPin pins or unpins a tab and keeps the reordered strip's active tab
-// on screen.
 func (f *framePath) toggleTabPin(id uint64) {
 	if f.tabMgr == nil {
 		return
@@ -1389,8 +1259,6 @@ func (f *framePath) toggleTabPin(id uint64) {
 	f.syncTabToToolbar()
 }
 
-// showActiveTabAfterBatch puts the surviving active tab back on screen after a
-// closure removed one or more tabs.
 func (f *framePath) showActiveTabAfterBatch() {
 	if f.tabMgr == nil || f.tabMgr.Count() == 0 {
 		return
@@ -1415,8 +1283,6 @@ func (f *framePath) showActiveTabAfterBatch() {
 	f.publishAccessibility()
 }
 
-// handleTabContextMenuAction executes an action chosen from a tab's menu. The
-// tab id travels in Data so the action lands on the tab that was right-clicked.
 func (f *framePath) handleTabContextMenuAction(action, data string) {
 	switch action {
 	case "tab_new":
@@ -1452,7 +1318,6 @@ func (f *framePath) handleTabContextMenuAction(action, data string) {
 	}
 }
 
-// reopenTab restores the most recently closed tab and loads its URL.
 func (f *framePath) reopenTab() {
 	if f.tabMgr == nil {
 		return
@@ -1487,7 +1352,6 @@ func (f *framePath) reopenTab() {
 	}
 }
 
-// duplicateTab clones the active tab and navigates it to the same page.
 func (f *framePath) duplicateTab() {
 	if f.tabMgr == nil {
 		return
@@ -1524,7 +1388,6 @@ func (f *framePath) duplicateTab() {
 	}
 }
 
-// toggleReaderMode switches the active tab between Reader Mode and original view.
 func (f *framePath) toggleReaderMode() {
 	if f.tabMgr == nil {
 		return

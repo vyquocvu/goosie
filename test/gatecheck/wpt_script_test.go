@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// TestRunWPTScriptFailsClosedOnSkippedSuite proves make wpt can never again
-// report success while TestWPTSuite skips: an empty checkout discovers zero
-// tests, the suite skips, and the script must exit non-zero.
 func TestRunWPTScriptFailsClosedOnSkippedSuite(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash is not installed")
@@ -33,10 +30,6 @@ func TestRunWPTScriptFailsClosedOnSkippedSuite(t *testing.T) {
 	if err := os.MkdirAll(wptDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// The reuse marker keeps Checkout.Ensure from downloading: the empty
-	// checkout then discovers zero tests and the suite skips. The marker
-	// alone is not reusable (checkoutReusable wants content behind it), so
-	// add one inert entry.
 	if err := os.WriteFile(filepath.Join(wptDir, ".goosie-wpt-commit"), []byte(cfg.Commit+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -57,9 +50,6 @@ func TestRunWPTScriptFailsClosedOnSkippedSuite(t *testing.T) {
 	if err == nil {
 		t.Fatalf("run-wpt.sh exited 0 on a suite that never ran; output:\n%s", out)
 	}
-	// Two fail-closed paths are acceptable: the suite errors on the empty
-	// checkout (go test exit propagates), or it skips and the script's own
-	// results check fires. Neither may report success.
 	if strings.Contains(string(out), "completed successfully") {
 		t.Fatalf("run-wpt.sh reported success on a suite that never ran; output:\n%s", out)
 	}

@@ -14,17 +14,8 @@ import (
 	"golang.org/x/net/publicsuffix"
 )
 
-// BroadcastChannel API implementation.
-//
-// A BroadcastHub is the process-global registry that connects channels with
-// the same name and origin across browsing contexts (tabs, windows, iframes).
-// Each participating Runtime receives the hub through Options.BroadcastHub;
-// otherwise a package-level default is used.
-
-// bcEvent is one pending inbound message queued by a peer's postMessage and
-// waiting for DrainBroadcastEvents to fire onmessage on the VM thread.
 type bcEvent struct {
-	dataJSON string // bounded graph encoding of the structured-clone subset
+	dataJSON string
 	origin   string
 }
 
@@ -33,7 +24,6 @@ type broadcastDelivery struct {
 	event   bcEvent
 }
 
-// bcObj holds the internal state of one BroadcastChannel instance.
 type bcObj struct {
 	mu             sync.Mutex
 	name           string
@@ -204,29 +194,19 @@ func removeBroadcastEventListener(r *Runtime, channel *bcObj, args []goja.Value)
 	}
 }
 
-// BroadcastHub connects BroadcastChannel instances that share a name. It is
-// safe for concurrent use: postMessage from any goroutine appends to peer
-// event queues, and DrainBroadcastEvents on the VM thread reads them.
 type BroadcastHub struct {
 	mu            sync.Mutex
-	channels      map[string][]*bcObj              // keyed by storage key and channel name
-	pending       map[*Runtime][]broadcastDelivery // queued by top-level browsing context
+	channels      map[string][]*bcObj
+	pending       map[*Runtime][]broadcastDelivery
 	sharedWorkers map[string]*sharedWorkerEntry
 }
 
-// defaultHub is the package-level fallback used when Options.BroadcastHub is
-// nil. A single process-wide hub means channels created by different runtimes
-// (different tabs) with no explicit hub still reach each other, matching the
-// browser contract that BroadcastChannel is origin-scoped, not runtime-scoped.
 var defaultHub = &BroadcastHub{
 	channels:      make(map[string][]*bcObj),
 	pending:       make(map[*Runtime][]broadcastDelivery),
 	sharedWorkers: make(map[string]*sharedWorkerEntry),
 }
 
-// NewBroadcastHub creates a new isolated hub. Hosts that want to scope
-// cross-tab messaging to a subset of runtimes (e.g. per origin) pass one of
-// these through Options.BroadcastHub; the rest use the package default.
 func NewBroadcastHub() *BroadcastHub {
 	return &BroadcastHub{
 		channels:      make(map[string][]*bcObj),
@@ -235,14 +215,12 @@ func NewBroadcastHub() *BroadcastHub {
 	}
 }
 
-// register adds a channel to its origin and name group.
 func (h *BroadcastHub) register(ch *bcObj) {
 	h.mu.Lock()
 	h.channels[ch.key] = append(h.channels[ch.key], ch)
 	h.mu.Unlock()
 }
 
-// unregister removes a channel from the hub's name group.
 func (h *BroadcastHub) unregister(ch *bcObj) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -258,9 +236,6 @@ func (h *BroadcastHub) unregister(ch *bcObj) {
 	}
 }
 
-// broadcast queues a message for each open peer except the sender. Deliveries
-// within one top-level browsing context are appended under one hub lock so
-// iframes observe recipient creation order despite having separate Runtimes.
 func (h *BroadcastHub) broadcast(sender *bcObj, dataJSON string) {
 	if sender == nil || !broadcastContextActive(sender.r) {
 		return
@@ -300,10 +275,6 @@ func broadcastContextRoot(r *Runtime) *Runtime {
 			continue
 		}
 		if r.iframeParent != nil {
-			// window.open contexts are top-level browsing contexts even though
-			// this engine hosts them in an iframe-shaped container. Their
-			// BroadcastChannel task queue must be pumped and grouped separately
-			// from the opener's context.
 			if r.iframeParent.iframeOpenedContexts[r.iframeParentFrame] {
 				return r
 			}
@@ -344,11 +315,7 @@ func broadcastContextActive(r *Runtime) bool {
 	return r != nil && !r.workerClosed
 }
 
-// setupBroadcastChannel installs the BroadcastChannel constructor on the
-// global scope and window object.
 func (r *Runtime) setupBroadcastChannel() {
-	// Detached and worker-like runtimes may not install the DOM prototype
-	// chain, but BroadcastChannel still implements EventTarget in those realms.
 	if r.eventTargetProto == nil {
 		r.eventTargetProto = r.vm.NewObject()
 		if r.ifaceCtors == nil {
@@ -364,7 +331,6 @@ func (r *Runtime) setupBroadcastChannel() {
 	state := &broadcastState{hub: hub, byObject: make(map[*goja.Object]*bcObj)}
 	setBroadcastState(r, state)
 
-	// BroadcastChannel constructor.
 	constructor := func(call goja.ConstructorCall) *goja.Object {
 		if len(call.Arguments) < 1 {
 			panic(r.vm.NewTypeError("Failed to construct 'BroadcastChannel': 1 argument required, but only 0 present."))
@@ -381,10 +347,6 @@ func (r *Runtime) setupBroadcastChannel() {
 		ch.origin = runtimeBroadcastOrigin(r)
 		storageOrigin := ch.origin
 		if storageOrigin == "null" {
-			// Opaque origins never match each other, including two documents
-			// that both serialize to "null". A blob worker inherits its
-			// creator's opaque origin, though, so it must share the creator's
-			// private key rather than using its own Runtime identity.
 			storageOrigin = runtimeBroadcastOpaqueKey(r)
 		}
 		storageKey := storageOrigin
@@ -400,7 +362,6 @@ func (r *Runtime) setupBroadcastChannel() {
 		}
 		r.genericEventTargets[obj] = nil
 
-		// Register with the hub and the runtime-local list.
 		hub.register(ch)
 		state.mu.Lock()
 		state.byObject[obj] = ch
@@ -412,9 +373,6 @@ func (r *Runtime) setupBroadcastChannel() {
 	ctor := r.vm.ToValue(constructor)
 	if constructorObject, ok := ctor.(*goja.Object); ok {
 		if prototype, ok := constructorObject.Get("prototype").(*goja.Object); ok {
-			// BroadcastChannel inherits the EventTarget interface operations and
-			// brand chain. Its listener storage remains channel-specific because
-			// inbound messages use the channel's task-queue dispatch path.
 			if r.eventTargetProto != nil {
 				_ = prototype.SetPrototype(r.eventTargetProto)
 			}
@@ -503,10 +461,6 @@ func (r *Runtime) setupBroadcastChannel() {
 			}
 		}
 	}
-	// A native Goja constructor can also be called as a function and does not
-	// expose that distinction through ConstructorCall.NewTarget. Wrap it in a
-	// JavaScript constructor so the Web API's required-new behavior is enforced,
-	// while Reflect.construct preserves subclass/newTarget prototype semantics.
 	const nativeCtorName = "__goosieNativeBroadcastChannelCtor"
 	_ = r.vm.Set(nativeCtorName, ctor)
 	wrapperValue, wrapErr := r.vm.RunString(`(function(nativeCtor) {
@@ -532,7 +486,6 @@ func (r *Runtime) setupBroadcastChannel() {
 	}
 	_ = r.vm.Set("BroadcastChannel", publicCtor)
 
-	// Also install on window.
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
 			_ = winObj.Set("BroadcastChannel", publicCtor)
@@ -596,10 +549,6 @@ func dispatchBroadcastEventCall(r *Runtime, channel *bcObj, args []goja.Value) g
 	return r.vm.ToValue(dispatchBroadcastEvent(r, channel, event))
 }
 
-// runtimeBroadcastOrigin returns the origin serialization used by
-// MessageEvent.origin. Initial about:blank and srcdoc runtimes inherit their
-// creator's origin; URLs with opaque or unsupported origins serialize as
-// "null".
 func runtimeBroadcastOrigin(r *Runtime) string {
 	if r == nil {
 		return "null"
@@ -648,9 +597,6 @@ func serializedBroadcastOrigin(u *url.URL) string {
 	return scheme + "://" + net.JoinHostPort(host, port)
 }
 
-// runtimeBroadcastTopLevelSite returns the schemeful site of the top-level
-// browsing context. BroadcastChannel is keyed by the environment settings
-// object's storage key, which includes this site for third-party contexts.
 func runtimeBroadcastTopLevelSite(r *Runtime) string {
 	if r == nil {
 		return "opaque-top-level"
@@ -689,8 +635,6 @@ func runtimeBroadcastTopLevelSite(r *Runtime) string {
 	return scheme + "://" + site
 }
 
-// DrainBroadcastEvents drains pending BroadcastChannel messages and fires
-// onmessage on the VM thread. Call this from Tick.
 func (r *Runtime) DrainBroadcastEvents() {
 	state := broadcastStateOf(r)
 	if state == nil {
@@ -714,8 +658,6 @@ func (r *Runtime) DrainBroadcastEvents() {
 	}
 }
 
-// fireBCEvent invokes the onmessage handler for one inbound BroadcastChannel
-// message. The structured-clone graph is rebuilt in the destination realm.
 func fireBCEvent(r *Runtime, channel *bcObj, ev bcEvent) {
 	if channel == nil {
 		return
@@ -738,30 +680,22 @@ func fireBCEvent(r *Runtime, channel *bcObj, ev bcEvent) {
 	_ = init.Set("origin", ev.origin)
 	eventObj, err := r.vm.New(r.vm.Get("MessageEvent"), r.vm.ToValue(typ), init)
 	if err != nil {
-		// Keep delivery alive if a host has replaced or damaged the constructor;
-		// the normal runtime path always creates a branded MessageEvent above.
 		eventObj = r.vm.NewObject()
 		_ = eventObj.Set("type", typ)
 		_ = eventObj.Set("data", data)
 		_ = eventObj.Set("origin", ev.origin)
 	}
-	// MessageEvent's constructor defaults its public `data` field to null when
-	// init.data is undefined, while a BroadcastChannel message may legitimately
-	// carry undefined. Preserve the value delivered by structured clone exactly.
 	_ = eventObj.Set("data", data)
 	_ = eventObj.Set("origin", ev.origin)
 	_ = eventObj.Set("target", obj)
 	_ = eventObj.Set("currentTarget", obj)
 	_ = eventObj.Set("isTrusted", true)
 	_ = eventObj.Set("timeStamp", time.Now().UnixMilli())
-	_ = eventObj.Set("preventDefault", func() {}) // BroadcastChannel messages are not cancelable.
+	_ = eventObj.Set("preventDefault", func() {})
 	_ = eventObj.Set("stopImmediatePropagation", func() { _ = eventObj.Set("__immediateStopped", true) })
 	dispatchBroadcastEvent(r, channel, eventObj)
 }
 
-// dispatchBroadcastEvent runs the at-target portion of EventTarget dispatch.
-// BroadcastChannel has no ancestors, so there are no capture or bubble phases
-// beyond invoking its listener list in registration order.
 func dispatchBroadcastEvent(r *Runtime, channel *bcObj, eventObj *goja.Object) bool {
 	if r == nil || channel == nil || channel.obj == nil || eventObj == nil {
 		return true
@@ -772,7 +706,7 @@ func dispatchBroadcastEvent(r *Runtime, channel *bcObj, eventObj *goja.Object) b
 	_ = eventObj.Set("__immediateStopped", false)
 	_ = eventObj.Set("target", obj)
 	_ = eventObj.Set("currentTarget", obj)
-	_ = eventObj.Set("eventPhase", 2) // AT_TARGET while listeners run.
+	_ = eventObj.Set("eventPhase", 2)
 	if trusted := eventObj.Get("isTrusted"); trusted == nil || goja.IsUndefined(trusted) {
 		_ = eventObj.Set("isTrusted", false)
 	}
@@ -801,9 +735,6 @@ func dispatchBroadcastEvent(r *Runtime, channel *bcObj, eventObj *goja.Object) b
 		if listener.typ != typ {
 			continue
 		}
-		// The snapshot fixes which registrations may run; checking the live
-		// listener list lets an earlier callback remove a later one. Reading the
-		// current callback also observes an onmessage replacement made mid-turn.
 		channel.mu.Lock()
 		var active *bcListener
 		for i := range channel.listeners {

@@ -6,7 +6,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-// arenaObjectByID walks the arena for the object whose element carries id.
 func arenaObjectByID(a *layout.Arena, id string) (layout.ObjectID, bool) {
 	for i := 1; i < len(a.Objects); i++ {
 		n := a.Objects[i].Node
@@ -17,7 +16,6 @@ func arenaObjectByID(a *layout.Arena, id string) (layout.ObjectID, bool) {
 	return 0, false
 }
 
-// A flow-root block contains its float: its height grows to the float bottom.
 func TestFlowRootContainsFloat(t *testing.T) {
 	a := buildBijectionArena(t,
 		`<div id="fr" style="display:flow-root;width:300px"><div style="float:left;width:100px;height:80px"></div>text</div>`,
@@ -32,7 +30,6 @@ func TestFlowRootContainsFloat(t *testing.T) {
 	}
 }
 
-// A plain block does NOT contain its float (control).
 func TestPlainBlockDoesNotContainFloat(t *testing.T) {
 	a := buildBijectionArena(t,
 		`<div id="pl" style="width:300px"><div style="float:left;width:100px;height:80px"></div>text</div>`,

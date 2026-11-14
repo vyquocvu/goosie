@@ -8,12 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// ---------------------------------------------------------------------------
-// RED regression: JS bridge must expose checked/value properties on form
-// controls, matching Chromium's behavior. These tests FAIL before the fix
-// and PASS after.
-// ---------------------------------------------------------------------------
-
 func redSession(t *testing.T, html string) (*engine.Session, *js.Runtime) {
 	t.Helper()
 	rt, err := js.New(js.Options{Timeout: 5 * time.Second, URL: "https://test.example/"})
@@ -33,8 +27,6 @@ func redSession(t *testing.T, html string) (*engine.Session, *js.Runtime) {
 	return sess, rt
 }
 
-// TestRED_CheckboxCheckedGetter verifies el.checked returns correct boolean
-// for a checkbox before and after click activation.
 func TestRED_CheckboxCheckedGetter(t *testing.T) {
 	sess, rt := redSession(t, `<!DOCTYPE html>
 <html><body>
@@ -44,7 +36,6 @@ __before = document.getElementById('cb').checked;
 </script>
 </body></html>`)
 
-	// Read initial state (should be true since checked attribute is set).
 	v, ok := rt.Global("__before")
 	if !ok {
 		t.Fatal("__before not set")
@@ -53,7 +44,6 @@ __before = document.getElementById('cb').checked;
 		t.Errorf("initial checked = %v, want true", v.Bool)
 	}
 
-	// Click to uncheck, then read via a script that sets a global.
 	clickCenter(t, sess, "cb")
 	if err := rt.Run("__after = document.getElementById('cb').checked", ""); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -67,8 +57,6 @@ __before = document.getElementById('cb').checked;
 	}
 }
 
-// TestRED_RadioValueGetter verifies el.value returns correct value for radio
-// buttons.
 func TestRED_RadioValueGetter(t *testing.T) {
 	_, rt := redSession(t, `<!DOCTYPE html>
 <html><body>
@@ -90,7 +78,6 @@ __v2 = document.getElementById('r2').value;
 	}
 }
 
-// TestRED_CheckboxCheckedSetter verifies el.checked = true/false changes state.
 func TestRED_CheckboxCheckedSetter(t *testing.T) {
 	_, rt := redSession(t, `<!DOCTYPE html>
 <html><body>
@@ -114,7 +101,6 @@ __afterUnset = cb.checked;
 	}
 }
 
-// TestRED_TextInputValueGetterSetter verifies el.value on text inputs.
 func TestRED_TextInputValueGetterSetter(t *testing.T) {
 	_, rt := redSession(t, `<!DOCTYPE html>
 <html><body>
@@ -136,8 +122,6 @@ __changed = document.getElementById('txt').value;
 	}
 }
 
-// TestRED_CheckboxValueDefault verifies that a checkbox without explicit value
-// attribute returns "on" as its default value (per HTML spec).
 func TestRED_CheckboxValueDefault(t *testing.T) {
 	_, rt := redSession(t, `<!DOCTYPE html>
 <html><body>

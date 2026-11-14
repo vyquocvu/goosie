@@ -9,18 +9,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/media"
 )
 
-// MediaProvider returns the playback controller for a node, or nil when the
-// element has no media: the document was opened without a backend, the node is
-// not a video, or the document has already reached its element cap. A nil answer
-// is why the accessors below fall back to the inert values the DOM specifies
-// rather than throwing — a page that asks a video for its duration on a build
-// that cannot play video should get NaN, not an exception.
 type MediaProvider func(*dom.Node) media.Controller
 
-// SetMediaProvider installs the bridge between wrapped elements and the engine's
-// media controllers. It has to happen before any page script runs, because a
-// script that reads video.readyState during parsing must see the same element a
-// later script sees.
 func (r *Runtime) SetMediaProvider(p MediaProvider) {
 	r.mu.Lock()
 	r.mediaProvider = p
@@ -28,10 +18,6 @@ func (r *Runtime) SetMediaProvider(p MediaProvider) {
 	r.mu.Unlock()
 }
 
-// mediaController resolves and caches the controller for a node. Caching matters
-// because the engine creates a controller the first time one is asked for and
-// caps how many a document may have: asking again per property read would spend
-// the cap on an element a page merely inspected.
 func (r *Runtime) mediaController(node *dom.Node) media.Controller {
 	if node == nil {
 		return nil
@@ -59,11 +45,6 @@ func (r *Runtime) mediaController(node *dom.Node) media.Controller {
 	return c
 }
 
-// installMediaBridge puts the three functions the per-element accessors call on
-// the document object, which is where every other reflected-property bridge in
-// this runtime lives. They are on document rather than captured in a closure
-// because an accessor's getter runs long after the element was wrapped, and a
-// global set for the duration of one RunString is gone by then.
 func (r *Runtime) installMediaBridge(doc *goja.Object) {
 	_ = doc.Set("__mediaGet__", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) < 2 {
@@ -90,9 +71,6 @@ func (r *Runtime) installMediaBridge(doc *goja.Object) {
 	})
 }
 
-// mediaAccessorJS defines the element's media properties. Read-only ones are the
-// playback state, which the page must not be able to write; src, currentTime,
-// muted and controls are the reflected ones. play, pause and load are methods.
 const mediaAccessorJS = `
 (function() {
 	var t = __mediaTarget__;
@@ -142,7 +120,6 @@ const mediaAccessorJS = `
 })();
 `
 
-// defineMediaAccessors installs the media surface on one wrapped video element.
 func (r *Runtime) defineMediaAccessors(obj *goja.Object) {
 	_ = r.vm.Set("__mediaTarget__", obj)
 	_, _ = r.vm.RunString(mediaAccessorJS)
@@ -154,8 +131,6 @@ func (r *Runtime) mediaGet(nid int, name string) goja.Value {
 	if node == nil {
 		return goja.Undefined()
 	}
-	// Two properties are plain attribute reflections and need no controller, so
-	// they work on a build with no backend at all.
 	switch name {
 	case "src":
 		return r.vm.ToValue(node.GetAttribute("src"))
@@ -197,9 +172,6 @@ func (r *Runtime) mediaGet(nid int, name string) goja.Value {
 	return goja.Undefined()
 }
 
-// mediaInertGet is what a media property reads as when the element has no
-// controller. These are the DOM's own "nothing is playing" values: a duration of
-// NaN rather than 0, because 0 would make every seek clamp to the start.
 func (r *Runtime) mediaInertGet(name string) goja.Value {
 	switch name {
 	case "currentSrc":
@@ -231,9 +203,6 @@ func (r *Runtime) mediaSet(nid int, name string, v goja.Value) {
 			url = v.String()
 		}
 		r.setReflectedAttribute(node, "src", url, true)
-		// Assigning src runs the load algorithm, so the fetch starts here rather
-		// than waiting for play(). Clearing it does the opposite: it stops
-		// whatever was loading.
 		if c := r.mediaController(node); c != nil {
 			c.SetSource(url)
 			if url != "" {
@@ -248,9 +217,6 @@ func (r *Runtime) mediaSet(nid int, name string, v goja.Value) {
 	}
 	switch name {
 	case "currentTime":
-		// The controller rejects NaN, infinities and negatives itself; reading the
-		// number here is only so a non-numeric assignment does not become 0 and
-		// silently seek to the start.
 		if f := v.ToFloat(); !math.IsNaN(f) && !math.IsInf(f, 0) && f >= 0 {
 			c.Seek(f)
 		}
@@ -280,14 +246,6 @@ func (r *Runtime) mediaCall(nid int, name string) goja.Value {
 	return goja.Undefined()
 }
 
-// mediaPlay is the whole of the play() contract that is visible from here: a real
-// Promise, rejected immediately when the request never started and settled later
-// by the event the backend produces when playback actually begins.
-//
-// The distinction is the reason this is not a resolved promise handed back on
-// success. A page that awaits play() is asking to be told when it can rely on
-// frames and audio, and "the request was accepted" is not that answer — the
-// download may still be running, or the asset may turn out to be undecodable.
 func (r *Runtime) mediaPlay(c media.Controller) goja.Value {
 	p := r.newPromiseObj()
 	if c == nil {
@@ -308,9 +266,6 @@ func (r *Runtime) mediaPlay(c media.Controller) goja.Value {
 	return p.obj
 }
 
-// settleMediaPlay finishes one pending play() promise. An op that is not pending
-// is not an error: the promise may already have been settled by an earlier event
-// for the same request.
 func (r *Runtime) settleMediaPlay(op uint64, rejected bool, code media.ErrorCode) {
 	r.mu.Lock()
 	p, ok := r.pendingPlays[op]
@@ -329,14 +284,6 @@ func (r *Runtime) settleMediaPlay(op uint64, rejected bool, code media.ErrorCode
 	r.rejectPromise(p, namedError(r, name, "play() failed: "+name))
 }
 
-// DispatchMediaEvents hands one element's transitions to its listeners. The engine
-// calls it from the media pump, on the runtime's own goroutine and outside the
-// pipeline lock.
-//
-// Each dispatch runs bounded. A listener is page code, and the media pump is on
-// the browser's UI thread, so an unbounded listener would be a page that can hang
-// the window by listening for timeupdate — which is why this does not go through
-// the same unwrapped path a synthetic dispatchEvent takes.
 func (r *Runtime) DispatchMediaEvents(node *dom.Node, events []media.Event) {
 	r.mu.Lock()
 	closed := r.closed
@@ -357,9 +304,6 @@ func (r *Runtime) DispatchMediaEvents(node *dom.Node, events []media.Event) {
 		if name == "" || name == "unknown" {
 			continue
 		}
-		// Media events do not bubble: they are about one element's own state, and
-		// a document-level listener for "play" would otherwise fire for every
-		// video on the page.
 		ev := dom.NewTrustedEvent(name, false, false)
 		_, _ = r.callBounded(func() (goja.Value, error) {
 			dom.DispatchEvent(node, ev)
@@ -368,11 +312,6 @@ func (r *Runtime) DispatchMediaEvents(node *dom.Node, events []media.Event) {
 	}
 }
 
-// mediaReadyState maps a playback state onto HTMLMediaElement's HAVE_* ladder.
-// The top rung means "there is a decoded frame at the current position", which is
-// the honest reading here: this engine has no buffer model, so it cannot claim to
-// know whether playback would stall, and it should not invent a number that says
-// it does.
 func mediaReadyState(s media.Snapshot) int {
 	switch s.State {
 	case media.StateEmpty, media.StateLoading, media.StateFailed, media.StateClosed:
@@ -393,8 +332,6 @@ func mediaReadyState(s media.Snapshot) int {
 }
 
 func (r *Runtime) mediaErrorObject(err error) goja.Value {
-	// MEDIA_ERR_NETWORK by default: a source that did not arrive is the common
-	// case, and the two specific codes are the ones a page can act on differently.
 	code := 2
 	switch {
 	case errors.Is(err, media.ErrDecode):

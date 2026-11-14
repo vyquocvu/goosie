@@ -14,21 +14,13 @@ import (
 	"github.com/vyquocvu/goosie/internal/tabs"
 )
 
-// FR-JS-06: the engine stops a script that runs past its deadline, but a
-// stopped script is not the same as a page the user chose to keep. The prompt
-// below names what happened and offers the two honest outcomes: reload without
-// scripts, or reload with a budget large enough for the page's work.
 const unresponsiveRetryBudget = 30 * time.Second
 
-// scriptPolicy is the per-load script budget. The zero value means "the
-// runtime default" and leaves every existing load unchanged.
 type scriptPolicy struct {
 	disabled bool
 	timeout  time.Duration
 }
 
-// unresponsiveScriptPolicy recognises the prompt's action URLs. It returns
-// false for a plain prompt URL so that URL renders the page instead.
 func unresponsiveScriptPolicy(rawURL string) (target string, policy scriptPolicy, ok bool) {
 	u, err := url.Parse(rawURL)
 	if err != nil || !strings.EqualFold(u.Scheme, "goosie") || !strings.EqualFold(u.Host, "unresponsive") {
@@ -48,8 +40,6 @@ func unresponsiveScriptPolicy(rawURL string) (target string, policy scriptPolicy
 	return "", scriptPolicy{}, false
 }
 
-// formatUnresponsivePageHTML renders the prompt. Target is untrusted page
-// input, so it is escaped for both text and query contexts.
 func formatUnresponsivePageHTML(target string, count int) string {
 	shown := "this page"
 	if target != "" {
@@ -74,8 +64,6 @@ func formatUnresponsivePageHTML(target string, count int) string {
 	return internalPageTemplate("", "Unresponsive Script", body)
 }
 
-// buildUnresponsivePageHTML serves goosie://unresponsive itself, including a
-// direct visit that has no page to reload yet.
 func buildUnresponsivePageHTML(rawURL string) (title, htmlContent string) {
 	u, _ := url.Parse(rawURL)
 	target := ""
@@ -87,9 +75,6 @@ func buildUnresponsivePageHTML(rawURL string) (title, htmlContent string) {
 	return "Unresponsive Script", formatUnresponsivePageHTML(target, count)
 }
 
-// buildUnresponsivePage prepares the prompt as a frame layer, the same way the
-// error page is built so the tab is never left blank or showing obsolete
-// content.
 func (f *framePath) buildUnresponsivePage(target string, count int) (*frame.Layer, *engine.Session, frame.Color) {
 	if f.fonts == nil || f.contentWidth() <= 0 {
 		return nil, nil, frame.RGB(255, 255, 255)
@@ -133,10 +118,6 @@ func (f *framePath) buildUnresponsivePage(target string, count int) (*frame.Laye
 	return layer, sess, sess.BackgroundColor()
 }
 
-// installUnresponsivePrompt replaces tab's content with the prompt. replaced is
-// the timed-out session the caller still owns; it is closed only after the
-// prompt is on screen, so a build failure leaves the caller able to commit the
-// original document instead.
 func (f *framePath) installUnresponsivePrompt(tab *tabs.Tab, target string, count int, serial uint64, replaced *engine.Session) bool {
 	layer, sess, bg := f.buildUnresponsivePage(target, count)
 	if layer == nil || sess == nil {

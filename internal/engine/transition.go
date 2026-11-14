@@ -8,7 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// ActiveTransition tracks one property transition in progress on an element.
 type ActiveTransition struct {
 	NodeID    dom.NodeID
 	Property  string
@@ -17,18 +16,13 @@ type ActiveTransition struct {
 	Delay     time.Duration
 	Timing    css.TimingFunc
 
-	// Start and end values for interpolation. For color properties, the RGBA
-	// channels are interpolated independently. For numeric properties, the
-	// float64 values are interpolated.
 	StartColor css.Color
 	EndColor   css.Color
 	StartNum   float64
 	EndNum     float64
-	IsColor    bool // true for color transitions, false for numeric
+	IsColor    bool
 }
 
-// Progress returns the current interpolation progress (0..1) accounting for
-// delay and timing function. Returns 1 when the transition is complete.
 func (at *ActiveTransition) Progress(now time.Time) float64 {
 	elapsed := now.Sub(at.StartTime)
 	if elapsed < at.Delay {
@@ -45,12 +39,10 @@ func (at *ActiveTransition) Progress(now time.Time) float64 {
 	return at.Timing.Eval(t)
 }
 
-// Done reports whether the transition has completed.
 func (at *ActiveTransition) Done(now time.Time) bool {
 	return at.Progress(now) >= 1
 }
 
-// InterpolateColor returns the interpolated color at the given progress (0..1).
 func InterpolateColor(from, to css.Color, progress float64) css.Color {
 	p := progress
 	if p < 0 {
@@ -70,25 +62,19 @@ func InterpolateColor(from, to css.Color, progress float64) css.Color {
 	}
 }
 
-// InterpolateNum returns the linearly interpolated number at the given progress.
 func InterpolateNum(from, to, progress float64) float64 {
 	return from*(1-progress) + to*progress
 }
 
-// TransitionTracker manages active transitions for a session.
 type TransitionTracker struct {
 	active []*ActiveTransition
 }
 
-// NewTransitionTracker creates a new transition tracker.
 func NewTransitionTracker() *TransitionTracker {
 	return &TransitionTracker{}
 }
 
-// Add registers a new transition. If a transition for the same node and property
-// already exists, it is replaced (for mid-transition reversals).
 func (tt *TransitionTracker) Add(at *ActiveTransition) {
-	// Replace any existing transition on the same node+property.
 	for i, existing := range tt.active {
 		if existing.NodeID == at.NodeID && existing.Property == at.Property {
 			tt.active[i] = at
@@ -98,7 +84,6 @@ func (tt *TransitionTracker) Add(at *ActiveTransition) {
 	tt.active = append(tt.active, at)
 }
 
-// RemoveCompleted removes transitions that have finished.
 func (tt *TransitionTracker) RemoveCompleted(now time.Time) {
 	kept := tt.active[:0]
 	for _, at := range tt.active {
@@ -109,18 +94,14 @@ func (tt *TransitionTracker) RemoveCompleted(now time.Time) {
 	tt.active = kept
 }
 
-// Active returns all currently active transitions.
 func (tt *TransitionTracker) Active() []*ActiveTransition {
 	return tt.active
 }
 
-// HasActive reports whether any transitions are in progress.
 func (tt *TransitionTracker) HasActive() bool {
 	return len(tt.active) > 0
 }
 
-// HasTransitionFor reports whether the given style declares a transition for
-// the named property. "all" in the transition matches any property.
 func HasTransitionFor(cs *style.ComputedStyle, property string) (css.Transition, bool) {
 	if cs == nil || len(cs.Transitions) == 0 {
 		return css.Transition{}, false
@@ -133,8 +114,6 @@ func HasTransitionFor(cs *style.ComputedStyle, property string) (css.Transition,
 	return css.Transition{}, false
 }
 
-// IsTransitionable reports whether a CSS property can be transitioned. Only
-// color and numeric properties are supported for now.
 func IsTransitionable(property string) bool {
 	switch property {
 	case "background-color", "color",
@@ -149,7 +128,6 @@ func IsTransitionable(property string) bool {
 	return false
 }
 
-// IsColorProperty reports whether a CSS property holds a color value.
 func IsColorProperty(property string) bool {
 	switch property {
 	case "background-color", "color",
@@ -160,7 +138,6 @@ func IsColorProperty(property string) bool {
 	return false
 }
 
-// GetColorValue extracts the color value of a named property from a computed style.
 func GetColorValue(cs *style.ComputedStyle, property string) css.Color {
 	switch property {
 	case "background-color":
@@ -179,7 +156,6 @@ func GetColorValue(cs *style.ComputedStyle, property string) css.Color {
 	return css.Color{}
 }
 
-// GetNumericValue extracts the numeric value of a named property from a computed style.
 func GetNumericValue(cs *style.ComputedStyle, property string) float64 {
 	switch property {
 	case "opacity":
@@ -208,8 +184,6 @@ func GetNumericValue(cs *style.ComputedStyle, property string) float64 {
 	return 0
 }
 
-// ApplyTransitionValue sets the interpolated value on a computed style. This is
-// called during paint to apply the current transition state.
 func ApplyTransitionValue(cs *style.ComputedStyle, property string, color css.Color, num float64, isColor bool) {
 	if isColor {
 		switch property {

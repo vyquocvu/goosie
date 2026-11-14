@@ -7,8 +7,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestPhaseOffset_HoverSkipsReflow verifies that hover interactions on
-// geometry-neutral properties (color, background) skip the layout pass.
 func TestPhaseOffset_HoverSkipsReflow(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 		.box { width: 100px; height: 100px; background: blue; }
@@ -32,8 +30,6 @@ func TestPhaseOffset_HoverSkipsReflow(t *testing.T) {
 	}
 }
 
-// TestPhaseOffset_HoverWithLayoutChange verifies that hover interactions
-// that change layout properties (width, margin, etc.) DO trigger reflow.
 func TestPhaseOffset_HoverWithLayoutChange(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 		.box { width: 100px; height: 100px; }
@@ -57,8 +53,6 @@ func TestPhaseOffset_HoverWithLayoutChange(t *testing.T) {
 	}
 }
 
-// TestPhaseOffset_SelectionUsesAccurateDamage verifies that selection
-// changes compute accurate damage rects instead of full repaints.
 func TestPhaseOffset_SelectionUsesAccurateDamage(t *testing.T) {
 	html := `<!DOCTYPE html><html><body>
 		<p>Select this text to test selection damage tracking.</p>
@@ -79,8 +73,6 @@ func TestPhaseOffset_SelectionUsesAccurateDamage(t *testing.T) {
 	}
 }
 
-// TestPhaseOffset_FocusUsesAccurateDamage verifies that focus changes
-// compute accurate damage rects.
 func TestPhaseOffset_FocusUsesAccurateDamage(t *testing.T) {
 	html := `<!DOCTYPE html><html><body>
 		<input type="text" id="test" value="Focus test">
@@ -119,8 +111,6 @@ func TestPhaseOffset_FocusUsesAccurateDamage(t *testing.T) {
 	}
 }
 
-// TestIncrementalStyleResolution_WhitespaceNodes verifies that whitespace
-// text node normalization doesn't cause false tree change detection.
 func TestIncrementalStyleResolution_WhitespaceNodes(t *testing.T) {
 	html := `<!DOCTYPE html><html><body>
 		<div>
@@ -145,8 +135,6 @@ func TestIncrementalStyleResolution_WhitespaceNodes(t *testing.T) {
 	}
 }
 
-// TestArenaRefresh_EmptyNodeList verifies that arena refresh handles
-// empty node lists correctly without failing.
 func TestArenaRefresh_EmptyNodeList(t *testing.T) {
 	html := `<!DOCTYPE html><html><body><div>Test</div></body></html>`
 

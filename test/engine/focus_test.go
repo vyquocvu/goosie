@@ -31,7 +31,6 @@ func newFocusSession(t *testing.T, html string) *engine.Session {
 	return s
 }
 
-// clickPoint returns the centre of the laid-out element with the given id.
 func clickPoint(t *testing.T, s *engine.Session, id string) (float32, float32) {
 	t.Helper()
 	for i := range s.Arena.Objects {
@@ -2259,18 +2258,18 @@ func TestEditDeleteForwardInControl(t *testing.T) {
 func TestEditArrowsAndHomeEnd(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
 	x, y := clickPoint(t, s, "a")
-	s.FocusControl(x, y) // caret at 2
+	s.FocusControl(x, y)
 	if s.Edit(engine.EditLeft, 0) {
 		t.Fatal("caret move should not report change")
 	}
-	s.Edit(engine.EditRune, '-') // "a-b"
+	s.Edit(engine.EditRune, '-')
 	s.Edit(engine.EditHome, 0)
-	s.Edit(engine.EditRune, '>') // ">a-b"
+	s.Edit(engine.EditRune, '>')
 	if got := s.Focused().InputControlValue(); got != ">a-b" {
 		t.Fatalf("value = %q, want %q", got, ">a-b")
 	}
 	s.Edit(engine.EditEnd, 0)
-	s.Edit(engine.EditRune, '<') // ">a-b<"
+	s.Edit(engine.EditRune, '<')
 	if got := s.Focused().InputControlValue(); got != ">a-b<" {
 		t.Fatalf("value = %q, want %q", got, ">a-b<")
 	}
@@ -2385,7 +2384,6 @@ func TestPaintFocusedShowsValueCaretAndRing(t *testing.T) {
 		t.Fatal("focus not gained")
 	}
 	dl := s.Paint(1).Build(1)
-	// Each input paints its value as one black text run.
 	valueRun := ""
 	for _, c := range dl.All() {
 		if c.Kind == paint.CmdText && c.Text.Color == frame.RGB(0, 0, 0) {
@@ -2424,8 +2422,6 @@ func TestPaintUnfocusedNoRing(t *testing.T) {
 	}
 }
 
-// ringBounds returns the union rect of the focus-ring strips (color 0,103,244)
-// in a built display list, or false when no ring is drawn.
 func ringBounds(dl *paint.LayerDL) (frame.Rect, bool) {
 	var r frame.Rect
 	found := false
@@ -2453,9 +2449,6 @@ func ringBounds(dl *paint.LayerDL) (frame.Rect, bool) {
 	return r, found
 }
 
-// TestPaintKeyboardTabMovesRing is the GOO-04 visual verification: driving a
-// Tab keypress through PressKey must move the painted focus ring from the
-// first input to the second, proving keyboard → SetFocus → paint end to end.
 // qc:BR-102
 func TestPaintKeyboardTabMovesRing(t *testing.T) {
 	s := newFocusSession(t, twoInputsHTML)
@@ -2463,7 +2456,6 @@ func TestPaintKeyboardTabMovesRing(t *testing.T) {
 		t.Fatal("session should start unfocused")
 	}
 
-	// Tab from nothing focuses #a: ring appears around #a's box.
 	s.PressKey("Tab", false, false, false, false)
 	dlA := s.Paint(1).Build(1)
 	ringA, okA := ringBounds(dlA)
@@ -2471,7 +2463,6 @@ func TestPaintKeyboardTabMovesRing(t *testing.T) {
 		t.Fatal("no focus ring after first Tab")
 	}
 
-	// Tab again focuses #b: the ring must move (its vertical band changes).
 	s.PressKey("Tab", false, false, false, false)
 	dlB := s.Paint(1).Build(1)
 	ringB, okB := ringBounds(dlB)
@@ -2482,7 +2473,6 @@ func TestPaintKeyboardTabMovesRing(t *testing.T) {
 		t.Fatalf("focus ring did not move after Tab: both at %v", ringA)
 	}
 
-	// Shift+Tab moves back toward #a: the ring must move again.
 	s.PressKey("Tab", true, false, false, false)
 	dlBack := s.Paint(1).Build(1)
 	ringBack, okBack := ringBounds(dlBack)

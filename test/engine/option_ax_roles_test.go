@@ -6,40 +6,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/ax"
 )
 
-// Which role, and what sits on an option node. Every line quoted below is copied
-// out of scripts/verify-optionax-roles.js (Chromium 153.0.8010.12, 182 checks,
-// run 2026-11-05), which dumps the whole AX property list over the widget forms
-// that decide a role and compares the rules it holds against that dump shape by
-// shape. Four of the script's own guesses were falsified by the measurement, so
-// these expectations are bytes rather than reasoning:
-//
-//	AX closed, size1, size0, size-bogus, size-minus1 -> combobox; size="0" and
-//	    size="less" are not zero-height lists, the used size is 1
-//	AX multi-size1 -> combobox, value "Mm One", the closed box's full property
-//	    set - `multiple` alone does NOT decide the role, the used size does
-//	AX size2, multi, multi-size0, multi-size-bogus, multi-size-minus1, multi-two,
-//	    group-open -> listbox, no value; a multiple control with no size attribute
-//	    is a listbox because its used size is 4, while its IDL size reads 0
-//	AX every case -> option nodes carry no value: [null,null]
-//	AX multi-two, multi-size2 -> {Aye selected, Bee selected, Cee unselected} - a
-//	    multiple control marks every selected option, so one selection cannot fill
-//	    the flags
-//	AX option-disabled -> {disabled:true} and NO selected flag, even though that
-//	    option is the selected one
-//	AX aria-listbox -> an authored listbox is answered as listbox, with no
-//	    activedescendant of its own
-//
-// The property sets Chromium answers with (focusable, invalid, expanded,
-// hasPopup, multiselectable, orientation, required, activedescendant, and the
-// disabled-state pruning of `focusable` and `selected`) have no channel in
-// ax.Node, so they stay disclosed rather than asserted here; see
-// GOOSIE-OPTIONAX-004 in docs/qa-open-defects.json.
-
 // qc:BR-139
-//
-// The role follows the used display size, not the IDL getter and not `multiple`:
-// a size that parses to nothing usable falls back to 1 on a single control and 4
-// on a multiple one, and those two fallbacks land on opposite roles.
 func TestAccessibilitySelectRoleFollowsTheUsedDisplaySize(t *testing.T) {
 	cases := []struct {
 		html string
@@ -66,11 +33,6 @@ func TestAccessibilitySelectRoleFollowsTheUsedDisplaySize(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// The open list announces no value and the closed box the display string - the
-// same clause on both shapes, so a rule that only looks at `multiple` cannot
-// place it: measured {"role":"listbox","name":""} for size="2" and multiple, and
-// value "Mm One" for the multiple control whose used size is 1.
 func TestAccessibilityOpenSelectAnnouncesNoValueAndClosedOneTheDisplay(t *testing.T) {
 	open := axSelect(t, `<html><body style="margin:0">`+
 		`<select id="s" size="2"><option value="v4" selected>Eve Lyn</option><option value="v5">Five</option></select></body></html>`)
@@ -80,8 +42,6 @@ func TestAccessibilityOpenSelectAnnouncesNoValueAndClosedOneTheDisplay(t *testin
 	if open.Value != "" {
 		t.Errorf("open control value = %q, want %q (Chromium exposes none)", open.Value, "")
 	}
-	// The rows stay children: the anchor reads the same option names and selected
-	// flags for a listbox as for a combobox, only with a different container role.
 	if got := optionNames(open); len(got) != 2 || got[0] != "Eve Lyn" || got[1] != "Five" {
 		t.Errorf("open control options = %q, want [Eve Lyn Five]", got)
 	}
@@ -104,11 +64,6 @@ func TestAccessibilityOpenSelectAnnouncesNoValueAndClosedOneTheDisplay(t *testin
 }
 
 // qc:BR-139
-//
-// An option node never carries a value: measured `option nodes carry no value:
-// [null,null]` in every one of the anchor's cases, including the ones whose value
-// attribute differs from the option's text. The submitted value stays in the
-// form, which is why the two surfaces cannot be merged into one node field.
 func TestAccessibilityOptionNodesAnnounceNoValue(t *testing.T) {
 	s := newFocusSession(t, `<html><body style="margin:0"><form id="f"><select id="s" name="c">`+
 		`<option value="v1" selected>Alpha Beta</option><option value="v2">Cee Dee</option>`+
@@ -130,11 +85,6 @@ func TestAccessibilityOptionNodesAnnounceNoValue(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// A multiple control marks every selected option, measured `option names and
-// properties: [{Aye,true},{Bee,true},{Cee,false}]` for two authored selections.
-// A single-selection model can only ever set one flag, so the tree has to read
-// each option's own selectedness.
 func TestAccessibilityMultipleSelectMarksEverySelectedOption(t *testing.T) {
 	control := axSelect(t, `<html><body style="margin:0">`+
 		`<select id="s" multiple><option value="a" selected>Aye</option>`+
@@ -155,11 +105,6 @@ func TestAccessibilityMultipleSelectMarksEverySelectedOption(t *testing.T) {
 }
 
 // qc:BR-139
-//
-// An authored `role="listbox"` is a listbox in the reference too - the anchor's
-// aria-listbox case reads {"role":"listbox","name":"Authored listbox"} with its
-// option as a child - so the ARIA token map resolves it to the same role the
-// engine gives an open select instead of folding it into a group.
 func TestAccessibilityAuthoredListboxTokenAnnouncesListbox(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0">`+
 		`<div id="w" role="listbox" aria-label="Authored listbox">`+

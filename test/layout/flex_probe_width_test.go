@@ -2,11 +2,6 @@ package layout_test
 
 import "testing"
 
-// A flex item with no measurable content must not keep the probe width it
-// was measured at: the measure fallback handed the 10000px probe width to
-// contentless items, stranding viewport-wide strips across pages. The
-// fallback exists for replaced elements (whose size comes from outside the
-// box model), so it stays limited to those tags.
 func TestFlexItemWithoutContentDoesNotKeepProbeWidth(t *testing.T) {
 	arena := session(t, `<html><body><div style="display: flex;"><div id="empty"></div><div id="text">hi</div></div></body></html>`, 800)
 	empty := findByID(arena, "empty")

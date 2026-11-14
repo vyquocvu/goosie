@@ -2,22 +2,11 @@ package style
 
 import "github.com/vyquocvu/goosie/internal/frame"
 
-// UsedBorderRadius resolves the declared corner radii against the box side
-// lengths (w, h) they round, in the same units the caller measures the box in,
-// and multiplies absolute lengths by scale. It implements CSS Backgrounds
-// & Borders 5.5: a percentage is the share of the side it runs along, and
-// radii that overflow their side scale down together - which is what turns an
-// oversized value like 999px into a pill rather than a clipped arc.
-//
-// Paint and pointer hit testing both need the identical used values, so this
-// lives next to the property instead of in either caller.
 func (s *ComputedStyle) UsedBorderRadius(w, h, scale float32) frame.Corners {
 	if s == nil {
 		return frame.Corners{}
 	}
 	declared := s.BorderRadius
-	// A declared percentage is a negative sentinel, so the check for "nothing was
-	// declared" has to be against zero rather than against a positive length.
 	if declared == ([4][2]float32{}) {
 		return frame.Corners{}
 	}

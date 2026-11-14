@@ -9,8 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/test/domtest"
 )
 
-// TestFirstLineStyleResolved verifies that ::first-line styles are computed
-// and stored in the pseudo-element map.
 func TestFirstLineStyleResolved(t *testing.T) {
 	html := `<html><body><p class="test">Hello world</p></body></html>`
 	cssText := `p.test::first-line { font-weight: bold; color: red; }`
@@ -50,8 +48,6 @@ func TestFirstLineStyleResolved(t *testing.T) {
 	}
 }
 
-// TestFirstLineDisallowedProperties verifies that margin, padding, and border
-// properties are filtered out of ::first-line styles.
 func TestFirstLineDisallowedProperties(t *testing.T) {
 	html := `<html><body><p class="test">Hello</p></body></html>`
 	cssText := `p.test::first-line {
@@ -92,11 +88,9 @@ func TestFirstLineDisallowedProperties(t *testing.T) {
 		t.Fatal("expected ::first-line style")
 	}
 
-	// Allowed property should survive.
 	if cs.FontWeight != style.WeightBold {
 		t.Errorf("expected font-weight bold, got %v", cs.FontWeight)
 	}
-	// Disallowed properties should be zeroed.
 	if cs.MarginTop != 0 {
 		t.Errorf("expected margin-top 0 (filtered), got %v", cs.MarginTop)
 	}
@@ -108,8 +102,6 @@ func TestFirstLineDisallowedProperties(t *testing.T) {
 	}
 }
 
-// TestFirstLineAllowedProperties verifies that all CSS-allowed properties
-// survive the filter on ::first-line.
 func TestFirstLineAllowedProperties(t *testing.T) {
 	html := `<html><body><p>Hello</p></body></html>`
 	cssText := `p::first-line {
@@ -175,8 +167,6 @@ func TestFirstLineAllowedProperties(t *testing.T) {
 	}
 }
 
-// TestFirstLineNoRules verifies that elements without ::first-line rules
-// produce no pseudo-style entry.
 func TestFirstLineNoRules(t *testing.T) {
 	html := `<html><body><p>Hello</p></body></html>`
 	cssText := `p { color: red; }`
@@ -212,7 +202,6 @@ func TestFirstLineNoRules(t *testing.T) {
 	}
 }
 
-// pseudoKeys returns the keys of a pseudo-style map for error messages.
 func pseudoKeys(m map[style.PseudoKey]*style.ComputedStyle) []style.PseudoKey {
 	keys := make([]style.PseudoKey, 0, len(m))
 	for k := range m {

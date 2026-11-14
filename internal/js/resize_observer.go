@@ -8,9 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// ResizeObserver API implementation.
-
-// resizeEntry represents one observed element's size.
 type resizeEntry struct {
 	target      *dom.Node
 	width       float64
@@ -18,7 +15,6 @@ type resizeEntry struct {
 	contentRect map[string]float64
 }
 
-// resizeObserver holds the internal state of one ResizeObserver.
 type resizeObserver struct {
 	mu           sync.Mutex
 	callback     goja.Callable
@@ -35,8 +31,8 @@ const resizeStateKey = "__resizeState__"
 type resizeState struct {
 	mu        sync.Mutex
 	observers []*resizeObserver
-	rects     map[*dom.Node][2]float64 // width, height
-	watched   map[*dom.Node]int        // refcount of observers per target
+	rects     map[*dom.Node][2]float64
+	watched   map[*dom.Node]int
 }
 
 func setResizeState(r *Runtime, s *resizeState) {
@@ -55,7 +51,6 @@ func resizeStateOf(r *Runtime) *resizeState {
 	return s
 }
 
-// setupResizeObserver installs the ResizeObserver constructor.
 func (r *Runtime) setupResizeObserver() {
 	state := &resizeState{
 		rects:   make(map[*dom.Node][2]float64),
@@ -83,7 +78,6 @@ func (r *Runtime) setupResizeObserver() {
 		obj := call.This
 		obs.obj = obj
 
-		// observe(target)
 		_ = obj.Set("observe", func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) < 1 {
 				panic(r.vm.NewTypeError("observe requires a target argument"))
@@ -135,7 +129,6 @@ func (r *Runtime) setupResizeObserver() {
 			return goja.Undefined()
 		})
 
-		// unobserve(target)
 		_ = obj.Set("unobserve", func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) < 1 {
 				return goja.Undefined()
@@ -175,7 +168,6 @@ func (r *Runtime) setupResizeObserver() {
 			return goja.Undefined()
 		})
 
-		// disconnect()
 		_ = obj.Set("disconnect", func(call goja.FunctionCall) goja.Value {
 			obs.mu.Lock()
 			obs.disconnected = true
@@ -228,7 +220,6 @@ func releaseResizeTarget(state *resizeState, node *dom.Node) {
 	state.mu.Unlock()
 }
 
-// SetElementSize records an element's current size for ResizeObserver.
 func (r *Runtime) SetElementSize(node *dom.Node, width, height float64) {
 	state := resizeStateOf(r)
 	if state == nil {
@@ -242,8 +233,6 @@ func (r *Runtime) SetElementSize(node *dom.Node, width, height float64) {
 	state.mu.Unlock()
 }
 
-// DrainResizeObservers fires callbacks for targets whose size changed since the
-// last delivery. An unobserved target is never reported.
 func (r *Runtime) DrainResizeObservers() {
 	state := resizeStateOf(r)
 	if state == nil {

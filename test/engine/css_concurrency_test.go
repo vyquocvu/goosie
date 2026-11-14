@@ -10,11 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/engine"
 )
 
-// TestCheckedSheetsFetchConcurrently guards the linked-stylesheet fetch path.
-// A page can link a dozen stylesheets; fetched one after another with no
-// deadline, one slow host stalls the whole document behind the client's 30s
-// timeout. A slow fetcher recording peak in-flight count proves the loads
-// overlap.
 func TestCheckedSheetsFetchConcurrently(t *testing.T) {
 	const (
 		count      = 8
@@ -60,9 +55,6 @@ func TestCheckedSheetsFetchConcurrently(t *testing.T) {
 	}
 }
 
-// TestCheckedSheetsCascadeOrderPreserved pins that parallel fetching does not
-// shuffle the cascade: with two sheets setting the same property, the one
-// linked later in the document must win.
 func TestCheckedSheetsCascadeOrderPreserved(t *testing.T) {
 	linker := func(base, href string) (string, error) {
 		if strings.HasSuffix(href, "/a.css") {

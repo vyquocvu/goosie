@@ -15,9 +15,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/archtest"
 )
 
-// permittedLicenses is the closed set of licenses acceptable in a distributed
-// binary. Permissive only: copyleft would change what distribution means and
-// needs product/legal review, never a silent test update.
 var permittedLicenses = map[string]bool{
 	"MIT":          true,
 	"BSD-2-Clause": true,
@@ -26,16 +23,10 @@ var permittedLicenses = map[string]bool{
 	"ISC":          true,
 }
 
-// releaseBinaries are the packages whose linked dependencies constitute the
-// distributed provenance. Dev-only tools (wpt-runner, diagnostics) are out
-// of scope: they never leave the repository.
 var releaseBinaries = []string{"./cmd/goosie", "./cmd/goosie-headless"}
 
-// mainModulePath is the repository's own module, which is never a provenance
-// question and so never a pin candidate.
 const mainModulePath = "github.com/vyquocvu/goosie"
 
-// buildTarget is one GOOS/GOARCH pair this project publishes an artifact for.
 type buildTarget struct {
 	goos   string
 	goarch string
@@ -43,21 +34,8 @@ type buildTarget struct {
 
 func (b buildTarget) String() string { return b.goos + "/" + b.goarch }
 
-// subtest names the target in a form usable by -run, i.e. without a slash.
 func (b buildTarget) subtest() string { return b.goos + "-" + b.goarch }
 
-// releaseTargets is the contract gate 8 audits, and declaring it is the whole
-// fix for GOOSIE-LICENSE-001. `go list -deps` answers a question about a target,
-// so an allowlist checked against "whatever machine runs the test" is wrong on
-// every other machine: measured here at TASK-043 §5, golang.org/x/sys@v0.48.0 is
-// linked on every amd64 target (darwin, linux, windows) and on no arm64 target,
-// so on darwin/arm64 the pin reads as stale while on linux/amd64 its absence
-// reads as an unpinned dependency. No unconditional list satisfies both
-// directions, which is why CI's "Race detector" job was red for three runs with
-// no data race in it. The set is every row of the matrix in
-// .github/workflows/release.yml, asserted as an equality by
-// TestReleaseTargetsMatchTheReleaseMatrix so a new artifact target cannot widen
-// the shipped provenance without widening this audit in the same commit.
 var releaseTargets = []buildTarget{
 	{goos: "darwin", goarch: "arm64"},
 	{goos: "darwin", goarch: "amd64"},
@@ -66,16 +44,6 @@ var releaseTargets = []buildTarget{
 	{goos: "windows", goarch: "amd64"},
 }
 
-// linkedModulesByTarget is the audited per-target measurement behind
-// releaseTargets: the sorted third-party modules each target links, taken from
-// `GOOS=<goos> GOARCH=<goarch> CGO_ENABLED=0 go list -deps ./cmd/goosie
-// ./cmd/goosie-headless` and recorded verbatim in TASK-043 §5. It is a second
-// oracle, independent of the allowlist, for two things the allowlist alone
-// cannot see: a module that appears on ONE target only (the x/sys shape, which
-// the flat file hides), and a module that quietly stops being linked while
-// still sitting pinned in the file. When a dependency legitimately changes,
-// amend the pin line AND every target row that links it, in one commit, after
-// re-reading the license text - never relax permittedLicenses or a direction.
 var linkedModulesByTarget = map[buildTarget][]string{
 	{goos: "darwin", goarch: "arm64"}: {
 		"github.com/dlclark/regexp2/v2@v2.5.2",
@@ -127,19 +95,6 @@ var linkedModulesByTarget = map[buildTarget][]string{
 	},
 }
 
-// TestLinkedDependenciesPinned fails on any distribution drift, for every
-// target in releaseTargets and not just for the machine running it: a module
-// linked into a release binary that is not in dependency-licenses.txt, a
-// version that moved without re-audit, a license outside the permitted set, a
-// target whose measured module list no longer matches the audited one, or a pin
-// that no target links any more. The fix is never to relax the test: re-audit
-// the license text and amend the allowlist in the same commit as the go.mod
-// change.
-//
-// Fail closed by design: there is no t.Skip on any path here. A target whose
-// dependency set cannot be computed is reported as a failure, because a gate
-// that shrugs at "couldn't work out what the binary links" is exactly how the
-// old host-pinned version under-checked Linux (TASK-043 §1.1).
 // qc:BR-194
 func TestLinkedDependenciesPinned(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
@@ -162,8 +117,6 @@ func TestLinkedDependenciesPinned(t *testing.T) {
 		t.Fatalf("releaseTargets has %d entries; a one-target contract is the bug this test exists to prevent", len(releaseTargets))
 	}
 
-	// Measured first, asserted after: one unresolvable target must not delete
-	// other targets from the union and so must not fabricate "stale pin" errors.
 	sets := make(map[buildTarget][]string, len(releaseTargets))
 	computable := true
 	for _, target := range releaseTargets {
@@ -205,8 +158,6 @@ func TestLinkedDependenciesPinned(t *testing.T) {
 	}
 
 	if !computable {
-		// The staleness direction is a claim about every target; with a target
-		// missing it would be a guess. The failures above already stop the gate.
 		t.Errorf("staleness direction not evaluated: at least one target had no dependency set")
 		return
 	}
@@ -223,11 +174,6 @@ func TestLinkedDependenciesPinned(t *testing.T) {
 	}
 }
 
-// TestReleaseTargetsMatchTheReleaseMatrix keeps releaseTargets honest about
-// what actually ships: the matrix in .github/workflows/release.yml is the
-// artifact contract, so a row added there without a licence audit is a new
-// distributed binary nobody pinned, and a row removed there leaves this gate
-// auditing a binary that no longer exists. Both directions are errors.
 // qc:BR-194
 func TestReleaseTargetsMatchTheReleaseMatrix(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
@@ -262,10 +208,6 @@ func TestReleaseTargetsMatchTheReleaseMatrix(t *testing.T) {
 	}
 }
 
-// TestTargetResolutionFailsClosed pins the property the old gate lacked: an
-// unusable measurement is an error, never an empty list that passes. A package
-// pattern that does not resolve, and a package that links no third-party module,
-// must both come back as errors from linkedModules.
 // qc:BR-194
 func TestTargetResolutionFailsClosed(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
@@ -319,22 +261,10 @@ func targetNames(targets []buildTarget) string {
 	return strings.Join(names, ", ")
 }
 
-// linkedModules returns the sorted set of third-party modules linked into pkgs
-// when built for target, measured with an explicitly stated build environment.
-// An error - a failed `go list`, output this gate cannot parse, or an empty set -
-// is returned instead of a shorter list, so the caller cannot mistake "unknown"
-// for "nothing to check".
 func linkedModules(root string, target buildTarget, pkgs []string) ([]string, error) {
 	args := append([]string{"list", "-f", "{{if not .Standard}}{{.ImportPath}}|{{.Module.Path}}@{{.Module.Version}}{{end}}", "-deps"}, pkgs...)
 	cmd := exec.Command("go", args...)
 	cmd.Dir = root
-	// The target is a parameter, not an accident of whoever runs the test. GOOS
-	// and GOARCH are set per target, and CGO_ENABLED=0 so the measurement needs
-	// no C toolchain and no display: measured on all five release targets, the
-	// cgo path in internal/platform/darwin adds no module to the graph, so this
-	// cannot hide a dependency. GOFLAGS is cleared for the same reason the host
-	// target is cleared - a runner-side -tags must not make the gate measure a
-	// binary that is not the shipped one.
 	cmd.Env = append(os.Environ(),
 		"GOOS="+target.goos,
 		"GOARCH="+target.goarch,
@@ -352,7 +282,6 @@ func linkedModules(root string, target buildTarget, pkgs []string) ([]string, er
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
-			// The template prints an empty line per stdlib package.
 			continue
 		}
 		parts := strings.SplitN(line, "|", 2)
@@ -399,9 +328,6 @@ func loadAllowlist(path string) (map[string]string, error) {
 	return out, sc.Err()
 }
 
-// stringDiff reports the audited entries a measurement is missing and the extra
-// entries it found, so a one-target-only dependency shows up as a named module
-// rather than as a count.
 func stringDiff(want, got []string) string {
 	inWant := map[string]bool{}
 	inGot := map[string]bool{}

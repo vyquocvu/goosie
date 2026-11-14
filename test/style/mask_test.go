@@ -37,7 +37,6 @@ func TestWebkitMaskImageAlias(t *testing.T) {
 	sheet := css.ParseForViewport(`.icon{-webkit-mask-image:url(menu.svg);mask-image:url(other.svg);}`, 800)
 	styles := style.Resolve(doc, []*css.Stylesheet{sheet}, nil)
 	st := styleForClass(t, doc, styles, "icon")
-	// Both spellings feed one field in cascade order; the later rule wins.
 	if st.MaskImage != "other.svg" {
 		t.Errorf("MaskImage = %q, want other.svg", st.MaskImage)
 	}

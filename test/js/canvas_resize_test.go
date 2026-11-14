@@ -8,10 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// canvasResizeRuntime builds a document holding one canvas with the given
-// width/height attributes ("" leaves the attribute absent) and returns the
-// runtime plus the element, with `canvas` and `ctx` already defined in script
-// scope.
 func canvasResizeRuntime(t *testing.T, width, height string) (*js.Runtime, *dom.Node) {
 	t.Helper()
 	doc := dom.NewDocument()
@@ -40,12 +36,6 @@ func canvasResizeRuntime(t *testing.T, width, height string) (*js.Runtime, *dom.
 	return r, canvas
 }
 
-// TestCanvasResizeClearsRecordedFrameAndFollowsNewSize is the BR-116 oracle for
-// the IDL path: assigning canvas.width/height must retarget the backing store
-// and discard the recorded drawing state. Before the resize hook the context
-// kept its original dimensions and every recorded op, so a later replay drew
-// the old frame stretched into whatever size the element now declared.
-//
 // qc:BR-116
 func TestCanvasResizeClearsRecordedFrameAndFollowsNewSize(t *testing.T) {
 	r, canvas := canvasResizeRuntime(t, "320", "200")
@@ -79,11 +69,6 @@ func TestCanvasResizeClearsRecordedFrameAndFollowsNewSize(t *testing.T) {
 	}
 }
 
-// TestCanvasAttributeResizeAlsoResets covers the attribute entry points:
-// setAttribute, setAttributeNS(null, ...) and removeAttribute all have to run
-// the same reset as the IDL properties. removeAttribute restores the HTML
-// default size instead of keeping the removed value.
-//
 // qc:BR-116
 func TestCanvasAttributeResizeAlsoResets(t *testing.T) {
 	r, canvas := canvasResizeRuntime(t, "320", "200")
@@ -123,10 +108,6 @@ func TestCanvasAttributeResizeAlsoResets(t *testing.T) {
 	}
 }
 
-// TestCanvasResizeToSameValueStillClears pins the documented quirk that
-// assigning the current dimension still resets the canvas. A hook that only
-// fires on a value change would let the old frame survive here.
-//
 // qc:BR-116
 func TestCanvasResizeToSameValueStillClears(t *testing.T) {
 	r, canvas := canvasResizeRuntime(t, "320", "200")

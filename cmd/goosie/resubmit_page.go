@@ -14,12 +14,8 @@ import (
 	"github.com/vyquocvu/goosie/internal/toolbar"
 )
 
-// resubmitPageTitle labels the tab while the POST confirmation is on screen.
 const resubmitPageTitle = "Confirm Form Resubmission"
 
-// tabDisplay is the document a resubmit prompt replaced. It is kept alive so
-// Cancel can put the exact page back - same DOM, scroll offset and focus -
-// instead of reloading it, which would lose state and could itself be a POST.
 type tabDisplay struct {
 	layer   *frame.Layer
 	session *engine.Session
@@ -31,21 +27,16 @@ type tabDisplay struct {
 	offset  frame.Point
 }
 
-// pendingResubmit is one tab's unanswered POST confirmation.
 type pendingResubmit struct {
 	request    toolbar.Request
 	target     string
 	delta      int
 	base       int
 	transition history.Transition
-	// scroll is the offset the target history entry was left at, restored once
-	// the confirmed resubmit lands.
-	scroll   int32
-	previous tabDisplay
+	scroll     int32
+	previous   tabDisplay
 }
 
-// resubmitAction recognises the prompt's own action links. It returns false for
-// a plain goosie://resubmit URL so direct visits still render a page.
 func resubmitAction(rawURL string) (action string, ok bool) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || !strings.EqualFold(u.Scheme, "goosie") || !strings.EqualFold(u.Host, "resubmit") {
@@ -124,9 +115,6 @@ func (f *framePath) buildResubmitPage(target string, req toolbar.Request) (*fram
 	return layer, sess, sess.BackgroundColor()
 }
 
-// promptResubmit replaces the active document with the confirmation. It reports
-// whether the prompt is showing; false means the caller should perform an
-// ordinary GET because there is nothing safe to keep behind a cancel.
 func (f *framePath) promptResubmit(tab *tabs.Tab, target string, req toolbar.Request, delta, base int, transition history.Transition, scroll int32) bool {
 	if tab == nil {
 		return false
@@ -168,8 +156,6 @@ func (f *framePath) promptResubmit(tab *tabs.Tab, target string, req toolbar.Req
 
 	layer, sess, bg := f.buildResubmitPage(target, req)
 	if layer == nil || sess == nil {
-		// The prompt could not be built: keep the page and fall through to a
-		// normal navigation on the caller's next branch.
 		f.resubmitMu.Lock()
 		delete(f.resubmits, tab.ID())
 		f.resubmitMu.Unlock()
@@ -210,8 +196,6 @@ func (f *framePath) promptResubmit(tab *tabs.Tab, target string, req toolbar.Req
 	return true
 }
 
-// resolveResubmitAction applies the user's choice. The pending entry is taken
-// first, so a double click cannot confirm or cancel twice.
 func (f *framePath) resolveResubmitAction(tab *tabs.Tab, action string) {
 	tabID := tab.ID()
 	f.resubmitMu.Lock()
@@ -236,8 +220,6 @@ func (f *framePath) resolveResubmitAction(tab *tabs.Tab, action string) {
 	}
 }
 
-// restoreResubmit puts the replaced document back exactly as it was. The proof
-// session is closed; the kept session never left the tab's ownership.
 func (f *framePath) restoreResubmit(tab *tabs.Tab, pending *pendingResubmit) {
 	if tab == nil || pending == nil {
 		return
@@ -281,8 +263,6 @@ func (f *framePath) restoreResubmit(tab *tabs.Tab, pending *pendingResubmit) {
 	}
 }
 
-// dropResubmit abandons an unanswered prompt for a tab: the replaced document
-// is no longer reachable, so it is closed with the pending decision.
 func (f *framePath) dropResubmit(tabID uint64) {
 	f.resubmitMu.Lock()
 	pending := f.resubmits[tabID]

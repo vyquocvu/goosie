@@ -25,23 +25,14 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// MaxResponseBytes bounds each decoded HTTP response or local file.
 const MaxResponseBytes = 16 << 20
 
-// MaxResponseHeaderBytes bounds one response's header block, which the transport
-// would otherwise buffer up to its own 10 MiB default before any body byte.
 const MaxResponseHeaderBytes = 256 << 10
 
-// userAgent is sent with every request. We identify as Goosie rather than
-// spoofing Chrome, because Cloudflare and other CDNs detect TLS fingerprint
-// mismatches (Go crypto/tls vs Chrome JA3/JA4) and trigger bot challenges.
 const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Goosie/2.0"
 
-// ErrResponseTooLarge reports a response that exceeds MaxResponseBytes.
 var ErrResponseTooLarge = errors.New("net: response exceeds 16 MiB limit")
 
-// HTTP is the 4-method interface the engine depends on. Declaring it here
-// rather than using *http.Client directly keeps navigation mockable in tests.
 type HTTP interface {
 	Get(ctx context.Context, url string) (*Response, error)
 	Post(ctx context.Context, url, contentType string, body io.Reader) (*Response, error)
@@ -51,27 +42,18 @@ type HTTP interface {
 	NetworkLog() *NetworkLog
 }
 
-// StreamingHTTP is optionally implemented by clients that can return response
-// headers before consuming the body. Navigations use it to save attachments
-// incrementally without buffering an unbounded file in memory.
 type StreamingHTTP interface {
 	GetStream(ctx context.Context, url string) (*StreamResponse, error)
 }
 
-// RangeStreamingHTTP is optionally implemented by clients that can continue a
-// partial transfer. start is the first byte to request, sent as
-// "Range: bytes=start-"; a resumable server answers 206 Partial Content.
 type RangeStreamingHTTP interface {
 	GetStreamRange(ctx context.Context, url string, start int64) (*StreamResponse, error)
 }
 
-// CacheClearingHTTP is optionally implemented by clients that keep responses
-// in memory and can drop them without being recreated.
 type CacheClearingHTTP interface {
 	ClearCache()
 }
 
-// StreamResponse exposes an HTTP response body as a cancelable stream.
 type StreamResponse struct {
 	StatusCode    int
 	Headers       map[string]string
@@ -83,15 +65,12 @@ type StreamResponse struct {
 	closeErr      error
 }
 
-// Cancel aborts an in-flight response body without closing the caller's
-// navigation context.
 func (r *StreamResponse) Cancel() {
 	if r != nil && r.cancel != nil {
 		r.cancel()
 	}
 }
 
-// Close releases the response body. It is safe to call more than once.
 func (r *StreamResponse) Close() error {
 	if r == nil {
 		return nil
@@ -105,7 +84,6 @@ func (r *StreamResponse) Close() error {
 	return r.closeErr
 }
 
-// ReadBounded consumes a stream as an in-memory response under maxBytes.
 func (r *StreamResponse) ReadBounded(maxBytes int64) ([]byte, error) {
 	if r == nil || r.Body == nil {
 		return nil, errors.New("net: response stream is closed")
@@ -127,7 +105,6 @@ func (r *StreamResponse) ReadBounded(maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
-// RequestTrace represents one recorded HTTP network transaction.
 type RequestTrace struct {
 	URL           string        `json:"url"`
 	Method        string        `json:"method"`
@@ -140,14 +117,12 @@ type RequestTrace struct {
 	BlockedReason string        `json:"blockedReason,omitempty"`
 }
 
-// NetworkLog records recent network transactions in a thread-safe circular buffer.
 type NetworkLog struct {
 	mu      sync.RWMutex
 	traces  []RequestTrace
 	maxSize int
 }
 
-// NewNetworkLog creates a new network log capped at maxSize entries.
 func NewNetworkLog(maxSize int) *NetworkLog {
 	if maxSize <= 0 {
 		maxSize = 200
@@ -155,7 +130,6 @@ func NewNetworkLog(maxSize int) *NetworkLog {
 	return &NetworkLog{maxSize: maxSize}
 }
 
-// Record appends a request trace to the log.
 func (nl *NetworkLog) Record(t RequestTrace) {
 	nl.mu.Lock()
 	defer nl.mu.Unlock()
@@ -165,7 +139,6 @@ func (nl *NetworkLog) Record(t RequestTrace) {
 	nl.traces = append(nl.traces, t)
 }
 
-// List returns a copy of recorded traces in chronological order.
 func (nl *NetworkLog) List() []RequestTrace {
 	nl.mu.RLock()
 	defer nl.mu.RUnlock()
@@ -174,15 +147,12 @@ func (nl *NetworkLog) List() []RequestTrace {
 	return out
 }
 
-// Clear resets the recorded traces.
 func (nl *NetworkLog) Clear() {
 	nl.mu.Lock()
 	defer nl.mu.Unlock()
 	nl.traces = nil
 }
 
-// Response is a simplified HTTP response. Repeated header values are joined
-// with a comma and space, retaining all values in the string-valued map.
 type Response struct {
 	StatusCode int
 	Headers    map[string]string
@@ -190,12 +160,6 @@ type Response struct {
 	URL        string
 }
 
-// StyleSheetRefused reports whether a response with this Content-Type must be
-// kept out of the cascade. A broken CDN path answers a stylesheet request with
-// an HTML error page, and that page's own rules parse as valid CSS: applied
-// silently, they restyle the real document. Chromium refuses a sheet whose type
-// it can classify as something else, inferring CSS only from a type it does not
-// recognise, so this follows the same split.
 func StyleSheetRefused(contentType string) bool {
 	mt := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	if mt == "" || mt == "text/css" {
@@ -215,18 +179,11 @@ func StyleSheetRefused(contentType string) bool {
 	return false
 }
 
-// Text returns the response body decoded to UTF-8 using HTML encoding
-// sniffing. Call TextWithEncoding when the selected encoding label is also
-// needed by the Document that consumes this text.
 func (r *Response) Text() string {
 	text, _, _ := r.TextWithEncoding()
 	return text
 }
 
-// TextWithEncoding decodes the response body to UTF-8 and returns the HTML
-// encoding label selected from its BOM, Content-Type, or in-document
-// declaration. certain is true when a BOM or transport charset determined the
-// encoding; otherwise it came from the prescan or fallback.
 func (r *Response) TextWithEncoding() (text, label string, certain bool) {
 	contentType := ""
 	if r.Headers != nil {
@@ -235,8 +192,6 @@ func (r *Response) TextWithEncoding() (text, label string, certain bool) {
 	return DecodeHTML(r.Body, contentType)
 }
 
-// DecodeHTML converts an HTML byte stream to UTF-8 and returns the selected
-// encoding label and confidence. contentType may be empty for local files.
 func DecodeHTML(body []byte, contentType string) (text, label string, certain bool) {
 	_, label, certain = htmlcharset.DetermineEncoding(body, contentType)
 	reader, err := htmlcharset.NewReader(bytes.NewReader(body), contentType)
@@ -250,8 +205,6 @@ func DecodeHTML(body []byte, contentType string) (text, label string, certain bo
 	return strings.TrimPrefix(string(decoded), "\uFEFF"), label, certain
 }
 
-// NormalizeURL validates explicit HTTP(S) and local file URLs, and gives bare
-// domains and localhost addresses an HTTPS scheme. It does not access the URL.
 func NormalizeURL(raw string) (string, error) {
 	if hasControl(raw) {
 		return "", errors.New("net: URL contains control characters")
@@ -315,11 +268,6 @@ func NormalizeURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
-// scrubURLError rewrites *url.Error values to carry the redacted URL. The
-// stdlib formats request errors with the full request URL inline
-// (Get "https://host/path?secret=...": ...), so wrapping is not enough: the
-// inner text must be scrubbed where the error is made. Values are fresh per
-// call, so mutating in place is safe.
 func scrubURLError(err error) error {
 	var uerr *url.Error
 	if errors.As(err, &uerr) {
@@ -328,11 +276,6 @@ func scrubURLError(err error) error {
 	return err
 }
 
-// RedactURL strips what diagnostics must never carry: userinfo credentials
-// and query/fragment secrets. Scheme, host and path stay for diagnosis.
-// Unparseable input reports a fixed token rather than echoing (which could
-// itself be the secret). Callers formatting URLs into errors and logs use
-// this, not the raw string.
 func RedactURL(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" && u.Host == "" && u.Path == "" && u.Opaque == "" {
@@ -349,10 +292,6 @@ func hasControl(s string) bool {
 	return strings.ContainsFunc(s, unicode.IsControl)
 }
 
-// idnaHost converts a Unicode DNS name to the ASCII form the resolver can ask
-// for. The address bar keeps the name the user typed; the request has to carry
-// the one DNS will answer, and a browser that skipped this step would either
-// reject the host after accepting it or resolve a different one.
 func idnaHost(host string) (string, error) {
 	if host == "" || isASCII(host) {
 		return host, nil
@@ -419,10 +358,6 @@ func validateHTTPHost(u *url.URL) error {
 	return nil
 }
 
-// clientTransport is the shared transport's own proxy, dialing, pooling and
-// HTTP/2 behaviour with this browser's response-header bound set on top. It is
-// a Clone rather than a literal so that the inherited settings stay inherited:
-// a hand-built Transport silently drops HTTP_PROXY support.
 func clientTransport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.MaxResponseHeaderBytes = MaxResponseHeaderBytes
@@ -430,9 +365,6 @@ func clientTransport() *http.Transport {
 	return t
 }
 
-// DefaultClient returns an HTTP client backed by net/http with standard TLS
-// verification and at most ten validated HTTP(S) redirects. Its cookie jar
-// lives in memory for the life of the client.
 func DefaultClient() HTTP {
 	c := &httpClient{
 		jar:    NewCookieJar(),
@@ -448,8 +380,6 @@ func DefaultClient() HTTP {
 	return c
 }
 
-// DefaultPrivateClient is DefaultClient with an ephemeral cookie jar that is
-// wiped on Close: nothing a private-mode session learns survives it.
 func DefaultPrivateClient() HTTP {
 	c := &httpClient{
 		jar:     NewCookieJar(),
@@ -466,9 +396,6 @@ func DefaultPrivateClient() HTTP {
 	return c
 }
 
-// DefaultClientWithTLS returns an HTTP client identical to DefaultClient but
-// using a caller-supplied TLS configuration. Tests use it to trust the
-// self-signed certificates httptest.NewTLSServer generates.
 func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
 	t := clientTransport()
 	t.TLSClientConfig = tlsConfig
@@ -486,11 +413,6 @@ func DefaultClientWithTLS(tlsConfig *tls.Config) HTTP {
 	return c
 }
 
-// DefaultClientWithCookies returns DefaultClient whose jar persists to
-// cookiesPath: cookies saved by an earlier run load at construction, and
-// persistent cookies save back on Close. A missing file is the normal first
-// run. A file that exists but cannot be read or parsed is an error, and no
-// save happens on Close — a broken store must not be silently truncated.
 func DefaultClientWithCookies(cookiesPath string) (HTTP, error) {
 	c := DefaultClient().(*httpClient)
 	if err := c.jar.Load(cookiesPath); err != nil {
@@ -507,24 +429,14 @@ func (c *httpClient) checkRedirect(req *http.Request, via []*http.Request) error
 	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
 		return errors.New("net: redirect requires HTTP(S)")
 	}
-	// A secure origin never downgrades mid-navigation: an https page that
-	// bounces through http exposes the session to the network it just left.
 	if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme == "http" {
 		return errors.New("net: refusing HTTPS-to-HTTP downgrade redirect")
 	}
-	// The response that caused this hop is the only place an intermediate
-	// Set-Cookie is visible; net/http would otherwise hand it to nobody. A
-	// cookie set by a redirect applies to the request the redirect caused,
-	// exactly as it would to the next independently issued request.
 	if req.Response != nil && req.Response.Request != nil && c.jar != nil {
 		if values := req.Response.Header.Values("Set-Cookie"); len(values) > 0 {
 			c.jar.Store(req.Response.Request.URL, values)
 		}
 	}
-	// Rebuild the Cookie header from the jar for this hop rather than letting
-	// the first hop's header stand. Forwarding it would omit a cookie set by
-	// the redirect itself and would carry cookies scoped to an origin this
-	// request is not going to; the jar's matching rules are what decide.
 	if c.jar != nil && req.Header != nil {
 		if cookie := c.jar.HeaderFor(req.URL); cookie != "" {
 			req.Header.Set("Cookie", cookie)
@@ -544,46 +456,32 @@ type httpClient struct {
 	netLog      *NetworkLog
 	private     bool
 	persistPath string
-	// hsts remembers Strict-Transport-Security max-age per exact host for
-	// the client's lifetime (memory only; persistence rides with profiles
-	// in gate 5). includeSubDomains is not honored: subdomains keep their
-	// own entries rather than inheriting trust they never earned.
-	hstsMu sync.Mutex
-	hsts   map[string]time.Time
+	hstsMu      sync.Mutex
+	hsts        map[string]time.Time
 }
 
-// NetworkLog returns the client's network transaction log.
 func (c *httpClient) NetworkLog() *NetworkLog {
 	return c.netLog
 }
 
-// Jar returns the client's cookie jar.
 func (c *httpClient) Jar() *CookieJar {
 	return c.jar
 }
 
-// ClearCache drops every cached response. Fresh entries kept for back/forward
-// and repeat navigation are discarded so the next request reaches the network.
 func (c *httpClient) ClearCache() {
 	if c.cache != nil {
 		c.cache.clear()
 	}
 }
 
-// Filter returns the client's ad/tracker filter engine.
 func (c *httpClient) Filter() *FilterEngine {
 	return c.filter
 }
 
-// SetFilter replaces the client's ad/tracker filter engine.
 func (c *httpClient) SetFilter(f *FilterEngine) {
 	c.filter = f
 }
 
-// noteHSTS records one response's transport-security policy: an https
-// response bearing max-age pins its exact host until the age lapses, and
-// max-age=0 unpins it. Anything else (http delivery, unparsable age)
-// changes nothing.
 func (c *httpClient) noteHSTS(reqURL *url.URL, header http.Header) {
 	if reqURL == nil || reqURL.Scheme != "https" {
 		return
@@ -616,8 +514,6 @@ func (c *httpClient) noteHSTS(reqURL *url.URL, header http.Header) {
 	c.hsts[host] = time.Now().Add(time.Duration(maxAge) * time.Second)
 }
 
-// upgradeHSTS rewrites an http URL to https when its exact host is pinned.
-// Lapsed pins are swept on sight rather than on a timer.
 func (c *httpClient) upgradeHSTS(u *url.URL) {
 	if u == nil || u.Scheme != "http" {
 		return
@@ -643,15 +539,10 @@ func (c *httpClient) Get(ctx context.Context, raw string) (*Response, error) {
 	return c.request(ctx, http.MethodGet, raw, "", nil)
 }
 
-// GetStream returns response headers and a live body stream. Cache hits are
-// replayed from their bounded in-memory bodies; live responses remain streamed
-// so downloads need not pass through the document response limit.
 func (c *httpClient) GetStream(ctx context.Context, raw string) (*StreamResponse, error) {
 	return c.getStream(ctx, raw, 0)
 }
 
-// GetStreamRange requests a live stream starting at byte offset start. Range
-// requests bypass the response cache, which holds whole bodies keyed by URL.
 func (c *httpClient) GetStreamRange(ctx context.Context, raw string, start int64) (*StreamResponse, error) {
 	if start < 0 {
 		return nil, errors.New("net: invalid range offset")
@@ -859,10 +750,6 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	if err != nil {
 		return nil, fmt.Errorf("net: request %s: %w", RedactURL(normalized), scrubURLError(err))
 	}
-	// A plain Go client identifies itself as Go-http-client and real sites
-	// (Wikipedia's robots policy among them) answer it with 403. Announcing a
-	// browser-like UA and content acceptance is what gets the same bytes a
-	// browser would render.
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -874,8 +761,6 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		// The stdlib error embeds the request URL verbatim; redact before
-		// it joins our chain, or query secrets ride along into diagnostics.
 		return nil, fmt.Errorf("net: fetch %s: %w", RedactURL(normalized), scrubURLError(err))
 	}
 	defer resp.Body.Close()
@@ -935,8 +820,6 @@ func (c *httpClient) Close() error {
 	return nil
 }
 
-// contextReader checks cancellation between reads as well as after a read.
-// net/http also interrupts blocked network reads through the request context.
 type contextReader struct {
 	ctx context.Context
 	r   io.Reader
@@ -969,7 +852,6 @@ func readFileURL(ctx context.Context, u *url.URL) (*Response, error) {
 		return nil, err
 	}
 	path := filepath.Clean(u.Path)
-	// Check before opening so devices and FIFOs are never deliberately opened.
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("net: stat file: %w", err)
@@ -980,8 +862,6 @@ func readFileURL(ctx context.Context, u *url.URL) (*Response, error) {
 	if info.Size() > MaxResponseBytes {
 		return nil, ErrResponseTooLarge
 	}
-	// Nonblocking open prevents a replacement FIFO from hanging between Stat
-	// and Open. Validate the opened descriptor again before reading any bytes.
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, fmt.Errorf("net: opening file: %w", err)

@@ -9,10 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// FR-JS-06: a document whose script exceeds the 5000ms CPU budget must leave a
-// typed, countable record on the session so the chrome can prompt the user,
-// instead of the interrupt disappearing into a generic script error.
-
 func newTimeoutRuntime(t *testing.T) *js.Runtime {
 	t.Helper()
 	rt, err := js.New(js.Options{URL: "https://example.test/slow", Timeout: 50 * time.Millisecond})
@@ -46,10 +42,6 @@ func TestParserScriptTimeoutIsRecorded(t *testing.T) {
 	if !found {
 		t.Fatalf("ScriptErrors = %+v, want one TimedOut entry", sess.ScriptErrors())
 	}
-	// The stop is scoped to the script, not the document: parsing continues,
-	// the elements after the script are in the tree, and the session still
-	// produces a paint list. A timeout that aborted the load would satisfy the
-	// counters above while leaving nothing for the chrome to show.
 	if text := sess.Doc.Node.TextContent(); !strings.Contains(text, "after") {
 		t.Fatalf("document text = %q, want parsing to continue past the stopped script", text)
 	}

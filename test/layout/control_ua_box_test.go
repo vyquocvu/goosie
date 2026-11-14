@@ -9,17 +9,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-// controlUAHTML is GOOSIE-CONTROLSIZE-001 measured. Every number in the three
-// tests below is Chromium's, read on 2026-11-12 with Playwright against exactly
-// this markup at an 800x600 viewport in standards mode: getComputedStyle for the
-// resolved cascade, getBoundingClientRect for the border box, and the height of
-// each row's line box with the control alone on it. The body is 16px sans-serif
-// so the strut every row shares is 14 above and 4 below the baseline, and the
-// metrics face controlLineMetrics supplies is the reference's own: 12/3/15 at the
-// 13.3333px control font, 14/4/18 at 16px and 22/6/28 at 24px.
-//
-// The rows are 600px wide so nothing wraps into a second line, which would read
-// as a box failure rather than as two lines.
 const controlUAHTML = `<!DOCTYPE html><html><head><style>
 html, body { margin: 0; padding: 0; }
 body { font: 16px sans-serif; }
@@ -82,18 +71,6 @@ func TestUASheetResolvesTheMeasuredControlCascade(t *testing.T) {
 	face := css.Color{R: 239, G: 239, B: 239, A: 255}
 	mid := css.Color{R: 118, G: 118, B: 118, A: 255}
 	clear := css.Color{}
-	// One row per distinct answer in the reference, each with the four numbers
-	// that make its box: the font it is laid out in, the frame, the padding and
-	// the background. They belong in the cascade and not in layout because an
-	// author has to be able to win them, as #i25 and #i26 below show: a page's
-	// own padding and border replace the reference's, and its font-size replaces
-	// the control font, without anything in layout being touched.
-	//
-	// The style column is the frame Chromium computes - "inset 2px", "solid 1px",
-	// "outset 2px". Where the control carries no chrome the expectation is the
-	// empty string, which is how this engine spells a border the sheet never gave
-	// a style; Chromium calls the same box "none" and paints nothing in either
-	// case, so the 0 width beside it is the number doing the work.
 	for _, c := range []struct {
 		id                     string
 		fam                    frame.FontFamily
@@ -151,9 +128,6 @@ func TestUASheetResolvesTheMeasuredControlCascade(t *testing.T) {
 		}
 	}
 
-	// An author wins every one of these, which is the reason they are in the
-	// sheet at all: #i25 replaces the frame and the padding, and #i26 replaces
-	// the control font.
 	if s := controlUAStyle(t, arena, "i25"); !almostEqual(s.BorderTopWidth, 1) || s.BorderTopStyle != "solid" ||
 		!almostEqual(s.PaddingTop, 8) || !almostEqual(s.PaddingLeft, 8) {
 		t.Errorf("#i25 author chrome did not reach the box: border %v %v, padding %v/%v",
@@ -163,20 +137,10 @@ func TestUASheetResolvesTheMeasuredControlCascade(t *testing.T) {
 		t.Errorf("#i26 author font-size = %v, want 24 to beat the UA control font", s.FontSize)
 	}
 
-	// `input[type=image]` is an inline-block in the reference, not the inline the
-	// old sheet forced on it: measured display is inline-block, and the 13x13 box
-	// it reaches is the one the row's <img> answers from the other side.
 	if s := controlUAStyle(t, arena, "i23"); s.Display != style.DisplayInlineBlock {
 		t.Errorf("#i23 display = %v, want inline-block", s.Display)
 	}
 
-	// The frame colours Chromium computes: rgb(118,118,118) on the fields, the
-	// date family, the select and the textarea. The button-like rows and the
-	// colour swatch are not in this list because the reference answers
-	// currentColor black on their frames, while the sheet here deliberately
-	// carries the mid-grey Goosie paints an outset or inset strip with - its
-	// stand-in for a bevel this engine does not draw (GOOSIE-BEVELPAINT-001).
-	// Their colour is the engine's own, so it is not something to score.
 	for _, id := range []string{"i0", "i2", "i18", "s7", "t8"} {
 		if s := controlUAStyle(t, arena, id); s.BorderTopColor != mid {
 			t.Errorf("#%s border colour = %v, want %v", id, s.BorderTopColor, mid)
@@ -187,11 +151,6 @@ func TestUASheetResolvesTheMeasuredControlCascade(t *testing.T) {
 // qc:BR-276
 func TestControlsSizeToTheirMeasuredBorderBoxes(t *testing.T) {
 	arena := controlMetricsSession(t, controlUAHTML, 800)
-	// Chromium's border boxes at the UA control font. Two of them cannot be
-	// reached from anything Goosie measures and are named where they appear:
-	// the widths that follow an average-character metric
-	// (GOOSIE-CONTROLWIDTH-001) and the picker controls whose interior metrics
-	// are the shadow editor's own (GOOSIE-DATECONTROL-001).
 	for _, c := range []struct {
 		id         string
 		w, h       float32
@@ -235,13 +194,6 @@ func TestControlsSizeToTheirMeasuredBorderBoxes(t *testing.T) {
 			t.Errorf("#%s border box W = %v, want %v (%s)", c.id, w, c.w, c.why)
 		}
 	}
-	// The one box whose height does not land: a select is one line of its font
-	// plus 4px - 2px of interior listbox chrome, which replacedSize adds because
-	// the shadow listbox owns it, and the 1px frame on each side - and that
-	// arithmetic is Chromium's measured 19 at the UA control font but lands 32
-	// where the reference measures 31 at an author 24px. The 1px is shadow
-	// internals (GOOSIE-DATECONTROL-001) and the measured 36px width is the
-	// option label (GOOSIE-CONTROLWIDTH-001).
 	if w, h := controlUABorderBox(t, arena, "s27"); !almostEqual(h, 32) || !almostEqual(w, 154) {
 		t.Errorf("#s27 border box = %vx%v, want 154x32 (a 24px select: the reference answers 31x36)", w, h)
 	}
@@ -250,13 +202,6 @@ func TestControlsSizeToTheirMeasuredBorderBoxes(t *testing.T) {
 // qc:BR-276
 func TestControlsKeepTheirMeasuredLinesAndOffsets(t *testing.T) {
 	arena := controlMetricsSession(t, controlUAHTML, 800)
-	// The control alone on a line over the 16px strut (14 above, 4 below).
-	// These are the answers that decide which edge each control aligns on, and
-	// they now come out of the box the UA sheet builds rather than a height
-	// guessed in layout: a field's line is its own 21px at offset 0, a textarea
-	// gains the strut's descent under it, an image input behaves exactly like
-	// the image beside it, and the widgets keep their UA margins outside the
-	// box they sit in.
 	for _, c := range []struct {
 		id        string
 		line, top float32
@@ -292,9 +237,6 @@ func TestControlsKeepTheirMeasuredLinesAndOffsets(t *testing.T) {
 	}
 }
 
-// controlUARow maps a control's id to the row that holds it: g0 for i0, g13 for
-// i13, and so on, which is what lets the table above name controls instead of
-// row numbers.
 func controlUARow(id string) string {
 	digits := ""
 	for i := len(id) - 1; i >= 0; i-- {

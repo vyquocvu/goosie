@@ -10,37 +10,12 @@ import (
 	"github.com/vyquocvu/goosie/internal/paint"
 )
 
-// ErrNilDestination is returned when there is nowhere to put the pixels. It is
-// an error rather than a panic because RasterizeTile runs on a worker, and a
-// panic there would take the pool down with it (pool.go has the guard that
-// catches the ones that still happen).
 var ErrNilDestination = errors.New("raster: nil tile destination")
 
-// RasterizeTile paints the tile covering bounds into out.
-//
-// bounds is in layer content space; out is a TileSize-square buffer whose own
-// coordinate space starts at zero. Translating once at the top is what makes the
-// result position-independent: the same tile buffer is valid no matter where the
-// viewport happens to be, which is the property that lets a scrolled-back tile
-// be reused instead of re-rendered.
-//
-// The list is read through its frozen bounds sidecar, so a tile over
-// whitespace walks one cheap pass instead of re-walking glyphs per command.
-// Nothing here takes a lock: the display list is frozen, and the glyph caches
-// synchronize themselves.
-//
-// g is the glyph cache and is what a frame path passes. It may be nil, in which
-// case glyphs come straight from f unshared - a slower rendering that exists so a
-// one-off tool can rasterize a tile without building an atlas.
 func RasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *Fonts, g *GlyphAtlas, bg frame.Color) error {
 	return rasterizeTile(dl, bounds, out, f, g, bg, nil)
 }
 
-// rasterizeTile is the real work behind RasterizeTile; see that method for the
-// bounds/coordinate, frozen-list, and glyph-cache contract, which it satisfies
-// unchanged. scratch is a tile-sized buffer pool the composer borrows to fade a
-// group offscreen; nil means each group allocates a one-off buffer instead (a
-// tool or test rasterizing a single tile without building a pool).
 func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *Fonts, g *GlyphAtlas, bg frame.Color, scratch *frame.BitmapPool) error {
 	if out == nil {
 		return ErrNilDestination
@@ -59,16 +34,12 @@ func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 	b := bounds.Canon()
 	dx, dy := -b.X0, -b.Y0
 	clip := out.Bounds()
-	// One index pass with frozen bounds: Intersecting would scan the list for
-	// the span and then re-test every command inside it (a glyph walk per text
-	// command per tile). CachedIntersects answers the same predicate in O(1),
-	// so a single pass both selects and filters with no second walk.
 	for i := 0; i < dl.Len(); i++ {
 		if grp, ok := dl.GroupAt(i); ok {
 			if err := compositeGroup(dl, grp, b, out, dx, dy, clip, f, g, scratch, nil); err != nil {
 				return err
 			}
-			i = grp.End - 1 // the loop's i++ lands on the first command past the group
+			i = grp.End - 1
 			continue
 		}
 		if !dl.CachedIntersects(i, b) {
@@ -81,32 +52,9 @@ func rasterizeTile(dl *paint.LayerDL, bounds frame.Rect, out *frame.Bitmap, f *F
 	return nil
 }
 
-// compositeGroup renders grp's [Start,End) into a scratch buffer the size of dst,
-// letting overlapping members blend against each other (not against the tile),
-// applies grp's own opacity once across the buffer, then blends it onto dst. This
-// is what closes GOOSIE-COMPOSITE-001: two translucent layers inside one faded
-// group darken once against each other and then once as a group, exactly as a
-// compositor does, instead of each being pre-faded and double-darkening. Nested
-// groups recurse with their own scratch. A tile-sized scratch means a group that
-// straddles tiles is faded per-tile, which is per-pixel and so still exact.
-//
-// The fade and the blit cover only `wrote`, the union of the boxes the members
-// actually painted, accumulated during the draw rather than read off
-// grp.Bounds: a text command's recorded bounds end at the baseline
-// (paint.TextRun.Bounds sets Y1 = glyph Y), so a descender lies outside them and
-// a bounds-sized region would clip the bottom off faded text. Resetting the whole
-// scratch stays a whole-tile operation because the buffer comes out of a pool
-// dirty in an unknown place, and a memset is two orders of magnitude cheaper per
-// pixel than the fade it replaces there: before this, one 40x40 faded box cost
-// the same 65,536-pixel pass as a group covering the tile
-// (test/raster/group_bench_test.go).
-//
-// ink, when non-nil, receives this group's blit region so the enclosing group
-// fades and blits it too. The tile itself passes nil: its pixels are already the
-// thing being written.
 func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *frame.Bitmap, dx, dy int32, clip frame.Rect, f *Fonts, g *GlyphAtlas, pool *frame.BitmapPool, ink *frame.Rect) error {
 	if !grp.Bounds.Intersects(tile) {
-		return nil // whole group misses this tile (an empty Bounds rejects here too)
+		return nil
 	}
 	sc, pooled := acquireScratch(dst, pool)
 	if pooled {
@@ -116,9 +64,6 @@ func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *fr
 	scClip := sc.Bounds()
 	var wrote frame.Rect
 	for i := grp.Start; i < grp.End; i++ {
-		// GroupAt(grp.Start) is this group itself, so only a command past the head
-		// can begin a nested child. The builder never records a group that shares its
-		// enclosing group's head, so a child always starts strictly after it.
 		if i > grp.Start {
 			if child, ok := dl.GroupAt(i); ok {
 				if err := compositeGroup(dl, child, tile, sc, dx, dy, scClip, f, g, pool, &wrote); err != nil {
@@ -136,16 +81,13 @@ func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *fr
 		}
 	}
 	if wrote.Empty() {
-		return nil // every member missed the tile: nothing to fade and nothing to blend
+		return nil
 	}
 	r := wrote.Intersection(scClip)
 	if r.Empty() {
 		return nil
 	}
 	fadeRect(sc, grp.OwnOpacity, r)
-	// r in scratch coordinates lands on r in dst coordinates: BlitOver maps
-	// srcRect's top-left to dstOrigin, so the origin has to be r's own corner -
-	// (0,0) here would shift the group by its offset.
 	dst.BlitOver(sc, frame.Point{X: r.X0, Y: r.Y0}, r, clip, nil)
 	if ink != nil {
 		*ink = ink.Union(r)
@@ -153,9 +95,6 @@ func compositeGroup(dl *paint.LayerDL, grp paint.Group, tile frame.Rect, dst *fr
 	return nil
 }
 
-// acquireScratch returns a buffer the same size as dst. With a matching pool it
-// is pooled (the steady-state frame path must not allocate); without one it is a
-// one-off NewBitmap for a tool or test rasterizing a single tile.
 func acquireScratch(dst *frame.Bitmap, pool *frame.BitmapPool) (*frame.Bitmap, bool) {
 	if pool != nil && pool.Size() == dst.Size() {
 		return pool.Acquire(), true
@@ -163,10 +102,6 @@ func acquireScratch(dst *frame.Bitmap, pool *frame.BitmapPool) (*frame.Bitmap, b
 	return frame.NewBitmap(dst.W, dst.H), false
 }
 
-// fadeScale is one opacity step as a byte table. A premultiplied fade scales all
-// four channels by the same factor, so the mapping depends on the byte value and
-// not on the pixel: building it once per group is bit-identical to doing
-// applyOpacity's float multiply per channel, for a quarter of the arithmetic.
 type fadeScale [256]byte
 
 func newFadeScale(o float32) fadeScale {
@@ -177,11 +112,6 @@ func newFadeScale(o float32) fadeScale {
 	return t
 }
 
-// fadeRect multiplies every pixel of b inside r by o (the premultiplied scale
-// applyOpacity performs per command). A recorded group carries o in (0,1); the
-// guards keep 0 (drop) and >=1 (no-op) correct should a wider range ever reach
-// here. Pixels outside r are untouched, which is why the caller's region has to
-// be everything the group painted - see compositeGroup.
 func fadeRect(b *frame.Bitmap, o float32, r frame.Rect) {
 	if o >= 1 {
 		return
@@ -201,17 +131,6 @@ func fadeRect(b *frame.Bitmap, o float32, r frame.Rect) {
 	}
 }
 
-// drawCommand paints one command into dst at the tile-local offset (dx,dy),
-// clipped to tileClip (dst's own bounds) intersected with the command's own
-// Clip. It is the single place a command's Kind becomes pixels, so an ordinary
-// tile draw and a group scratch draw are guaranteed identical.
-//
-// ink, when non-nil, receives the box the command could paint, in dst's
-// coordinates. It over-approximates on purpose - the command's own box rather
-// than the clipped remainder, and for text the glyphs' real mask boxes, which is
-// the one Kind whose ink leaves its Rect - because a region too small clips
-// pixels and a region too large only costs fade work. Callers that paint
-// straight to a tile pass nil: nothing reads the answer.
 func drawCommand(dst *frame.Bitmap, dl *paint.LayerDL, i int, dx, dy int32, tileClip frame.Rect, f *Fonts, g *GlyphAtlas, ink *frame.Rect) error {
 	c := dl.At(i)
 	cmdClip := tileClip
@@ -247,11 +166,6 @@ func drawCommand(dst *frame.Bitmap, dl *paint.LayerDL, i int, dx, dy int32, tile
 	return nil
 }
 
-// drawMaskedFill paints color over dst, multiplied by a mask stretched over
-// the fill rect. The mask resolves per the match-source rule: images with
-// real translucency gate on alpha, alpha-less images on luminance. Rounded
-// corners do not apply under a mask (icons, the motivating case, are square);
-// mask-size/position/repeat are deferred, so the single layer always covers.
 func drawMaskedFill(out *frame.Bitmap, dst frame.Rect, color frame.Color, mask image.Image, clip frame.Rect) {
 	mb := mask.Bounds()
 	mw, mh := mb.Dx(), mb.Dy()
@@ -321,15 +235,6 @@ func drawMaskedFill(out *frame.Bitmap, dst frame.Rect, color frame.Color, mask i
 	}
 }
 
-// applyOpacity folds a command's opacity into its premultiplied color by scaling
-// all four channels together, which is the only operation that keeps a
-// premultiplied color valid: un-premultiplying, scaling alpha, and re-multiplying
-// would round differently at every opacity step.
-//
-// Zero means unset rather than invisible, so a producer that emits only opaque
-// commands never touches the field. That is consistent with the rest of
-// DisplayCmd, where visibility is decided by Color and Rect: an element that is
-// genuinely transparent is dropped by the style pass before it becomes a command.
 func applyOpacity(c frame.Color, opacity float32) frame.Color {
 	if opacity == 0 || opacity >= 1 {
 		return c
@@ -341,12 +246,6 @@ func applyOpacity(c frame.Color, opacity float32) frame.Color {
 	return frame.Color(scale(c.R())<<24 | scale(c.G())<<16 | scale(c.B())<<8 | scale(c.A()))
 }
 
-// drawBorder paints up to four edge strips. Each strip is a fill, so a border
-// costs at most four clipped rectangles and no extra geometry.
-//
-// The strips go into a fixed array rather than a slice literal: this runs once
-// per bordered box per tile, and a heap slice here would put an allocation inside
-// the steady-state frame path.
 func drawBorder(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.Rect) {
 	type side struct {
 		spec paint.SideSpec
@@ -355,8 +254,6 @@ func drawBorder(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame
 	r := c.Rect.Translate(dx, dy).Canon()
 	w, h := r.W(), r.H()
 	if !c.Radius.Empty() {
-		// A rounded box's ring is one shape, not four strips: the corner bands
-		// belong to the horizontal edges, so the arc stays continuous.
 		out.StrokeRounded(r, c.Radius,
 			clampW(c.Border.Top.Width, h), clampW(c.Border.Right.Width, w),
 			clampW(c.Border.Bottom.Width, h), clampW(c.Border.Left.Width, w),
@@ -380,8 +277,6 @@ func drawBorder(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame
 	}
 }
 
-// clampW stops a border whose two opposite edges together exceed the box from
-// wrapping past the middle and painting the far edge.
 func clampW(width, extent int32) int32 {
 	if width > extent {
 		return extent
@@ -410,13 +305,9 @@ func drawText(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.R
 		if !glyph.Ok || glyph.Mask == nil || glyph.Mask.Bounds().Empty() {
 			continue
 		}
-		// The pen sits on the baseline; the glyph's own bounds say where its ink
-		// falls relative to the pen.
 		pen := frame.Point{X: gl.X + dx, Y: gl.Y + dy}
 		origin := pen.Translate(glyph.Bounds.X0, glyph.Bounds.Y0)
 		if ink != nil {
-			// The mask box, not the command rect: BlitMask writes exactly this, and
-			// below the baseline is where a faded 'p' or 'g' puts its ink.
 			mr := glyph.Mask.Bounds()
 			*ink = ink.Union(frame.RectAt(origin, frame.Size{W: int32(mr.Dx()), H: int32(mr.Dy())}))
 		}
@@ -425,9 +316,6 @@ func drawText(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.R
 	return nil
 }
 
-// drawImage scales a decoded image into the command's box. A missing source is
-// not an error: an image that has not decoded yet is a normal state for a page,
-// and the affected tiles are re-rasterized when it arrives.
 func drawImage(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.Rect) {
 	src := c.Image.Src
 	if src == nil {
@@ -444,16 +332,10 @@ func drawImage(out *frame.Bitmap, c *paint.DisplayCmd, dx, dy int32, clip frame.
 	out.ScaleOver(src, rectOf(box), dst, clip, opacityCoverage(c.Opacity), nil)
 }
 
-// rectOf re-exports an image.Rectangle as the content-space rect the frame
-// primitives speak in. The two types are deliberately not merged: one is a
-// standard-library image's own coordinate space and the other is a layer's.
 func rectOf(r image.Rectangle) frame.Rect {
 	return frame.Rect4(int32(r.Min.X), int32(r.Min.Y), int32(r.Max.X), int32(r.Max.Y))
 }
 
-// opacityCoverage turns a command's opacity into the 8-bit coverage the scaler
-// multiplies each sampled pixel by, with the same unset-is-opaque convention as
-// applyOpacity. 255 lets the scaler skip the multiplication for the common case.
 func opacityCoverage(opacity float32) uint8 {
 	if opacity == 0 || opacity >= 1 {
 		return 255

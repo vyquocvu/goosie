@@ -15,7 +15,6 @@ func TestThemeSwitching(t *testing.T) {
 	f := newNavTestPath(t)
 	f.config = config{width: 800, height: 600, dpr: 1}
 
-	// 1. Initial default is system (light)
 	if f.isDarkMode() {
 		t.Errorf("expected isDarkMode() = false initially, got true")
 	}
@@ -23,7 +22,6 @@ func TestThemeSwitching(t *testing.T) {
 		t.Errorf("expected isHighContrast() = false initially, got true")
 	}
 
-	// 2. Set theme to dark
 	f.setTheme("dark")
 	if !f.isDarkMode() {
 		t.Errorf("expected isDarkMode() = true after setTheme(\"dark\")")
@@ -33,7 +31,6 @@ func TestThemeSwitching(t *testing.T) {
 		t.Errorf("dark mode tab BGColor = %v, want #181818", activeTab.BGColor())
 	}
 
-	// 3. Set theme to high-contrast
 	f.setTheme("high-contrast")
 	if !f.isHighContrast() {
 		t.Errorf("expected isHighContrast() = true after setTheme(\"high-contrast\")")
@@ -42,7 +39,6 @@ func TestThemeSwitching(t *testing.T) {
 		t.Errorf("expected isDarkMode() = false under high-contrast")
 	}
 
-	// 4. Set theme to light
 	f.setTheme("light")
 	if f.isDarkMode() || f.isHighContrast() {
 		t.Errorf("expected both false under light mode")
@@ -64,7 +60,6 @@ func TestInspectPageThemeAction(t *testing.T) {
 	}
 	tab.SetSession(sess)
 
-	// Trigger set_theme action via goosie://inspect
 	_, inspectHTML := buildInspectPageHTML(f, "goosie://inspect?action=set_theme&theme=dark")
 	if !f.isDarkMode() {
 		t.Errorf("expected isDarkMode() = true after inspect action")
@@ -90,10 +85,6 @@ func TestVersionPageAppearanceReport(t *testing.T) {
 	}
 }
 
-// TestThemeChromeSurfacesStayInSync renders the tab strip and toolbar together
-// for every appearance theme and asserts the two chrome surfaces, plus the
-// security indicator, stay in step. This is the oracle the earlier
-// TestThemeSwitching lacked: it only checked the tab's stored background.
 // qc:BR-141
 func TestThemeChromeSurfacesStayInSync(t *testing.T) {
 	fonts, err := raster.NewFonts()

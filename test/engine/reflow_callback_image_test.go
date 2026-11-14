@@ -8,20 +8,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// An IntersectionObserver callback runs synchronously from inside Reflow, and
-// Reflow used to hold imgMu for its whole body. A callback that assigns
-// img.src therefore re-entered the loader on the same goroutine and blocked
-// forever on the mutex it already held: https://vneconomy.vn/ never returned
-// from NewSession in sweep #13 (SIGQUIT: beginScriptImage in sync.Mutex.Lock,
-// called from Reflow at engine.go).
-//
-// The invariant is "a Reflow must not dispatch JS while holding a lock the
-// JS can re-enter". The oracle is liveness under a watchdog, plus the payload:
-// the image must actually decode, so a fix that drops the load instead of
-// releasing the lock does not pass.
-//
-// The observer is registered inline so the real load path (parse -> scripts ->
-// RestyleAndReflow -> CheckIntersections) runs exactly as on a live page.
 const reflowCallbackWatchdog = 10 * time.Second
 
 // qc:BR-256
@@ -77,9 +63,6 @@ new IntersectionObserver(function (entries) {
 		t.Errorf("hero src was not assigned by the callback")
 	}
 
-	// The data: source loads inline, but js settles the element in a microtask,
-	// so the result becomes visible on the next pump. This is the positive half:
-	// the load must complete, not merely be attempted.
 	got.sess.PumpJS(800)
 	if got := engineComputed(t, rt, "document.getElementById('hero').naturalWidth + 'x' + document.getElementById('hero').naturalHeight"); got != "4x4" {
 		t.Errorf("hero natural size after the callback's src assignment = %s, want 4x4", got)

@@ -34,10 +34,6 @@ func TestIndependentTabNavigation(t *testing.T) {
 	}
 }
 
-// The serial a tab carries is what stops a navigation the user has since superseded from
-// landing on top of the one they are waiting for. That only matters inside
-// framePath.applyNavResult, which is where the result reaches the tab, the toolbar, and
-// the scheduler, so it is tested there rather than by assigning the field.
 // qc:BR-014 BR-170
 func TestStaleNavResultCannotPaintOverTheCurrentOne(t *testing.T) {
 	f := newNavTestPath(t)
@@ -67,8 +63,6 @@ func TestStaleNavResultCannotPaintOverTheCurrentOne(t *testing.T) {
 	}
 }
 
-// An error from a navigation the user already replaced is not an error the user should
-// see: they moved on, and the load they are waiting on may still succeed.
 // qc:BR-170
 func TestStaleNavErrorDoesNotSurface(t *testing.T) {
 	f := newNavTestPath(t)
@@ -90,9 +84,6 @@ func TestStaleNavErrorDoesNotSurface(t *testing.T) {
 	}
 }
 
-// The positive control: the same call with the serial the tab is actually waiting on does
-// take the tab over and does publish a plan. Without it the two tests above could pass on
-// a framePath that ignores every result.
 func TestCurrentNavResultIsApplied(t *testing.T) {
 	f := newNavTestPath(t)
 	tab := f.tabMgr.Active()
@@ -175,8 +166,6 @@ func TestStopTabCancelsOnlyActiveNavigationAndKeepsDisplayedDocument(t *testing.
 }
 
 // qc:BR-027
-// A background tab finishing its load updates itself and nothing on screen, which is what
-// makes tabs independent. The foreground keeps its document and its published plan.
 func TestBackgroundTabResultLeavesTheForegroundAlone(t *testing.T) {
 	f := newNavTestPath(t)
 	background := f.tabMgr.Active()
@@ -207,10 +196,6 @@ func TestBackgroundTabResultLeavesTheForegroundAlone(t *testing.T) {
 	}
 }
 
-// TestOutOfOrderResultsLandOnTheir OwnTabs pins independent tab navigation
-// under completion reorder: the background tab finishing first must not
-// disturb the foreground, and the foreground finishing later lands exactly
-// once with its own history intact.
 // qc:BR-028 BR-171
 func TestOutOfOrderResultsLandOnTheirOwnTabs(t *testing.T) {
 	f := newNavTestPath(t)

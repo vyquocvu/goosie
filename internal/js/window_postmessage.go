@@ -12,9 +12,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
-// setupWindowPostMessage installs the same-window Window.postMessage path.
-// It queues a task, applies targetOrigin filtering, and clones the supported
-// JSON-compatible portion of structured-clone data before dispatch.
 func (r *Runtime) setupWindowPostMessage(win *goja.Object) {
 	_ = win.Set("postMessage", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
@@ -68,9 +65,6 @@ func (r *Runtime) setupWindowPostMessage(win *goja.Object) {
 	})
 }
 
-// postMessageAcross queues a message in another runtime. The source window is
-// supplied in the receiver's realm so MessageEvent.source has the right
-// identity and can be used without exporting a goja object across runtimes.
 func (r *Runtime) postMessageAcross(call goja.FunctionCall, target *Runtime, sourceWindow goja.Value) goja.Value {
 	if len(call.Arguments) == 0 {
 		panic(r.vm.NewTypeError("Failed to execute 'postMessage': 1 argument required"))
@@ -104,8 +98,6 @@ func (r *Runtime) postMessageAcross(call goja.FunctionCall, target *Runtime, sou
 	return goja.Undefined()
 }
 
-// transferPortsTo moves MessagePort wrappers into the destination runtime while
-// preserving the endpoint pair and any messages already queued on the port.
 func (r *Runtime) transferPortsTo(target *Runtime, transfer goja.Value) ([]any, error) {
 	values := transferList(r.vm, transfer)
 	ports := make([]any, 0, len(values))
@@ -302,9 +294,6 @@ func (c *messageValueCloner) clone(value goja.Value, depth int) (goja.Value, err
 	}
 	object, isObject := value.(*goja.Object)
 	if !isObject {
-		// Primitive goja values are immutable and can be shared between realms.
-		// Returning them directly preserves NaN, infinities, -0, BigInt, and
-		// UTF-16 strings containing unpaired surrogates without a lossy JSON hop.
 		return value, nil
 	}
 	if transferred := c.transfers[object]; transferred != nil {
@@ -313,8 +302,6 @@ func (c *messageValueCloner) clone(value goja.Value, depth int) (goja.Value, err
 	if messagePortFromObject(c.source.vm, object) != nil {
 		return nil, errBroadcastDataClone
 	}
-	// Response has no structured-serialize steps in the HTML Standard. Check
-	// prototype identity (including subclasses) without reading user getters.
 	if c.source.responseProto != nil {
 		for prototype := object; prototype != nil; prototype = prototype.Prototype() {
 			if prototype == c.source.responseProto {
@@ -329,9 +316,6 @@ func (c *messageValueCloner) clone(value goja.Value, depth int) (goja.Value, err
 	if c.nodes > maxBroadcastCloneNodes {
 		return nil, errBroadcastDataClone
 	}
-	// ArrayBuffer and SharedArrayBuffer are branded platform objects rather
-	// than ordinary objects. Preserve their native slots and resize mode when
-	// cloning them into the destination runtime.
 	if buffer, ok := object.Export().(goja.ArrayBuffer); ok {
 		if buffer.Detached() {
 			return nil, errBroadcastDataClone
@@ -343,9 +327,6 @@ func (c *messageValueCloner) clone(value goja.Value, depth int) (goja.Value, err
 		c.seen[object] = cloned
 		return cloned, nil
 	}
-	// ArrayBuffer views must be detected from their internal slots. Exported
-	// Go slices lose the distinction between fixed-length and length-tracking
-	// views and do not reveal whether a view is currently out of bounds.
 	if viewInfo, ok := c.source.vm.ArrayBufferViewInfo(object); ok {
 		if viewInfo.OutOfBounds || viewInfo.ByteOffset < 0 || viewInfo.ByteLength < 0 || viewInfo.ByteOffset > maxBroadcastCloneBytes || viewInfo.ByteLength > maxBroadcastCloneBytes || viewInfo.ElementSize <= 0 {
 			return nil, errBroadcastDataClone
@@ -508,9 +489,6 @@ func (c *messageValueCloner) clone(value goja.Value, depth int) (goja.Value, err
 		return date, nil
 	case "RegExp":
 		source, flags := object.Get("source"), object.Get("flags")
-		// Goja serializes escaped slashes as a Unicode escape in the source
-		// getter, while RegExp.prototype.source uses the short escaped-slash
-		// spelling required by the web platform.
 		sourceText := strings.NewReplacer("\\u002f", "\\/", "\\u002F", "\\/").Replace(source.String())
 		regexp, err := c.destination.vm.New(c.destination.vm.Get("RegExp"), c.destination.vm.ToValue(sourceText), flags)
 		if err != nil {
@@ -590,9 +568,6 @@ func (c *messageValueCloner) cloneError(source *goja.Object, depth int) (goja.Va
 		return nil, errBroadcastDataClone
 	}
 	c.seen[source] = cloned
-	// Error cause is an own structured-serializable data member. AggregateError
-	// additionally carries its errors sequence. Neither the stack nor arbitrary
-	// custom own properties are part of Error serialization.
 	for _, property := range []string{"cause", "errors"} {
 		if !hasOwnPropertyName(source, property) {
 			continue

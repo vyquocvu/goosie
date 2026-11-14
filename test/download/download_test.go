@@ -10,9 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/download"
 )
 
-// TestShouldDownloadAttachment verifies that an attachment disposition always
-// downloads and that unrenderable content types download even without one,
-// while renderable HTML/plain text still goes to the page.
 // qc:BR-149
 func TestShouldDownloadAttachment(t *testing.T) {
 	cases := []struct {
@@ -37,8 +34,6 @@ func TestShouldDownloadAttachment(t *testing.T) {
 	}
 }
 
-// TestFileNameFromDisposition verifies that the disposition filename wins over
-// the URL path.
 // qc:BR-149
 func TestFileNameFromDisposition(t *testing.T) {
 	got := download.FileName(`attachment; filename="report.pdf"`, "https://x.com/blob")
@@ -162,8 +157,6 @@ func TestSaveStreamCannotEscapeDownloadDirectory(t *testing.T) {
 	}
 }
 
-// TestSaveDeduplicatesNames verifies that saving the same name three times
-// creates three files and never overwrites the earlier contents.
 // qc:BR-150
 func TestSaveDeduplicatesNames(t *testing.T) {
 	dir := t.TempDir()
@@ -192,10 +185,6 @@ func TestSaveDeduplicatesNames(t *testing.T) {
 	}
 }
 
-// TestSaveUnwritableDirectoryReturnsErrorAndWritesNothing verifies that a
-// destination directory which cannot be created surfaces an error instead of
-// silently dropping the download. A regular file blocks the parent path so the
-// failure is deterministic regardless of the user's permissions.
 // qc:BR-152
 func TestSaveUnwritableDirectoryReturnsErrorAndWritesNothing(t *testing.T) {
 	root := t.TempDir()
@@ -223,8 +212,6 @@ func TestSaveUnwritableDirectoryReturnsErrorAndWritesNothing(t *testing.T) {
 		t.Fatalf("blocker content = %q (err %v), want keep", got, readErr)
 	}
 
-	// The failure must be recoverable: the next download into a writable
-	// directory still succeeds, so the app keeps working.
 	recovered, err := download.Save(filepath.Join(root, "downloads"), "file.bin", []byte("later"))
 	if err != nil {
 		t.Fatalf("download after failure: %v", err)

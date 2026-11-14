@@ -1,16 +1,5 @@
 package entrypoints
 
-// GOOSIE-PUMP-001: a paced run - a screenshot or a measured gate burst - used
-// to load the page, draw it, and never run its event loop, and the script-image
-// fetch context died as soon as the load call returned. A page whose timer,
-// RAF callback or `new Image()` completion was supposed to change what it looks
-// like was therefore captured before any of that could happen.
-//
-// These oracles drive the real binary over a local server and read the written
-// PNG, so they measure the same path an operator runs: BR-253 (zero-delay
-// timer), BR-254 (script-assigned image source reaching the network and its
-// onload being dispatched) and BR-255 (timer that mutates the DOM).
-
 import (
 	"bytes"
 	"image"
@@ -33,8 +22,6 @@ const (
 	pacedHeight = 150
 )
 
-// runPacedScreenshot runs `goosie -screenshot` against url through the headless
-// backend and returns the decoded PNG it wrote.
 func runPacedScreenshot(t *testing.T, bin, url string) image.Image {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "shot.png")
@@ -63,7 +50,6 @@ func runPacedScreenshot(t *testing.T, bin, url string) image.Image {
 	return img
 }
 
-// newPacedPageServer serves the named HTML pages and 404s everything else.
 func newPacedPageServer(pages map[string]string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, ok := pages[r.URL.Path]
@@ -76,7 +62,6 @@ func newPacedPageServer(pages map[string]string) *httptest.Server {
 	}))
 }
 
-// pngPixel reads one pixel of a decoded screenshot.
 func pngPixel(t *testing.T, img image.Image, x, y int) color.RGBA {
 	t.Helper()
 	if !(image.Point{X: x, Y: y}).In(img.Bounds()) {
@@ -86,9 +71,6 @@ func pngPixel(t *testing.T, img image.Image, x, y int) color.RGBA {
 	return color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}
 }
 
-// assertPixel fails with both colours named. The tolerance absorbs nothing a
-// solid fill should not produce, but keeps the assertion about the colour a
-// page asked for rather than one encoder rounding.
 func assertPixel(t *testing.T, img image.Image, x, y int, want color.RGBA, what string) {
 	t.Helper()
 	got := pngPixel(t, img, x, y)
@@ -102,15 +84,6 @@ func assertPixel(t *testing.T, img image.Image, x, y int, want color.RGBA, what 
 	}
 }
 
-// BR-253: a zero-delay timer runs before a paced screenshot settles.
-//
-// The page starts blue and a setTimeout(...,0) callback turns the body
-// background red. The PNG the binary writes must hold the post-timer colour;
-// the control page, identical without the script, must keep the initial one.
-// The sample point is the middle of the viewport, which no box covers: it shows
-// the plan's canvas colour, so this also measures that a scripted background
-// change republished the plan rather than only re-rasterizing tiles.
-//
 // qc:BR-253
 func TestPacedScreenshotRunsAZeroDelayTimer(t *testing.T) {
 	bin := buildBinary(t, "goosie")
@@ -132,17 +105,6 @@ func TestPacedScreenshotRunsAZeroDelayTimer(t *testing.T) {
 		"BR-253 control: the settled paced screenshot of a page with no timer keeps its initial #0000ff")
 }
 
-// BR-254: a script-assigned image source reaches the network after the load
-// call returned, and its onload runs inside the paced run.
-//
-// The server holds the image response for 50ms. That is deliberate: the old
-// code canceled the image fetch context when loadURLCtx returned, so the hold
-// guarantees the fetch is still open at that moment and the request is aborted
-// unless the context outlives the call. After the hold the handler records
-// r.Context().Err(), which is how the server sees the client cancel. The page
-// paints green from onload and red from onerror, so a failed dispatch is not
-// mistaken for a missing repaint.
-//
 // qc:BR-254
 func TestPacedScreenshotScriptImageLoadOutlivesTheLoadCall(t *testing.T) {
 	bin := buildBinary(t, "goosie")
@@ -158,7 +120,6 @@ i.src = '/x.png';
 	var requests atomic.Int32
 	var requestedOnce sync.Once
 	requested := make(chan struct{})
-	// held carries what the request context looked like when the hold ended.
 	held := make(chan error, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,12 +170,6 @@ i.src = '/x.png';
 		"BR-254: the settled paced screenshot after the script image's onload sets body background to #00ff00")
 }
 
-// BR-255: a timer that mutates the DOM in a paced run is repainted.
-//
-// The page starts white and a setTimeout(...,0) callback appends a 120x80 green
-// block at the top-left. The settled PNG must show the block; the control page
-// must not.
-//
 // qc:BR-255
 func TestPacedScreenshotRepaintsATimerMutation(t *testing.T) {
 	bin := buildBinary(t, "goosie")
@@ -236,12 +191,6 @@ func TestPacedScreenshotRepaintsATimerMutation(t *testing.T) {
 		"BR-255 control: the settled paced screenshot of a page with no timer stays white where the block would be")
 }
 
-// The gate driver is the other paced seam, and it shares the shape: a timer
-// cannot prove it the way BR-253 does, because a zero-delay timer fires inside
-// the load. A 30ms timer can only fire once the paced loop is running, so a
-// fetch its callback issues reaching the local server is proof that the gate
-// pumped the page. Without the hook the run draws its frames and exits with the
-// server never seeing the request.
 func TestGatePacedRunPumpsThePageEventLoop(t *testing.T) {
 	bin := buildBinary(t, "goosie")
 
@@ -286,9 +235,6 @@ setTimeout(function(){ fetch('/ping').catch(function(){}); }, 30);
 	}
 }
 
-// tinyPNG encodes the image the BR-254 server answers with. Its size is
-// deliberate but arbitrary: the oracle is about the request and the event, not
-// about the decoded dimensions.
 func tinyPNG(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 7, 9))

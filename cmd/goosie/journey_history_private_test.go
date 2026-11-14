@@ -107,8 +107,6 @@ func TestJourneyReloadDoesNotAddHistoryVisits(t *testing.T) {
 	b := newBrowserE2E(t)
 	a, bb := server.URL+"/a", server.URL+"/b"
 	b.navigateViaAddressBar(t, a)
-	// The title is set before the visit is recorded, so wait for the entry
-	// too or the comparison below can start one visit short.
 	b.waitFor(t, "page A", func() bool {
 		return b.activeURL() == a && b.f.tabMgr.Active().Title() == "/a" && len(b.f.history.Entries()) == 1
 	})
@@ -134,8 +132,6 @@ func TestJourneyReloadDoesNotAddHistoryVisits(t *testing.T) {
 	if got := len(b.f.history.Entries()); got != beforeReload {
 		t.Fatalf("history grew from %d to %d after reload", beforeReload, got)
 	}
-	// Pin the same consecutive-URL rule directly too: reload must not create a
-	// duplicate even when the history store receives the displayed URL again.
 	b.f.history.Record(bb, "/b")
 	if got := len(b.f.history.Entries()); got != beforeReload {
 		t.Fatalf("recording the displayed URL again grew history from %d to %d", beforeReload, got)
@@ -145,10 +141,6 @@ func TestJourneyReloadDoesNotAddHistoryVisits(t *testing.T) {
 		if b.activeURL() != a || b.f.tabMgr.Active().Title() != "/a" {
 			return false
 		}
-		// The displayed URL and title are set before the visit reaches the
-		// store, and the store dedupes against its own tail. Reading the count
-		// before that record lands makes the reload below look like a new
-		// visit, so wait for the traversal to be recorded too.
 		entries := b.f.history.Entries()
 		return len(entries) > 0 && entries[len(entries)-1].URL == a
 	})

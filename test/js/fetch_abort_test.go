@@ -10,8 +10,6 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
-// gatedFetcher blocks inside Fetch until the test releases it, so an abort can
-// be observed while the request is still in flight.
 type gatedFetcher struct {
 	started chan struct{}
 	release chan struct{}
@@ -26,9 +24,6 @@ func (g *gatedFetcher) Fetch(ctx context.Context, url, method string, headers ma
 	return g.resp, nil
 }
 
-// waitAbortedDrain waits for the request goroutine to observe the abort and
-// queue its rejection, then drains it. The HTTP client stays blocked: an abort
-// must not need the response to settle the promise.
 func waitAbortedDrain(t *testing.T, r *js.Runtime) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -41,16 +36,8 @@ func waitAbortedDrain(t *testing.T, r *js.Runtime) {
 	r.DrainFetchCallbacks()
 }
 
-// defaultAbortText is what a rejection handler sees when it concatenates the
-// value of a default abort. Chromium's reason is a DOMException, so the text
-// carries its message: measured as "AbortError: signal is aborted without
-// reason" by scripts/verify-br123-fetch-abort.js, section 1. The value's own
-// shape is pinned in test/js/fetch_abort_reason_test.go.
 const defaultAbortText = "rejected:AbortError: signal is aborted without reason"
 
-// TestFetchAbortSignalRejectsAndDropsLateResponse pins the abort contract: a
-// pending fetch rejects with AbortError as soon as the signal fires, and the
-// response that arrives afterwards must never reach the script.
 // qc:BR-123
 func TestFetchAbortSignalRejectsAndDropsLateResponse(t *testing.T) {
 	gf := &gatedFetcher{
@@ -96,7 +83,6 @@ func TestFetchAbortSignalRejectsAndDropsLateResponse(t *testing.T) {
 		t.Fatalf("abortState = %+v, want %q", v, defaultAbortText)
 	}
 
-	// The response completes only now; it must be dropped, not delivered.
 	release()
 	drainFetch(t, r)
 	r.DrainFetchCallbacks()
@@ -109,8 +95,6 @@ func TestFetchAbortSignalRejectsAndDropsLateResponse(t *testing.T) {
 	}
 }
 
-// TestFetchAbortPreAbortedSignalSkipsRequest pins the already-aborted case:
-// fetch must reject without ever calling the HTTP client.
 // qc:BR-123
 func TestFetchAbortPreAbortedSignalSkipsRequest(t *testing.T) {
 	m := &mockFetcher{
@@ -141,8 +125,6 @@ func TestFetchAbortPreAbortedSignalSkipsRequest(t *testing.T) {
 	}
 }
 
-// TestFetchAbortCustomReasonRejectsWithReason verifies the rejection value is
-// the signal's reason rather than a hardcoded string.
 // qc:BR-123
 func TestFetchAbortCustomReasonRejectsWithReason(t *testing.T) {
 	gf := &gatedFetcher{

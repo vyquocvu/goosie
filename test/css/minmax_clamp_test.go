@@ -6,12 +6,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/css"
 )
 
-// clamp(), min() and max() are how modern pages size their type and their gutters:
-// CSS-Tricks sets its body text with `clamp(14px,calc(0.8rem + 0.25vw),20px)` and
-// MDN's side padding is `max(1rem,calc(50vw - 720px + 1rem))`. Each argument is
-// itself an expression, so they share calc()'s grammar.
 func TestEvalClampBoundsItsValue(t *testing.T) {
-	// 4rem is 64, the middle term 16 + 44.8 = 60.8, so the lower bound wins.
 	cases := []struct {
 		name, fn, expr string
 		want           float32

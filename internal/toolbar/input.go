@@ -5,9 +5,6 @@ import (
 	"unicode"
 )
 
-// sanitizePaste strips carriage returns and newlines a clipboard can carry.
-// The address bar submits on Enter, so a pasted newline must never become
-// part of the value; surrounding whitespace is left for navigation to trim.
 func sanitizePaste(text string) string {
 	if strings.IndexAny(text, "\r\n") < 0 {
 		return text
@@ -94,8 +91,6 @@ func (s *State) copyLocked() (string, Clipboard) {
 	return string(runes[sMin:sMax]), s.Clipboard
 }
 
-// Copy writes the selection to the clipboard. The clipboard call runs after
-// unlock: the host clipboard may block, and it must never run under the lock.
 func (s *State) Copy() {
 	s.mu.Lock()
 	text, cb := s.copyLocked()
@@ -109,8 +104,6 @@ func (s *State) pasteTextLocked(text string) {
 	if s.Focus != FocusAddress {
 		return
 	}
-	// A normal input never admits a newline from the clipboard: it would
-	// submit mid-paste or smuggle a control character into the URL.
 	text = sanitizePaste(text)
 	if text == "" {
 		return
@@ -127,7 +120,6 @@ func (s *State) pasteTextLocked(text string) {
 	s.Cursor += len(pasted)
 }
 
-// Paste inserts the clipboard text. The clipboard read runs after unlock.
 func (s *State) Paste() {
 	s.mu.Lock()
 	if s.Focus != FocusAddress {
@@ -157,7 +149,6 @@ func (s *State) cutLocked() (string, Clipboard) {
 	return text, cb
 }
 
-// Cut removes the selection to the clipboard; the write runs after unlock.
 func (s *State) Cut() {
 	s.mu.Lock()
 	text, cb := s.cutLocked()
@@ -380,9 +371,6 @@ func isWordChar(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
 }
 
-// Public locking wrappers: these mutate only State fields, so they lock,
-// delegate to the locked bodies above, and unlock. Clipboard and host
-// callbacks never run inside; see Copy, Paste and Cut.
 func (s *State) InsertRune(r rune) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -4,9 +4,6 @@ package darwin
 
 import "strings"
 
-// fileAccept is a parsed <input type="file"> accept value. Extensions are
-// lowercase without their leading dot; MIME types keep their media type and may
-// carry a wildcard subtype such as image/*.
 type fileAccept struct {
 	Extensions []string
 	MIMETypes  []string
@@ -39,10 +36,6 @@ func parseFileAccept(raw string) fileAccept {
 	return accept
 }
 
-// filters reports whether the panel can restrict its selection. */* means
-// everything, so it imposes nothing. A wildcard group the panel cannot express
-// (application/* and friends) also leaves the selection unfiltered rather than
-// hiding files the page meant to allow.
 func (a fileAccept) filters() bool {
 	if len(a.MIMETypes) > 0 {
 		for _, mime := range a.MIMETypes {
@@ -55,9 +48,6 @@ func (a fileAccept) filters() bool {
 	return len(a.Extensions) > 0
 }
 
-// nativeFilter returns the comma-separated extension and MIME lists the shim
-// applies to the panel. Both are empty when the accept value cannot be fully
-// represented, so the panel stays unfiltered.
 func (a fileAccept) nativeFilter() (extensions, mimeTypes string) {
 	if !a.filters() {
 		return "", ""
