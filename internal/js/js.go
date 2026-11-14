@@ -251,6 +251,7 @@ type Runtime struct {
 	ariaElementListReferences          map[*dom.Node]map[string]goja.Value
 	formElementCollections             map[*dom.Node]*goja.Object
 	documentFormCollections            map[*dom.Node]*goja.Object
+	documentNamedCollections           map[string]map[*dom.Node]*goja.Object
 	fieldsetElements                   map[*dom.Node]*goja.Object
 	selectOptionsCollections           map[*dom.Node]*goja.Object
 	selectSelectedCollections          map[*dom.Node]*goja.Object

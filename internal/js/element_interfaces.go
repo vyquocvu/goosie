@@ -372,6 +372,7 @@ func (r *Runtime) setupProtoChain() {
 		r.protoForTag(tag)
 	}
 	r.setupHTMLFormCollectionInterfaces()
+	r.installDocumentCollections()
 
 	if doc, ok := r.vm.Get("document").(*goja.Object); ok {
 		_ = doc.Set("__createImage__", func(call goja.FunctionCall) goja.Value {

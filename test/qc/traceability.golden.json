@@ -3329,6 +3329,22 @@
     "enforced": false
   },
   {
+    "id": "BR-295",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/document_collections_test.go:TestDocumentCollectionsAreEmptyOnADocumentWithoutMembers",
+      "test/js/document_collections_test.go:TestDocumentLinksCollectOnlyHrefAnchorsAndAreasInOrder",
+      "test/js/document_collections_test.go:TestDocumentScriptsAndImagesAreInDocumentOrder",
+      "test/js/document_collections_test.go:TestDocumentScriptsImagesLinksAreLiveHTMLCollections"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
