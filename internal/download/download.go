@@ -30,7 +30,7 @@ func ShouldDownload(contentType, disposition string) bool {
 		return true
 	}
 	ct := strings.ToLower(strings.TrimSpace(contentType))
-	if i := strings.IndexByte(ct, ';'); i >= 0 {
+	if i := strings.IndexAny(ct, ";,"); i >= 0 {
 		ct = strings.TrimSpace(ct[:i])
 	}
 	switch ct {

@@ -4024,6 +4024,19 @@
     "enforced": false
   },
   {
+    "id": "BR-296",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/download/content_type_comma_test.go:TestShouldDownloadAcceptsCommaSeparatedContentType",
+      "test/download/content_type_comma_test.go:TestShouldDownloadAttachmentStillOverridesContentType"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-169",
     "priority": "P1",
     "methods": [
