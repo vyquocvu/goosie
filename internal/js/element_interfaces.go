@@ -753,7 +753,10 @@ func (r *Runtime) defineConstructor(name string, p *goja.Object) *goja.Object {
 	}
 	_ = r.vm.Set("__ifaceProto__", p)
 	v, err := r.vm.RunString(`(function(proto) {
-		var C = function ` + name + `() { throw new TypeError("Illegal constructor"); };
+		var C = function ` + name + `() {
+			if (new.target) throw new TypeError("Failed to construct '` + name + `': Illegal constructor");
+			throw new TypeError("Illegal constructor");
+		};
 		Object.defineProperty(C, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
 		Object.defineProperty(proto, 'constructor', { value: C, writable: true, enumerable: false, configurable: true });
 		return C;

@@ -3364,6 +3364,21 @@
     "enforced": false
   },
   {
+    "id": "BR-298",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/constructor_error_message_test.go:TestAbstractInterfaceConstructorNameAndPrototypeSurviveTheBranch",
+      "test/js/constructor_error_message_test.go:TestCallingAbstractInterfaceThrowsBareIllegalConstructor",
+      "test/js/constructor_error_message_test.go:TestNewOnAbstractInterfaceThrowsPrefixedIllegalConstructor"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
