@@ -3271,6 +3271,20 @@
     "enforced": false
   },
   {
+    "id": "BR-291",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/doctype_test.go:TestDocumentDoctypeExposesNamePublicIdSystemId",
+      "test/js/doctype_test.go:TestDocumentDoctypeIsNullWhenAbsent",
+      "test/js/doctype_test.go:TestDocumentFirstChildIsTheDoctypeNotTheHtmlElement"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
