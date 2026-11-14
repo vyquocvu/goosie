@@ -62,7 +62,7 @@ Suy ra, cho chính task của bạn:
 
 ### 4.1. Tái dùng harness, không viết lại
 
-`cmd/goosie/e2e_test.go` đã có: `newBrowserE2E`, `close`, `inject`, `pressKey`, `click`, `clickNode`, `clickToolbarButton`, `navigateViaAddressBar`, `waitFor`, `diagnostics`, `activeURL`, `findAXNode`, `axContainsLabel`. API phía engine để đọc trạng thái: `internal/engine/focus.go:220 Focused()`, `:461 FocusedText()`, `:471 FocusedEditable()`, `engine.go:1849 SelectionBounds()`, `selection.go:252 SelectionText()`; xử lý biểu mẫu ở `internal/engine/forms.go`. **Không thêm API mới vào `internal/**`.** Nếu thiếu đường đọc để assert đúng điều catalog, ghi vào Status và dừng case đó — integrator sẽ quyết.
+`cmd/goosie/e2e_test.go` đã có: `newBrowserE2E`, `close`, `inject`, `pressKey`, `click`, `clickNode`, `clickToolbarButton`, `navigateViaAddressBar`, `waitFor`, `diagnostics`, `activeURL`, `findAXNode`, `axContainsLabel`. API phía engine để đọc trạng thái: `internal/engine/focus.go:186 Focused()`, `:461 FocusedText()`, `:471 FocusedEditable()`, `engine.go:1345 SelectionBounds()`, `selection.go:221 SelectionText()`; xử lý biểu mẫu ở `internal/engine/forms.go`. **Không thêm API mới vào `internal/**`.** Nếu thiếu đường đọc để assert đúng điều catalog, ghi vào Status và dừng case đó — integrator sẽ quyết.
 
 ### 4.2. Bất biến bắt buộc cho cả 11 case
 
@@ -123,16 +123,16 @@ Commit trên branch của bạn với message theo quy ước repo (`git log --o
 
 | Case | Test áp dụng | Phép mutation cụ thể | Kết quả Mutation (FAIL) | Kết quả Revert (PASS) | Kết luận độ nhạy của Oracle |
 | --- | --- | --- | --- | --- | --- |
-| **BR-097** | `TestJourneyTextInputEditingAndCaret` | Trong `internal/engine/focus.go:389` (`EditBackspace`), đổi `s.caret--` thành `s.caret++`. Khiến Backspace không lùi caret, làm sai lệch vị trí chèn ký tự 'X' tiếp theo. | **3/3 FAIL**<br>`timed out waiting for character inserted at caret position; presents=478` (25.051s) | **3/3 PASS**<br>`ok cmd/goosie 1.198s` | Oracle bắt chính xác vị trí caret và text sau khi sửa. |
-| **BR-098** | `TestJourneyTextareaMultilineInput` | Trong `internal/engine/focus.go:370` (`EditEnter` cho `AtomTextarea`), đổi `insert("\n")` thành `insert(" ")` (chèn khoảng trắng thay vì newline). | **3/3 FAIL**<br>`timed out waiting for textarea contains multiline text with newlines; presents=478` (24.899s) | **3/3 PASS**<br>`ok cmd/goosie 0.905s` | Oracle bắt chính xác ký tự `\n` và cấu trúc các dòng. |
-| **BR-099** | `TestJourneyCheckboxToggleClickAndSpace` | Trong `internal/engine/events.go:88`, vô hiệu hóa Space activation: `case " ": return false` (thay vì gọi `activateKeyboardTarget`). | **3/3 FAIL**<br>`timed out waiting for server received form submission; url=".../chk-submit?events=2"` (24.903s) | **3/3 PASS**<br>`ok cmd/goosie 0.749s` | Oracle bắt chính xác việc Space bị bỏ qua (server chỉ nhận 2 events thay vì 3, thiếu `agreed=yes`). |
-| **BR-100** | `TestJourneyRadioGroupSelection` | Trong `internal/engine/focus.go:656`, vô hiệu hóa `uncheckRadioGroup(root, name, n)` bằng cách comment bỏ lệnh uncheck. | **3/3 FAIL**<br>`timed out waiting for navigation to /submit completes; url=".../submit?color=red&color=green"` (24.840s) | **3/3 PASS**<br>`ok cmd/goosie 0.746s` | Oracle bắt chính xác việc radio cũ không bị bỏ chọn (server nhận cả `color=red` lẫn `color=green`). |
+| **BR-097** | `TestJourneyTextInputEditingAndCaret` | Trong `internal/engine/focus.go:342` (`EditBackspace`), đổi `s.caret--` thành `s.caret++`. Khiến Backspace không lùi caret, làm sai lệch vị trí chèn ký tự 'X' tiếp theo. | **3/3 FAIL**<br>`timed out waiting for character inserted at caret position; presents=478` (25.051s) | **3/3 PASS**<br>`ok cmd/goosie 1.198s` | Oracle bắt chính xác vị trí caret và text sau khi sửa. |
+| **BR-098** | `TestJourneyTextareaMultilineInput` | Trong `internal/engine/focus.go:324` (`EditEnter` cho `AtomTextarea`), đổi `insert("\n")` thành `insert(" ")` (chèn khoảng trắng thay vì newline). | **3/3 FAIL**<br>`timed out waiting for textarea contains multiline text with newlines; presents=478` (24.899s) | **3/3 PASS**<br>`ok cmd/goosie 0.905s` | Oracle bắt chính xác ký tự `\n` và cấu trúc các dòng. |
+| **BR-099** | `TestJourneyCheckboxToggleClickAndSpace` | Trong `internal/engine/events.go:62`, vô hiệu hóa Space activation: `case " ": return false` (thay vì gọi `activateKeyboardTarget`). | **3/3 FAIL**<br>`timed out waiting for server received form submission; url=".../chk-submit?events=2"` (24.903s) | **3/3 PASS**<br>`ok cmd/goosie 0.749s` | Oracle bắt chính xác việc Space bị bỏ qua (server chỉ nhận 2 events thay vì 3, thiếu `agreed=yes`). |
+| **BR-100** | `TestJourneyRadioGroupSelection` | Trong `internal/engine/focus.go:574`, vô hiệu hóa `uncheckRadioGroup(root, name, n)` bằng cách comment bỏ lệnh uncheck. | **3/3 FAIL**<br>`timed out waiting for navigation to /submit completes; url=".../submit?color=red&color=green"` (24.840s) | **3/3 PASS**<br>`ok cmd/goosie 0.746s` | Oracle bắt chính xác việc radio cũ không bị bỏ chọn (server nhận cả `color=red` lẫn `color=green`). |
 | **BR-101** | `TestJourneySelectOptionChange` | N/A (BLOCKED [AC-07]) | Engine thiếu tính năng tương tác `<select>`. | N/A | Dừng theo [AC-07], ghi reproducer. |
-| **BR-102** | `TestJourneyFormTabNavigationOrder` | Trong `internal/engine/focus.go:715` (`FocusNext`), đổi `next := controls[(idx+1)%len(controls)]` thành `(idx+2)%len(controls)` (nhảy cóc qua control kế). | **3/3 FAIL**<br>`timed out waiting for tab moved focus to f2; presents=479` (24.934s) | **3/3 PASS**<br>`ok cmd/goosie 0.954s` | Oracle bắt chính xác thứ tự focus tuần tự qua từng phần tử. |
-| **BR-103** | `TestJourneyFormSubmitOnEnterKey` | Trong `internal/engine/focus.go:378` (`EditEnter` cho input), comment bỏ lệnh `s.submitFormLocked(form)`. | **3/3 FAIL**<br>`timed out waiting for search results loaded and server received submit exactly once; url=".../searchpage.html"` (24.881s) | **3/3 PASS**<br>`ok cmd/goosie 0.831s` | Oracle bắt chính xác form không được submit khi nhấn Enter. |
-| **BR-104** | `TestJourneyFormSubmitOnButtonClick` | Trong `internal/engine/forms.go:75` (`isSuccessfulControl`), đổi `case "checkbox", "radio": return n.HasAttribute("checked")` thành `return true` (submit cả control unchecked). | **3/3 FAIL**<br>`timed out waiting for destination loaded and parameters received; url=".../submit-all?...skip=no&role=user..."` (24.925s) | **3/3 PASS**<br>`ok cmd/goosie 0.957s` | Oracle bắt chính xác các control chưa checked bị gửi thừa lên server. |
+| **BR-102** | `TestJourneyFormTabNavigationOrder` | Trong `internal/engine/focus.go:633` (`FocusNext`), đổi `next := controls[(idx+1)%len(controls)]` thành `(idx+2)%len(controls)` (nhảy cóc qua control kế). | **3/3 FAIL**<br>`timed out waiting for tab moved focus to f2; presents=479` (24.934s) | **3/3 PASS**<br>`ok cmd/goosie 0.954s` | Oracle bắt chính xác thứ tự focus tuần tự qua từng phần tử. |
+| **BR-103** | `TestJourneyFormSubmitOnEnterKey` | Trong `internal/engine/focus.go:331` (`EditEnter` cho input), comment bỏ lệnh `s.submitFormLocked(form)`. | **3/3 FAIL**<br>`timed out waiting for search results loaded and server received submit exactly once; url=".../searchpage.html"` (24.881s) | **3/3 PASS**<br>`ok cmd/goosie 0.831s` | Oracle bắt chính xác form không được submit khi nhấn Enter. |
+| **BR-104** | `TestJourneyFormSubmitOnButtonClick` | Trong `internal/engine/forms.go:63` (`isSuccessfulControl`), đổi `case "checkbox", "radio": return n.HasAttribute("checked")` thành `return true` (submit cả control unchecked). | **3/3 FAIL**<br>`timed out waiting for destination loaded and parameters received; url=".../submit-all?...skip=no&role=user..."` (24.925s) | **3/3 PASS**<br>`ok cmd/goosie 0.957s` | Oracle bắt chính xác các control chưa checked bị gửi thừa lên server. |
 | **BR-105** | `TestJourneyFormValidationRequired` | N/A (BLOCKED [AC-07]) | Engine thiếu HTML5 form validation. | N/A | Dừng theo [AC-07], ghi reproducer. |
-| **BR-106** | `TestJourneyFormMethodAndEncoding` | Trong `internal/engine/forms.go:136` (`EncodeFormURLEncoded`), đổi `buf.WriteString(url.QueryEscape(d.Value))` thành `buf.WriteString(d.Value)` (bỏ URL escape). | **3/3 FAIL**<br>`timed out waiting for results loaded and request captured; url=".../search-enc?query=goosie engine & fast?&tag=tiếng việt #1"` (24.916s) | **3/3 PASS**<br>`ok cmd/goosie 0.750s` | Oracle bắt chính xác việc URL không được percent-encoded (`%26`, `%3F`, `%23`). |
+| **BR-106** | `TestJourneyFormMethodAndEncoding` | Trong `internal/engine/forms.go:115` (`EncodeFormURLEncoded`), đổi `buf.WriteString(url.QueryEscape(d.Value))` thành `buf.WriteString(d.Value)` (bỏ URL escape). | **3/3 FAIL**<br>`timed out waiting for results loaded and request captured; url=".../search-enc?query=goosie engine & fast?&tag=tiếng việt #1"` (24.916s) | **3/3 PASS**<br>`ok cmd/goosie 0.750s` | Oracle bắt chính xác việc URL không được percent-encoded (`%26`, `%3F`, `%23`). |
 | **BR-107** | `TestJourneyFormSubmitterData` | N/A (BLOCKED [AC-07]) | Engine thiếu cơ chế thu thập submitter name/value. | N/A | Dừng theo [AC-07], ghi reproducer. |
 
 ---
@@ -140,13 +140,13 @@ Commit trên branch của bạn với message theo quy ước repo (`git log --o
 ### 7.3. Danh sách Assert đã Bỏ vì không chứng minh được (§3.2, [R-4])
 
 1. **Assert trên DOM Node Attribute nội bộ trong `waitFor` (`chkNode.HasAttribute("checked")`)**: Đã bỏ vì `dom.Node` không có mutex bảo vệ, truy cập từ test goroutine trong khi UI thread xử lý click gây ra data race (`WARNING: DATA RACE`). Thay thế bằng kiểm chứng payload HTTP request gửi về test server (`lastChecked == true/false`) — nguồn cuối thread-safe 100%.
-2. **Assert `axContainsLabel` trên DOM Text thay đổi qua JS `textContent` sau click checkbox/radio**: Đã bỏ vì trong `cmd/goosie/interaction.go:56` nhánh `if activated` (checkbox/radio), engine gọi `f.repaintTab` và return luôn mà **không gọi `f.publishAccessibility()`**. Do đó cây AX không được publish lại sau click checkbox/radio, dẫn đến assertion bị timeout rỗng. Thay thế bằng xác thực số lần event `change` qua trường hidden input được gửi lên test server trong request payload (`lastEvents == "3"`).
+2. **Assert `axContainsLabel` trên DOM Text thay đổi qua JS `textContent` sau click checkbox/radio**: Đã bỏ vì trong `cmd/goosie/interaction.go:49` nhánh `if activated` (checkbox/radio), engine gọi `f.repaintTab` và return luôn mà **không gọi `f.publishAccessibility()`**. Do đó cây AX không được publish lại sau click checkbox/radio, dẫn đến assertion bị timeout rỗng. Thay thế bằng xác thực số lần event `change` qua trường hidden input được gửi lên test server trong request payload (`lastEvents == "3"`).
 
 ---
 
 ### 7.4. Danh sách Mutation đã thử và Bị loại là Vô giá trị ([R-3])
 
-1. **Xóa `name` và `root` khi comment `uncheckRadioGroup` (BR-100)**: Khi comment bỏ `uncheckRadioGroup(root, name, n)` ở `internal/engine/focus.go:656`, Go compiler báo lỗi build: `declared and not used: name`, `declared and not used: root`. Phép mutation này bị loại vì làm hỏng compilation thay vì thay đổi runtime behavior. Đã thay thế bằng `_ = root; _ = name` để build thành công và đổi đúng runtime behavior (radio cũ không bị uncheck).
+1. **Xóa `name` và `root` khi comment `uncheckRadioGroup` (BR-100)**: Khi comment bỏ `uncheckRadioGroup(root, name, n)` ở `internal/engine/focus.go:574`, Go compiler báo lỗi build: `declared and not used: name`, `declared and not used: root`. Phép mutation này bị loại vì làm hỏng compilation thay vì thay đổi runtime behavior. Đã thay thế bằng `_ = root; _ = name` để build thành công và đổi đúng runtime behavior (radio cũ không bị uncheck).
 2. **Thay đổi `s.caret--` tại nhầm nhánh trong `internal/engine/focus.go` (BR-097)**: Lần thử đầu tiên bị apply nhầm vào nhánh `EditRight` thay vì `EditBackspace`, khiến test `TestJourneyTextInputEditingAndCaret` không fail ở bước Backspace như dự kiến. Đã định vị chính xác dòng 389 trong `EditBackspace` để mutation có giá trị.
 
 ---
@@ -155,9 +155,9 @@ Commit trên branch của bạn với message theo quy ước repo (`git log --o
 
 #### 1. Case BR-101: Thiếu tương tác chọn `<option>` trên `<select>` bằng chuột / bàn phím
 - **Thực tế trong engine**:
-  - `internal/engine/engine.go:1576` (`activatableAt`): `<select>` không nằm trong danh sách activatable elements. Click vào `<select>` chỉ focus phần tử hoặc rơi vào hố trống, không mở menu dropdown và không có popup listbox.
+  - `internal/engine/engine.go:1122` (`activatableAt`): `<select>` không nằm trong danh sách activatable elements. Click vào `<select>` chỉ focus phần tử hoặc rơi vào hố trống, không mở menu dropdown và không có popup listbox.
   - `internal/engine/focus.go`: Khi `<select>` có focus, các phím mũi tên `ArrowUp` (`0xF700`) và `ArrowDown` (`0xF701`) rơi vào `scrollContentKey` (cuộn trang), không có mã xử lý chuyển đổi option được chọn.
-  - `internal/paint/builder_controls.go:269`: `paintSelect` chỉ vẽ nhãn của option hiện tại có thuộc tính `selected` hoặc option đầu tiên, cùng icon mũi tên. Không có UI dropdown nào được rasterize.
+  - `internal/paint/builder_controls.go:222`: `paintSelect` chỉ vẽ nhãn của option hiện tại có thuộc tính `selected` hoặc option đầu tiên, cùng icon mũi tên. Không có UI dropdown nào được rasterize.
 - **Reproducer tối giản**:
   ```html
   <select id="sel" name="opt">
@@ -171,7 +171,7 @@ Commit trên branch của bạn với message theo quy ước repo (`git log --o
 
 #### 2. Case BR-105: Thiếu Form Validation (`required` / `type`) khi submit form
 - **Thực tế trong engine**:
-  - `internal/engine/engine.go:1619` (`submitFormLocked`):
+  - `internal/engine/engine.go:1161` (`submitFormLocked`):
     ```go
     ev := dom.NewEvent("submit", true, true)
     if !dom.DispatchEvent(form, ev) {
@@ -194,7 +194,7 @@ Commit trên branch của bạn với message theo quy ước repo (`git log --o
 
 #### 3. Case BR-107: Name/Value của Submitter Button bị loại khỏi Form Data
 - **Thực tế trong engine**:
-  - `internal/engine/forms.go:70-72` & `:88`:
+  - `internal/engine/forms.go:58-60` & `:74`:
     ```go
     case "input":
         typ := strings.ToLower(n.GetAttribute("type"))
@@ -206,7 +206,7 @@ Commit trên branch của bạn với message theo quy ước repo (`git log --o
     case "button":
         return false // only successful if used to submit
     ```
-    Các nút submit luôn trả về `false` trong `isSuccessfulControl`. Tác giả ghi chú "handled separately", nhưng trong `internal/engine/engine.go:1563` (`runClickDefault`), khi click submit button:
+    Các nút submit luôn trả về `false` trong `isSuccessfulControl`. Tác giả ghi chú "handled separately", nhưng trong `internal/engine/engine.go:1109` (`runClickDefault`), khi click submit button:
     ```go
     case "submit", "":
         if form := FindForm(n); form != nil {
@@ -319,10 +319,10 @@ ok  	github.com/vyquocvu/goosie/test/qc	0.493s
 
 | Gap | Chỗ chặn | Vì sao đáng sửa |
 | --- | --- | --- |
-| `<select>` không tương tác được | `internal/engine/focus.go:573-590 IsActivatable` không có `select` (`engine.go:1576 activatableAt` chỉ là hit-test gọi nó); `select` **có** focusable (`focus.go:193, :807`) nhưng `events.go:75 keyDefaultAction` không có nhánh Arrow/Home/End nên phím rơi về `cmd/goosie/interaction.go:298` → `:425 scrollContentKey` và cuộn trang; `internal/paint/builder_controls.go:269 paintSelect` chỉ vẽ nhãn option hiện tại | Người dùng không chọn được option nào bằng UI thật, kể cả khi DOM đã có `selected`. Đây là case P1 bị block, không phải P2. Spec fix: `docs/tasks/TASK-030-SELECT-INTERACTION.md`. |
+| `<select>` không tương tác được | `internal/engine/focus.go:504-518 IsActivatable` không có `select` (`engine.go:1122 activatableAt` chỉ là hit-test gọi nó); `select` **có** focusable (`focus.go:164, :716`) nhưng `events.go:51 keyDefaultAction` không có nhánh Arrow/Home/End nên phím rơi về `cmd/goosie/interaction.go:260` → `:425 scrollContentKey` và cuộn trang; `internal/paint/builder_controls.go:222 paintSelect` chỉ vẽ nhãn option hiện tại | Người dùng không chọn được option nào bằng UI thật, kể cả khi DOM đã có `selected`. Đây là case P1 bị block, không phải P2. Spec fix: `docs/tasks/TASK-030-SELECT-INTERACTION.md`. |
 | Không có validation `required`/`type` trước submit | `Session.SubmitForm` dispatch `submit` và gửi request ngay cả khi control bắt buộc còn trống | Form rỗng vẫn bay lên server: hành vi sai ở đường cùng của người dùng. |
-| Submitter name/value bị bỏ | `forms.go:72,88 isSuccessfulControl` return false với button | Hai nút "Save"/"Publish" trong cùng form cho server kết quả **giống hệt nhau**. |
-| ~~AX tree không publish sau khi kích hoạt control~~ — **claim của §8, đã bác bỏ** | `cmd/goosie/repaintTab` **có** publish: `presentation.go:116` mở đầu hàm và kết thúc bằng `f.publishAccessibility()` ở `:167` **và** `:185` (cả hai nhánh). Journey `cmd/goosie/journey_p1_forms_test.go:46-49` là bằng chứng thực nghiệm: `clickNode(t, "txtinput")` xong `node.Focused == true` đọc được từ `AccessibilityTree()`. Nhánh duy nhất return mà không publish là `PopSubmittedForm` (`interaction.go:43-46`) - và navigation sẽ publish ngay sau đó, nên cũng không phải gap. | Ghi lại vì nó **là** lỗi: §8 ban đầu assert từ đọc `interaction.go` rồi kết luận gap, không mở body `repaintTab`. Bài học cho cả agent lẫn integrator: "hàm X không gọi Y" chỉ được kết luận khi đã đọc thân hàm X. |
+| Submitter name/value bị bỏ | `forms.go:60,74 isSuccessfulControl` return false với button | Hai nút "Save"/"Publish" trong cùng form cho server kết quả **giống hệt nhau**. |
+| ~~AX tree không publish sau khi kích hoạt control~~ — **claim của §8, đã bác bỏ** | `cmd/goosie/repaintTab` **có** publish: `presentation.go:92` mở đầu hàm và kết thúc bằng `f.publishAccessibility()` ở `:127` **và** `:145` (cả hai nhánh). Journey `cmd/goosie/journey_p1_forms_test.go:45-48` là bằng chứng thực nghiệm: `clickNode(t, "txtinput")` xong `node.Focused == true` đọc được từ `AccessibilityTree()`. Nhánh duy nhất return mà không publish là `PopSubmittedForm` (`interaction.go:36-39`) - và navigation sẽ publish ngay sau đó, nên cũng không phải gap. | Ghi lại vì nó **là** lỗi: §8 ban đầu assert từ đọc `interaction.go` rồi kết luận gap, không mở body `repaintTab`. Bài học cho cả agent lẫn integrator: "hàm X không gọi Y" chỉ được kết luận khi đã đọc thân hàm X. |
 
 **Trạng thái sau khi sửa §8:** còn **ba** gap engine thật (không phải bốn), và cả ba đã có
 spec: `docs/tasks/TASK-030-SELECT-INTERACTION.md` (BR-101) và

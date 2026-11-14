@@ -133,7 +133,7 @@ sau** khi sửa `nodeType`, apnews vẫn 0 px ink. Điều kiện §4.2 (đóng 
 Dùng lại chính client mà browser dùng (`internal/net.DefaultClient`) qua một probe tạm trong
 `cmd/probe-t039/` (in `status/final/bytes/sha256` rồi bị xoá trước khi commit), so với curl cùng
 **ba header y hệt** (UA của Goosie là `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)
-AppleWebKit/537.36 (KHTML, like Gecko) Goosie/2.0` — `internal/net/http.go:35`; Goosie không tự đặt
+AppleWebKit/537.36 (KHTML, like Gecko) Goosie/2.0` — `internal/net/http.go:32`; Goosie không tự đặt
 `Accept-Encoding`):
 
 ```
@@ -295,7 +295,7 @@ TASK-038, **12/39** trang đó có ink Goosie bằng 0/gần 0 (7 `LAYOUT_EMPTY`
 
 | Nhánh | Root cause | Trang | Xử lý |
 | --- | --- | --- | --- |
-| A | Nguồn trả 4xx; engine render trang chặn và **status không được ghi ở đâu** (`loadURLCtx` chưa từng đọc `resp.StatusCode`; media path thì đọc — `internal/engine/media_download.go:120`) | 6/8 | **đã sửa** — `7fd486b` |
+| A | Nguồn trả 4xx; engine render trang chặn và **status không được ghi ở đâu** (`loadURLCtx` chưa từng đọc `resp.StatusCode`; media path thì đọc — `internal/engine/media_download.go:80`) | 6/8 | **đã sửa** — `7fd486b` |
 | B | `nodeType` không tồn tại trên document và trên node → gate `9 === doc.nodeType` của Sizzle/jQuery fail | gov.vn + toàn họ js-revealed | **đã sửa** — `1f6684c` |
 | C | Node/DOM API jQuery 3.6 cần mà binding chưa có: `createDocumentFragment`, `insertBefore`, `cloneNode`, `childNodes`/`lastChild`, `ownerDocument`, `defaultView`, `getComputedStyle`, `readyState` + dispatch `DOMContentLoaded`/`load` | gov.vn (vẫn blank), zara | **mở** → `docs/roadmap-v2.md` |
 | D | Chế độ paced không pump event loop JS (thiết kế nhất quán của các cổng đo) | mọi trang js-revealed trong sweep | **mở** → `docs/roadmap-v2.md`, theo Bước 2 §3: ghi roadmap, **để defect mở**, không hạ severity |

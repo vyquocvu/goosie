@@ -15,15 +15,15 @@ phải P2.
 
 | Sự thật | Chỗ trong code |
 | --- | --- |
-| `IsActivatable` có `button`, `summary`, `a[href]`, `input[submit/reset/button/image/checkbox/radio]` — **không có `select`** | `internal/engine/focus.go:573-590` |
-| `select` **được** coi là focusable | `internal/engine/focus.go:193` (`case "textarea", "select", "button"`) và `:807` |
-| Engine đã có hàm đọc lựa chọn hiện tại, ưu tiên `selected`, fallback option đầu tiên | `internal/engine/focus.go:595 SelectedOption` |
-| `keyDefaultAction` chỉ xử lý `Tab` / `Enter` / `Space`; không có `ArrowUp`/`ArrowDown`/`Home`/`End` | `internal/engine/events.go:75` (switch), `PressKey` ở `:46` |
-| Phím mũi tên vì thế rơi về shell và bị ăn làm cuộn trang | `cmd/goosie/interaction.go:298` → `:425 scrollContentKey` |
-| Paint chỉ vẽ nhãn option hiện tại + icon mũi tên; không có dropdown nào được rasterize | `internal/paint/builder_controls.go:269 paintSelect`, gọi từ `internal/paint/builder_box.go:101-102` |
-| Thuộc tính DOM là nguồn sự thật cho value khi collect form | `internal/engine/forms.go:85` (`case "select": return true`) |
+| `IsActivatable` có `button`, `summary`, `a[href]`, `input[submit/reset/button/image/checkbox/radio]` — **không có `select`** | `internal/engine/focus.go:504-518` |
+| `select` **được** coi là focusable | `internal/engine/focus.go:164` (`case "textarea", "select", "button"`) và `:716` |
+| Engine đã có hàm đọc lựa chọn hiện tại, ưu tiên `selected`, fallback option đầu tiên | `internal/engine/focus.go:523 SelectedOption` |
+| `keyDefaultAction` chỉ xử lý `Tab` / `Enter` / `Space`; không có `ArrowUp`/`ArrowDown`/`Home`/`End` | `internal/engine/events.go:51` (switch), `PressKey` ở `:33` |
+| Phím mũi tên vì thế rơi về shell và bị ăn làm cuộn trang | `cmd/goosie/interaction.go:260` → `:425 scrollContentKey` |
+| Paint chỉ vẽ nhãn option hiện tại + icon mũi tên; không có dropdown nào được rasterize | `internal/paint/builder_controls.go:222 paintSelect`, gọi từ `internal/paint/builder_box.go:47-47` |
+| Thuộc tính DOM là nguồn sự thật cho value khi collect form | `internal/engine/forms.go:71` (`case "select": return true`) |
 
-Node API có sẵn để sửa attribute: `internal/dom/node.go:316 SetAttribute`, `:363 RemoveAttribute`.
+Node API có sẵn để sửa attribute: `internal/dom/node.go:224 SetAttribute`, `:363 RemoveAttribute`.
 
 ## 3. Thiết kế tối thiểu
 
@@ -116,7 +116,7 @@ gán agent, vì đây là chỗ thiết kế mình đã đo và sai một lần 
 
 **Lệch so với §3 — có lý do, ghi lại để người sau không đoán:** thay `SelectOptionDelta` /
 `SelectOptionEdge` bằng **một** API `MoveSelect(EditAction)`. Lý do: phím mà shell nhận
-(`0xF700`–`0xF705`) đã được `cmd/goosie/interaction.go:381-405` map sẵn sang
+(`0xF700`–`0xF705`) đã được `cmd/goosie/interaction.go:339-359` map sẵn sang
 `engine.EditAction`; hai API riêng sẽ bắt shell phải tự dịch lại lần hai và tạo thêm một
 chỗ lệch. §3 cũng định sửa `keyDefaultAction` — **đã không sửa**, vì §2 chỉ ra (và test
 chứng minh) phím mũi tên **không bao giờ tới** `keyDefaultAction`: nó vào `Session.Edit`,
@@ -181,28 +181,28 @@ if got := browser.f.loop.Stats().Rasterize; got == rasterAtFocus {
 
 Journey BR-101 đọc lựa chọn bằng `engine.SelectedOption(sel)` + `GetAttribute("value")`
 **trên goroutine test**, trong lúc goroutine pump của shell gọi `MoveSelect` →
-`setSelectedOption` → `dom.Node.SetAttribute` (`internal/dom/node.go:329`). `-race` báo:
+`setSelectedOption` → `dom.Node.SetAttribute` (`internal/dom/node.go:235`). `-race` báo:
 
 ```
 Write at 0x00c0154c9060 by goroutine 605:
-  internal/dom.(*Node).SetAttribute()                 node.go:329
-  internal/engine.setSelectedOption()                 select.go:160
-  internal/engine.(*Session).MoveSelect()             select.go:109
-  cmd/goosie.(*framePath).contentKey()                interaction.go:408
+  internal/dom.(*Node).SetAttribute()                 node.go:235
+  internal/engine.setSelectedOption()                 select.go:127
+  internal/engine.(*Session).MoveSelect()             select.go:78
+  cmd/goosie.(*framePath).contentKey()                interaction.go:362
 Previous read at 0x00c0154c9060 by goroutine 596:
-  internal/dom.(*Node).HasAttribute()                 node.go:354
-  internal/engine.SelectedOption()                    focus.go:626
-  cmd/goosie.TestJourneySelectOptionChange.func4()    journey_p1_forms_test.go:416
+  internal/dom.(*Node).HasAttribute()                 node.go:257
+  internal/engine.SelectedOption()                    focus.go:548
+  cmd/goosie.TestJourneySelectOptionChange.func4()    journey_p1_forms_test.go:393
 ```
 
 **Đường sản phẩm không race.** Mọi chỗ đọc DOM trong tiến trình vẽ đi qua
-`Session.PaintChecked` (`internal/engine/paint.go:15` lấy `opMu`), còn input/toggle/
+`Session.PaintChecked` (`internal/engine/paint.go:13` lấy `opMu`), còn input/toggle/
 `MoveSelect` cũng lấy `opMu`. Chỉ cái node pointer mà test tự giữ (`sel`) là ngoài vòng
 khoá. Bài học cho các journey sau: **đọc trạng thái DOM từ goroutine khác phải qua
 accessor có khoá**, không cầm node rồi tự đi.
 
 Sửa: thêm `Session.FocusedSelectValue()` (`internal/engine/select.go`) — snapshot đúng
-giá trị form sẽ submit, đọc dưới `opMu`, dùng `controlValue` (forms.go:94) nên trùng khớp
+giá trị form sẽ submit, đọc dưới `opMu`, dùng `controlValue` (forms.go:80) nên trùng khớp
 với payload; `TestSelectMoveChangesSubmittedValue` pin bất biến đó
 (`FocusedSelectValue reports %q but the form submits %q`). Journey bỏ luôn
 `ElementByID("sel")` khỏi goroutine test.

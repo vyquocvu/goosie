@@ -22,7 +22,7 @@ Probe `/tmp/probe/c.html` — 8 control trong một trang, render ở 300x600 (`
 | `<input type="number" value="3">` | chữ `3`, không có border | ô có viền + spinner |
 | `<input type="checkbox" checked>` |hộp nhỏ có dấu tích, **không có outline của `:checked`** | ô xanh trắng |
 
-Trong code, chỗ chặn là `internal/paint/builder_controls.go:87`:
+Trong code, chỗ chặn là `internal/paint/builder_controls.go:74`:
 
 ```go
 switch typ {
@@ -31,7 +31,7 @@ case "checkbox", "radio", "submit", "reset", "button":
 }
 ```
 
-Năm type được special-case thì có đường vẽ riêng (`internal/paint/builder_box.go:119` cho checkbox/radio), còn `color`, `range`, `date`, `month`, `week`, `time`, `datetime-local`, `file` **không có ở cả hai nhánh**: layout cấp box cho chúng (`internal/layout/block.go:2133` chỉ biết checkbox/radio), paint không có đường nào, kết quả là khoảng trắng. Đối chiếu `internal/engine/accessibility.go:149-150` thì thấy AX **có** biết đủ các type này — tức tree nói "có control" trong khi màn hình nói "không có gì". Đó là loại lệch mà QA manual phát hiện ngay bằng mắt, và automation hiện tại không phát hiện được.
+Năm type được special-case thì có đường vẽ riêng (`internal/paint/builder_box.go:64` cho checkbox/radio), còn `color`, `range`, `date`, `month`, `week`, `time`, `datetime-local`, `file` **không có ở cả hai nhánh**: layout cấp box cho chúng (`internal/layout/block.go:1592` chỉ biết checkbox/radio), paint không có đường nào, kết quả là khoảng trắng. Đối chiếu `internal/engine/accessibility.go:136-137` thì thấy AX **có** biết đủ các type này — tức tree nói "có control" trong khi màn hình nói "không có gì". Đó là loại lệch mà QA manual phát hiện ngay bằng mắt, và automation hiện tại không phát hiện được.
 
 ## 2. Band parity liên quan
 

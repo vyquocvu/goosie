@@ -14,7 +14,7 @@ Người dùng duyệt web bằng hành trình, không bằng đơn vị functio
 Tin tốt: hạ tầng để tự động hoá đã có sẵn và đúng chủ đích.
 
 - `internal/ax/node.go` ghi rõ: *"ID is a stable identifier for automation"*. `ax.Node` có `Role, ID, Label, Value, Href, Selected, Disabled, AddressBar, Focused` và bounds `X0,Y0,X1,Y1` — tức là **cùng kênh quan sát mà QA manual dùng** ("URL khớp", "nút disabled", "focus đúng ô").
-- `cmd/goosie/e2e_test.go:39-257` đã có driver hoàn chỉnh chạy qua `platform/headless` nhưng dùng thật `surface.Loop`, `raster.Scheduler`, `Composer` và `Present`.
+- `cmd/goosie/e2e_test.go:39-254` đã có driver hoàn chỉnh chạy qua `platform/headless` nhưng dùng thật `surface.Loop`, `raster.Scheduler`, `Composer` và `Present`.
 - 42 file test trong `cmd/goosie/` đã chứng minh pattern này chạy được, và `go test ./cmd/goosie` mất ~10s.
 
 **Mục tiêu**: dựng **journey suite cho các P0 case hành trình**, assertion bằng **ngữ nghĩa quan sát được** (AX tree, URL, trạng thái tab/toolbar), **không** bằng con số pixel hay giá trị geometry gõ tay. Lý do manual test đáng tin hơn auto test ở repo này: người QA đánh giá *kết quả theo hành trình*; test tự động hiện chủ yếu assert `got/want` tự viết nên chỉ đóng băng hành vi hiện tại.
@@ -125,7 +125,7 @@ Vẫn là lớp lỗi ở §8, nhưng nặng hơn một bậc. Điều kiện ch
 return axContainsLabel(tree, deadAddr) || ...
 ```
 
-`deadAddr` chính là cái URL mà test vừa gõ vào thanh địa chỉ, nên nó **đã là một label trong AX tree trước khi trang lỗi tồn tại**. Điều kiện chờ vì vậy thoả ngay khi `active.Error()` vừa được set tại `navigation.go:242`, trong khi `tab.SetTitle("Problem loading page")` phải đến dòng 256 mới chạy. Dòng 105 đọc `Title()` mà chưa chờ nó lần nào.
+`deadAddr` chính là cái URL mà test vừa gõ vào thanh địa chỉ, nên nó **đã là một label trong AX tree trước khi trang lỗi tồn tại**. Điều kiện chờ vì vậy thoả ngay khi `active.Error()` vừa được set tại `navigation.go:197`, trong khi `tab.SetTitle("Problem loading page")` phải đến dòng 256 mới chạy. Dòng 105 đọc `Title()` mà chưa chờ nó lần nào.
 
 `TestJourneyMalformedURLRecoversWithoutRetainingOldDoc` (BR-007) cùng kiểu đọc nhưng **0/30 fail**, chỉ vì điều kiện của nó có `!initialStillPresent` — tài liệu cũ biến mất nghĩa là `publishAccessibility` ở dòng 270 đã chạy, mà dòng đó nằm sau `SetTitle`. Đây là độ an toàn *mượn* từ thứ tự publish của engine, không phải thứ test tự đảm bảo.
 

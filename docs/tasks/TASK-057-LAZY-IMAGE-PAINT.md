@@ -10,9 +10,9 @@
 
 All probes were throwaway and deleted; the temporary `DBG` instrumentation in `internal/js/element_interfaces.go` and `internal/engine/script_image.go` was restored byte-identical.
 
-1. During-parse assignment works: `<img id=i>` plus a synchronous `i.src = <data: 7x9>` in the page script paints 6,300 blue pixels (70x90 CSS box). Scripts run before `loadImages`, so the parse-time collector fetches/decodes the current attribute and `applyImages` fills `Session.images` (`internal/engine/engine.go:1196`).
-2. After-load assignment does not: `setTimeout(function(){ i.src = <same data:>; }, 0)` followed by `PumpJS` leaves `onload`/`decode()` reporting `LOADED 7x9` (so the js element state is correct) while the laid-out object's `Image` is **nil** and the box stays empty. `decodeScriptImage` decodes and reports, but deliberately keeps no pixels (`internal/engine/script_image.go:83-86`: "The decoded pixels are not retained").
-3. The attachment point is `Reflow` (`internal/engine/engine.go:1352-1357`): `Object.Image` is assigned from `Session.images` every time the arena is rebuilt. Nothing fills that map after load, so no reflow can ever paint the image.
+1. During-parse assignment works: `<img id=i>` plus a synchronous `i.src = <data: 7x9>` in the page script paints 6,300 blue pixels (70x90 CSS box). Scripts run before `loadImages`, so the parse-time collector fetches/decodes the current attribute and `applyImages` fills `Session.images` (`internal/engine/engine.go:832`).
+2. After-load assignment does not: `setTimeout(function(){ i.src = <same data:>; }, 0)` followed by `PumpJS` leaves `onload`/`decode()` reporting `LOADED 7x9` (so the js element state is correct) while the laid-out object's `Image` is **nil** and the box stays empty. `decodeScriptImage` decodes and reports, but deliberately keeps no pixels (`internal/engine/script_image.go:52-55`: "The decoded pixels are not retained").
+3. The attachment point is `Reflow` (`internal/engine/engine.go:956-958`): `Object.Image` is assigned from `Session.images` every time the arena is rebuilt. Nothing fills that map after load, so no reflow can ever paint the image.
 
 ## 2. Cause, one sentence with its proof
 
@@ -22,11 +22,11 @@ All probes were throwaway and deleted; the temporary `DBG` instrumentation in `i
 
 ### 3.1 Carry the pixels across the js boundary, opt-in and opaque
 
-`internal/js` decides whether a result is current (`st.gen`, `internal/js/element_interfaces.go:1560-1568`) and is the only place that knows which node asked. Extend that seam rather than guessing nodes by URL in the engine:
+`internal/js` decides whether a result is current (`st.gen`, `internal/js/element_interfaces.go:1467-1475`) and is the only place that knows which node asked. Extend that seam rather than guessing nodes by URL in the engine:
 
 - `LoadedImage` gains an opaque `Pixels any` field, set by the engine loader on success.
-- `js.Options` gains an image-pixel sink, installed through a setter like `SetImageLoader` (`internal/js/js.go:88-160`, `element_interfaces.go:44-50`). Signature: `func(node *dom.Node, rawSrc string, pixels any)`, called from `applyImageResult`'s success branch, after the state update and **before** the `load` event is dispatched. Never called on the error branch. `internal/js` must not interpret `pixels`; `any` keeps it free of `internal/image`/`internal/engine`.
-- The engine installs the sink next to `SetImageLoader` (`internal/engine/engine.go:494`), before any script runs.
+- `js.Options` gains an image-pixel sink, installed through a setter like `SetImageLoader` (`internal/js/js.go:54-87`, `element_interfaces.go:23-28`). Signature: `func(node *dom.Node, rawSrc string, pixels any)`, called from `applyImageResult`'s success branch, after the state update and **before** the `load` event is dispatched. Never called on the error branch. `internal/js` must not interpret `pixels`; `any` keeps it free of `internal/image`/`internal/engine`.
+- The engine installs the sink next to `SetImageLoader` (`internal/engine/engine.go:263`), before any script runs.
 
 `rawSrc` is `st.src` (the attribute value this result corresponds to), not a re-resolved URL: reconciliation compares attribute text, and re-resolving in the engine would use `s.imgBase` while js resolved against `js.Options.URL` — two bases that can differ.
 
@@ -34,17 +34,17 @@ All probes were throwaway and deleted; the temporary `DBG` instrumentation in `i
 
 The sink runs inside `PumpJS` → `jsRT.Tick` → microtask drain, i.e. on the JS goroutine. It must not reflow there. It records `{nodeID, rawSrc, image, w, h}` in an `imgMu`-protected pending table and sets a **layout-pending** bit. `PumpJS` then, after `Tick` and `TickRAF` (so a later RAF `src` write wins):
 
-1. Drains pending entries: attach only if `node.IsConnected()` (`internal/dom/node.go:368`) and the node is an `<img>` and `node.GetAttribute("src") == rawSrc`. Attach = `s.images[id] = img` and `s.natural[id] = {w,h}` under the locks. Anything else is dropped (a detached `new Image()`, a stale result whose src changed again).
+1. Drains pending entries: attach only if `node.IsConnected()` (`internal/dom/node.go:271`) and the node is an `<img>` and `node.GetAttribute("src") == rawSrc`. Attach = `s.images[id] = img` and `s.natural[id] = {w,h}` under the locks. Anything else is dropped (a detached `new Image()`, a stale result whose src changed again).
 2. Reconciles already-retained entries: drop `s.images[id]` / `s.natural[id]` when the node is disconnected or its `src` attribute no longer equals the retained `rawSrc`. This is what makes a later failing or empty assignment stop painting the old pixels; the js element state cannot tell the engine about those (empty/unparseable sources never reach the loader).
-3. If anything attached or dropped, reflow. **`mutated = true` alone is not enough**: `RestyleAndReflow` may early-return after `Arena.RefreshComputedStyles` when layout styles are unchanged (`internal/engine/engine.go:2335`), which neither rebuilds the arena nor re-runs layout with the new `s.natural`. The image change must reach a real `Reflow` exactly once in the turn — either call `Reflow` when the restyle path did not, or give the restyle path a force-layout signal. Do not rebuild layout twice in one turn; `WorkCounts().LayoutBuilds` is the probe.
-4. Keep the layout-pending bit set across turns when the existing `deferredActive > 0` skip postpones the reflow (`internal/engine/engine.go:2290-2292`), so the next tick still forces it.
+3. If anything attached or dropped, reflow. **`mutated = true` alone is not enough**: `RestyleAndReflow` may early-return after `Arena.RefreshComputedStyles` when layout styles are unchanged (`internal/engine/engine.go:1737`), which neither rebuilds the arena nor re-runs layout with the new `s.natural`. The image change must reach a real `Reflow` exactly once in the turn — either call `Reflow` when the restyle path did not, or give the restyle path a force-layout signal. Do not rebuild layout twice in one turn; `WorkCounts().LayoutBuilds` is the probe.
+4. Keep the layout-pending bit set across turns when the existing `deferredActive > 0` skip postpones the reflow (`internal/engine/engine.go:1695-1697`), so the next tick still forces it.
 
 A turn with a pending attach returns `true` (repaint). Keep the `!mutated && !imagesChanged` early return for quiescent ticks.
 
 ### 3.3 Lifetime and release rules
 
 - Retained script pixels live for as long as the entry passes §3.2 reconciliation; a replacement assignment overwrites them, a changed/failed/empty `src` or a disconnect drops them, and session close releases the session. Reinserting a node that was dropped-and-reconnected while still holding a valid src does **not** re-attach old pixels; the next `src` assignment loads again. State this in a comment.
-- Do **not** refund the decoded-pixel reservation on a drop. The existing rule is deliberate (`script_image.go:84-86`): the charge bounds cumulative decode work per document, and a refund would let a `src`-cycling page decode unbounded bytes. Pixels that are dropped become garbage; their charge stays.
+- Do **not** refund the decoded-pixel reservation on a drop. The existing rule is deliberate (`script_image.go:53-55`): the charge bounds cumulative decode work per document, and a refund would let a `src`-cycling page decode unbounded bytes. Pixels that are dropped become garbage; their charge stays.
 - A detached `new Image()` still decodes, still reports `naturalWidth/Height`, and is still charged, but is never retained for paint.
 
 ### 3.4 Out of scope

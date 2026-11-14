@@ -41,7 +41,7 @@
 ## Task 1: `DisplayCmd.Seq` + the group data model in `paint`
 
 **Files:**
-- Modify: `internal/paint/cmd.go:180-181` (after the `Z` field)
+- Modify: `internal/paint/cmd.go:110-112` (after the `Z` field)
 - Modify: `internal/paint/list.go` (`List` struct, `Append`, `Reset`, `Build`, `LayerDL`, `sameCommand`)
 - Test: `test/paint/list_group_test.go` (create)
 
@@ -383,7 +383,7 @@ git commit -m "feat(paint): carry faded groups through the sorted display list"
 
 - [ ] **Step 1: Write the failing paint oracle**
 
-Create `test/paint/group_paint_test.go`. It reuses the frozen-list path `visDisplayList` already uses (`engine.NewSession` → `sess.PaintChecked(1.0)` → `dl.Build(1)`), but publishes to a `*LayerDL` so `Groups()`/`GroupAt` are visible. The list `PaintChecked` returns is already `SortStable`'d (engine/paint.go:105), so `Build` reconstructs groups in sorted order.
+Create `test/paint/group_paint_test.go`. It reuses the frozen-list path `visDisplayList` already uses (`engine.NewSession` → `sess.PaintChecked(1.0)` → `dl.Build(1)`), but publishes to a `*LayerDL` so `Groups()`/`GroupAt` are visible. The list `PaintChecked` returns is already `SortStable`'d (engine/paint.go:86), so `Build` reconstructs groups in sorted order.
 
 ```go
 package paint_test
@@ -655,7 +655,7 @@ git commit -m "feat(paint): record clean faded opacity groups in the display wal
 ## Task 3: Extract `drawCommand` in the rasterizer (pure refactor)
 
 **Files:**
-- Modify: `internal/raster/tile.go:57-93` (the loop body and switch)
+- Modify: `internal/raster/tile.go:32-55` (the loop body and switch)
 - Test: existing `test/raster/tile_test.go`, `test/raster/mask_test.go` (regression gate; no new behavior)
 
 - [ ] **Step 1: Write the refactor as a behavior-preserving extraction**
@@ -738,7 +738,7 @@ git commit -m "refactor(raster): extract drawCommand so tiles and groups share o
 **Files:**
 - Modify: `internal/raster/tile.go` (`RasterizeTile` → `rasterizeTile`, `compositeGroup`, `fadePixels`, `acquireScratch`)
 - Modify: `internal/raster/pool.go` (`Job.Scratch`, `DefaultRaster`)
-- Modify: `internal/raster/scheduler.go` (`groupScratch` field, `NewScheduler`, Job at `:508`)
+- Modify: `internal/raster/scheduler.go` (`groupScratch` field, `NewScheduler`, Job at `:308`)
 - Test: `test/raster/group_opacity_test.go` (create — the pixel oracle)
 
 - [ ] **Step 1: Write the failing pixel oracle**

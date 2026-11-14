@@ -19,19 +19,19 @@ Chạy riêng lẻ `go test -count=8 -run TestFetchCatchOnError ./test/js/` trê
 Nguyên nhân nằm ở helper, không phải engine:
 
 ```go
-// test/js/fetch_test.go:103
+// test/js/fetch_test.go:88
 func drainFetch(r *js.Runtime) {
 	time.Sleep(50 * time.Millisecond)
 	r.DrainFetchCallbacks()
 }
 ```
 
-`fetch` chạy trên goroutine riêng (`internal/js/fetch.go:316 runFetch`). `DrainFetchCallbacks` (dòng 677) chỉ invoke các callback **đã được queue**; nó không chờ in-flight request. Nên 50 ms chỉ là một phỏng đoán thời gian: dưới tải, goroutine chưa kịp đặt callback vào `fs.callbacks`, `gotCatch` vẫn rỗng và test fail.
+`fetch` chạy trên goroutine riêng (`internal/js/fetch.go:235 runFetch`). `DrainFetchCallbacks` (dòng 677) chỉ invoke các callback **đã được queue**; nó không chờ in-flight request. Nên 50 ms chỉ là một phỏng đoán thời gian: dưới tải, goroutine chưa kịp đặt callback vào `fs.callbacks`, `gotCatch` vẫn rỗng và test fail.
 
 Engine đã có bộ đếm in-flight, chỉ chưa export, và protocol đã an toàn để poll:
 
 ```go
-// internal/js/fetch.go:133-138
+// internal/js/fetch.go:86-89
 type fetchState struct {
 	client    HTTPFetcher
 	mu        sync.Mutex
@@ -39,8 +39,8 @@ type fetchState struct {
 	callbacks []fetchCallback
 }
 
-// internal/js/fetch.go:295  fs.active++   (bên trong doFetch, đồng bộ với lời gọi fetch())
-// internal/js/fetch.go:319  fs.active--   (defer của runFetch, trên goroutine nền)
+// internal/js/fetch.go:219  fs.active++   (bên trong doFetch, đồng bộ với lời gọi fetch())
+// internal/js/fetch.go:238  fs.active--   (defer của runFetch, trên goroutine nền)
 ```
 
 Vì `active++` chạy đồng bộ ngay trong `doFetch`, một vòng poll `active == 0` sau `Run()` luôn thấy đúng số request đang chạy. Fix đúng bản chất là thay phỏng đoán bằng **wait on the real counter**.
@@ -138,13 +138,13 @@ No other file under `internal/` was changed. No fetch, CORS, or promise behavior
 
 ### `time.Sleep` audit (all matches after the change)
 
-- `test/js/fetch_test.go:66` is the new delayed mock's intentional 300 ms delay; `:115` is the helper's 1 ms bounded polling interval. Existing fetch-specific timing waits remain at `:590` (wait for six goroutines to enter a blocking fetch before releasing their gate; scheduling-sensitive) and `:661` (wait before testing `Tick` drains a fetch callback; timing-sensitive).
-- `test/js/workers_test.go:82,121` and `test/js/websocket_cors_csp_test.go:175,217` wait for background Worker/WebSocket setup; these are scheduling-sensitive. `test/js/websocket_cors_csp_test.go:40` is a delay in the mock WebSocket's empty-read/close path.
-- `test/js/xhr_test.go:48,71,96,119,141,175,202,227` wait before `Tick` processes asynchronous XHR outcomes (including the deliberate timeout window at `:202`); most are scheduling-sensitive.
-- `test/js/timer_test.go:27,55,77,98,107,128,142,165,201,251,272,293,302` and `test/js/microtask_test.go:77,101` allow timer/microtask durations to elapse. `test/js/interrupt_test.go:58` waits for the interrupt path; scheduling-sensitive.
-- `test/engine/js_admission_test.go:96` and `test/engine/external_script_test.go:96` wait for asynchronous JS/script work; scheduling-sensitive.
-- `test/engine/image_concurrency_test.go:41`, `test/engine/css_concurrency_test.go:33`, and `test/engine/font_concurrency_test.go:40` use configured per-fetch delays in concurrency tests.
-- `test/engine/media_download_test.go:177`, `test/engine/media_test.go:301,708`, `test/platform/headless_test.go:56,324`, `test/raster/pool_test.go:82,465`, `test/gate/gate_test.go:236`, `test/surface/loop_test.go:473`, and `test/surface/headless_integration_test.go:80` use short sleeps in polling/wait loops; reliability depends on the loop condition and any bound around them.
-- `test/engine/media_paint_test.go:58` and `test/engine/media_test.go:731` wait for media update intervals. `test/net/cache_test.go:104` waits 1.2 seconds for cache expiry behavior. `test/surface/loop_test.go:1125` waits before checking loop behavior. These are duration/interval waits rather than fetch-drain synchronization.
+- `test/js/fetch_test.go:60` is the new delayed mock's intentional 300 ms delay; `:100` is the helper's 1 ms bounded polling interval. Existing fetch-specific timing waits remain at `:533` (wait for six goroutines to enter a blocking fetch before releasing their gate; scheduling-sensitive) and `:598` (wait before testing `Tick` drains a fetch callback; timing-sensitive).
+- `test/js/workers_test.go:81,120` and `test/js/websocket_cors_csp_test.go:172,214` wait for background Worker/WebSocket setup; these are scheduling-sensitive. `test/js/websocket_cors_csp_test.go:39` is a delay in the mock WebSocket's empty-read/close path.
+- `test/js/xhr_test.go:45,68,93,116,138,172,199,225` wait before `Tick` processes asynchronous XHR outcomes (including the deliberate timeout window at `:199`); most are scheduling-sensitive.
+- `test/js/timer_test.go:22,47,67,86,95,114,127,148,184,229,248,266,273` and `test/js/microtask_test.go:65,87` allow timer/microtask durations to elapse. `test/js/interrupt_test.go:44` waits for the interrupt path; scheduling-sensitive.
+- `test/engine/js_admission_test.go:82` and `test/engine/external_script_test.go:93` wait for asynchronous JS/script work; scheduling-sensitive.
+- `test/engine/image_concurrency_test.go:36`, `test/engine/css_concurrency_test.go:28`, and `test/engine/font_concurrency_test.go:35` use configured per-fetch delays in concurrency tests.
+- `test/engine/media_download_test.go:158`, `test/engine/media_test.go:276,655`, `test/platform/headless_test.go:42,275`, `test/raster/pool_test.go:68,406`, `test/gate/gate_test.go:166`, `test/surface/loop_test.go:386`, and `test/surface/headless_integration_test.go:69` use short sleeps in polling/wait loops; reliability depends on the loop condition and any bound around them.
+- `test/engine/media_paint_test.go:50` and `test/engine/media_test.go:675` wait for media update intervals. `test/net/cache_test.go:103` waits 1.2 seconds for cache expiry behavior. `test/surface/loop_test.go:964` waits before checking loop behavior. These are duration/interval waits rather than fetch-drain synchronization.
 
 Raw audit command: `grep -rn "time.Sleep" test/` (completed; the above accounts for every match).

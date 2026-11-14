@@ -10,11 +10,11 @@
 
 | Sự thật | Chỗ trong code |
 | --- | --- |
-| CSS tokenizer/selector **đã nhận** tên `first-line`/`first-letter` như pseudo-element | `internal/css/selector.go:467` (`case "before", "after", "first-line", "first-letter"`) |
-| Style **không bao giờ** resolve hai tên đó: chỉ lặp `{before, after}` | `internal/style/pseudo.go:37` và `:82` |
-| Layout chỉ tạo box cho hai kinds đó | `internal/layout/arena.go:482-483` (`Pseudo: "before"`), `:544-545` (`"after"`), `buildPseudoElement` ở `:557` |
-| BoxKind enum không có chỗ cho first-letter | `internal/layout/boxkey.go:21-22` (`BoxKindPseudoBefore`, `BoxKindPseudoAfter`) |
-| Engine cũng khoá theo đúng hai tên khi vẽ background pseudo | `internal/engine/engine.go:915`, `internal/engine/style_diff.go:180` |
+| CSS tokenizer/selector **đã nhận** tên `first-line`/`first-letter` như pseudo-element | `internal/css/selector.go:392` (`case "before", "after", "first-line", "first-letter"`) |
+| Style **không bao giờ** resolve hai tên đó: chỉ lặp `{before, after}` | `internal/style/pseudo.go:32` và `:68` |
+| Layout chỉ tạo box cho hai kinds đó | `internal/layout/arena.go:276-277` (`Pseudo: "before"`), `:330-331` (`"after"`), `buildPseudoElement` ở `:343` |
+| BoxKind enum không có chỗ cho first-letter | `internal/layout/boxkey.go:14-15` (`BoxKindPseudoBefore`, `BoxKindPseudoAfter`) |
+| Engine cũng khoá theo đúng hai tên khi vẽ background pseudo | `internal/engine/engine.go:584`, `internal/engine/style_diff.go:177` |
 | Hệ quả đo được: `testdata/render/parity` fixture `selectors/03-pseudo-elements.png` còn **3 band trống** `(457,475) (539,554) (579,599)`; `::before`/`::after` trong cùng fixture **vẽ bình thường** (rows 483..498, 517..532) | `docs/tasks/TASK-027-GLYPH-COVERAGE.md` §6; baseline `testdata/render-known-gaps.json` (`selectors/03`: `blank_regions: 3`) |
 
 Kết luận: selector vào được nhưng **chết ở style + layout**. Drop cap `font-size: 48px;
@@ -23,7 +23,7 @@ float: left` bị bỏ hoàn toàn, nên nửa dưới fixture bị đẩy lên 
 
 ## 2. Thiết kế tối thiểu
 
-1. `internal/style/pseudo.go`: thêm `"first-letter"` vào **cả hai** vòng lặp (`:37`, `:82`).
+1. `internal/style/pseudo.go`: thêm `"first-letter"` vào **cả hai** vòng lặp (`:32`, `:68`).
    Không đổi `computePseudoStyle` ngoài việc cho phép tên mới.
 2. `internal/layout/boxkey.go`: thêm `BoxKindPseudoFirstLetter` ở cuối enum (giữ các số cũ —
    `BoxKey` 64-bit đã merge ở `9f4fb4c` mã hoá kind vào key, nên chèn giữa làm đổi mọi key
@@ -31,12 +31,12 @@ float: left` bị bỏ hoàn toàn, nên nửa dưới fixture bị đẩy lên 
 3. `internal/layout/arena.go`: trong `buildSubtree`, khi node là block có inline content và
    tồn tại `pseudoStyles[{NodeID, "first-letter"}]`:
    * tách **ký tự in được đầu tiên** của text node đầu tiên (bỏ qua leading whitespace;
-     `content:` rỗng ⇒ không tạo box, giống quy tắc hiện tại cho before/after ở `pseudo.go:37`
+     `content:` rỗng ⇒ không tạo box, giống quy tắc hiện tại cho before/after ở `pseudo.go:32`
      comment),
    * tạo một anonymous inline box chứa đúng ký tự đó với computed style của pseudo, đặt **trước**
      run còn lại, rồi để inline/float pass hiện có xử lý `float: left` như mọi box float khác,
    * text node gốc **mất** ký tự đã tách (không vẽ hai lần — đây là lỗi dễ mắc nhất).
-4. `internal/engine/engine.go:915` + `style_diff.go:180`: thêm tên mới vào danh sách
+4. `internal/engine/engine.go:584` + `style_diff.go:177`: thêm tên mới vào danh sách
    background/interactive diff, để đổi style `::first-letter` vẫn trigger reflow đúng.
 5. `internal/paint`: không cần case mới nếu box là inline thường; **nếu** buộc phải chạm
    `internal/paint`, ghi rõ ở §Status trước khi làm (quy tắc kế thừa từ TASK-027 §5).
@@ -67,13 +67,13 @@ float: left` bị bỏ hoàn toàn, nên nửa dưới fixture bị đẩy lên 
 Proof là **tắt hành vi**; dán `FAIL → revert → PASS`, và disclose proof nào không giết được
 test nào:
 
-* (i) bỏ `"first-letter"` khỏi `pseudo.go:37` ⇒ test style + test 1 **FAIL**.
+* (i) bỏ `"first-letter"` khỏi `pseudo.go:32` ⇒ test style + test 1 **FAIL**.
 * (ii) tạo box first-letter nhưng **không** xoá ký tự khỏi text gốc ⇒ test 1 **FAIL**
     (assert tổng glyph source) — đây là mutation nguy hiểm nhất vì ảnh vẫn "có vẻ đúng".
 * (iii) khỏi box first-letter khỏi float pass (force `display: inline`, bỏ float) ⇒ test 3
     **FAIL**.
 * (iv) để whitespace dẫn đầu lọt qua (`first = 0` cứng) ⇒ test 2 **FAIL**.
-* (v) bỏ tên mới khỏi `engine.go:915`/`style_diff.go:180` ⇒ test 6 **FAIL**; nếu không fail,
+* (v) bỏ tên mới khỏi `engine.go:584`/`style_diff.go:177` ⇒ test 6 **FAIL**; nếu không fail,
     ghi rõ là incremental path chưa bị oracle nào chặn.
 
 ## 5. Ràng buộc vận hành

@@ -7,7 +7,7 @@ BR-179 (release candidate phải xanh mọi lệnh), CI job "Race detector".
 
 Gate 8 (`TestLinkedDependenciesPinned`) là bằng chứng duy nhất cho *provenance của binary phân
 phát*. Nó so hai chiều: mọi module linked phải có trong allowlist, **và** mọi dòng allowlist phải
-đang được linked (`licenses_test.go:70` và `:78-82`). Vì `go list -deps` phụ thuộc build target,
+đang được linked (`licenses_test.go:47` và `:47-50`). Vì `go list -deps` phụ thuộc build target,
 hai chiều đó mâu thuẫn nhau giữa macOS và Linux — nghĩa là **không tồn tại file allowlist nào làm
 xanh gate trên cả hai platform**. Đây không phải lỗi cấu hình CI; nó chặn điều kiện tiên quyết
 "candidate commit exit 0 mọi lệnh".
@@ -61,7 +61,7 @@ $ # khôi phục file, chạy lại: ok 0.979s; git status sạch
 `LICENSE`: "Copyright 2009 The Go Authors." + ba điều kiện (giữ copyright khi redistribute source;
 reproduce copyright + conditions + disclaimer khi redistribute binary; **không** dùng tên Google LLC
 hoặc tên người đóng góp để quảng bá) + disclaimer ALL WARRANTIES. Đó là bản BSD-3-Clause chuẩn của
-Go, thuộc tập được phép (`permittedLicenses`, `licenses_test.go:19-25`). Thư mục còn có `PATENTS`
+Go, thuộc tập được phép (`permittedLicenses`, `licenses_test.go:18-22`). Thư mục còn có `PATENTS`
 — văn bản patente chuẩn của golang, không đổi SPDX id và không phải copyleft.
 
 ## 2. Phải đo/quyết trước khi sửa
@@ -93,7 +93,7 @@ Go, thuộc tập được phép (`permittedLicenses`, `licenses_test.go:19-25`)
   commit** với bước 1 vì một mình nó làm darwin red (§1.3).
 * **Bước 3 — không nới gì cả:** `permittedLicenses` giữ nguyên tập; không bỏ chiều staleness; copyleft
   vẫn bị cấm. Nếu một module mới xuất hiện thì câu trả lời vẫn là "re-audit, không relax test"
-  (comment `licenses_test.go:32-36`).
+  (comment `licenses_test.go:26-28`).
 
 ## 4. Điều kiện nhận
 
@@ -312,7 +312,7 @@ exit=1
 ```
 
 Direction (a) im lặng trong kịch bản đó, đó chính xác là lý do oracle per-target tồn tại.
-(Hai danh sách module trong dòng `licenses_test.go:183` bị rút gọn vì quá dài; mọi dòng khác
+(Hai danh sách module trong dòng `licenses_test.go:136` bị rút gọn vì quá dài; mọi dòng khác
 nguyên văn, kể cả 5 target đều report và `exit=1`.)
 
 **(v) Re-pin `golang.org/x/image@v0.45.0` thành `GPL-3.0-only`** ⇒ chỉ nhánh `permittedLicenses`

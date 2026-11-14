@@ -43,7 +43,7 @@ Các trạng thái phải được ghi theo lần chạy: **NOT RUN**, **PASS**,
 
 ### Probe Chromium và số đo ad-hoc
 
-Số đo chép vào comment, catalog, roadmap hay registry đều phải nói rõ đo trên build nào và bằng harness nào. Repo pin hai oracle trong `testdata/oracle-pins.json` (`test/gatecheck/oracle_pins_test.go` giữ chúng khớp với requirements/package.json/reference-meta):
+Số đo chép vào catalog, roadmap hay registry đều phải nói rõ đo trên build nào và bằng harness nào. Mã Go first-party không còn comment giải thích — toàn bộ đã bị xoá ngày 2026-11-14, chỉ giữ `// qc:BR-NNN` (machine-read, xem mục traceability) và `//go:build` — nên source không còn là chỗ để chép một số đo vào; muốn một con số sống cùng code thì nó phải sống trong chính assertion của test. Repo pin hai oracle trong `testdata/oracle-pins.json` (`test/gatecheck/oracle_pins_test.go` giữ chúng khớp với requirements/package.json/reference-meta):
 
 - **Render parity**: Python Playwright 1.49.1 → Chromium **131.0.6778.33**. Script chạy bằng python (`/tmp/*/run*.py`, `testdata/parity.py`) thuộc build này.
 - **Interaction parity và probe DOM/CSSOM tạm**: Node Playwright 1.63.0 (cài global) → Chromium **153.0.8010.12**. Runner `.js` thuộc build này.

@@ -16,11 +16,11 @@ $ go test -race -count=20 -run TestFetchCatchOnError ./test/js/
     (fail y như nguyên)  +  KHÔNG có DATA RACE report
 ```
 
-`Kind:4` là `KindString` (`internal/js/js.go:156-162`: Undefined=0, Null=1, Bool=2, Number=3, String=4). `Str:""` chính là giá trị khởi tạo `var gotCatch = ''`. Nghĩa là: **`.catch` không hề chạy** — không phải chạy với payload sai, không phải timeout. Và vì `-race` im lặng, đây là lỗi thứ tự (ordering), không phải data race.
+`Kind:4` là `KindString` (`internal/js/js.go:85-87`: Undefined=0, Null=1, Bool=2, Number=3, String=4). `Str:""` chính là giá trị khởi tạo `var gotCatch = ''`. Nghĩa là: **`.catch` không hề chạy** — không phải chạy với payload sai, không phải timeout. Và vì `-race` im lặng, đây là lỗi thứ tự (ordering), không phải data race.
 
 ## 2. Nguyên nhân, chỉ đúng dòng
 
-`runFetch` chạy trên goroutine riêng. Khi kết thúc, nó **chụp snapshot handler rồi nhét snapshot đó vào queue** (`internal/js/fetch.go:404-423`):
+`runFetch` chạy trên goroutine riêng. Khi kết thúc, nó **chụp snapshot handler rồi nhét snapshot đó vào queue** (`internal/js/fetch.go:302-319`):
 
 ```go
 t.mu.Lock()
@@ -32,20 +32,20 @@ fs.callbacks = append(fs.callbacks, fetchCallback{fn: catchCB, isReject: true, .
 
 Thứ tự chết người:
 
-1. JS chạy `fetch('/x').catch(fn)`. `doFetch` (`:295`) tăng `fs.active` rồi `go r.runFetch(...)` (`:304`) — **trước khi** `.catch(fn)` kịp gắn.
+1. JS chạy `fetch('/x').catch(fn)`. `doFetch` (`:219`) tăng `fs.active` rồi `go r.runFetch(...)` (`:228`) — **trước khi** `.catch(fn)` kịp gắn.
 2. `mockFetcher` trả lỗi ngay lập tức. Goroutine kết thúc trước cả khi hàng đợi microtask kịp chạy, đọc `t.catchCB == nil`, và queue `{fn: nil}`.
 3. JS gắn `.catch(fn)` -> `t.catchCB = fn`, nhưng callback đã queue không còn liên quan gì tới `t` ngoài con trỏ `chain`.
 4. `drainFetch`: `PendingFetches()==0` (đúng!), `DrainFetchCallbacks()` gọi `invokeOneCallback({fn: nil})` -> không có gì xảy ra. Test đọc `gotCatch` = `''`.
 
 `active == 0` chưa bao giờ có nghĩa "handler sẽ được gọi". Nó chỉ có nghĩa "request đã xong".
 
-Ba chỗ khác cùng khuôn: `:342-346`, `:357-361`, `:389-393` (preflight/CORS), và `makeRejectThenable` (`:642-664`) thì **đã** xử lý đúng — nó set `t.rejected = true; t.result = ...` *và* queue callback, nên handler gắn muộn vẫn chạy được (chú thích ở `:646-648` nói rõ ý đồ đó). Đường `runFetch` là đường duy nhất chưa làm thế.
+Ba chỗ khác cùng khuôn: `:251-255`, `:266-271`, `:294-298` (preflight/CORS), và `makeRejectThenable` (`:493-512`) thì **đã** xử lý đúng — nó set `t.rejected = true; t.result = ...` *và* queue callback, nên handler gắn muộn vẫn chạy được (chú thích ở `:498-499` nói rõ ý đồ đó). Đường `runFetch` là đường duy nhất chưa làm thế.
 
 ## 3. Yêu cầu
 
 1. **Sửa hành vi, không sửa test cho qua.** Thenable phải settle đúng semantics của promise: settle **trên thenable** (`t.rejected`/`t.resolved`/`t.result`), còn lúc *drain* thì phân phối cho handler **đang được gắn tại thời điểm gọi** — không phải snapshot. `chain` đã có sẵn trong `fetchCallback`; `invokeOneCallback` là chỗ nên quyết định gọi gì. Cơ chế "gắn muộn vẫn chạy" (`invokeResolvedCallback`) đã tồn tại cho đường resolve — dùng cùng nguyên tắc cho đường reject của `runFetch`.
 2. **Test hồi quy tất định** (thứ TASK-017 thiếu): một test mà *chính ordering* là điều được đo — request settle **trước khi** handler được gắn, rồi gắn handler, rồi drain, rồi assert handler chạy. Không sleep, không đếm, không `-count` thần kỳ. Viết theo kiểu `drainFetch` hiện có nhưng thứ tự thao tác là do test áp đặt.
-3. **Sửa cả 4 site** (`:342`, `:357`, `:389`, `:404-423`) — chứng minh bằng cách grep lại `t.thenCB`/`t.catchCB` trong `runFetch`: sau fix, **không còn** chỗ nào queue snapshot handler.
+3. **Sửa cả 4 site** (`:251`, `:266`, `:294`, `:302-319`) — chứng minh bằng cách grep lại `t.thenCB`/`t.catchCB` trong `runFetch`: sau fix, **không còn** chỗ nào queue snapshot handler.
 4. **Đây là bug web-compat thật**, không phải bug test: trên một máy chậm/nhanh khác nhau, một trang dùng `fetch(...).then(...)` với response tới sớm sẽ **im lặng không bao giờ chạy callback**. Page sẽ không bao giờ nhận dữ liệu. Viết vào Status một câu mô tả triệu chứng mà người dùng cuối gặp.
 
 ## 4. Tiêu chí nghiệm thu

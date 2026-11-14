@@ -31,8 +31,8 @@ Vậy đây **không phải** bug layout/paint nói chung: ký tự BMP trong ph
 
 Hai chỗ ghép lại thành một lỗi quan sát được:
 
-1. **Chuỗi fallback không có face nào phủ các codepoint đó.** `internal/raster/fonts.go:357 fallbackLocked` duyệt qua `f.sources` — tức đúng các slot đã đăng ký ở `systemFontFiles` (`fonts.go:110-140`: Times/Arial/Courier/Georgia/Verdana, mỗi loại 4 variant) và `systemFontCollections` (`fonts.go:154-156`: HelveticaNeue). Không file nào trong số đó chứa Dingbats (U+2700–U+27BF) hay supplementary-plane emoji (U+1F000+). `systemFontDir` trỏ `/System/Library/Fonts/Supplemental` nhưng **chỉ** để tra các slot đã liệt kê — `Arial Unicode.ttf` nằm ngay trong thư mục đó và có phủ cả hai block, mà không slot nào nhắc tới nó.
-2. **Glyph thiếu bị biến thành khoảng trắng, hoàn toàn im lặng.** Chính doc comment ở `internal/raster/fonts.go:406-409` nói ra điều đó:
+1. **Chuỗi fallback không có face nào phủ các codepoint đó.** `internal/raster/fonts.go:273 fallbackLocked` duyệt qua `f.sources` — tức đúng các slot đã đăng ký ở `systemFontFiles` (`fonts.go:67-97`: Times/Arial/Courier/Georgia/Verdana, mỗi loại 4 variant) và `systemFontCollections` (`fonts.go:110`: HelveticaNeue). Không file nào trong số đó chứa Dingbats (U+2700–U+27BF) hay supplementary-plane emoji (U+1F000+). `systemFontDir` trỏ `/System/Library/Fonts/Supplemental` nhưng **chỉ** để tra các slot đã liệt kê — `Arial Unicode.ttf` nằm ngay trong thư mục đó và có phủ cả hai block, mà không slot nào nhắc tới nó.
+2. **Glyph thiếu bị biến thành khoảng trắng, hoàn toàn im lặng.** Chính doc comment ở `internal/raster/fonts.go:314-316` nói ra điều đó:
 
    > *"The zero Glyph, with Ok false, means no face has such a glyph, which the text path treats as whitespace rather than an error."*
 
@@ -44,7 +44,7 @@ Hai chỗ ghép lại thành một lỗi quan sát được:
 
 Chuỗi fallback phải tìm được face **có chứa codepoint đang cần**, thay vì chỉ các slot đã map. Yêu cầu tối thiểu:
 
-* Thêm các face hệ thống có coverage rộng vào nguồn fallback (macOS: `Arial Unicode.ttf`, `Apple Symbols`; Linux: `DejaVuSans.ttf`, `NotoSansSymbols2`; đường dẫn phải được thử theo kiểu *có thì dùng, không thì bỏ qua* như `fonts.go:108-109` đã document cho host Linux).
+* Thêm các face hệ thống có coverage rộng vào nguồn fallback (macOS: `Arial Unicode.ttf`, `Apple Symbols`; Linux: `DejaVuSans.ttf`, `NotoSansSymbols2`; đường dẫn phải được thử theo kiểu *có thì dùng, không thì bỏ qua* như `fonts.go:65-66` đã document cho host Linux).
 * Không được phá thứ tự ưu tiên hiện tại: family mà CSS chỉ định phải thắng; face coverage-rộng chỉ được dùng khi **không face nào trong chuỗi hiện tại vẽ được** codepoint đó. Chứng minh bằng test: một trang `font-family: Arial` vẫn lấy Arial cho ký tự ASCII, chỉ ký tự ngoài coverage mới rơi xuống face khác.
 * `→` và `∑` **đã render đúng từ trước** — nếu sau sửa mà chúng đổi hình/dổi advance width thì đó là regression, phải giữ nguyên.
 
@@ -72,7 +72,7 @@ Với codepoint mà **mọi** face đều không phủ (emoji màu là trường
 ## 5. Ràng buộc
 
 * Sở hữu: `internal/raster/fonts.go` và file test của nó, `testdata/render-known-gaps.json`, `docs/tasks/TASK-027-GLYPH-COVERAGE.md`. Nếu cần chạm `internal/paint` hoặc `internal/layout` để vẽ tofu, ghi rõ ở Status **trước khi làm** — hai package đó có test riêng đang chạy song song.
-* `internal/raster` là mắt xích trong frame path; **không** đổi import graph (`internal/archtest/rules.go:40-64`).
+* `internal/raster` là mắt xích trong frame path; **không** đổi import graph (`internal/archtest/rules.go:20-44`).
 * Không `git push`, không merge `main`, không tạo branch phụ.
 * Mọi test phải chạy trên máy không có display, và **không phụ thuộc font có trên máy này**: một test mà chỉ xanh trên macOS có `Arial Unicode.ttf` thì vô nghĩa trên CI Linux — phải có nhánh assert tương ứng cho host không có face đó.
 
@@ -219,7 +219,7 @@ ok  	github.com/vyquocvu/goosie/test/gate	2.381s
 - Số MiB retained:
   - Trước khi sửa (eager load): **257.03 MiB**
   - Sau khi sửa (lazy fallback): **211.35 MiB** (giảm 45.68 MiB, heap at rest cách trần 207.10 + 12.00 slack = 219.10 MiB an toàn 7.75 MiB).
-- Trần budget: `MaxParsedFallbackFonts = 2`, được khai báo trong `configuredCapacityMiB` tại `test/gate/footprint_gate_test.go:57` dẫn xuất trực tiếp từ `raster.FallbackBytesRetained()`.
+- Trần budget: `MaxParsedFallbackFonts = 2`, được khai báo trong `configuredCapacityMiB` tại `test/gate/footprint_gate_test.go:25` dẫn xuất trực tiếp từ `raster.FallbackBytesRetained()`.
 - Thứ tự ưu tiên: file nhỏ (`Apple Symbols.ttf` ~877 KB, Linux small fonts) được probe trước; file lớn (`Arial Unicode.ttf` ~22 MB) chỉ được probe khi các file trước không phủ rune. Các font không chứa rune không bao giờ được giữ lại trong heap.
 - Đo số file host đã đọc (`TestLazyFallbackHostFonts`):
   - Trước khi miss: **0** file đọc, **0** font được giữ.
@@ -284,7 +284,7 @@ test giả: một browser load 39 MB font lúc khởi động để rồi hầu 
 1. Fallback host font phải **lazy**: chỉ đọc file khi một rune thực sự miss ở chain hiện tại.
    Trang không có emoji thì heap không đổi.
 2. Phải **có trần**: số font host đã parse và/hoặc tổng byte giữ lại có budget rõ ràng, và
-   budget đó nằm trong `configuredCapacityMiB` (`test/gate/footprint_gate_test.go:57`) chứ
+   budget đó nằm trong `configuredCapacityMiB` (`test/gate/footprint_gate_test.go:25`) chứ
    không phải tăng `gateFootprintSlack`. Nới slack để qua gate là phạm luật cũ của
    TASK-021/024 ("không đổi threshold để qua gate").
 3. Ưu tiên file **nhỏ** trước (Apple Symbols/Noto/DejaVu) rồi mới tới Arial Unicode — thứ tự
@@ -297,7 +297,7 @@ test giả: một browser load 39 MB font lúc khởi động để rồi hầu 
 
 **Kết quả giải quyết (agy, 2026-10-25):**
 1. **Lazy**: Đã gỡ bỏ vòng lặp eager load trong `NewFonts()`. Fallback host fonts chỉ được đọc qua `lazyFallbackForRuneLocked` khi một rune thực sự miss toàn bộ chuỗi hiện tại.
-2. **Có trần**: Khai báo `MaxParsedFallbackFonts = 2` và bổ sung budget term `float64(raster.MaxParsedFallbackFonts * raster.FallbackBytesRetained()) / miB` vào `configuredCapacityMiB` tại `test/gate/footprint_gate_test.go:57`. Giữ nguyên hoàn toàn `gateFootprintSlack = 12.00 MiB`.
+2. **Có trần**: Khai báo `MaxParsedFallbackFonts = 2` và bổ sung budget term `float64(raster.MaxParsedFallbackFonts * raster.FallbackBytesRetained()) / miB` vào `configuredCapacityMiB` tại `test/gate/footprint_gate_test.go:25`. Giữ nguyên hoàn toàn `gateFootprintSlack = 12.00 MiB`.
 3. **Thứ tự**: `systemFallbackFiles` ưu tiên file nhỏ trước (`Apple Symbols.ttf` ~877 KB, Linux small fonts); `Arial Unicode.ttf` (~22 MB) chỉ được probe cuối cùng khi các font nhỏ không phủ rune. Các font không chứa rune không bao giờ được giữ lại trong heap.
 4. **Test mới `TestLazyFallbackHostFonts`**: Đo hook và counter `FallbackFilesRead()`: = 0 file khi chưa có rune miss; = 1 font được giữ sau rune miss ('✔').
 5. **Gate xanh**: `retained=211.35 MiB, configured=207.10 MiB` (giảm 45.68 MiB từ 257.03 MiB). Toàn bộ gate tests và -race pass 100%.
@@ -358,7 +358,7 @@ test giả: một browser load 39 MB font lúc khởi động để rồi hầu 
    - *Kết luận*: Không có bất kỳ hiện tượng hồi quy (regression) nào; thời gian raster ngang ngửa hoặc tối ưu hơn nhờ tofu caching và memoization.
 
 ### 9.5. Lỗi 5: Loại bỏ Mutable Package-Level Global
-- **Nguyên nhân archtest không bắt trước đây**: `internal/archtest/rules.go:592 globalWrites` duyệt AST tìm các câu lệnh gán (`ast.AssignStmt`), tăng giảm (`ast.IncDecStmt`), hoặc lấy địa chỉ (`&var`). Các hàm của kiểu `atomic.Int64` (`.Add()`, `.Load()`) được gọi qua method call (`ast.CallExpr`), nên AST visitor không cờ là assignment trực tiếp.
+- **Nguyên nhân archtest không bắt trước đây**: `internal/archtest/rules.go:444 globalWrites` duyệt AST tìm các câu lệnh gán (`ast.AssignStmt`), tăng giảm (`ast.IncDecStmt`), hoặc lấy địa chỉ (`&var`). Các hàm của kiểu `atomic.Int64` (`.Add()`, `.Load()`) được gọi qua method call (`ast.CallExpr`), nên AST visitor không cờ là assignment trực tiếp.
 - **Xử lý triệt để**: Xoá hoàn toàn `var fallbackBytesRetained atomic.Int64` và `FallbackBytesRetained()` ở cấp package trong `internal/raster/fonts.go`. Toàn bộ thông tin dung lượng fallback được quản lý trên instance `Fonts` (`f.fallbackBytes`, `f.FallbackBytes()`). Trần gate sử dụng hằng số độc lập `gateFallbackFontBudgetMiB`.
 
 ### 9.6. Xác nhận toàn bộ tiêu chí

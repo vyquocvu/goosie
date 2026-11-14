@@ -52,14 +52,14 @@ Registry máy đọc được, seed bằng đúng thứ đã mở thật — **b
 `GOOSIE-RENDER-001` (P1, `docs/qa-test-plan.md` §QA-002: chưa có frame-by-frame evidence để đóng phần nhấp nháy), và
 ba gap engine ghi ở `docs/tasks/TASK-026-FORM-JOURNEYS.md` §8 (bản đã xác minh lại 2026-10-25):
 
-* `GOOSIE-SELECT-001` (P1) — `<select>` focus được nhưng không đổi được value: `internal/engine/focus.go:573-590 IsActivatable` không có `select`, `internal/engine/events.go:75 keyDefaultAction` không có nhánh Arrow/Home/End nên phím rơi vào `cmd/goosie/interaction.go:425 scrollContentKey`. Spec fix: `docs/tasks/TASK-030-SELECT-INTERACTION.md` (BR-101).
-* `GOOSIE-VALIDATE-001` (P1) — `internal/engine/engine.go:1619 submitFormLocked` dispatch `submit` rồi collect và gửi ngay, không đọc `required`/`type`. Spec fix: `docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md` (BR-105).
-* `GOOSIE-SUBMITTER-001` (P1) — `internal/engine/forms.go:70-72,88 isSuccessfulControl` loại button khỏi form data và `internal/engine/engine.go:1560-1568 runClickDefault` gọi `SubmitForm(form)` không truyền submitter. Spec fix: `docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md` (BR-107).
+* `GOOSIE-SELECT-001` (P1) — `<select>` focus được nhưng không đổi được value: `internal/engine/focus.go:504-518 IsActivatable` không có `select`, `internal/engine/events.go:51 keyDefaultAction` không có nhánh Arrow/Home/End nên phím rơi vào `cmd/goosie/interaction.go:377 scrollContentKey`. Spec fix: `docs/tasks/TASK-030-SELECT-INTERACTION.md` (BR-101).
+* `GOOSIE-VALIDATE-001` (P1) — `internal/engine/engine.go:1161 submitFormLocked` dispatch `submit` rồi collect và gửi ngay, không đọc `required`/`type`. Spec fix: `docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md` (BR-105).
+* `GOOSIE-SUBMITTER-001` (P1) — `internal/engine/forms.go:58-60,74 isSuccessfulControl` loại button khỏi form data và `internal/engine/engine.go:1106-1114 runClickDefault` gọi `SubmitForm(form)` không truyền submitter. Spec fix: `docs/tasks/TASK-031-FORM-SUBMISSION-CORRECTNESS.md` (BR-107).
 
-**Không seed defect AX-publish nào.** §8 bản đầu nghi `cmd/goosie/interaction.go:44-58` không
-publish accessibility sau khi kích hoạt; đã bác bỏ: `repaintTab` (`cmd/goosie/presentation.go:116`)
-kết thúc bằng `publishAccessibility()` ở cả hai nhánh (`:167`, `:185`), và
-`cmd/goosie/journey_p1_forms_test.go:46-49` chứng minh `node.Focused` đổi trong AX tree ngay sau
+**Không seed defect AX-publish nào.** §8 bản đầu nghi `cmd/goosie/interaction.go:37-51` không
+publish accessibility sau khi kích hoạt; đã bác bỏ: `repaintTab` (`cmd/goosie/presentation.go:92`)
+kết thúc bằng `publishAccessibility()` ở cả hai nhánh (`:127`, `:145`), và
+`cmd/goosie/journey_p1_forms_test.go:45-48` chứng minh `node.Focused` đổi trong AX tree ngay sau
 `clickNode`. Defect chỉ được ghi vào registry khi đã **đo**, không phải khi đọc thấy có vẻ thiếu.
  Trường: `id, priority, status (open|closed|waived), owner, summary, evidence, closed_by`.
 Ratchet cho golden: một `qa-ratchet.json` ghi `{"p0_tagged": <n>, "p0p1_tagged": <n>}`. Sweep fail (exit 1) nếu số giảm, hoặc nếu có P0 không tagged. **Nâng số là hợp lệ, hạ số phải kèm lý do trong commit.**
@@ -105,7 +105,7 @@ Ratchet cho golden: một `qa-ratchet.json` ghi `{"p0_tagged": <n>, "p0p1_tagged
 
 - **AC-01 — PASS.** `bash -n scripts/rc-sweep.sh`; `go vet -all ./...`; `go test -count=1 ./internal/archtest/` đều exit 0. Các lệnh này cũng chạy lại trong bước `gate` của sweep cuối.
 - **AC-02 — PASS.** `go test -count=1 ./test/gatecheck/` → `ok ... 35.059s`; `go test -race -count=1 ./test/gatecheck/` → `ok ... 36.432s`.
-- **AC-03 — PASS sau rerun.** `go test -count=1 ./...` → tất cả package PASS trong release-gate cuối (`/tmp/rc-sweep/gate/01-go-test-count-1.log`). Một sweep trước có `TestQueueFullIsRefusedNotBlocked` timeout ở `test/surface/loop_test.go:873`; chạy riêng `go test -count=1 ./test/surface/ -run '^TestQueueFullIsRefusedNotBlocked$'` → `ok ... 0.464s`, full-suite rerun → `test/surface PASS ... 2.857s`, sweep cuối → release gate PASS. `TestNativeEndToEndPlaysARealVideo` PASS trong các full-suite run cuối; không sửa test/timeout. `go test -count=1 -run TestTraceability ./test/qc/ -update` → `ok ... 0.685s`; golden chỉ đổi row BR-180: các test `test/gatecheck/rc_sweep_test.go` và `enforced: true`.
+- **AC-03 — PASS sau rerun.** `go test -count=1 ./...` → tất cả package PASS trong release-gate cuối (`/tmp/rc-sweep/gate/01-go-test-count-1.log`). Một sweep trước có `TestQueueFullIsRefusedNotBlocked` timeout ở `test/surface/loop_test.go:734`; chạy riêng `go test -count=1 ./test/surface/ -run '^TestQueueFullIsRefusedNotBlocked$'` → `ok ... 0.464s`, full-suite rerun → `test/surface PASS ... 2.857s`, sweep cuối → release gate PASS. `TestNativeEndToEndPlaysARealVideo` PASS trong các full-suite run cuối; không sửa test/timeout. `go test -count=1 -run TestTraceability ./test/qc/ -update` → `ok ... 0.685s`; golden chỉ đổi row BR-180: các test `test/gatecheck/rc_sweep_test.go` và `enforced: true`.
 - **AC-04 — RUN, exit 1 có lý do.** Lệnh: `bash scripts/rc-sweep.sh -binary ./bin/goosie -out /tmp/rc-sweep`. Report: `/tmp/rc-sweep/rc-sweep.json`, đủ 7 step. Output cuối: `rc-sweep: fingerprint: PASS - build SHA, OS, and binary SHA-256 recorded`; `rc-sweep: gate: PASS - release gate exited 0`; `rc-sweep: parity_render: PASS - parity render exited 0`; `rc-sweep: parity_interaction: PASS - interaction parity exited 0`; `rc-sweep: per_case_run: PASS - all 71 tagged P0/P1 test names ran`; `rc-sweep: live_smoke: PASS - live page drew 120 frames, doc_height=21217`; `rc-sweep: defects_signoff: FAIL - open P0/P1 defects: GOOSIE-RENDER-001; human sign-off is missing for build 091ce0c76fe5efadcff4256e50c6d4b5096f4413`; `rc-sweep: FAIL (report: /private/tmp/rc-sweep/rc-sweep.json)`. Live smoke tới được `https://about.google/products/`; headless report ghi 120 frame, doc height 21217, failed tile 0, worker panic 0.
 - **AC-05 — PASS; mutation proofs đã chạy, revert và chạy lại.** Mỗi output dưới đây là số test mục tiêu thực thi; hành vi bị tắt cho kết quả `1/1 FAIL`, sau revert là `1/1 PASS`:
 

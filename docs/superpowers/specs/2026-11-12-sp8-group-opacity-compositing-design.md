@@ -27,7 +27,7 @@ executed without further sign-off. Commits on `main`, NO push.
 ## 1. Problem and evidence
 
 `GOOSIE-COMPOSITE-001` (P2, open): group opacity is folded into every command's
-premultiplied color at `internal/raster/tile.go` `applyOpacity` (`tile.go:180-189`,
+premultiplied color at `internal/raster/tile.go` `applyOpacity` (`tile.go:115-119`,
 called per fill/border/text/image). Because each command blends its own faded
 color straight onto the tile, two translucent paintings that overlap inside one
 faded group darken twice.
@@ -93,15 +93,15 @@ index space; the command slice itself is never reordered within a group (see
 
 ### 3.2 Why groups stay contiguous — the clean-group rule
 
-`List.SortStable` (`list.go:84-94`) sorts the flat slice by `Z`, stable, and
-`LayerDL.Intersecting` (`list.go:265-292`) relies on the list being contiguous in
+`List.SortStable` (`list.go:52-57`) sorts the flat slice by `Z`, stable, and
+`LayerDL.Intersecting` (`list.go:174-190`) relies on the list being contiguous in
 paint order (a span, not a filtered copy — no per-tile allocation). A naive
 opacity group could break if a descendant with `z-index>0` is stamped a `Z` that
 lifts it past the group's tail.
 
 Rule: **a box becomes a recorded group only if it declares `opacity∈(0,1)` AND its
 subtree has no descendant with a lifting `z`** — i.e. no box below it for which
-`zIndexOf` (`builder_box.go:140-145`) returns true. Call this *clean*. Cleanliness
+`zIndexOf` (`builder_box.go:72-77`) returns true. Call this *clean*. Cleanliness
 is monotone up the tree: if any descendant escapes, every ancestor's potential
 group is also non-clean. So a clean group's whole range carries a single `Z`, and
 a stable sort keeps equal-`Z` elements in their original relative order — nothing
@@ -119,7 +119,7 @@ a recorded group is non-contiguous.
 ### 3.3 Opacity threading at a group boundary
 
 The defect and the fallback must never *lose* a fade. At each box the builder
-already computes `effective = inheritedOpacity × own` (`builder_box.go:90-99`).
+already computes `effective = inheritedOpacity × own` (`builder_box.go:44-47`).
 
 - **Clean group:** do **not** multiply this box's own `o` into the threaded value.
   Emit the box's own decoration/contents and its children with `effective` passed
@@ -144,7 +144,7 @@ Correctness of the two cases:
 ### 3.4 Raster composite (raster)
 
 Refactor the per-command `switch c.Kind` body of `RasterizeTile`
-(`tile.go:71-92`) into a helper `drawCommand(dst *frame.Bitmap, dl, i, dx, dy,
+(`tile.go:42-55`) into a helper `drawCommand(dst *frame.Bitmap, dl, i, dx, dy,
 clip, f, g)` that draws one command into an arbitrary destination bitmap, honoring
 `c.Opacity`, `c.Clip`, and `CachedIntersects` exactly as now. `RasterizeTile`
 then walks the frozen list; when the loop index `i` equals a group's `Start`
@@ -170,7 +170,7 @@ so image/text/gradient/border/mask paths inherit group compositing for free.
 ## 4. Damage and equality
 
 A group's `OwnOpacity` lives outside the command fields, so `sameCommand`
-(`list.go:224-234`) and therefore `ContentDamage` (`list.go:179-222`) would treat
+(`list.go:151-154`) and therefore `ContentDamage` (`list.go:111-149`) would treat
 a frame that only changed a group's opacity as undamaged. `ContentDamage` must
 also compare the group slices between the two `LayerDL`s: if the group set for the
 dirty command range differs (count, `OwnOpacity`, or range), widen the damage to
@@ -191,7 +191,7 @@ region is repainted.
   element type. Only a parallel `[]Group` + `firstGroupAt` sidecar are added, both
   in `internal/paint`, which already imports `frame`.
 - **Import/arch rules:** `Group` in `paint` is visible to `raster`
-  (`raster → paint` is allowed, `archtest/rules.go:44`); nothing in `frame` gains a
+  (`raster → paint` is allowed, `archtest/rules.go:24`); nothing in `frame` gains a
   dependency. Pure Go (no cgo). `internal/engine` gains no `*layout.Object` field.
 - **Admission limits:** the scratch is ≤ one tile, already within the tile cache
   budget (`limits.go` `MaxTileCacheBytes`, `MaxDocumentTiles`); no unbounded

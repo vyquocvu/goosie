@@ -106,20 +106,20 @@ Cập nhật mục **Resource Limits** (dòng 129-135):
 Verified by TASK-003 developer during Go toolchain bump audit:
 
 1. **TileCacheBudget err checks**: all 8 call sites in `cmd/goosie/*.go` check the error return:
-   - `document_loader.go:117-119` (view-source path)
-   - `document_loader.go:194-196` (PDF path)
-   - `document_loader.go:447-449` (main document path)
-   - `error_page.go:168-170`
-   - `internal_pages.go:1839-1841`
-   - `presentation.go:130-133`
-   - `render_work_test.go:669-671`
+   - `document_loader.go:109-111` (view-source path)
+   - `document_loader.go:181-183` (PDF path)
+   - `document_loader.go:404-406` (main document path)
+   - `error_page.go:165-167`
+   - `internal_pages.go:1780-1781`
+   - `presentation.go:103-107`
+   - `render_work_test.go:663-665`
    - `progressive_images_test.go:39-41`
 
 2. **Test constants match `internal/engine/limits.go`** (16 MiB, 1,000,000 nodes, 524,288 tiles, 2 MiB geometry):
-   - `test/domtest/domtest.go:23` — Nodes: 1000000; line 26 — AttributeBytes: 1048576 (1 MiB)
+   - `test/domtest/domtest.go:9` — Nodes: 1000000; line 26 — AttributeBytes: 1048576 (1 MiB)
    - `test/engine/bounds_test.go:18-29` — uses `engine.MaxDocumentBytes+1`, `engine.MaxDocumentNodes+1`, `2097153px` (> MaxGeometry), aggregate 2.4M px (> 2 MiB)
    - `test/engine/viewport_test.go:37-39` — 131072×262144 = 524,288 tiles (aligned limit); 131073×262144 = 525,312 tiles (rejected)
-   - `test/entrypoints/limits_test.go:73` — 131073px×262144px; line 180 — 16<<20+1
+   - `test/entrypoints/limits_test.go:64` — 131073px×262144px; line 180 — 16<<20+1
    - `cmd/goosie/main_test.go:209` — 131073px×262144px
    - `test/net/http_test.go:48` — (16<<20)+1; line 228 — 16<<20
 

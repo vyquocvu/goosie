@@ -15,7 +15,7 @@
 ## Task 1: Parse `flow-root` to a block with a FlowRoot flag
 
 **Files:**
-- Modify: `internal/style/style.go` (ComputedStyle `:254`; call sites `:2131`, `:2689`; helper near `parseDisplay` `:4263`)
+- Modify: `internal/style/style.go` (ComputedStyle `:213`; call sites `:1762`, `:2238`; helper near `parseDisplay` `:3718`)
 - Test: `test/style/flow_root_parse_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -73,14 +73,14 @@ Expected: FAIL — `cs.FlowRoot undefined`.
 
 - [ ] **Step 3: Add the field and helper**
 
-In `internal/style/style.go`, add to `ComputedStyle` immediately after `Display Display` (`:254`):
+In `internal/style/style.go`, add to `ComputedStyle` immediately after `Display Display` (`:213`):
 
 ```go
 	Display     Display
 	FlowRoot    bool
 ```
 
-Add a helper just above `parseDisplay` (`:4263`):
+Add a helper just above `parseDisplay` (`:3718`):
 
 ```go
 // applyDisplay sets the used display and records flow-root, which is block-level
@@ -95,8 +95,8 @@ func applyDisplay(cs *ComputedStyle, value string) {
 ```
 
 Route both call sites through it:
-- `:2131` `st.Display = parseDisplay(val)` → `applyDisplay(st, val)`
-- `:2689` `cs.Display = parseDisplay(value)` → `applyDisplay(cs, value)`
+- `:1762` `st.Display = parseDisplay(val)` → `applyDisplay(st, val)`
+- `:2238` `cs.Display = parseDisplay(value)` → `applyDisplay(cs, value)`
 
 - [ ] **Step 4: Run it green**
 
@@ -116,8 +116,8 @@ git commit -m "feat(style): parse display:flow-root to a block with a FlowRoot f
 ## Task 2: `startsNewFC` and `layoutStyleKey` honor FlowRoot
 
 **Files:**
-- Modify: `internal/layout/block.go` (`startsNewFC` `:2887`)
-- Modify: `internal/engine/style_diff.go` (struct `:16`, `makeLayoutStyleKey` `:101`)
+- Modify: `internal/layout/block.go` (`startsNewFC` `:2212`)
+- Modify: `internal/engine/style_diff.go` (struct `:13`, `makeLayoutStyleKey` `:98`)
 - Test: `test/layout/fc_flow_root_test.go`, `test/engine/style_diff_flow_root_test.go`
 
 - [ ] **Step 1: Write the failing layout test**
@@ -176,7 +176,7 @@ Expected: `TestFlowRootContainsFloat` FAIL (height < 80, float escapes because `
 
 - [ ] **Step 3: Honor FlowRoot in startsNewFC**
 
-In `internal/layout/block.go` `startsNewFC` (`:2887`), after the block-level switch (`:2892-2896`) and before the overflow check (`:2897`), add:
+In `internal/layout/block.go` `startsNewFC` (`:2212`), after the block-level switch (`:2215-2217`) and before the overflow check (`:2218`), add:
 
 ```go
 	if s.FlowRoot {
@@ -191,14 +191,14 @@ Expected: PASS.
 
 - [ ] **Step 5: Add FlowRoot to layoutStyleKey + test**
 
-In `internal/engine/style_diff.go`, add to the struct (`:17` line) a field:
+In `internal/engine/style_diff.go`, add to the struct (`:14` line) a field:
 
 ```go
 	Display, Position, Float, Clear               uint8
 	FlowRoot                                      bool
 ```
 
-and to `makeLayoutStyleKey` (`:101`):
+and to `makeLayoutStyleKey` (`:98`):
 
 ```go
 		Display: uint8(s.Display), Position: uint8(s.Position), Float: uint8(s.Float), Clear: uint8(s.Clear),
@@ -259,7 +259,7 @@ python3 testdata/gen_layout_refs.py > /tmp/sp5-t3gen.log 2>&1; echo gen=$?
 go test ./test/engine -run 'TestLayoutParityWithChromium/float-containment-001' -count=1 -v > /tmp/sp5-t3.log 2>&1; echo $?; cat /tmp/sp5-t3.log
 ```
 
-Expected: PASS (all boxes within 1px). If any box still diverges, STOP and investigate the block-row placement of a sole inline-block child (`block.go:398-491`, `flowsInlineContent` `:2829`) before promoting — record the divergence. `gen_layout_refs.py` regenerates ALL references; confirm `git status` shows only the new `float-containment-001.reference.json` changed (others byte-identical); `git checkout` any churned existing reference.
+Expected: PASS (all boxes within 1px). If any box still diverges, STOP and investigate the block-row placement of a sole inline-block child (`block.go:294-368`, `flowsInlineContent` `:2159`) before promoting — record the divergence. `gen_layout_refs.py` regenerates ALL references; confirm `git status` shows only the new `float-containment-001.reference.json` changed (others byte-identical); `git checkout` any churned existing reference.
 
 - [ ] **Step 2: Finalize the move**
 
@@ -321,8 +321,8 @@ Temporarily remove the `if s.FlowRoot { return true }` branch from `startsNewFC`
 ## Task 5: Migrate `findMark.obj` to a BoxKey value (L5)
 
 **Files:**
-- Modify: `internal/engine/engine.go` (`findMark` `:2622`, `Find` `:2679`)
-- Modify: `internal/engine/paint.go` (`:81`)
+- Modify: `internal/engine/engine.go` (`findMark` `:2000`, `Find` `:2056`)
+- Modify: `internal/engine/paint.go` (`:65`)
 - Test: `test/engine/find_identity_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -372,10 +372,10 @@ type findMark struct {
 }
 ```
 
-`:2679` `marks = append(marks, findMark{obj: words[first], rect: rect, match: len(matches)})` →
+`:2056` `marks = append(marks, findMark{obj: words[first], rect: rect, match: len(matches)})` →
 `marks = append(marks, findMark{key: words[first].Key, rect: rect, match: len(matches)})`
 
-In `internal/engine/paint.go` `:81` `Key: m.obj.Key,` → `Key: m.key,`
+In `internal/engine/paint.go` `:65` `Key: m.obj.Key,` → `Key: m.key,`
 
 - [ ] **Step 4: Run green + regression**
 
@@ -395,7 +395,7 @@ git commit -m "refactor(engine): key find marks by BoxKey, not a held arena poin
 ## Task 6: Archtest forbids held arena-pointer fields in engine state
 
 **Files:**
-- Modify: `internal/archtest/rules.go` (add `ArenaPointerFields` near `ArenaPointerMaps` `:580`)
+- Modify: `internal/archtest/rules.go` (add `ArenaPointerFields` near `ArenaPointerMaps` `:432`)
 - Test: `internal/archtest/pointer_field_test.go`
 
 - [ ] **Step 1: Write the failing test**
@@ -456,7 +456,7 @@ Expected: FAIL — `archtest.ArenaPointerFields undefined`.
 
 - [ ] **Step 3: Add the rule**
 
-In `internal/archtest/rules.go`, after `ArenaPointerMaps` (`:614`), add:
+In `internal/archtest/rules.go`, after `ArenaPointerMaps` (`:466`), add:
 
 ```go
 // ArenaPointerField is a struct field that holds a *layout.Object. Engine state
@@ -561,7 +561,7 @@ In `docs/roadmap-v2.md`, after the SP-4 block, add an SP-5 status block (Vietnam
 
 - [ ] **Step 3: Review status notes**
 
-In `docs/engine-compatibility-review.md`, update the §4.2 status (L2 second landing now landed via flow-root, not the containment refactor), §4.5 (findMark migrated; transient overlays documented as walk-local; archtest widened to fields), and §6 L2/L5 status lines. Keep additive; correct stale line refs found in the terrain map (anon veto `arena.go:371-393/399-425`; `startsNewFC` `block.go:2887`).
+In `docs/engine-compatibility-review.md`, update the §4.2 status (L2 second landing now landed via flow-root, not the containment refactor), §4.5 (findMark migrated; transient overlays documented as walk-local; archtest widened to fields), and §6 L2/L5 status lines. Keep additive; correct stale line refs found in the terrain map (anon veto `arena.go:189-203/399-425`; `startsNewFC` `block.go:2212`).
 
 - [ ] **Step 4: Commit docs**
 
@@ -603,9 +603,9 @@ T4/T7 were verification-only (no commit).
   `internal/engine/style_diff_flow_root_test.go` (`package engine`), not
   `test/engine/` (uniformly `engine_test`), to reach `makeLayoutStyleKey`; it
   compares via `reflect.DeepEqual` (the key holds a non-comparable
-  `DeferredLength`), matching the production seam at `style_diff.go:157`.
+  `DeferredLength`), matching the production seam at `style_diff.go:154`.
 - T5: no new `find_identity_test.go` — `TestFindHighlightsPainted`
-  (`test/engine/find_test.go:200`) already guards Find→SetFindActive→PaintChecked
+  (`test/engine/find_test.go:193`) already guards Find→SetFindActive→PaintChecked
   →ClearFind with fill/color assertions, so a baseline-green duplicate was skipped
   (DRY). `PaintChecked` takes a `scale float32` arg. The structural red is T6.
 - T6: `writePackageGo` takes `map[string]string`, not `(name, body)`; the fixture
@@ -619,7 +619,7 @@ T4/T7 were verification-only (no commit).
 now 9 fixtures (added `float-containment-001`), all green at 1px. Mutations red→
 restored→green: drop `FlowRoot` branch in `startsNewFC` (`#flowroot h=22 want 82`);
 drop `FlowRoot` from key builder; re-add `findMark.obj` (archtest flags
-`engine.go:2626`). One load-induced flake (`test/raster
+`engine.go:2003`). One load-induced flake (`test/raster
 TestUpdateLayerCoalescesDamage`) under the concurrent full suite confirmed green
 in isolation ×5 and package ×3, and on a full-suite re-run — not a regression.
 L3/L4 deferred to SP-6+ with terrain evidence (see roadmap/review).

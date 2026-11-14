@@ -13,13 +13,13 @@ server không mong nhận**.
 
 | Sự thật | Chỗ trong code |
 | --- | --- |
-| Submit dispatch `submit` rồi **collect và gửi ngay**, không có dòng validation nào | `internal/engine/engine.go:1619 submitFormLocked` (`ev := dom.NewEvent("submit"...)` → `data := CollectFormData(form)`) |
-| Không có chỗ nào đọc thuộc tính `required` khi submit (chỉ CSS `:required` selector) | `internal/css/selector.go:887,934`; không có `required` check nào khác |
-| `method="dialog"` đã được xử **trước** khi tạo submission — validation phải chèn trước cả nhánh này | `internal/engine/engine.go:1631-1641` |
-| Button luôn bị loại khỏi form data với chú thích "handled separately", nhưng **không có chỗ nào handle separately** | `internal/engine/forms.go:70-72` (`input` type submit/reset/button) và `:88` (`case "button": return false`) |
-| Click submit button gọi `SubmitForm(form)` **không truyền node button** ⇒ mất submitter | `internal/engine/engine.go:1560-1568 runClickDefault` |
-| Enter trong input cũng submit mà không có submitter | `internal/engine/focus.go:378` (`submitFormLocked(form)`) |
-| API public hiện tại chỉ nhận form | `internal/engine/engine.go:1613 SubmitForm(form *dom.Node)`; call sites: `focus.go:378`, `engine.go:1535`, `engine.go:1564`, `test/engine/control_events_test.go:232`, `test/engine/dialog_test.go:194` |
+| Submit dispatch `submit` rồi **collect và gửi ngay**, không có dòng validation nào | `internal/engine/engine.go:1161 submitFormLocked` (`ev := dom.NewEvent("submit"...)` → `data := CollectFormData(form)`) |
+| Không có chỗ nào đọc thuộc tính `required` khi submit (chỉ CSS `:required` selector) | `internal/css/selector.go:741,783`; không có `required` check nào khác |
+| `method="dialog"` đã được xử **trước** khi tạo submission — validation phải chèn trước cả nhánh này | `internal/engine/engine.go:1174-1177` |
+| Button luôn bị loại khỏi form data với chú thích "handled separately", nhưng **không có chỗ nào handle separately** | `internal/engine/forms.go:58-60` (`input` type submit/reset/button) và `:74` (`case "button": return false`) |
+| Click submit button gọi `SubmitForm(form)` **không truyền node button** ⇒ mất submitter | `internal/engine/engine.go:1106-1114 runClickDefault` |
+| Enter trong input cũng submit mà không có submitter | `internal/engine/focus.go:331` (`submitFormLocked(form)`) |
+| API public hiện tại chỉ nhận form | `internal/engine/engine.go:1160 SubmitForm(form *dom.Node)`; call sites: `focus.go:331`, `engine.go:1081`, `engine.go:1110`, `test/engine/control_events_test.go:227`, `test/engine/dialog_test.go:190` |
 
 ## 2. Thiết kế
 
@@ -119,8 +119,8 @@ Hoàn tất phần implementation và verification trên branch `worktree-task-0
 
 Đã xác nhận các dòng evidence còn lại trong bảng trên nhánh này. Hai trích dẫn sau không khớp source hiện tại, ghi lại để không âm thầm dựa vào chúng:
 
-- `internal/engine/focus.go:378` không phải call site Enter; đó là dòng cuối của helper `insert`. Call site `s.submitFormLocked(form)` nằm ở `internal/engine/focus.go:399` trước sửa. Nay truyền `FirstSubmitButton(form)` tại dòng 399.
-- `internal/css/selector.go:887,934` không phải `:required` selector. Dòng 887–909 thuộc kiểm tra option `:checked`; 934 thuộc danh sách phần tử `:disabled`. `rg -n required internal/css/selector.go` chỉ tìm thấy comment không liên quan ở dòng 855. Kết luận không có required validation ở submit path vẫn đúng; không tìm thấy checker `required` trong selector file.
+- `internal/engine/focus.go:331` không phải call site Enter; đó là dòng cuối của helper `insert`. Call site `s.submitFormLocked(form)` nằm ở `internal/engine/focus.go:352` trước sửa. Nay truyền `FirstSubmitButton(form)` tại dòng 399.
+- `internal/css/selector.go:741,783` không phải `:required` selector. Dòng 887–909 thuộc kiểm tra option `:checked`; 934 thuộc danh sách phần tử `:disabled`. `rg -n required internal/css/selector.go` chỉ tìm thấy comment không liên quan ở dòng 855. Kết luận không có required validation ở submit path vẫn đúng; không tìm thấy checker `required` trong selector file.
 
 ### Verification nguyên văn
 

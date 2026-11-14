@@ -28,24 +28,24 @@ Already done — do NOT redo:
 
 - Internal managers exist and are reachable: `goosie://bookmarks`,
   `goosie://history`, `goosie://downloads`, `goosie://settings` via the
-  in-document nav header (`internalNavHeader`, `cmd/goosie/internal_pages.go:30`)
-  and omnibox suggestions (`querySuggestions`, `cmd/goosie/main.go:582`).
+  in-document nav header (`internalNavHeader`, `cmd/goosie/internal_pages.go:29`)
+  and omnibox suggestions (`querySuggestions`, `cmd/goosie/main.go:455`).
   Their INT/SEC mechanics are signed PASS (BR-048/049/050/051/058).
 - A reusable dropdown exists: `ContextMenu` (`cmd/goosie/context_menu.go`),
   with `Show/Hide/Rect/UpdateHover/HitItem/Draw`, viewport clamping, and action
-  routing through `handleContextMenuAction` (`cmd/goosie/interaction.go:833`).
-  It is already drawn in `chromeWindow.Present` (`toolbar_window.go:468`) and
-  hit-tested first in `chromeWindow.intercept` (`toolbar_window.go:620`).
+  routing through `handleContextMenuAction` (`cmd/goosie/interaction.go:748`).
+  It is already drawn in `chromeWindow.Present` (`toolbar_window.go:419`) and
+  hit-tested first in `chromeWindow.intercept` (`toolbar_window.go:552`).
 - The tab bar is already responsive: `internal/tabs/layout.go`
   (`MinTabWidth=80`, `TabWidthFor`, `ChevronsShown`, `EnsureTabVisible`).
 - Unclipped post-walk paint overlays exist as precedent: validation bubble
   (`internal/paint/validation.go`, `Builder.paintValidationBubble`) and select
   listbox (`internal/paint/listbox.go`, `Builder.paintSelectListBox`), both
-  emitted after `paintBox` in `Builder.Build` (`internal/paint/builder.go:90`)
+  emitted after `paintBox` in `Builder.Build` (`internal/paint/builder.go:53`)
   so no ancestor overflow clips them.
-- Node→box mapping exists: `Session.objectFor(n)` (`internal/engine/focus.go:2965`,
+- Node→box mapping exists: `Session.objectFor(n)` (`internal/engine/focus.go:2722`,
   caller holds `opMu`) → `*layout.Object` → `BorderRect()`. `dom.Node.Walk`
-  (`internal/dom/node.go:1844`) and `Node.ID` (`NodeID uint32`, `node.go:26,54`)
+  (`internal/dom/node.go:1544`) and `Node.ID` (`NodeID uint32`, `node.go:22,43`)
   let the inspector resolve a node by numeric id.
 - A headless journey harness exists: `newBrowserE2E` (`cmd/goosie/e2e_test.go:39`),
   `inject`, `waitFor`, `clickToolbarButton`, `navigateViaAddressBar`,
@@ -64,7 +64,7 @@ Open gaps this spec closes:
    below width 152; the right-anchored `ButtonDownloads` overlaps Reload/Forward/Back
    below width 144. There is no `MinToolbarWidth`, no overflow affordance.
 3. **BR-142 — inspector DOM tree is static.** `renderDOMTreeHTML`
-   (`cmd/goosie/internal_pages.go:1812`) emits syntax-highlighted text; nodes are
+   (`cmd/goosie/internal_pages.go:1752`) emits syntax-highlighted text; nodes are
    not selectable and there is no highlight-in-page mechanism. Selecting a node
    and highlighting it without DOM mutation does not exist.
 
@@ -91,7 +91,7 @@ the `ContextMenu` type but are distinct instances so a right-click menu and the
 main menu never fight over one `Visible` flag).
 
 The standalone `ButtonDownloads` is **kept** at normal widths (backward
-compatible with `toolbar_test.go:424`, `downloads_test.go:180`,
+compatible with `toolbar_test.go:406`, `downloads_test.go:172`,
 `accessibilityChrome`); it sits immediately left of `ButtonMenu`. At small
 widths it collapses into the menu per D2. `OnDownloads` wiring is unchanged.
 

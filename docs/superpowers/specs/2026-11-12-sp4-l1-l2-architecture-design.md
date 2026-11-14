@@ -15,25 +15,25 @@
 The review's snapshot is stale. Verified current state:
 
 **Already done (do not re-plan):**
-- `BoxKey uint64` = (node32 | kind16 | ordinal16), `BoxKind` enum (15 kinds, `BoxKindUnknown=0` … `BoxKindPseudoFirstLetter=14`), `NewBoxKey`, `NodeID()/Kind()/Ordinal()`, `boxKindForStyle` — `internal/layout/boxkey.go:10-90`.
-- `Object.Key BoxKey` field — `arena.go:45`. Assigned in `Build` for root (`arena.go:430`), elements with `n.ID != 0` (`arena.go:509`), `::before/::after` (`arena.go:677`), `::first-letter` (`arena.go:699`). Tests: `test/layout/boxkey_test.go`.
-- Float-containment seed/merge is **committed**, not dirty — `block.go:545-599`; `floatBottomL/R`, `floatSeedL/R`, `floatTop`, `floatSeedTop/Has` fields at `arena.go:126-143`.
-- Pseudo-background maps are keyed by `*style.ComputedStyle`, **not** `*layout.Object` — `engine.go:90-91`. Style pointers survive reflow, so these are already arena-pointer-free. **No migration needed.**
+- `BoxKey uint64` = (node32 | kind16 | ordinal16), `BoxKind` enum (15 kinds, `BoxKindUnknown=0` … `BoxKindPseudoFirstLetter=14`), `NewBoxKey`, `NodeID()/Kind()/Ordinal()`, `boxKindForStyle` — `internal/layout/boxkey.go:5-74`.
+- `Object.Key BoxKey` field — `arena.go:20`. Assigned in `Build` for root (`arena.go:236`), elements with `n.ID != 0` (`arena.go:300`), `::before/::after` (`arena.go:457`), `::first-letter` (`arena.go:478`). Tests: `test/layout/boxkey_test.go`.
+- Float-containment seed/merge is **committed**, not dirty — `block.go:404-437`; `floatBottomL/R`, `floatSeedL/R`, `floatTop`, `floatSeedTop/Has` fields at `arena.go:57-62`.
+- Pseudo-background maps are keyed by `*style.ComputedStyle`, **not** `*layout.Object` — `engine.go:58-59`. Style pointers survive reflow, so these are already arena-pointer-free. **No migration needed.**
 
 **Missing (the actual L1 work):**
-- No `Arena.byKey` index. The only node index is `byNode map[dom.NodeID]ObjectID` (`arena.go:256`).
+- No `Arena.byKey` index. The only node index is `byNode map[dom.NodeID]ObjectID` (`arena.go:124`).
 - No production code reads `Object.Key`. Every `NewBoxKey` call passes ordinal `0`.
-- Word/text-run boxes (`inline.go:724-736`), anonymous blocks (`anonymous.go:138-139`), and anonymous table rows/cells (`table.go:336,362` via `spliceAnonymousBlock`) are **unkeyed** (`Key` zero).
-- Two production `map[*layout.Object]`: `Builder.selection map[*layout.Object]SelSpan` (`paint/builder.go:19`) and `Builder.find map[*layout.Object][]FindMark` (`paint/builder.go:20`). Both rebuilt every `Paint` from the live arena; never outlive one generation. `SelSpan.Obj *layout.Object` (`paint/selection.go:9-16`), `FindMark.Obj *layout.Object` (`paint/find.go:11-15`).
-- The false pointer-stability comment is on `Alloc` at `arena.go:301-303` (claims the pointer is stable across `Alloc`; `append` doubling invalidates it).
+- Word/text-run boxes (`inline.go:597-604`), anonymous blocks (`anonymous.go:104-105`), and anonymous table rows/cells (`table.go:265,287` via `spliceAnonymousBlock`) are **unkeyed** (`Key` zero).
+- Two production `map[*layout.Object]`: `Builder.selection map[*layout.Object]SelSpan` (`paint/builder.go:13`) and `Builder.find map[*layout.Object][]FindMark` (`paint/builder.go:14`). Both rebuilt every `Paint` from the live arena; never outlive one generation. `SelSpan.Obj *layout.Object` (`paint/selection.go:9-13`), `FindMark.Obj *layout.Object` (`paint/find.go:8-12`).
+- The false pointer-stability comment is on `Alloc` at `arena.go:143-145` (claims the pointer is stable across `Alloc`; `append` doubling invalidates it).
 
 **L2 ground truth:**
-- Dispatch is a 5-branch `if/else-if` inside `blockIntoInner` at `block.go:253-271`: `ContentVisibility=="hidden"` (short-circuit, sets W/H) → table (`layoutTable`) → grid (`layoutGrid`) → flex (`layoutFlexColumn` if column/column-reverse else `layoutFlexRow`) → block-flow `else` (the inline child loop `block.go:272-611`). Inline and positioned are **not** display branches here.
-- All passes are **free functions** over `*Arena`: container passes share `func(a *Arena, id ObjectID, containingW float32) float32` returning **content height**; `blockInto*` return **outer height**; `layoutTable` also writes `obj.W`/`obj.H` itself (`table.go:276,287`). No builder/context struct exists.
-- Engine pass order `Build → Block → Inline → applyImplicitPopoverAnchors → Positioning`, duplicated in `Reflow` (`engine.go:1873-1883`), `refresh.go:55-60/80-85/121-126`, `cssom_view.go:224-232`.
-- `startsNewFC(a, obj)` at `block.go:2893-2913` encodes **margin-collapse-through**, not full FC establishment. 6 callers: `block.go:553,586,609,2925,2935`, `inline.go:84`.
-- `WorkCounts` (`engine.go:347-352`) = StyleResolves, StyleNodeVisits, LayoutBuilds, DisplayListBuilds. **No per-FC/per-pass counter exists.** Tile/alloc counters live in `raster`/`frame`/`surface`, not engine.
-- Stale package doc `arena.go:8-12` claims a "block, inline, float, flex, grid, table" order that does not match the code.
+- Dispatch is a 5-branch `if/else-if` inside `blockIntoInner` at `block.go:180-191`: `ContentVisibility=="hidden"` (short-circuit, sets W/H) → table (`layoutTable`) → grid (`layoutGrid`) → flex (`layoutFlexColumn` if column/column-reverse else `layoutFlexRow`) → block-flow `else` (the inline child loop `block.go:192-441`). Inline and positioned are **not** display branches here.
+- All passes are **free functions** over `*Arena`: container passes share `func(a *Arena, id ObjectID, containingW float32) float32` returning **content height**; `blockInto*` return **outer height**; `layoutTable` also writes `obj.W`/`obj.H` itself (`table.go:219,228`). No builder/context struct exists.
+- Engine pass order `Build → Block → Inline → applyImplicitPopoverAnchors → Positioning`, duplicated in `Reflow` (`engine.go:1361-1371`), `refresh.go:47-52/80-85/121-126`, `cssom_view.go:184-192`.
+- `startsNewFC(a, obj)` at `block.go:2215-2234` encodes **margin-collapse-through**, not full FC establishment. 6 callers: `block.go:405,425,441,2243,2251`, `inline.go:72`.
+- `WorkCounts` (`engine.go:169-172`) = StyleResolves, StyleNodeVisits, LayoutBuilds, DisplayListBuilds. **No per-FC/per-pass counter exists.** Tile/alloc counters live in `raster`/`frame`/`surface`, not engine.
+- Stale package doc `arena.go:1-1` claims a "block, inline, float, flex, grid, table" order that does not match the code.
 
 ---
 
@@ -50,8 +50,8 @@ The index is **generation-scoped** (one arena per reflow, unchanged). It is the 
 Generated boxes get a key whose **ordinal is a per-arena monotonic counter per kind**, guaranteeing within-generation uniqueness regardless of allocation order or how many times a node is processed:
 
 - `Arena` gains `wordSeq uint16` and `anonSeq uint16` (zero in `NewArena`).
-- **Word/text-run** (`inline.go:724`, after `a.Alloc()`): `a.setKey(wordID, NewBoxKey(uint32(k.Node.ID), BoxKindWord, a.wordSeq)); a.wordSeq++`. `k.Node.ID` is the originating text node (the per-word `nodeCopy` preserves `ID`). Add `BoxKindWord BoxKind = 15` to the enum.
-- **Anonymous block / table row / cell** (`anonymous.go:138`, inside `spliceAnonymousBlock`): `a.setKey(id, NewBoxKey(a.anonNodeID(parent), BoxKindAnonymous, a.anonSeq)); a.anonSeq++`. `anonNodeID(parent)` walks `Parent` links to the nearest box with `Node != nil && Node.ID != 0` and returns its node ID (0 if none). The global `anonSeq` ordinal — not the node ID — carries uniqueness, so nested anonymous boxes under different parents never collide.
+- **Word/text-run** (`inline.go:597`, after `a.Alloc()`): `a.setKey(wordID, NewBoxKey(uint32(k.Node.ID), BoxKindWord, a.wordSeq)); a.wordSeq++`. `k.Node.ID` is the originating text node (the per-word `nodeCopy` preserves `ID`). Add `BoxKindWord BoxKind = 15` to the enum.
+- **Anonymous block / table row / cell** (`anonymous.go:104`, inside `spliceAnonymousBlock`): `a.setKey(id, NewBoxKey(a.anonNodeID(parent), BoxKindAnonymous, a.anonSeq)); a.anonSeq++`. `anonNodeID(parent)` walks `Parent` links to the nearest box with `Node != nil && Node.ID != 0` and returns its node ID (0 if none). The global `anonSeq` ordinal — not the node ID — carries uniqueness, so nested anonymous boxes under different parents never collide.
 
 **Why global monotonic ordinals:** the review's natural word key `(textNodeID, runeStart, runeEnd)` does not fit the 16-bit ordinal field, and per-node ordinals can collide if a node is collected twice. A global per-kind counter makes the bijection trivially true within a generation, which is all the paint maps (rebuilt per `Paint`) require. Cross-generation word/anonymous identity is best-effort (ordinal shifts with content) — the review acknowledges this; true copy-forward stability is L4.
 
@@ -60,16 +60,16 @@ Generated boxes get a key whose **ordinal is a per-arena monotonic counter per k
 ### 2.3 Paint names boxes by key
 
 Migrate the two production pointer maps to `BoxKey`:
-- `SelSpan.Obj *layout.Object` → `SelSpan.Key BoxKey` (`paint/selection.go`). `Builder.selection map[BoxKey]SelSpan` (`paint/builder.go:19`); `SetSelection` keys by `sp.Key`; the consumer `paint/builder_text.go:40` looks up `b.selection[obj.Key]`.
-- `FindMark.Obj *layout.Object` → `FindMark.Key BoxKey` (`paint/find.go`). `Builder.find map[BoxKey][]FindMark`; `SetFind` keys by `m.Key`; consumer `paint/builder_text.go:37` looks up `b.find[obj.Key]`.
+- `SelSpan.Obj *layout.Object` → `SelSpan.Key BoxKey` (`paint/selection.go`). `Builder.selection map[BoxKey]SelSpan` (`paint/builder.go:13`); `SetSelection` keys by `sp.Key`; the consumer `paint/builder_text.go:39` looks up `b.selection[obj.Key]`.
+- `FindMark.Obj *layout.Object` → `FindMark.Key BoxKey` (`paint/find.go`). `Builder.find map[BoxKey][]FindMark`; `SetFind` keys by `m.Key`; consumer `paint/builder_text.go:36` looks up `b.find[obj.Key]`.
 - Producers in `engine/selection.go` (`selectionSpans` ~564, `imeMarkedSpans` ~590) and the find-mark producer set `Key` from the live word box's `Key` instead of its pointer. Word boxes are keyed during layout (§2.2), before paint, so the keys exist.
 
-After this, **zero** production `map[*layout.Object]` remains. Transient per-paint pointer holders (`Builder.focus.object`, `InspectHighlight.Obj`, `ValidationBubble.Obj`, `ListBox.Obj`, `engine.findMark.obj`) are re-resolved from the live arena each paint and never cross an allocating call — they stay as-is (the documented re-fetch pattern). `objectFor` (`focus.go:2965`) is a per-paint linear re-resolution, not a held pointer — unchanged.
+After this, **zero** production `map[*layout.Object]` remains. Transient per-paint pointer holders (`Builder.focus.object`, `InspectHighlight.Obj`, `ValidationBubble.Obj`, `ListBox.Obj`, `engine.findMark.obj`) are re-resolved from the live arena each paint and never cross an allocating call — they stay as-is (the documented re-fetch pattern). `objectFor` (`focus.go:2722`) is a per-paint linear re-resolution, not a held pointer — unchanged.
 
 ### 2.4 Pointer-lifetime rule
 
-- Delete the false comment at `arena.go:301-303`. Replace with the rule: **a `*Object` is valid only until the next call that can allocate; hold `ObjectID`, re-fetch at use.** The existing re-fetch sites (`block.go:188,383,579,613,660,782,1120`, `inline.go:483,750,781`, `table.go:340`) become the documented pattern.
-- Correct the stale package doc `arena.go:8-12` to the real order (Block dispatches flex/grid/table per box; engine runs Block → Inline → Positioning).
+- Delete the false comment at `arena.go:143-145`. Replace with the rule: **a `*Object` is valid only until the next call that can allocate; hold `ObjectID`, re-fetch at use.** The existing re-fetch sites (`block.go:144,279,418,442,475,551,806`, `inline.go:408,614,642`, `table.go:269`) become the documented pattern.
+- Correct the stale package doc `arena.go:1-1` to the real order (Block dispatches flex/grid/table per box; engine runs Block → Inline → Positioning).
 - New archtest rule: no production package declares a map keyed by `*layout.Object` (grep-based, like the existing cgo/globals rules). This is the enforceable proxy for "paint does not hold arena pointers."
 
 ### 2.5 L1 acceptance
@@ -84,7 +84,7 @@ After this, **zero** production `map[*layout.Object]` remains. Transient per-pai
 
 ### 3.1 First landing: behavior-preserving pass registry
 
-Replace the `else if table / else if grid / else if flex` chain (`block.go:261-270`) with a registry lookup, leaving the `ContentVisibility=="hidden"` short-circuit first and the block-flow `else` loop unchanged:
+Replace the `else if table / else if grid / else if flex` chain (`block.go:185-190`) with a registry lookup, leaving the `ContentVisibility=="hidden"` short-circuit first and the block-flow `else` loop unchanged:
 
 ```go
 type FCKind int
@@ -125,7 +125,7 @@ if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
 } else if pass, ok := fcRegistry[obj.Style.Display]; ok {
     y = pass(a, id, containingW)
 } else {
-    // unchanged block-flow child loop (block.go:272-611)
+    // unchanged block-flow child loop (block.go:192-441)
 }
 ```
 
@@ -136,7 +136,7 @@ Table/grid/flex are mutually exclusive display values, so map lookup reproduces 
 ### 3.2 Second landing: authoritative FC roots
 
 Make FC boundaries authoritative for float/margin containment instead of the local seed/merge patch:
-- Widen `startsNewFC` (`block.go:2893`) from margin-collapse-through to the CSS FC-establishment rule set: the box's own `float`, `position:absolute/fixed`, `display:inline-block`, `display:table-cell`, flex/grid **item**-ness (parent display), `overflow` not visible, `contain:paint/layout`, `flow-root`. Keep the margin-collapse callers (`collapsesThroughTop/Bottom`) correct by separating the two predicates if widening changes their meaning — `startsNewFC` keeps its margin semantics for those callers, and a new `establishesFC` drives containment.
+- Widen `startsNewFC` (`block.go:2215`) from margin-collapse-through to the CSS FC-establishment rule set: the box's own `float`, `position:absolute/fixed`, `display:inline-block`, `display:table-cell`, flex/grid **item**-ness (parent display), `overflow` not visible, `contain:paint/layout`, `flow-root`. Keep the margin-collapse callers (`collapsesThroughTop/Bottom`) correct by separating the two predicates if widening changes their meaning — `startsNewFC` keeps its margin semantics for those callers, and a new `establishesFC` drives containment.
 - The block pass descends into FC roots and merges their float extents through the registry rather than the ad-hoc `floatSeed*`/`floatBottom*` hand-down/merge-up. Remove the local merge patch only once the new path reproduces it.
 
 **This landing changes behavior** and is gated on a new Chromium-verified fixture, not zero-diff. It is the riskiest part of SP-4; if the registry landing is clean but this one cannot match Chromium within budget, it is recorded as deferred to SP-5 with evidence (the review §7 permits reordering), and SP-4 ships L1 + L2-first-landing.
@@ -168,7 +168,7 @@ TDD with red→green mutations: each new test is shown red on the pre-change tre
 ## 5. Out of scope (deferred, with owner)
 
 - **L3 dependency-tier invalidation, L4 dirty-root reflow + copy-forward, L5 admission/teardown** → SP-5. L1's `byKey` index and generation-scoped arena are the seam L4 reuses; L1 does not implement copy-forward or change the rebuild strategy.
-- **Session cross-reflow `map[BoxKey]BoxSlot` retention** → L4 (no production consumer in L1; selection ends on reflow per `engine.go:2002`, paint maps are rebuilt per paint). Adding an unused map now would violate YAGNI.
+- **Session cross-reflow `map[BoxKey]BoxSlot` retention** → L4 (no production consumer in L1; selection ends on reflow per `engine.go:1465`, paint maps are rebuilt per paint). Adding an unused map now would violate YAGNI.
 - **Display-list IR / diffing by key** → later optimization (review §4.4).
 - **Text shaping, bidi, multi-line flex, table conformance** → SP-7 / deferred register.
 - **Pseudo-background map migration** → not needed (already keyed by stable `*style.ComputedStyle`).

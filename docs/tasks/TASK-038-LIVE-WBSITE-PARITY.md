@@ -18,7 +18,7 @@ thật, không phải suy đoán — xem §1.
 Lệnh Goosie: `goosie -backend headless -width 1280 -height 1024 -dpr 1 -screenshot -url <U> -out <png>`.
 Lệnh Chromium: Playwright sync, `new_page(viewport 1280x1024, device_scale_factor=1)`,
 `goto(wait_until="load", timeout=30000)`, `screenshot(animations="disabled")` — **viewport,
-không full_page**, vì `steadyDriver` không scroll (`cmd/goosie/drive.go:134`).
+không full_page**, vì `steadyDriver` không scroll (`cmd/goosie/drive.go:88`).
 Điểm ảnh tính bằng hàm có sẵn của `testdata/parity.py` (import, không viết lại lần hai).
 
 | Trang | Chromium | Goosie | Kết quả đo |
@@ -45,7 +45,7 @@ Ba kết luận đo được, không suy diễn:
    để so sánh giữa các lần chạy.
 
 Ràng buộc kỹ thuật tìm được khi đo: deadline của chế độ screenshot **hard-code 25 s**
-(`cmd/goosie/drive.go:170`, floor 8 frame ở `drive.go:129`), không có flag, và khi nó bắn thì
+(`cmd/goosie/drive.go:116`, floor 8 frame ở `drive.go:83`), không có flag, và khi nó bắn thì
 rc vẫn 0. Với trang sống chậm, đây là nguồn "ảnh cắt dở" — tool không được phép coi đó là
 divergence của engine.
 
@@ -249,7 +249,7 @@ thì chưa, vì dải nhiễu liên lần (mục dưới) rộng hơn chênh l�
   (`-url file:///tmp/cafef.html`, 217,170 B). Chuỗi bisection sau lần quét đã tìm ra thủ phạm:
   **tên** một custom property bắt đầu bằng chữ số — `.box-ttdn .list .mdn .time {
   color: var(--8e8e8e, #8e8e8e) }` — tokenizer phát `Dimension value="-8e8" unit="e8e"`
-  (`numval=-8e+08`), `internal/engine/limits.go:239-241` áp `MaxGeometry = 2<<20` (= 2,097,152)
+  (`numval=-8e+08`), `internal/engine/limits.go:194-195` áp `MaxGeometry = 2<<20` (= 2,097,152)
   cho dimension ⇒ **cả document bị từ chối**. Repro một dòng `:root{--8e8e8e:#8e8e8e}`;
   Chromium đo trên máy này chấp nhận (`var(--8e8e8e)` → `rgb(171, 205, 239)`); đổi đúng ident đó
   thành `--grey` thì cafef.vn paint **554,999 px ink** với rc 0. Đã bác bằng thực nghiệm: "số ≥7
@@ -257,7 +257,7 @@ thì chưa, vì dải nhiễu liên lần (mục dưới) rộng hơn chênh l�
   không chứa dãy chữ số nào; và "giá trị sinh ra sau khi script chạy" — nó nằm nguyên trong khối
   `<style>` thứ 8 của tài liệu tĩnh, bỏ 9 khối `<style>` là rc 0 trong khi bỏ `style=` attribute
   thì không. Message vẫn không nêu property, không nêu value, không nêu ngưỡng
-  (`internal/engine/limits.go:53,226-241`), và bị in đúp tiền tố `goosie: goosie:`.
+  (`internal/engine/limits.go:40,186-195`), và bị in đúp tiền tố `goosie: goosie:`.
   → `GOOSIE-LIVE-002`, spec ở TASK-040.
 * **Họ "nội dung ở chỗ khác" — và nó làm mềm số 46 `OK`**: `coverage` là `goosie_total /
   chromium_total` (`testdata/parity.py:279`), tức **tỷ lệ khối ink**, nên nó vượt 1 khi Goosie in

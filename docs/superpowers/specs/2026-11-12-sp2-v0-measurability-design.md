@@ -82,7 +82,7 @@ its own re-baseline budget.
 
 ### D2 — Committed goosie goldens with embedded fonts
 
-`GOOSIE_SYSTEM_FONTS=0` (`internal/raster/fonts.go:698`) makes the font set a
+`GOOSIE_SYSTEM_FONTS=0` (`internal/raster/fonts.go:567`) makes the font set a
 function of the binary alone — the documented escape hatch for byte-comparable
 renders. Goldens are goosie's own output (regression ratchet), not Chromium
 references, so they need no browser at test time and run in `go test ./...`
@@ -95,7 +95,7 @@ on every platform.
   positioning `positioning/02-absolute.html`. Selection recorded in
   `testdata/render-goldens/manifest.json` (fixture path, family, sha256).
 - New `test/goldens/golden_test.go`:
-  - builds `./cmd/goosie-headless` once (pattern: `test/entrypoints/limits_test.go:21`),
+  - builds `./cmd/goosie-headless` once (pattern: `test/entrypoints/limits_test.go:17`),
   - renders each manifest fixture with `GOOSIE_SYSTEM_FONTS=0` at 800x600 dpr 1,
   - decodes both PNGs and compares dimensions and every RGBA pixel; any
     difference fails with the first differing coordinate and a count,

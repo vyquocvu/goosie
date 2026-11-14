@@ -53,24 +53,24 @@ A SIGQUIT dump of the merged build on getbootstrap (`/tmp/t50-hang.err`, 49 KB) 
 
 ```
 [sync.Mutex.Lock]
-js.(*Runtime).jsGetShadowRoot            internal/js/shadow_dom.go:120
-js.(*Runtime).setupDOM.func56            internal/js/js.go:1168
+js.(*Runtime).jsGetShadowRoot            internal/js/shadow_dom.go:119
+js.(*Runtime).setupDOM.func56            internal/js/js.go:846
 goja.(*valueProperty).get / Object.Export
-js.(*Runtime).CheckIntersections         internal/js/intersection.go:311
-engine.(*Session).Reflow                 internal/engine/engine.go:1414
-engine.NewSession                        internal/engine/engine.go:516
-cmd/goosie/document_loader.go:437
+js.(*Runtime).CheckIntersections         internal/js/intersection.go:257
+engine.(*Session).Reflow                 internal/engine/engine.go:994
+engine.NewSession                        internal/engine/engine.go:285
+cmd/goosie/document_loader.go:394
 ```
 
-`CheckIntersections` takes `r.mu` at `internal/js/intersection.go:308` and, still holding it, calls
-`entry.target.Export()` at `:311`. Exporting a node wrapper walks its enumerable properties, which include
-`parentNode` (`internal/js/js.go:1806-1820`) and `shadowRoot` (`internal/js/shadow_dom.go:22-33`) — both
+`CheckIntersections` takes `r.mu` at `internal/js/intersection.go:254` and, still holding it, calls
+`entry.target.Export()` at `:257`. Exporting a node wrapper walks its enumerable properties, which include
+`parentNode` (`internal/js/js.go:1422-1436`) and `shadowRoot` (`internal/js/shadow_dom.go:21-32`) — both
 `enumerable: true` getters that call back into the runtime, and `jsGetShadowRoot` then takes `r.mu` again.
 Go mutexes are not reentrant, so the load path waits forever. The object export is only used to recover a
 `__nid__` the observer already had at `observe()` time.
 
 Sibling observers do not have the bug and are the reference: `MutationObserver`
-(`internal/js/mutation_observer.go:109`) and `ResizeObserver` (`internal/js/resize_observer.go:98`) read
+(`internal/js/mutation_observer.go:104`) and `ResizeObserver` (`internal/js/resize_observer.go:92`) read
 `__nid__` when `observe()` is called and keep a `*dom.Node`.
 
 ## 3. The fix
@@ -246,9 +246,9 @@ line inside the locked region that calls `.Export()`, `.Get(`, `.Set(`, `ExportT
 `.Call(`. It found **44 lock statements in 41 functions (19 of them deferred) and zero flagged lines.** The
 only two function-level hits from a coarser pass were false positives, checked by hand:
 
-- `internal/js/custom_elements.go:196 invokeLifecycleCallback` — `wrapper.Get(callback)` at line 222 is
+- `internal/js/custom_elements.go:186 invokeLifecycleCallback` — `wrapper.Get(callback)` at line 222 is
   **after** `r.mu.Unlock()` at 215. The locks at 198 and 213 cover a map scan and a map read only.
-- `internal/js/shadow_dom.go:45 jsAttachShadow` — `call.Arguments[0].Export()` at line 59 runs **before** the
+- `internal/js/shadow_dom.go:44 jsAttachShadow` — `call.Arguments[0].Export()` at line 59 runs **before** the
   lock at 97, which then covers one `nodeRegistry` scan and one map write.
 
 `js.go:Run` and `js.go:Evaluate` also hold `r.mu` only for the `closed` flag read and release it before

@@ -8,27 +8,27 @@ real DOM, a CSS cascade, style resolution, and layout — and renders through a 
 composer, and a vsync-paced UI loop.
 
 The engine pipeline is **Parse → Style → Layout → Paint**, wired in
-`internal/engine/engine.go`. `Session.NewSession` (`engine.go:259`) runs it end to end:
+`internal/engine/engine.go`. `engine.NewSession` (`engine.go:422`) runs it end to end:
 
 1. **Admission + parse** — byte cap checked, then `dom.ParseBounded` under node,
-   depth, and attribute caps (`engine.go:264-278`).
+   depth, and attribute caps (`engine.go:431-472`).
 2. **Scripts** — `<script>` bodies execute in document order against the same DOM
-   through the goja runtime in `internal/js`; errors are non-fatal (`engine.go:282-285`).
+   through the goja runtime in `internal/js`; errors are non-fatal (`engine.go:493`).
 3. **Stylesheets** — `<style>`, inline `style=""`, and `<link rel=stylesheet>` are
    collected in one document walk, with linked sheets fetched concurrently into
-   reserved slots so document-order cascade position survives (`limits.go:473-616`);
+   reserved slots so document-order cascade position survives (`internal/engine/limits.go:577-627`);
    `@import` expands to depth 4.
 4. **Fonts** — `@font-face` jobs are fetched and registered before style resolution,
-   or deferred for progressive paint (`engine.go:471-483`, `:338-351`).
+   or deferred for progressive paint (`engine.go:804`, `engine.go:823`).
 5. **Style / cascade** — a per-session `style.Resolver` prepends the UA sheet and
    keeps a key-bucketed rule index compiled for that stylesheet set; style and
    pseudo-element passes share it across interactions. It computes per-element
    style on each pass. Cascade entries sort by importance split, then origin,
-   then specificity, then document order (`internal/style/style.go:705-735`).
+   then specificity, then document order (`internal/style/style.go:1517-1553`).
 6. **Images** — `<img src>` and CSS `background-image` refs are fetched under a worker
    and byte/pixel budget, each passing `image.Probe` admission before decode
-   (`engine.go:485-688`).
-7. **Layout** — `Reflow` (`engine.go:727`) builds the box arena (`layout.Build`) and
+   (`engine.go:1003`, probe at `engine.go:1244`).
+7. **Layout** — `Reflow` (`engine.go:1393`) builds the box arena (`layout.Build`) and
    runs the passes in a fixed order: block, inline, float, flex, grid, table, then
    positioning for relative/absolute/fixed.
 8. **Paint** — `PaintChecked(scale)` validates scale, arena, and document extent, then
@@ -91,7 +91,7 @@ current production-readiness review and the ordered release gates.
 
 ## Import Rules
 
-The full allowed-imports table lives in `internal/archtest/rules.go:40-64` and is
+The full allowed-imports table lives in `internal/archtest/rules.go:20-52` and is
 enforced by `go test ./internal/archtest/`. Anything absent from the table is a
 violation, and an internal package with no entry has no engine imports allowed at all —
 a new package must be added deliberately. `test/` and `cmd/` are free: they may reach
@@ -135,8 +135,8 @@ both use it; only the `cmd/dump-paint` diagnostic calls unchecked `Paint`.
 
 ## Resource Limits
 
-Per-document admission caps are declared in `internal/engine/limits.go:23-59` and
-`internal/image/decode.go:14-18`. Notable ones: `MaxDocumentBytes` 16 MiB,
+Per-document admission caps are declared in `internal/engine/limits.go:23-50` and
+`internal/image/decode.go:16-20`. Notable ones: `MaxDocumentBytes` 16 MiB,
 `MaxDocumentNodes` 1000000, `MaxDocumentDepth` 128, `MaxCSSBytes` 4 MiB,
 `MaxLayoutObjects` 4194304, `MaxDocumentTiles` 524288, `MaxTileCacheBytes` 64 MiB,
 `MaxImageDimension` 8192, `MaxDecodedImagePixels` 16 M. Image data is probed for encoded

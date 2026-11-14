@@ -263,7 +263,7 @@ ba hệ quả mà §7 không thể biết trước:
 `count == floor`. TASK-041 thêm `css-features/08-bad-string-recovery.html` → corpus thành 81,
 nên `TestParityFixtureFloorMatchesCorpus` **đỏ trên main ngay khi TASK-041 landing** — đỏ vì
 corpus *tăng*, tức gate tự phạt một cải thiện. Đã đổi semantic sang ratchet một chiều:
-`count < floor` mới fail (`parity_harness_test.go:121`), comment ghi rõ "adding a fixture must
+`count < floor` mới fail (`parity_harness_test.go:86`), comment ghi rõ "adding a fixture must
 never red that test by itself; locking the gain = raising the floor in the same change", và
 `MIN_SCORED_FIXTURES` 80 → 81. Proof sàn vẫn chặn: tạm đặt floor 999 ⇒
 `testdata/render has 81 HTML fixtures, below MIN_SCORED_FIXTURES 999` → FAIL, rồi khôi phục.

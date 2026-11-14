@@ -10,9 +10,9 @@ The SP-6 P3 survey (`docs/roadmap-v2.md:204`, corrected this sprint) found **fiv
 
 The terrain map (Explore, 2026-11-12) splits the work cleanly by layer:
 
-- **Go / surface / headless are already N-window clean.** `surface.Loop` holds exactly one `Window` (`internal/surface/loop.go:88-112`); N windows ⇒ N independent loops and event channels, no window-id field needed (`surface.Event` has none, `window.go:130-145`). `platform.Select` is stateless and re-entrant (`platform.go:182`). Headless has zero shared state and **two windows already coexist** in one test (`cmd/goosie/render_work_test.go:699,1124`); a shared `ManualClock` ticks them in lockstep.
-- **Every real single-window assumption is native** (`internal/platform/darwin/shim_darwin.m`): the hand-rolled `GoosieAppRun` exits on one window's `quit` (`:1143-1171`), the app delegate is replaced on each create and bound to one `gw` (`:1071-1074`, `:918-948`), `applicationShouldTerminateAfterLastWindowClosed=YES` (`:927`), `Open` is main-thread-only with **no main-queue create trampoline** (`window.go:80-83`, `:1046`), and `GoosieClose` never orders the window out (`:1470-1474`).
-- **The app layer is one-`framePath`-shaped:** `run` (`cmd/goosie/main.go:902-1126`) orchestrates a single window's loop goroutine, shutdown goroutine, and the main-thread `r.Run()` hand-off.
+- **Go / surface / headless are already N-window clean.** `surface.Loop` holds exactly one `Window` (`internal/surface/loop.go:39-56`); N windows ⇒ N independent loops and event channels, no window-id field needed (`surface.Event` has none, `window.go:98-113`). `platform.Select` is stateless and re-entrant (`platform.go:95`). Headless has zero shared state and **two windows already coexist** in one test (`cmd/goosie/render_work_test.go:693,1098`); a shared `ManualClock` ticks them in lockstep.
+- **Every real single-window assumption is native** (`internal/platform/darwin/shim_darwin.m`): the hand-rolled `GoosieAppRun` exits on one window's `quit` (`:1143-1171`), the app delegate is replaced on each create and bound to one `gw` (`:1071-1074`, `:918-948`), `applicationShouldTerminateAfterLastWindowClosed=YES` (`:927`), `Open` is main-thread-only with **no main-queue create trampoline** (`window.go:44-45`, `:1046`), and `GoosieClose` never orders the window out (`:1470-1474`).
+- **The app layer is one-`framePath`-shaped:** `run` (`cmd/goosie/main.go:722-886`) orchestrates a single window's loop goroutine, shutdown goroutine, and the main-thread `r.Run()` hand-off.
 
 **Decomposition (brainstorming scope-check).** Multi-window is one feature with two dependent layers. They are split into two sub-projects to isolate the risky, compile-only-verifiable native surgery behind a fully headless-verifiable Go foundation:
 
@@ -25,7 +25,7 @@ This ordering means the lifecycle logic (spawn, close-one-keep-others, quit-on-l
 
 ### 2.1 Owned manager, not a global
 
-`internal/` forbids mutable package-level vars (`archtest.MutableGlobals`, `rules.go:492`; gate `m1_gate_test.go:317`). The manager is therefore an **owned value** created in `run` and threaded through, never a package-global registry. It lives in `cmd/goosie` (a `FreeDirs` exempt package, `rules.go:76`), so it may import everything.
+`internal/` forbids mutable package-level vars (`archtest.MutableGlobals`, `rules.go:361`; gate `m1_gate_test.go:236`). The manager is therefore an **owned value** created in `run` and threaded through, never a package-global registry. It lives in `cmd/goosie` (a `FreeDirs` exempt package, `rules.go:54`), so it may import everything.
 
 ```
 windowManager (owned by run)
@@ -40,7 +40,7 @@ windowManager (owned by run)
 
 ### 2.2 Profile-shared vs per-window (no field-access refactor)
 
-`framePath` (`main.go:122-228`) keeps its existing fields. The manager does **not** rename `f.bookmarks` → `f.profile.bookmarks` (that would touch every access site). Instead it **creates the profile-level stores once and assigns the same pointers** into each `framePath`; per-window machinery is built fresh per window. This is the minimal-invasion seam.
+`framePath` (`main.go:74-135`) keeps its existing fields. The manager does **not** rename `f.bookmarks` → `f.profile.bookmarks` (that would touch every access site). Instead it **creates the profile-level stores once and assigns the same pointers** into each `framePath`; per-window machinery is built fresh per window. This is the minimal-invasion seam.
 
 Sharing is **semantically correct**, not merely convenient: same profile ⇒ one cookie jar / HTTP pool (`client`, `privateClient`), one `localStorage` per origin (`storage`, `incognitoStorage` — web-platform semantics span windows), one `BroadcastHub`, one permissions store (`perms`, per-origin), one history, one bookmark store, one download manager, one glyph atlas (`fonts`), one preferences/flags/theme set.
 
@@ -50,7 +50,7 @@ Per-window (built fresh): `window`, `loop`, `sched`, `pool`, `composer`, `layer`
 
 ### 2.3 N loops, one app loop on native
 
-Each window runs its own `loop.Run(ctx)` goroutine and its own shutdown goroutine (the existing per-window teardown order: cancel → join loop → `runCancel` → `navWg.Wait` → `closeAllSessions` → `window.Close`). The manager joins all window loops. On **native**, the main thread hands off to the platform `Runner` once (today `GoosieAppRun`); in SP-6a native runs exactly one window, so this hand-off is unchanged. On **headless** there is no `Runner` (`platform.go:66-68`), so the manager simply waits for its N loop goroutines.
+Each window runs its own `loop.Run(ctx)` goroutine and its own shutdown goroutine (the existing per-window teardown order: cancel → join loop → `runCancel` → `navWg.Wait` → `closeAllSessions` → `window.Close`). The manager joins all window loops. On **native**, the main thread hands off to the platform `Runner` once (today `GoosieAppRun`); in SP-6a native runs exactly one window, so this hand-off is unchanged. On **headless** there is no `Runner` (`platform.go:39-39`), so the manager simply waits for its N loop goroutines.
 
 ## 3. Component A — `windowManager` + lifecycle
 
@@ -62,16 +62,16 @@ Each window runs its own `loop.Run(ctx)` goroutine and its own shutdown goroutin
 - `func (m *windowManager) removeWindow(f *framePath)`: drop `f` from the slice under lock; when the slice becomes empty, signal the manager done (`doneOnce`) so `run` proceeds to final save + exit. Idempotent (a window is removed once).
 - `func (m *windowManager) run(ctx) error`: spawn the first window, run N loops, on native hand the main thread to the `Runner`, wait for all loops / manager-done, then perform the existing final save (session/history/flags). Quit-on-last-window is the manager-done signal.
 
-**Refactor `run` (`main.go:902-1126`)** to construct a `windowManager` and delegate the **interactive browser path** to it. The existing single-window orchestration becomes the manager's N=1 case. The paced/screenshot/private driver paths (`c.paced()`, `c.screenshot`, `c.private`) **bypass the manager** and keep their existing single-window orchestration and frame-count finish semantics unchanged — they are diagnostic drivers, not the interactive browser, and SP-6a does not multi-window them.
+**Refactor `run` (`main.go:722-886`)** to construct a `windowManager` and delegate the **interactive browser path** to it. The existing single-window orchestration becomes the manager's N=1 case. The paced/screenshot/private driver paths (`c.paced()`, `c.screenshot`, `c.private`) **bypass the manager** and keep their existing single-window orchestration and frame-count finish semantics unchanged — they are diagnostic drivers, not the interactive browser, and SP-6a does not multi-window them.
 
-**Last-tab-close → close-window (indirect).** Today `tabs.NewManager(onCloseLast)` wires `onCloseLast → f.window.Close()` (`main.go:378-382`), and `TabManager.CloseTab` fires it in a goroutine when the last tab closes (`internal/tabs/manager.go:154-161`). SP-6a **keeps `onCloseLast` unchanged**: closing the last tab still calls `f.window.Close()`. The manager's per-window teardown goroutine (`startWindow`) waits on the loop's `stopped` signal — which fires when `window.Close()` ends the loop — then runs the teardown order and calls `m.removeWindow(f)`. So closing a window's last tab closes **that window** and removes it from the registry; the app quits only when `removeWindow` empties the slice (the **last window**). `showActiveTabAfterBatch` already no-ops at `Count()==0` (`interaction.go:1391`), so no empty-window repaint is introduced.
+**Last-tab-close → close-window (indirect).** Today `tabs.NewManager(onCloseLast)` wires `onCloseLast → f.window.Close()` (`main.go:266-270`), and `TabManager.CloseTab` fires it in a goroutine when the last tab closes (`internal/tabs/manager.go:141-148`). SP-6a **keeps `onCloseLast` unchanged**: closing the last tab still calls `f.window.Close()`. The manager's per-window teardown goroutine (`startWindow`) waits on the loop's `stopped` signal — which fires when `window.Close()` ends the loop — then runs the teardown order and calls `m.removeWindow(f)`. So closing a window's last tab closes **that window** and removes it from the registry; the app quits only when `removeWindow` empties the slice (the **last window**). `showActiveTabAfterBatch` already no-ops at `Count()==0` (`interaction.go:1262`), so no empty-window repaint is introduced.
 
 ## 4. Component B — headless multi-window verification harness
 
 No production change; a test harness in `cmd/goosie` (package `goosie`, internal, to reach `windowManager`/`framePath`) built on `headless.New` + a shared `ManualClock`:
 
 - Spawn N windows against one clock; `Advance` ticks all in lockstep (the pattern already used by `render_work_test.go`).
-- Inject events per window via `headless.Window.Inject` (`headless/window.go:222`) and assert per-window routing (an event in window 1 never touches window 2's tabs).
+- Inject events per window via `headless.Window.Inject` (`headless/window.go:145`) and assert per-window routing (an event in window 1 never touches window 2's tabs).
 - Read back pixels per window (`Presented`/`WritePNG`) to prove independent rendering.
 
 ## 5. Data flow
@@ -85,8 +85,8 @@ No production change; a test harness in `cmd/goosie` (package `goosie`, internal
 ## 6. Error handling / edge cases
 
 - **Spawn failure:** `m.spawn` returns the error; `run` fails fast if the **first** window cannot open (today's behavior). A failed **later** spawn (headless test only in SP-6a) leaves existing windows running and reports the error; no partial window is appended.
-- **Teardown ordering:** each window keeps the existing order (`closeAllSessions` before `window.Close`, so video/audio stops while the main-thread loop still services it — `main.go:1078-1085`). The manager joins every window's `navWg` and loop before the final save.
-- **Concurrent close:** `closeWindow` is idempotent and mutex-guarded; `onCloseLast` fires in a goroutine (`manager.go:159`), so two rapid closes cannot double-remove or race the slice.
+- **Teardown ordering:** each window keeps the existing order (`closeAllSessions` before `window.Close`, so video/audio stops while the main-thread loop still services it — `main.go:852-854`). The manager joins every window's `navWg` and loop before the final save.
+- **Concurrent close:** `closeWindow` is idempotent and mutex-guarded; `onCloseLast` fires in a goroutine (`manager.go:146`), so two rapid closes cannot double-remove or race the slice.
 - **Shared-store lifetime:** profile stores are created once by the manager and outlive every window; the final `history.Save`/`flags.Save` runs once after all windows close (not per window), avoiding N concurrent writes to one file.
 - **Memory:** per-window `pool`/`composer`/3-slot surface ring scale linearly with window count (terrain S11). SP-6a bounds this only by the headless tests' window count; a shared pool / window cap is deferred (§9).
 - **No native regression:** native still runs N=1 through the unchanged `GoosieAppRun`; SP-6a adds no native code and no user-facing shortcut, so the shipping macOS path is byte-for-byte the current single-window behavior.
@@ -112,7 +112,7 @@ SP-6a ships when: the `windowManager` owns N `framePath`s with correctly shared 
 
 ## 9. Deferred to SP-6b / later (YAGNI, with evidence)
 
-- **SP-6b — native shim adaptation + user wiring:** app-wide quit in `GoosieAppRun` (terrain S4), one shared app delegate with a window registry (S1/S3), `applicationShouldTerminateAfterLastWindowClosed` semantics (S2), a main-queue create trampoline so a non-main goroutine can spawn window #2 while `Run` turns (S15), `GoosieClose` ordering the window out (S12), and retaining the per-window `NSWindow` handle (S13, also a latent file-panel bug). **Plus** Cmd+N (`handleTabShortcut` currently handles only Cmd+Shift+N→incognito, `toolbar_window.go:1228`) and a File→New Window menu item. Compile-verified; native visual sign-off deferred (no display).
+- **SP-6b — native shim adaptation + user wiring:** app-wide quit in `GoosieAppRun` (terrain S4), one shared app delegate with a window registry (S1/S3), `applicationShouldTerminateAfterLastWindowClosed` semantics (S2), a main-queue create trampoline so a non-main goroutine can spawn window #2 while `Run` turns (S15), `GoosieClose` ordering the window out (S12), and retaining the per-window `NSWindow` handle (S13, also a latent file-panel bug). **Plus** Cmd+N (`handleTabShortcut` currently handles only Cmd+Shift+N→incognito, `toolbar_window.go:1098`) and a File→New Window menu item. Compile-verified; native visual sign-off deferred (no display).
 - **Window-aware session persistence grouping:** aggregating all windows' tabs into one session file with window grouping. SP-6a preserves today's single-window session save (native N=1); grouping lands with SP-6b's user-facing multi-window.
 - **Drag-tab-between-windows, shared raster pool, window cap, per-window sheet-modal dialogs, cascade/offset placement (S8), per-display display-link (S7):** independent enhancements, each its own future increment when a journey + acceptance criteria exist.
 - **L3/L4 (incremental style/layout invalidation):** still deferred to SP-7+ per the SP-5 terrain evidence (hard restyle-veto assertions, no per-rule `Deps`, full-pipeline reflow). Unchanged by SP-6.

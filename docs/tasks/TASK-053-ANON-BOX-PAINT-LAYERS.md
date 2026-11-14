@@ -13,8 +13,8 @@
   corpus numbers instead of moving the floor.
 - No `git push`, no merge, no PR. Measure everything you write, and correct this doc where your data disagrees.
 - Do not edit `internal/style/style.go` below line ~4000 — TASK-050 is running against
-  `extractBackgroundURL` (`:4655`) in the same file right now. Your changes belong near `AnonymousBlockStyle`
-  (`:593`) and in `internal/paint/`.
+  `extractBackgroundURL` (`:4050`) in the same file right now. Your changes belong near `AnonymousBlockStyle`
+  (`:436`) and in `internal/paint/`.
 
 > **Implementer's note (2026-10-26).** The worktree this task ran in was cut from an older `main` and sat 30
 > commits behind; I fast-forwarded it (`git merge --ff-only main`, `c8cd80b → b46d4d5`) before any edit, so the
@@ -28,8 +28,8 @@
 TASK-049 collapsed the anonymous block's **background** layers (`style.AnonymousBlockStyle: s = *parent`
 now zeroes all four), registered as BR-200/201/202 with the display-list and pixel oracles. Its §6.3 recorded
 that the same assignment still **copies** `BoxShadow`, `TextShadow`, `BorderRadius`, `Mask*` and
-`BorderImage`, and that `paintBoxShadow` (`internal/paint/builder_effects.go:14`, called from
-`builder_box.go:162`) is not gated by box anonymity at all — so a block that generates anonymous boxes emits a
+`BorderImage`, and that `paintBoxShadow` (`internal/paint/builder_effects.go:12`, called from
+`builder_box.go:94`) is not gated by box anonymity at all — so a block that generates anonymous boxes emits a
 shadow per band.
 
 Measured by the integrator on 2026-10-26 (`/tmp/t49-shadow/`, one translucent shadow layer, block split by
@@ -92,7 +92,7 @@ their collapse a cascade rule rather than a pixel fix, and is stated as such in 
 Two places can gate this; pick one per property and say why:
 
 1. **Style layer** (what TASK-049 did for backgrounds): zero the property in `AnonymousBlockStyle`
-   (`internal/style/style.go:593`), mirroring `AnonymousTableStyle:630`. Cheap, local, provable at the
+   (`internal/style/style.go:436`), mirroring `AnonymousTableStyle:630`. Cheap, local, provable at the
    cascade, and it keeps `paint` anonymous-agnostic. Correct only for properties an anonymous box should
    never paint.
 2. **Paint layer**: gate `paintBoxShadow` (and friends) on the box being anonymous. This needs layout to
@@ -258,7 +258,7 @@ Both files are new: `test/style/anonymous_block_paint_layers_test.go` (three tes
 
 ### 8.4 Where to look first
 
-1. `internal/style/style.go:593` — the fix: seven assignments plus the measured comment, inside
+1. `internal/style/style.go:436` — the fix: seven assignments plus the measured comment, inside
    `AnonymousBlockStyle` only. `AnonymousTableStyle` is untouched.
 2. `TestAnonymousBlockStyleKeepsInheritedTextShadow` and `TestAnonymousBlockTextKeepsItsShadow` — the reverse
    oracles. If anyone proposes zeroing `TextShadow`, these two and only these two go red (mutation D).
@@ -334,7 +334,7 @@ still emit 112 fills where Chromium paints one ring.
    measuring, not fixed.** Probe `/tmp/t053-work/tsinh`: a parent with `text-shadow:2px 2px 0 blue` holding raw
    text and a `<span>` child changes 1,390 px in Chromium (460 of them inside the span's glyphs) and 699 px in
    Goosie, with **0** inside the span. That is why the paint oracle's document uses raw text.
-7. **`AnonymousTableStyle` still zeroes `TextShadow`** (`internal/style/style.go:699`) while the block builder
+7. **`AnonymousTableStyle` still zeroes `TextShadow`** (`internal/style/style.go:484`) while the block builder
    now keeps it. Unverified at paint (table cells reach text through a different path and no oracle covers it);
    the block/table "alike" test deliberately compares only the four non-inherited groups.
 8. **Not measured:** DPR 2+, browsers other than Chromium 131.0.6778.33, `inset` shadows, multiple blurred

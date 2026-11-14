@@ -14,13 +14,13 @@ Bằng chứng đã lấy trên `main` (`7ecdc04`, sau khi merge TASK-030):
 
 | Sự thật | Chỗ trong code |
 | --- | --- |
-| AX builder switch trên `n.DataAtom` có `meter`/`a`/`img`/`button`/`input`/`textarea` — **không có `dom.AtomSelect`** | `internal/engine/accessibility.go:120-162` |
-| Vì thế select rơi vào nhánh generic: `hasKids` sai hoặc `len(kids) == 0` ⇒ trả `nil` | `internal/engine/accessibility.go:164-180` |
+| AX builder switch trên `n.DataAtom` có `meter`/`a`/`img`/`button`/`input`/`textarea` — **không có `dom.AtomSelect`** | `internal/engine/accessibility.go:107-149` |
+| Vì thế select rơi vào nhánh generic: `hasKids` sai hoặc `len(kids) == 0` ⇒ trả `nil` | `internal/engine/accessibility.go:151-167` |
 | Probe thật: layout arena có `obj tag="select" id="sel"`, nhưng `Session.AccessibilityTree()` dưới form chỉ trả về node `role=4 id="send"` (button) | ghi ở `docs/tasks/TASK-030-SELECT-INTERACTION.md` §9.4 |
 | Hệ quả thực dụng: helper click theo toạ độ AX (`clickNode`) không định vị được select; journey BR-101 buộc phải dùng `clickElementByID` | `cmd/goosie/journey_p1_forms_test.go` (comment ngay trước `browser.clickElementByID(t, "sel")`) |
-| `ax.Node` **đã có** đủ trường cần thiết: `Value`, `Selected`, `Disabled`, `Focused`, `Children` | `internal/ax/ax.go:29-45` |
-| AX **không có** role nào cho combo box / option | `internal/ax/ax.go:11-22` (`RoleDocument`…`RoleTab`) |
-| Role lạ trên macOS âm thầm biến thành GROUP, không lỗi | `internal/platform/darwin/window.go:458-459` (`default: return C.GOOSIE_AX_GROUP`) |
+| `ax.Node` **đã có** đủ trường cần thiết: `Value`, `Selected`, `Disabled`, `Focused`, `Children` | `internal/ax/ax.go:21-37` |
+| AX **không có** role nào cho combo box / option | `internal/ax/ax.go:6-17` (`RoleDocument`…`RoleTab`) |
+| Role lạ trên macOS âm thầm biến thành GROUP, không lỗi | `internal/platform/darwin/window.go:337-338` (`default: return C.GOOSIE_AX_GROUP`) |
 | Hằng role C nằm ở `shim.h` và map sang `NSAccessibility…Role` trong `shim_darwin.m` | `internal/platform/darwin/shim.h:213-223`, `shim_darwin.m:100-112` |
 
 ## 2. Thiết kế tối thiểu
@@ -32,7 +32,7 @@ Bằng chứng đã lấy trên `main` (`7ecdc04`, sau khi merge TASK-030):
    `Children` là một `RoleOption` mỗi `<option>`: `Label` = text của option (fallback
    `value`), `Value` = `controlValue(option)`, `Selected` = option mang `selected` (hoặc
    option đầu khi chưa ai selected — **giống hệt** quy tắc `SelectedOption`
-   `internal/engine/focus.go:616`, để AX không bao giờ nói khác DOM). Option `disabled` vẫn
+   `internal/engine/focus.go:541`, để AX không bao giờ nói khác DOM). Option `disabled` vẫn
    có node nhưng `Disabled: true`. Không có option ⇒ ComboBox không children.
    `select` phải **dừng** ở nhánh của nó, không rơi xuống generic path.
 3. `internal/platform/darwin`: thêm `GOOSIE_AX_COMBO_BOX` / `GOOSIE_AX_OPTION` vào
@@ -45,7 +45,7 @@ Bằng chứng đã lấy trên `main` (`7ecdc04`, sau khi merge TASK-030):
 ## 3. Test phải có
 
 * `test/engine/accessibility_test.go` **đã tồn tại** và đã có helper `axFind(tree, role,
-  label)` (dùng ở `:55`, `:69`) — viết test mới trong file đó, tái dụng `axFind`, không
+  label)` (dùng ở `:55`, `:70`) — viết test mới trong file đó, tái dụng `axFind`, không
   sinh helper song song.
   1. select 3 option, option 2 `selected` ⇒ đúng **một** node `RoleComboBox` id=`sel`,
      `Value` = value option 2, `Label` không rỗng, 3 con `RoleOption`, `Selected` chỉ một.
@@ -225,11 +225,11 @@ Two disclosures the agent did not volunteer, found while reviewing the diff:
   rect for every option. Not wrong for a collapsed control, but it is a limitation, not a
   measurement of option geometry.
 * The option value rule (value attribute, else text content) used to exist in **three**
-  places: `forms.go:213` `controlValue`, the `Session.controlValue` method (`focus.go:537`)
+  places: `forms.go:185` `controlValue`, the `Session.controlValue` method (`focus.go:471`)
   and inline in `accessibility.go`. It now exists in one place, `optionValue`
-  (`focus.go:624`), which all three call, so a submitted value and an announced value cannot
+  (`focus.go:546`), which all three call, so a submitted value and an announced value cannot
   drift apart unnoticed: `TestAccessibilitySelectValueMatchesSubmittedFormValue`
-  (`test/engine/accessibility_test.go:343`, qc:BR-139) compares the two directly, over both an
+  (`test/engine/accessibility_test.go:340`, qc:BR-139) compares the two directly, over both an
   option with a `value` attribute and one that falls back to text content, and it fails on a
   re-diverged rule. Still open: `SelectedOption` and the old `forms.go` scan both pick the
   *first* `selected` option while HTML picks the *last*, and option text is not stripped or

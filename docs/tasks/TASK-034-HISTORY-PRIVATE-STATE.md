@@ -18,15 +18,15 @@ lúc viết test phát hiện hành vi sai, **dừng lại và báo cáo**, khô
 
 | Hành vi | Chỗ trong code | Rule thực tế (đọc từ source, không đoán) |
 | --- | --- | --- |
-| Nhánh forward bị cắt khi Push giữa trail | `internal/toolbar/history.go:18-26` | `if h.index >= 0 && h.index < len(h.entries)-1 { h.entries = h.entries[:h.index+1] }` rồi append; `index = len-1` |
-| Commit traversal chỉ khi load thành công | `internal/toolbar/history.go:61-76` (`Step`), `cmd/goosie/navigation.go:435-456` | `Step` từ chối nếu `h.index != base` (cursor đã bị ai đó dịch); `traverseTab` **peek** trước, chỉ commit trong `applyNavResult` |
-| Redirect của một traversal ghi lại URL cuối | `internal/toolbar/history.go:82-89` (`ReplaceCurrent`) | chỉ thay phần tử dưới cursor, "The forward trail is untouched" |
-| Visit log chống trùng liên tiếp và có trần | `internal/history/history.go:57-68` | `Record` return sớm nếu phần tử cuối **cùng URL**; cắt về `MaxEntries` |
-| Private: cookie không ghi file, history/bookmark không mở store | `cmd/goosie/main.go:202-220` | `private` ⇒ `net.DefaultPrivateClient()`; `bookmarkStore`/`historyStore` chỉ Load khi `!c.private` |
-| Private: không restore session | `cmd/goosie/main.go:495-497` | `shouldRestoreSession(private, mode) = !private && mode != StartupNewTab` |
-| Private: profile management read-only | `cmd/goosie/internal_pages.go:775,809` | "Private sessions cannot change profile settings." |
-| Tab trail được lưu/restore | `internal/session/session.go:16` (`TabState` "where it was, and the back/forward trail"), `:34` (ghi atomic) | `RestoreHistory(entries, index)` ở `internal/toolbar/history.go:153` |
-| Cookie chỉ ghi disk khi có persistPath; private xóa jar lúc Close | `internal/net/http.go:455-467` (`DefaultPrivateClient`, comment "nothing a private-mode session learns survives it"), `:882-891` (`Close`) | `if c.persistPath != "" { c.jar.Save(...) }` rồi `if c.private { c.jar.Clear() }` — hai điều kiện **độc lập**, nên oracle BR-055 phải kiểm cả hai: không Save file profile **và** jar bị xóa khi thoát |
+| Nhánh forward bị cắt khi Push giữa trail | `internal/toolbar/history.go:14-20` | `if h.index >= 0 && h.index < len(h.entries)-1 { h.entries = h.entries[:h.index+1] }` rồi append; `index = len-1` |
+| Commit traversal chỉ khi load thành công | `internal/toolbar/history.go:45-60` (`Step`), `cmd/goosie/navigation.go:365-382` | `Step` từ chối nếu `h.index != base` (cursor đã bị ai đó dịch); `traverseTab` **peek** trước, chỉ commit trong `applyNavResult` |
+| Redirect của một traversal ghi lại URL cuối | `internal/toolbar/history.go:66-71` (`ReplaceCurrent`) | chỉ thay phần tử dưới cursor, "The forward trail is untouched" |
+| Visit log chống trùng liên tiếp và có trần | `internal/history/history.go:44-55` | `Record` return sớm nếu phần tử cuối **cùng URL**; cắt về `MaxEntries` |
+| Private: cookie không ghi file, history/bookmark không mở store | `cmd/goosie/main.go:124-132` | `private` ⇒ `net.DefaultPrivateClient()`; `bookmarkStore`/`historyStore` chỉ Load khi `!c.private` |
+| Private: không restore session | `cmd/goosie/main.go:375-377` | `shouldRestoreSession(private, mode) = !private && mode != StartupNewTab` |
+| Private: profile management read-only | `cmd/goosie/internal_pages.go:746,777` | "Private sessions cannot change profile settings." |
+| Tab trail được lưu/restore | `internal/session/session.go:15` (`TabState` "where it was, and the back/forward trail"), `:29` (ghi atomic) | `RestoreHistory(entries, index)` ở `internal/toolbar/history.go:124` |
+| Cookie chỉ ghi disk khi có persistPath; private xóa jar lúc Close | `internal/net/http.go:385-397` (`DefaultPrivateClient`, comment "nothing a private-mode session learns survives it"), `:767-776` (`Close`) | `if c.persistPath != "" { c.jar.Save(...) }` rồi `if c.private { c.jar.Clear() }` — hai điều kiện **độc lập**, nên oracle BR-055 phải kiểm cả hai: không Save file profile **và** jar bị xóa khi thoát |
 
 ## 2. Test phải có — mỗi case một oracle, không gộp
 
@@ -36,14 +36,14 @@ dụng helper đã có trong các package đó; **không** sinh helper song song
 
 1. **BR-043** — điều hướng A→B→C: visit log có đúng 3 mục theo đúng thứ tự, URL và title khớp
    những gì đã hiển thị; không có bản ghi cho URL chưa load thành công (kiểm bằng server trả
-   500/ERR: `Record` không được chạy cho failure đã commit ở `navigation.go:312`).
+   500/ERR: `Record` không được chạy cho failure đã commit ở `navigation.go:259`).
 2. **BR-044** — A→B→C, Back về B, rồi đi D: `Entries()` phải là `[A,B,D]` với index=2, và
    `CanForward()` **false**. Assert cấu trúc, không pixel.
 3. **BR-045** — reload trang (và reload sau khi Back): số visit không đổi; Push/Record lặp
-   cùng URL liên tiếp phải là no-op theo `history.go:60-62`.
+   cùng URL liên tiếp phải là no-op theo `history.go:47-49`.
 4. **BR-049** — mở 2 tab với trail khác nhau → save → `RestoreHistory` → mỗi tab có đúng
    `entries` + `index` của nó, con trỏ trỏ đúng trang đang xem; session file ghi atomic
-   (`session.go:34`) nên test ghi rồi đọc lại phải thấy dữ liệu nguyên vẹn.
+   (`session.go:29`) nên test ghi rồi đọc lại phải thấy dữ liệu nguyên vẹn.
 5. **BR-054** — chạy với `private=true`: cookie jar là `DefaultPrivateClient`, **không** có
    file cookie nào được ghi, `historyStore`/`bookmarkStore` không được chạm tới (assert bằng
    file trên disk không đổi/mất tồn tại, không assert bằng log).
@@ -58,16 +58,16 @@ dụng helper đã có trong các package đó; **không** sinh helper song song
 Mỗi proof là **tắt hành vi**, không phải trả giá trị sai; dán nguyên văn `FAIL → revert → PASS`
 và bảng "mutation → test mục tiêu → rc". Ít nhất:
 
-* (i) bỏ khối cắt nhánh trong `history.go:21-23` ⇒ BR-044 **FAIL** (forward branch còn dư).
+* (i) bỏ khối cắt nhánh trong `history.go:16-18` ⇒ BR-044 **FAIL** (forward branch còn dư).
 * (ii) cho `Step` bỏ kiểm tra `h.index != base` ⇒ test BR-044/BR-049 **FAIL** (commit đè lên
   cursor đã dịch) — nếu không fail thì nói rõ, đừng im.
-* (iii) bỏ điều kiện dedupe trong `history.go:57-62` (`return` sớm) ⇒ BR-045 **FAIL**.
-* (iv) gọi `Record` cho cả navigation thất bại (bỏ cổng thành công ở `navigation.go:312`) ⇒
+* (iii) bỏ điều kiện dedupe trong `history.go:44-49` (`return` sớm) ⇒ BR-045 **FAIL**.
+* (iv) gọi `Record` cho cả navigation thất bại (bỏ cổng thành công ở `navigation.go:259`) ⇒
   BR-043 **FAIL**.
 * (v) `shouldRestoreSession = !private || mode != NewTab` (đổi `&&` thành `||`) ⇒ BR-056
   **FAIL**.
 * (vi) cho private dùng `DefaultClientWithCookies(cookieFile)` (bỏ nhánh `private` ở
-  `main.go:202-204`) ⇒ BR-054 **FAIL**.
+  `main.go:124-125`) ⇒ BR-054 **FAIL**.
 
 Proof nào không giết được test nào thì **disclose** trong §Status kèm lý do, theo đúng tinh thần
 `docs/superpowers` R-7 mà TASK-031 đã áp dụng.
@@ -122,21 +122,21 @@ Bảng mutation integrator tự reproduce (tắt chính hành vi, không trả g
 
 | # | Tắt gì | Kết quả |
 | --- | --- | --- |
-| M1 | `history.go:60-62` bỏ guard consecutive-repeat | `FAIL TestHistoryDropsConsecutiveRepeat: Entries() = 2 records, want 1 after a consecutive repeat` |
-| M2 | `toolbar/history.go:21-23` bỏ forward-trail truncation trong `Push` | `FAIL TestHistoryPushAfterBackDiscardsForwardTrail: history after branching = [a b c d]@3, want [a b d]@2` |
-| M3 | `main.go:217` `if !c.private` ⇒ `if true` (private mở profile stores) | `FAIL TestPrivateBuildDoesNotTouchProfileStores: private app stores/client = ...history.json...; want client and no profile stores` |
-| M4 | `navigation.go:681` bỏ `f.config.private` khỏi guard journal | `FAIL TestPrivateRunDoesNotJournalOrRestorePrivateTabs` — hai vế: `private session file .../session_active.json exists after close` và `regular startup found a private crash journal: &{Tabs:[{URL:https://private.example/secret ...}]}` |
-| M5 | `http.go:889` `if c.private` ⇒ không clear jar khi Close | `FAIL TestJourneyRegularPrivateRegularCookieIsolation: private jar after Close = [{Name:Y Value:private ...}], want cleared` |
-| M6 | `navigation.go:276` error path ghi `f.history.Record` trước khi return | `FAIL TestJourneyHistoryRecordsDisplayedVisitsAndOmitsFailedLoad: history after failed load has 4 entries, want 3 successful visits` |
-| M7 | `navigation.go:665` `HistoryIndex: idx` ⇒ mất cursor | `FAIL TestSessionStateRoundTrip` — 5 assertion cùng đỏ (`history = [a b c]@0, want @1`, `first tab URL = "https://a/"`, `forward = "https://b/",true, want https://c/`, ...) |
+| M1 | `history.go:47-49` bỏ guard consecutive-repeat | `FAIL TestHistoryDropsConsecutiveRepeat: Entries() = 2 records, want 1 after a consecutive repeat` |
+| M2 | `toolbar/history.go:15-18` bỏ forward-trail truncation trong `Push` | `FAIL TestHistoryPushAfterBackDiscardsForwardTrail: history after branching = [a b c d]@3, want [a b d]@2` |
+| M3 | `main.go:129` `if !c.private` ⇒ `if true` (private mở profile stores) | `FAIL TestPrivateBuildDoesNotTouchProfileStores: private app stores/client = ...history.json...; want client and no profile stores` |
+| M4 | `navigation.go:572` bỏ `f.config.private` khỏi guard journal | `FAIL TestPrivateRunDoesNotJournalOrRestorePrivateTabs` — hai vế: `private session file .../session_active.json exists after close` và `regular startup found a private crash journal: &{Tabs:[{URL:https://private.example/secret ...}]}` |
+| M5 | `http.go:774` `if c.private` ⇒ không clear jar khi Close | `FAIL TestJourneyRegularPrivateRegularCookieIsolation: private jar after Close = [{Name:Y Value:private ...}], want cleared` |
+| M6 | `navigation.go:228` error path ghi `f.history.Record` trước khi return | `FAIL TestJourneyHistoryRecordsDisplayedVisitsAndOmitsFailedLoad: history after failed load has 4 entries, want 3 successful visits` |
+| M7 | `navigation.go:556` `HistoryIndex: idx` ⇒ mất cursor | `FAIL TestSessionStateRoundTrip` — 5 assertion cùng đỏ (`history = [a b c]@0, want @1`, `first tab URL = "https://a/"`, `forward = "https://b/",true, want https://c/`, ...) |
 
 Mọi mutation đều được revert; `git status --short` của worktree sạch trước và sau khi merge,
 và `grep -rn MUTATION-TEMP` trong toàn cây: **no matches**.
 
 Probe thêm của integrator (không nằm trong batch của codex): tôi nghi ngờ vế *tab-level*
 incognito chưa có oracle, vì các test TASK-034 đều khoá ở mức `-private`. Bỏ guard
-`!tab.Incognito()` ở `navigation.go:319` trên `main` ⇒ `FAIL TestIncognitoHistorySuppression
-(incognito_test.go:96): incognito visit leaked into history!` — vậy vùng đó **đã** bị khoá,
+`!tab.Incognito()` ở `navigation.go:266` trên `main` ⇒ `FAIL TestIncognitoHistorySuppression
+(incognito_test.go:92): incognito visit leaked into history!` — vậy vùng đó **đã** bị khoá,
 nghi ngờ của tôi sai, và probe đã revert. Không mở defect nào cho nó.
 
 Hạn chế còn lại, khai rõ chứ không ẩn:
@@ -148,8 +148,8 @@ Hạn chế còn lại, khai rõ chứ không ẩn:
   (con trỏ stale) — đây là ràng buộc nội bộ của `toolbar.History`, nó khoá hành vi thật
   (không commit bước đã peek từ lâu) nhưng khách quan sát được ít trực tiếp hơn phần còn lại.
 * BR-044/BR-045 không có journey app-level **mới**: chúng khoá `toolbar.History`/`history.Store`,
-  còn đường commit bước đã peek (`tab.History().Step(...)` ở `navigation.go:312-316`) do các
-  fixture có sẵn trong `cmd/goosie/main_test.go:837,861,882,947,1052` dẫn `traverse`/
+  còn đường commit bước đã peek (`tab.History().Step(...)` ở `navigation.go:259-263`) do các
+  fixture có sẵn trong `cmd/goosie/main_test.go:821,843,861,916,1012` dẫn `traverse`/
   `traverseBase`. Nếu ai đó đổi cả hai tầng cùng lúc thì mức báo động vẫn đỏ, nhưng vị trí lỗi
   sẽ phải dò lại.
 

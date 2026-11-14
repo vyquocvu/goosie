@@ -34,9 +34,9 @@ option.textContent = '  Hi\n  there\n'  ->  option.value === "Hi there"
 
 | Sự thật | Chỗ trong code |
 | --- | --- |
-| Giá trị option = `TextContent()` nguyên bản, không strip không collapse | `internal/engine/focus.go` `optionValue` (một định nghĩa duy nhất, dùng bởi `forms.go:controlValue`, `Session.controlValue`, `accessibility.go:162-193`) |
-| `Label` của option trong AX **đã** `strings.TrimSpace` trong khi `Value` thì không ⇒ cùng một node, hai câu trả lời lệch nhau | `internal/engine/accessibility.go:171-177` |
-| `<select>` có **hai** option cùng `selected`: Chromium chọn cái **cuối** (`selectedIndex 1, value "b", FormData "b"`); `SelectedOption` trả về ngay khi thấy `selected` đầu tiên ⇒ Goosie gửi `"a"` | `internal/engine/focus.go:634` `SelectedOption` |
+| Giá trị option = `TextContent()` nguyên bản, không strip không collapse | `internal/engine/focus.go` `optionValue` (một định nghĩa duy nhất, dùng bởi `forms.go:controlValue`, `Session.controlValue`, `accessibility.go:149-177`) |
+| `Label` của option trong AX **đã** `strings.TrimSpace` trong khi `Value` thì không ⇒ cùng một node, hai câu trả lời lệch nhau | `internal/engine/accessibility.go:159-164` |
+| `<select>` có **hai** option cùng `selected`: Chromium chọn cái **cuối** (`selectedIndex 1, value "b", FormData "b"`); `SelectedOption` trả về ngay khi thấy `selected` đầu tiên ⇒ Goosie gửi `"a"` | `internal/engine/focus.go:556` `SelectedOption` |
 | Hành vi first-wins này **không** có test nào khoá: `grep selected test/engine/` không có case hai option cùng `selected` | `test/engine/` |
 
 Vì sao đáng làm: form `<GET>` nhận `?c=%0A++Charcoal%0A` thì server không khớp được giá trị nào;
@@ -154,7 +154,7 @@ INDENTED after ArrowDown -> {"selectedIndex":0,"value":"Charcoal","optionValue":
 | `value` attribute: dùng **nguyên bản**, kể cả whitespace và cả chuỗi rỗng (`value=""` submit `""`, không fallback về text) | `attrpad` → `"  pad  me  "`, `attrnewline` → `"a\n b\tc"`, `attrempty` → `""`, `attrnbsp` → `"\u00a0x\u00a0"`; `FORMDATA`/`ENCODED` cùng dòng | `optionValue` nhánh attribute, giữ nguyên |
 | Nhiều option cùng `selected`: cái **cuối** thắng; Chromium **không** viết lại content attribute | `TIEBREAK two-selected -> {"selectedIndex":1,"value":"b","optionFlags":[false,true,false],"attrFlags":[true,true,false],"formdata":[["c","b"]]}` | `SelectedOption` (`focus.go`) |
 | Bàn phím bước từ option đang thắng; markup **một** option selected không đổi hành vi | `LISTBOX two-selected initial/after ArrowDown/after ArrowUp` (1→2→1) và control `LISTBOX single-selected *` (1→2) | `MoveSelect` (`internal/engine/select.go`) |
-| Label AX của option dùng **chung** helper với value | `OPTION name=charcoal -> {"value":"Charcoal","label":"Charcoal"}`, `INDENTED initial` | `internal/engine/accessibility.go:174` (label option), `:192` (label fallback của combo) |
+| Label AX của option dùng **chung** helper với value | `OPTION name=charcoal -> {"value":"Charcoal","label":"Charcoal"}`, `INDENTED initial` | `internal/engine/accessibility.go:161` (label option), `:176` (label fallback của combo) |
 
 Ghi chú thành thật: select **đóng** (không có `size`) không responded với phím mũi
 tên trong headless Chromium trên máy này — `CLOSED two-selected after ArrowDown ->
@@ -441,7 +441,7 @@ integrator phải chạy. Bằng chứng gián tiếp rằng nó không đổi �
 Không một dòng nào trong `internal/paint`, `internal/layout`, `internal/frame`,
 `internal/raster`, `internal/surface`, `testdata/**`, `MIN_SCORED_FIXTURES`
 (hay `testdata/parity.py`): **không fixture nào được thêm**, nên không có chuyện nâng sàn
-fixture. Đường vẽ select (`internal/paint/builder_controls.go:271` `paintSelect`) đọc
+fixture. Đường vẽ select (`internal/paint/builder_controls.go:224` `paintSelect`) đọc
 `TextContent()` và attribute `selected` trực tiếp, không đi qua `optionValue`, nên ảnh
 pixel không thể đổi; tie-break của nó vốn đã là "cái cuối thắng" nên từ lần sửa này nó
 **đồng ý kiến** với value thay vì lệch. Suite `./test/paint/ ./test/raster/
@@ -452,12 +452,12 @@ pixel không thể đổi; tie-break của nó vốn đã là "cái cuối thắ
 * **Tag QC + golden**: chưa nộp (xem §5.5). Branch không tự tag vì sẽ làm
   `./test/qc` đỏ.
 * **`make parity` / live sweep**: chưa chạy lại ở lần này (§5.7).
-* **`option:checked` trong CSS** (`internal/css/selector.go:882-910`) vẫn phân định
-  tie-break theo **`selected` đầu tiên**: guard `&& selected == nil` ở `:901` và
-  `return selected == nil && first == n` ở `:909`. Với markup hai option cùng
+* **`option:checked` trong CSS** (`internal/css/selector.go:737-762`) vẫn phân định
+  tie-break theo **`selected` đầu tiên**: guard `&& selected == nil` ở `:753` và
+  `return selected == nil && first == n` ở `:761`. Với markup hai option cùng
   `selected`, `:checked` giờ chọn option **khác** option mà form submit và AX
   công bố. **Chưa oracle nào chắn lệch này**: test duy nhất về `option:checked`
-  (`test/css/interactive_test.go:202-214`) chỉ đặt `selected` lên **một** option nên
+  (`test/css/interactive_test.go:184-195`) chỉ đặt `selected` lên **một** option nên
   nó vẫn xanh — đây là lệch thật chưa được đo, không phải lệch đã có test đỏ.
   Ngoài phạm vi §2 (và sửa nó là đụng `internal/css`), nên nợ.
 * **`<optgroup>`**: `SelectedOption` và `accessibility.go` vẫn chỉ duyệt con trực tiếp,
@@ -471,7 +471,7 @@ pixel không thể đổi; tie-break của nó vốn đã là "cái cuối thắ
   chưa collapse (§2.5: không đụng paint). Đây là lý do thật sự khiến ảnh có thể lệch
   Chromium về khoảng trắng trong ô select — nhưng corpus hiện tại không buộc, và task
   này cấm đụng ảnh.
-* **`option.value` trong JS** (`internal/js/js.go:809-823` `__getValue__`) trả `""` cho
+* **`option.value` trong JS** (`internal/js/js.go:535-549` `__getValue__`) trả `""` cho
   option không có `value` attribute, thay vì text đã normalize như Chromium đo ở §5.1.
   Ngoài phạm vi: `internal/js` không nằm trong ba đường (submit / bàn phím / AX) của task.
 * **`<select multiple>`, `size>1`, `<datalist>`, và việc input/textarea có cần normalize
@@ -484,6 +484,6 @@ pixel không thể đổi; tie-break của nó vốn đã là "cái cuối thắ
 ## 6. Ngoài phạm vi
 
 `<optgroup>` — engine đã ghi nhận chưa hỗ trợ ngay trong code
-(`internal/engine/select.go:46-48`: option lồng trong optgroup không tới được bằng bàn phím), nên
+(`internal/engine/select.go:32-35`: option lồng trong optgroup không tới được bằng bàn phím), nên
 đó là task riêng; `<select multiple>`, `<datalist>`, `size>1`, và việc textarea/input có cần
 normalize tương tự hay không.

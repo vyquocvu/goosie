@@ -7,7 +7,7 @@
 
 ## 结论
 
-1. **差距不是引擎在 Linux 上“行为不同”，而是字体输入/oracle 未受控**：Goosie 的系统字体加载只认 macOS 路径（`internal/raster/fonts.go:105-157`），Linux 上所有字体槽都退回内置 Go 字体；Chromium 在 Linux 上则用 Liberation/DejaVu。同一 commit、同一 Playwright 1.49.1 / Chromium 131.0.6778.33 下，本机 macOS 复现 **80/80、96.085%**，把 Goosie 的字体输入切到“仅内置字体”（等价 Linux CI 状态）后降到 **68/80、94.060%**，几乎重合 CI 的 **66/80、93.638%**。
+1. **差距不是引擎在 Linux 上“行为不同”，而是字体输入/oracle 未受控**：Goosie 的系统字体加载只认 macOS 路径（`internal/raster/fonts.go:65-111`），Linux 上所有字体槽都退回内置 Go 字体；Chromium 在 Linux 上则用 Liberation/DejaVu。同一 commit、同一 Playwright 1.49.1 / Chromium 131.0.6778.33 下，本机 macOS 复现 **80/80、96.085%**，把 Goosie 的字体输入切到“仅内置字体”（等价 Linux CI 状态）后降到 **68/80、94.060%**，几乎重合 CI 的 **66/80、93.638%**。
 2. **“Chromium 版本未固定、每次取最新”不成立**：CI 日志实际下载的是 `Chromium 131.0.6778.33 (playwright build v1148)`，与本机一致；`playwright==1.49.*` 已经把浏览器 revision 绑定到 Playwright 版本，不是浮动最新版。文档里的 93.54% 来自旧 run，最新 run 是 93.638%。
 3. **30/channel 容差不是跨平台差距的原因**（两边用同一阈值），但它是 90% 门槛敏感度的来源之一；阈值扫描显示即使放宽到 80/channel，内置字体仍会有 4 个 fixture 低于 90%，不能用“调阈值”静默关掉差距。
 
@@ -15,10 +15,10 @@
 
 | # | 假设 | 结论 | 证据 | 可信度 | 最便宜的证伪实验 |
 | --- | --- | --- | --- | --- | --- |
-| (a) | CI(Linux) 与 macOS 的字体/抗锯齿不同 | **成立（主因）** | CI 安装 `fonts-liberation`、`fonts-unifont`（CI run `40069270435` 日志）；Goosie 只读 macOS 字体路径（`internal/raster/fonts.go:105-157`）；本机 macOS 96.085%/80 通过 vs 仅内置字体 94.060%/68 通过（附录 A2/A3） | 高 | 已做：`GOOSIE_SYSTEM_FONTS=off` 重渲染后分数从 96.085 掉到 94.060 |
+| (a) | CI(Linux) 与 macOS 的字体/抗锯齿不同 | **成立（主因）** | CI 安装 `fonts-liberation`、`fonts-unifont`（CI run `40069270435` 日志）；Goosie 只读 macOS 字体路径（`internal/raster/fonts.go:65-111`）；本机 macOS 96.085%/80 通过 vs 仅内置字体 94.060%/68 通过（附录 A2/A3） | 高 | 已做：`GOOSIE_SYSTEM_FONTS=off` 重渲染后分数从 96.085 掉到 94.060 |
 | (b) | Chromium 版本未固定，每次 `install` 取最新 | **排除** | CI 日志：`Downloading Chromium 131.0.6778.33 (playwright build v1148)`；本机 `Chromium --version` 同为 131.0.6778.33；CI 用 `playwright==1.49.*`（`.github/workflows/ci.yml:92-95`） | 高 | 已做：对比 CI 日志与本机 `--version` |
 | (c) | 评分容差 30/channel 过松或过严 | **不是跨平台差距的原因；是门槛敏感度来源** | 阈值扫描（附录 A5）：thr=30 时 macOS 0 失败、内置字体 12 失败；thr=80 时内置字体仍 4 失败；thr=25 时 macOS 反而 1 失败 | 高 | 已做：同一批渲染按 0–80 重新评分 |
-| (d) | 引擎自身在 Linux 上的字体回退/度量差异 | **成立（机制）** | Linux 上 `NewFonts` 读不到任何 `systemFontFiles`/`systemFontCollections`，`resolveLocked` 退回内置 Go regular/bold（`internal/raster/fonts.go:162-197, 296-327`）；默认字体是 Times（`internal/style/style.go:675`）；语料中 61 条 `font-family: sans-serif` 声明 | 高 | 已做：等价环境重渲染；也可在 Linux 上跑 `go run ./cmd/dump-fonts` 验证无系统字体 |
+| (d) | 引擎自身在 Linux 上的字体回退/度量差异 | **成立（机制）** | Linux 上 `NewFonts` 读不到任何 `systemFontFiles`/`systemFontCollections`，`resolveLocked` 退回内置 Go regular/bold（`internal/raster/fonts.go:116-151, 229-251`）；默认字体是 Times（`internal/style/style.go:484`）；语料中 61 条 `font-family: sans-serif` 声明 | 高 | 已做：等价环境重渲染；也可在 Linux 上跑 `go run ./cmd/dump-fonts` 验证无系统字体 |
 | (e1) | 滚动条占位差异 | **排除** | Playwright 默认参数包含 `--hide-scrollbars`（本机 `.../playwright/driver/package/lib/server/chromium/chromium.js:275`） | 高 | 在 Linux 上截图对比 `window.innerWidth`/`clientWidth` |
 | (e2) | DPR/视口/尺寸不一致 | **排除** | `parity.py` 显式 800×600、DPR 1（`testdata/parity.py:51-70, 534-535`）；CI 与本地均 0 个 dimension error | 高 | 已做：CI JSON `errors=0` |
 | (e3) | Web 字体加载竞态 | **排除** | `testdata/render` 中 `@font-face` 数量为 0，且无外部 `src`/`href` 引用（附录 A8） | 高 | 已做：grep 语料 |
@@ -42,9 +42,9 @@
 
 字体替换不只改字形，还改 advance/line-height，导致换行和整块内容位移：
 
-- `internal/raster/fonts.go:105-157`：`systemFontDir = "/System/Library/Fonts/Supplemental"`，只列 macOS 的 Times/Arial/Courier/Georgia/Verdana 与 `HelveticaNeue.ttc`。
-- `internal/raster/fonts.go:170-195`：文件读不到就 `continue`；Linux 上全部跳过。
-- `internal/raster/fonts.go:296-327`：找不到槽位时先降级同族，再落到内置 face；内置只有 Go regular/bold（`internal/raster/fonts.go:199-218`）。
+- `internal/raster/fonts.go:65-111`：`systemFontDir = "/System/Library/Fonts/Supplemental"`，只列 macOS 的 Times/Arial/Courier/Georgia/Verdana 与 `HelveticaNeue.ttc`。
+- `internal/raster/fonts.go:124-149`：文件读不到就 `continue`；Linux 上全部跳过。
+- `internal/raster/fonts.go:229-251`：找不到槽位时先降级同族，再落到内置 face；内置只有 Go regular/bold（`internal/raster/fonts.go:153-172`）。
 - 同一份 Goosie 渲染，仅切换字体输入（系统字体 vs 内置字体），14 个 CI 失败 fixture 的平均像素差异为 **10.62%**（中位数 10.57%，最大 17.72%），而 66 个通过 fixture 平均仅 **3.79%**（中位数 4.09%）（附录 A6）。
 - `colors/01-text-background` 的分带差异从顶部约 5–7% 增长到下半部 20–31%（附录 A9），是典型的文本度量变化导致的纵向重排，而不是局部字形抗锯齿。
 - `colors/02-gradients` 实际内容是纯色背景 + 白字（`testdata/render/colors/02-gradients.html:13-32`，没有任何 gradient），CI 仍掉 9.31pp；它不可能是渐变实现问题，只能是文字/字体差异。
@@ -90,7 +90,7 @@
 
 ### P1 — 后续改进
 
-1. **给 `internal/raster/fonts.go` 增加 Linux 字体源**：使用 fontconfig 或固定目录加载 Liberation Sans/Serif/Mono（Playwright `--with-deps` 已安装），按 Chromium 的 fontconfig 替换关系映射槽位；特别要验证 generic `sans-serif`（Goosie 现在映射到 `FontArial`，见 `internal/style/style.go:4237`）与 Linux Chromium 的实际 generic 解析是否一致。需要新增测试覆盖“字体存在/缺失”两种分辨率。
+1. **给 `internal/raster/fonts.go` 增加 Linux 字体源**：使用 fontconfig 或固定目录加载 Liberation Sans/Serif/Mono（Playwright `--with-deps` 已安装），按 Chromium 的 fontconfig 替换关系映射槽位；特别要验证 generic `sans-serif`（Goosie 现在映射到 `FontArial`，见 `internal/style/style.go:3692`）与 Linux Chromium 的实际 generic 解析是否一致。需要新增测试覆盖“字体存在/缺失”两种分辨率。
 2. **提交或在固定环境生成 Chromium 参考 PNG**：带 SHA-256、浏览器 build、OS、字体集元数据；不要用 macOS 现场生成的参考去评 Linux 现场生成的 Goosie。
 3. **保留 30/channel、90% 作为回归围栏，而不是兼容性结论**（与 `docs/engine-compatibility-review.md:365` 一致）；报告中按平台、按 fixture 发布分数和分母。
 4. **报告分层**：把“文字/字形差异”和“布局/颜色差异”分开统计，避免字体噪声掩盖真正的引擎缺陷。

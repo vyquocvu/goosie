@@ -88,15 +88,15 @@ sampling artefact.
 ## 2. Cause, from reading the two stages that matter
 
 - Layout splices a box per word for every text node, and each of those boxes carries a **verbatim copy** of the
-  generating element's computed style: `internal/style/style.go:1613-1625` (`inheritStyle`) does `cs := *parent`,
-  `BackgroundColor` included, and `buildSubtreeWithHost` (`internal/layout/arena.go:454-470`) hands out an arena slot
+  generating element's computed style: `internal/style/style.go:1319-1328` (`inheritStyle`) does `cs := *parent`,
+  `BackgroundColor` included, and `buildSubtreeWithHost` (`internal/layout/arena.go:257-270`) hands out an arena slot
   for text nodes as well as elements.
 - The paint stage then treated every box as a background owner. `internal/paint/builder_box.go`
   (`paintBoxDecoration`) gates the whole decoration on `paintsInlineFragments := computed.Display != style.DisplayInline
   || (obj.Node != nil && obj.Node.Text())`. A text run is `Display == Inline` with a text node, so the second clause
   pulled it into `paintBoxBackground` — and it filled with the copied background.
 - The style stage had already learned this lesson in one place only: `style.AnonymousBlockStyle`
-  (`internal/style/style.go:593-611`) zeroes `BackgroundColor` with the comment "painting it twice would double the
+  (`internal/style/style.go:436-451`) zeroes `BackgroundColor` with the comment "painting it twice would double the
   alpha of a translucent box". Anonymous blocks were covered; **text runs were not**.
 - The legitimate half, which must not be collapsed: an **inline** element's own box paints no background at all (the
   `Display != Inline` test skips it) precisely so its per-line fragments carry it. That is CSS-correct fragmentation,
@@ -145,7 +145,7 @@ Why this shape:
   element whose style was copied.
 - **Generated content is the exception, exactly as `boxDeclaresOpacity` treats it.** A `::before`/`::after`/
   `::first-letter` box is built from a synthetic text node with no parent element (`buildPseudoElement`,
-  `internal/layout/arena.go:604`), so it returns early with `true` and keeps its own background.
+  `internal/layout/arena.go:386`), so it returns early with `true` and keeps its own background.
 - **Failures fall back to `true`** (unknown generator, absent style): an unidentified box keeps painting, so the worst
   case is the status quo, never a silently vanished background.
 - It covers all four background layers at once, because all four are emitted by `paintBoxBackground`: colour, linear
@@ -312,7 +312,7 @@ lines, i.e. every one of the 10 block subtests, both inline span controls, and t
 (`(213,63,63)` at all four word boxes, `1395 of 18000`). The `::before` and `::first-letter` controls are the only
 cases that survive C, again because they never reach the comparison. Wider run
 `go test -count=1 ./test/paint/ ./test/engine/` exit **1** with `TestInlineElementBackgroundPaintsPerFragment` failing
-again (`inline_background_test.go:43`). So the sign of the comparison is load-bearing in both directions; a reader who
+again (`inline_background_test.go:37`). So the sign of the comparison is load-bearing in both directions; a reader who
 flips it gets a red suite, not a green one.
 
 Under C, TASK-044's oracles still pass (exit **0**, the 10 top-level tests of `opacity_paint_test.go` (5),
@@ -585,7 +585,7 @@ signal.
 
 **What this task does not close, and I found while checking its widest branch.** §5's predicate returns `true` at
 `obj.Node == nil`, which is exactly the branch an anonymous block takes, so I probed that shape. For a solid colour the
-path is unreachable — `style.AnonymousBlockStyle` already zeroes `BackgroundColor` (`internal/style/style.go:610`) and
+path is unreachable — `style.AnonymousBlockStyle` already zeroes `BackgroundColor` (`internal/style/style.go:450`) and
 `cmd/dump-layout` confirms the anonymous boxes exist here (ID=11 `(0,0,300,18)`, ID=12 `(0,38,300,18)`) yet emit no
 background fill in either build. For a **gradient** it is live: `AnonymousTableStyle` zeroes all four background layers
 (:635-642) and `AnonymousBlockStyle` zeroes only the colour, so `/tmp/t48-check/anon-grad.html` (same DOM,

@@ -11,16 +11,16 @@
 
 | Vị trí | Hiện tại làm gì | Thứ bị vứt đi |
 | --- | --- | --- |
-| `fuzz_input_test.go:44` `FuzzClickAt` | `sess.ClickAt(x, y)` | giá trị `bool` trả về |
-| `fuzz_input_test.go:59` `FuzzSetHover` | `sess.SetHover(x, y)` | giá trị `bool` |
+| `fuzz_input_test.go:37` `FuzzClickAt` | `sess.ClickAt(x, y)` | giá trị `bool` trả về |
+| `fuzz_input_test.go:52` `FuzzSetHover` | `sess.SetHover(x, y)` | giá trị `bool` |
 | `fuzz_input_test.go:~70` `FuzzFocusControl` | `sess.FocusControl(10, 10)` | giá trị `bool` |
-| `fuzz_input_test.go:100` `FuzzEdit` | `sess.Edit(action, r)` | giá trị `bool` + nội dung text |
+| `fuzz_input_test.go:93` `FuzzEdit` | `sess.Edit(action, r)` | giá trị `bool` + nội dung text |
 | `fuzz_input_test.go:~118` `FuzzInteractionSequence` | chạy một chuỗi thao tác | mọi trạng thái sau đó |
-| `test/style/shadow_test.go:195` `TestShadowPanicsNoPanic` | parse 9 khai báo shadow qua resolver | kết quả computed style |
+| `test/style/shadow_test.go:174` `TestShadowPanicsNoPanic` | parse 9 khai báo shadow qua resolver | kết quả computed style |
 
 Đây đúng là loại assurance rỗng mà chương trình QC này đang triệt tiêu: một resolver mà **lặng lẽ bỏ hết box-shadow** vẫn làm `TestShadowPanicsNoPanic` xanh; một `ClickAt` trả `false` cho mọi điểm vẫn xanh. "Không crash" là điều kiện cần, không phải kết quả kiểm thử.
 
-Điểm thuận lợi: cả năm hàm input **đã trả `bool`** (`engine.go:1502 ClickAt`, `focus.go:76 FocusControl`, `focus.go:318 Edit`, `focus.go:818 SetHover`) và session đã expose `focus.go:220 Focused()`, `focus.go:461 FocusedText()`, `focus.go:471 FocusedEditable()`, `engine.go:1849 SelectionBounds()`, `selection.go:252 SelectionText()`. Không cần API mới cho phần lớn việc.
+Điểm thuận lợi: cả năm hàm input **đã trả `bool`** (`engine.go:1054 ClickAt`, `focus.go:65 FocusControl`, `focus.go:279 Edit`, `focus.go:727 SetHover`) và session đã expose `focus.go:186 Focused()`, `focus.go:404 FocusedText()`, `focus.go:412 FocusedEditable()`, `engine.go:1345 SelectionBounds()`, `selection.go:221 SelectionText()`. Không cần API mới cho phần lớn việc.
 
 ## 2. Yêu cầu
 
@@ -74,22 +74,22 @@ Ghi nguyên văn output FAIL + PASS sau revert vào Status. Một assert không 
 ## 5.1 Quyết định của integrator (2026-10-25) — cả hai câu hỏi mục 5 đã có đáp án bằng code, không cần chọn phương án
 
 **Câu 1 — shadow: không cần accessor mới, và cũng không cần đo qua display list.**
-`internal/style/style.go:237` là `type ComputedStyle struct` (đã export), và chính nó khai báo:
+`internal/style/style.go:203` là `type ComputedStyle struct` (đã export), và chính nó khai báo:
 
 ```go
-BoxShadow  []css.BoxShadow   // style.go:507 — nil nghĩa là `none`
-TextShadow []css.TextShadow  // style.go:510
+BoxShadow  []css.BoxShadow   // style.go:386 — nil nghĩa là `none`
+TextShadow []css.TextShadow  // style.go:386
 ```
 
-Thư mục test đã đọc hai field này trực tiếp: `test/style/shadow_test.go:14` (`TestBoxShadowResolved`) assert `len(s.BoxShadow)` rồi `OffsetX/OffsetY/Blur/Spread`, qua helper `styleFor(...)` mà `TestShadowPanicsNoPanic` đang gọi rồi **vứt kết quả** (`shadow_test.go:210`: `_ = styleFor(...)`). Vậy hướng (a)/(b) trong mục 5 là giả sai: API tồn tại, chỉ có assert là chưa viết. `TestShadowPanicsNoPanic` phải đổi thành bảng kỳ vọng per-declaration dùng đúng `styleFor` đang có.
+Thư mục test đã đọc hai field này trực tiếp: `test/style/shadow_test.go:12` (`TestBoxShadowResolved`) assert `len(s.BoxShadow)` rồi `OffsetX/OffsetY/Blur/Spread`, qua helper `styleFor(...)` mà `TestShadowPanicsNoPanic` đang gọi rồi **vứt kết quả** (`shadow_test.go:187`: `_ = styleFor(...)`). Vậy hướng (a)/(b) trong mục 5 là giả sai: API tồn tại, chỉ có assert là chưa viết. `TestShadowPanicsNoPanic` phải đổi thành bảng kỳ vọng per-declaration dùng đúng `styleFor` đang có.
 
-Một phân biệt cần giữ: "shadow" trong file này là **CSS box/text-shadow**, không phải DOM shadow tree (`n.ShadowRoot` ở `internal/style/incremental.go:194`). Phạm vi task là CSS shadow; ai muốn phủ shadow root thì mở task khác, vì oracle của nó là cascade/invalidate chứ không phải resolver.
+Một phân biệt cần giữ: "shadow" trong file này là **CSS box/text-shadow**, không phải DOM shadow tree (`n.ShadowRoot` ở `internal/style/incremental.go:187`). Phạm vi task là CSS shadow; ai muốn phủ shadow root thì mở task khác, vì oracle của nó là cascade/invalidate chứ không phải resolver.
 
 **Câu 2 — hover: KHÔNG bỏ khỏi phạm vi, vì hover đã quan sát được qua DOM event.**
-`Session.hovered` (`internal/engine/engine.go:133`) là field không export và nên giữ nguyên như vậy. Nhưng `SetHover` dispatch **`mouseenter`** tại `internal/engine/focus.go:861` và unhover phần tử cũ qua `mouseleave` ở nhánh prev. Đó là chính thứ người dùng cảm nhận được (link đổi màu, con trỏ đổi shape là hệ quả), nên bất biến phải viết trên event, không trên field:
+`Session.hovered` (`internal/engine/engine.go:73`) là field không export và nên giữ nguyên như vậy. Nhưng `SetHover` dispatch **`mouseenter`** tại `internal/engine/focus.go:766` và unhover phần tử cũ qua `mouseleave` ở nhánh prev. Đó là chính thứ người dùng cảm nhận được (link đổi màu, con trỏ đổi shape là hệ quả), nên bất biến phải viết trên event, không trên field:
 
 * `SetHover` trả `true` ⇒ **đúng một** `mouseenter` hoặc `mouseleave` đã fire kể từ lần gọi trước.
-* `SetHover` trả `false` ⇒ **không** event nào fire (`focus.go:840`: `if hovered == s.hovered { return false }` — nhánh đó về sớm trước mọi dispatch), và phần tử đang hover không đổi.
+* `SetHover` trả `false` ⇒ **không** event nào fire (`focus.go:749`: `if hovered == s.hovered { return false }` — nhánh đó về sớm trước mọi dispatch), và phần tử đang hover không đổi.
 * Gọi hai điểm trùng nhau rồi gọi `SetHover` ở điểm đó lần thứ hai ⇒ phải trả `false` (đây là case mà một stub "luôn trả true" chết ngay).
 
 Ràng buộc: test đăng ký listener qua DOM API có thật của engine, không thêm hàm đọc vào `internal/**`. Nếu engine không cho gắn `mouseenter` listener từ script/`dom.AddEventListener` sẵn có, **dừng và báo** kèm bằng chứng, đừng tự mở API.
@@ -239,9 +239,9 @@ ok  	github.com/vyquocvu/goosie/test/style	0.415s
 
 ### Assertions điều chỉnh và sai lệch CSS
 
-- Điều kiện `FocusControl == true ⇒ Focused() != nil` không đúng với hợp đồng tại `focus.go:76`: focus vào vùng trống có thể xóa focus và vẫn trả true. Test dùng điều kiện phù hợp: true phải thay đổi node focus (kể cả sang nil), false phải giữ nguyên.
+- Điều kiện `FocusControl == true ⇒ Focused() != nil` không đúng với hợp đồng tại `focus.go:65`: focus vào vùng trống có thể xóa focus và vẫn trả true. Test dùng điều kiện phù hợp: true phải thay đổi node focus (kể cả sang nil), false phải giữ nguyên.
 - Điều kiện hover true ⇒ đúng một event không đúng khi chuyển giữa hai element: nhánh engine có thể phát `mouseleave` và `mouseenter`, tổng cộng hai event. Test cho phép một hoặc hai event khi true; lần gọi lặp lại trên target đã nhận `mouseenter` vẫn phải false và không phát event.
-- `ClickAt` chỉ kích hoạt control, không đặt focus theo API ở `engine.go:1502`; vì vậy bỏ điều kiện true ⇒ `Focused() != nil`. Thay bằng quan hệ return/event click trên button thật và false ⇒ focus không đổi.
+- `ClickAt` chỉ kích hoạt control, không đặt focus theo API ở `engine.go:1054`; vì vậy bỏ điều kiện true ⇒ `Focused() != nil`. Thay bằng quan hệ return/event click trên button thật và false ⇒ focus không đổi.
 - Rune surrogate không phải Unicode scalar hợp lệ. Oracle Edit chỉ xét `utf8.ValidRune` và ký tự không control.
 - Không có assert nào bị bỏ vì không chứng minh được bằng mutation. Các điều kiện nêu trên được thay vì mâu thuẫn với contract/API hoặc Unicode.
 - Không tìm thấy sai lệch CSS-spec trong 9 khai báo. Ví dụ tối giản `box-shadow: 1px 1px` cho offset `(1,1)`, blur `0`, spread `0`; màu omitted được biểu diễn bằng `ColorIsCurrent`. Khai báo box-shadow hai layer và text-shadow ba layer giữ đúng count, thứ tự, màu, offset và blur. Alpha rgba được byte-quantize theo rounding (0.3 → 77; 0.5 → 128).
@@ -254,7 +254,7 @@ ok  	github.com/vyquocvu/goosie/test/style	0.415s
 - **AC-03:** các lệnh `-fuzz ... -fuzztime=30s` PASS: `FuzzClickAt` 206,282 execs; `FuzzSetHover` 194,657; `FuzzFocusControl` 195,132; `FuzzSelectAtTo` 191,493; `FuzzEdit` 178,459; `FuzzInteractionSequence` 159,670. Lệnh đầu không nâng quyền bị loopback `httptest` chặn; các lần chạy 30 s hoàn tất khi cấp quyền loopback.
 - **AC-05:** `go build ./...`, `go vet -all ./...`, `go test ./internal/archtest/`, `go test ./test/qc/` PASS; `gofmt -l test/engine/fuzz_input_test.go test/style/shadow_test.go` không in file.
 - **AC-06:** không đổi tag QC nên không chạy `-update`; golden không đổi.
-- **AC-07:** các test cùng dạng còn lại (chỉ liệt kê): `test/engine/control_events_test.go` (FocusControl/Edit, khoảng dòng 28–370); `disclosure_test.go:57`; `focus_test.go` (FocusControl/Edit, dòng 67–396); `ime_test.go` (FocusControl/Edit, dòng 29–195); `events_test.go` (SetHover/FocusControl, dòng 123–247); `unicode_test.go:50–62`; `popover_test.go:83–230`; `parity_interaction_test.go:69–182`; `interaction_e2e_test.go:56–623`. Nhiều test trong nhóm này kiểm tra tác dụng phụ ở assertion phía sau dù bỏ qua bool trả về.
+- **AC-07:** các test cùng dạng còn lại (chỉ liệt kê): `test/engine/control_events_test.go` (FocusControl/Edit, khoảng dòng 28–370); `disclosure_test.go:54`; `focus_test.go` (FocusControl/Edit, dòng 67–396); `ime_test.go` (FocusControl/Edit, dòng 29–195); `events_test.go` (SetHover/FocusControl, dòng 123–247); `unicode_test.go:46–62`; `popover_test.go:80–230`; `parity_interaction_test.go:58–182`; `interaction_e2e_test.go:42–623`. Nhiều test trong nhóm này kiểm tra tác dụng phụ ở assertion phía sau dù bỏ qua bool trả về.
 
 ### Giới hạn dọn dẹp
 
@@ -269,7 +269,7 @@ Lần fuzz đầu phát hiện hai oracle kỳ vọng quá hẹp và Go đã t�
 | A | `case EditRune:` đổi điều kiện thành `if true { return false }` — không bao giờ chèn rune | `ok ... 0.752s` **(PASS)** | `--- FAIL: FuzzEdit/seed#0 ... returned false; text stayed "hello"` + fail cả corpus `767b1cc07fe7a7f1` |
 | A2 | `insert(string(r) + string(r))` — chèn trùng | không chạy ở bản cũ (oracle chỉ cần "chữ có xuất hiện đâu đó") | `--- FAIL: FuzzEdit/seed#0 ... produced "helloaa" from "hello", want "helloa"` |
 | B | đầu `Session.ClickAt`: `return false` — không hit-test, không dispatch | `ok ... 0.747s` **(PASS)** | `--- FAIL: FuzzClickAt/seed#0 ... returned false after 0 click events, want true and 1` |
-| C | đầu `Session.SetHover`: `return false` — không hover, không event | `--- FAIL: FuzzSetHover/seed#0 ... returned without exactly one enter/leave event` — **đã bị bắt từ bản cũ** (oracle này đã có kỳ vọng dương) | vẫn FAIL, dòng tương ứng nay là `fuzz_input_test.go:109` |
+| C | đầu `Session.SetHover`: `return false` — không hover, không event | `--- FAIL: FuzzSetHover/seed#0 ... returned without exactly one enter/leave event` — **đã bị bắt từ bản cũ** (oracle này đã có kỳ vọng dương) | vẫn FAIL, dòng tương ứng nay là `fuzz_input_test.go:102` |
 
 Lỗi chung của A/B: invariant chỉ viết ở dạng `returned X <===> effect Y`. Một hàm bị vô hiệu hoá hoàn toàn thì hai vế **đều sai một cách nhất quán**, nên test vẫn xanh. Đây chính xác là lớp đã giết BR-021 (TASK-020 §6), quay lại ở file khác.
 
@@ -277,7 +277,7 @@ Cả ba oracle vẫn được viết lại cho chặt, trong đó hai oracle ph�
 
 Hai phát hiện thật từ lần siết này, không phải chuyện test:
 
-* **Quy tắc từ chối của engine rộng hơn dự kiến.** Oracle mới ban đầu liệt kê `{\n, \r, \t, 0}`; fuzz 45s tìm ra `\f` (`U+000C`) cũng bị từ chối — vì `internal/engine/focus.go:360` chặn **mọi** `r < 0x20`. Đã ghi lại đúng hợp đồng đó kèm lý do (không phím nào gửi C0 control vào form field; CR/LF/TAB phải nằm ngoài value một dòng). Rune không hợp lệ/surrogate đơn được engine chèn thành `U+FFFD` — hành vi đúng theo tinh thần WHATWG, và `string(r)` của Go cũng làm đúng phép gấp đó, nên oracle không cần đặc cách `utf8`.
+* **Quy tắc từ chối của engine rộng hơn dự kiến.** Oracle mới ban đầu liệt kê `{\n, \r, \t, 0}`; fuzz 45s tìm ra `\f` (`U+000C`) cũng bị từ chối — vì `internal/engine/focus.go:318` chặn **mọi** `r < 0x20`. Đã ghi lại đúng hợp đồng đó kèm lý do (không phím nào gửi C0 control vào form field; CR/LF/TAB phải nằm ngoài value một dòng). Rune không hợp lệ/surrogate đơn được engine chèn thành `U+FFFD` — hành vi đúng theo tinh thần WHATWG, và `string(r)` của Go cũng làm đúng phép gấp đó, nên oracle không cần đặc cách `utf8`.
 * **Chuỗi hover không phải một event.** Probe trên fixture: từ trống vào `#box` ⇒ 1 `mouseenter`; từ `#box` sang `body` ⇒ 1 `leave` + 1 `enter`; từ `#ta` ra khỏi trang ⇒ 1 `leave`. Oracle `events == 1` của bản đầu là **sai về phía test**, còn `1 hoặc 2` là rộng tuỳ tiện. Dạng đã ghi: `enters <= 1 && leaves <= 1 && handled == (events > 0)`. **Lưu ý cho bug sau:** goosie chỉ bắn `mouseenter`/`mouseleave` trên node bị chạm, không bắn cho tổ tiên mới đi vào — Chromium thì bắn cho cả chuỗi. Chưa đối chứng bằng `testdata/interaction-parity`, nên đây là gap ghi nhận, chưa phải defect đã đóng; oracle hiện **pin hành vi cũ**, và nếu sửa theo spec thì test này sẽ đỏ có chủ đích.
 
 Quy trình fuzz của agent giữ nguyên giá trị: chính `-fuzz` là thứ tìm ra hai oracle quá hẹp. Ba corpus repro ở `test/engine/testdata/fuzz/` được **commit làm regression seed** (agent xin phép dọn vì nằm ngoài phạm vi file — quyết định của integrator: giữ), và input `\f` giờ assert đúng điều engine làm thay vì bị nhảy qua.

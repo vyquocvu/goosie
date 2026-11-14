@@ -38,15 +38,15 @@ một rule duy nhất, và rule `.q` **không tồn tại trong stylesheet**. CS
 định chuỗi chưa đóng phải thành `<bad-string>` **ngay tại newline**, và §5.4.4 yêu cầu loại đúng
 declaration chứa nó. `grep -rn "bad-string" internal/` → **0 kết quả**.
 
-**Attribution rút lại:** bản §1.1 đầu tiên đổ lỗi cho `internal/css/token.go:201 readString`. Sai.
-`grep -rn "NewTokenizer" internal/` chỉ trả về `css/value.go:114` (lex **một value**) và
-`engine/limits.go:181` (đếm token để áp trần admission) — **không** có đường nào từ `Parse` đi qua
+**Attribution rút lại:** bản §1.1 đầu tiên đổ lỗi cho `internal/css/token.go:179 readString`. Sai.
+`grep -rn "NewTokenizer" internal/` chỉ trả về `css/value.go:104` (lex **một value**) và
+`engine/limits.go:148` (đếm token để áp trần admission) — **không** có đường nào từ `Parse` đi qua
 tokenizer, nên `readString` không thể nuốt cả sheet. Probe ở trên chạy nguyên văn trên `main` và giá
 trị 83 byte xuất hiện từ scanner chứ không từ tokenizer.
 
-Cùng một thiếu sót (đóng `quote` chỉ khi gặp ký tự nháy) còn nằm ở `stripComments` (`parser.go:124`,
-đo ở §2.2), `splitDeclarations`/`SplitDeclarations` (`:1768`, `:1776`) và các scanner
-at-rule/nested (`:1314-1355`, `:1408-1420`).
+Cùng một thiếu sót (đóng `quote` chỉ khi gặp ký tự nháy) còn nằm ở `stripComments` (`parser.go:89`,
+đo ở §2.2), `splitDeclarations`/`SplitDeclarations` (`:1625`, `:1633`) và các scanner
+at-rule/nested (`:1178-1218`, `:1268-1280`).
 Chúng tôi **không** sửa trong task này, có chủ đích: `readString` nuôi trần admission mà `TASK-040`
 đang sở hữu (đổi số token đếm được là đổi hành vi từ chối sheet), còn splitter ở tầng value là thứ
 giữ cho data URI base64 xuống dòng không bị cắt. §2.2 đo tác dụng thật của `stripComments` để việc
@@ -135,7 +135,7 @@ StripComments(...) = ".a { content: \"\"\";\n}\n/* keep */ .b { color: red; }"  
 rule [.a] decls=1  content = "\"\"\";\n}\n/* keep */ .b { color: red; }"          // .b không thành rule
 ```
 
-Xác nhận đúng như §2.2 nghi ngờ: `stripComments` (`parser.go:124`) tự theo dõi dấu nháy nên coi phần
+Xác nhận đúng như §2.2 nghi ngờ: `stripComments` (`parser.go:89`) tự theo dõi dấu nháy nên coi phần
 còn lại là **bên trong chuỗi** và bỏ qua mọi comment sau đó — lỗi thứ hai, độc lập. Nhưng hậu quả
 nhìn thấy được vẫn do scanner §1.1 gây ra: sau khi chỉ sửa scanner, cùng input cho
 `rule [.a] decls=0`, `rule [.b] decls=1 {color red}`. `stripComments` được để lại **có chủ đích**
@@ -329,7 +329,7 @@ Không thêm assertion thời gian nào — chỉ ghi số để tái hiện.
 * **Nợ đo, không đóng được trong task này:** mức nhiễm trên **trang thật** (§2.4) — cần chạy mạng,
   và `live-parity.py` không giữ HTML đã tải, nên phép đo phải tải lại và grep trên bộ HTML đó.
 * **Nợ sửa, cố ý để riêng:** cùng thiếu sót "đóng `quote` chỉ khi gặp ký tự nháy" vẫn còn ở
-  `stripComments` (`parser.go:124`) và `readString` (`token.go:201`, nuôi trần admission của
+  `stripComments` (`parser.go:89`) và `readString` (`token.go:179`, nuôi trần admission của
   `TASK-040`). §2.2 đã đo để chứng minh chúng **không** phải cơ chế gây rò; nếu muốn siết thì phải
   là defect riêng với oracle riêng, không phải sửa kèm ở đây.
 
@@ -407,7 +407,7 @@ Chạy lại để xác nhận: `gofmt -l internal/css test/css` (rỗng), `go v
 ### 7.6 Nợ còn lại, ghi rõ để lần sau không đoán
 
 * Escaped **quote** (`content:"a\"b"`) vẫn đóng chuỗi ở các scanner không thuộc ba điểm trên
-  (`:1321`, `:1346`, `:1419`, `:1681`, `:1784` và `SplitDeclarations`): chúng bỏ qua backslash. Cùng
+  (`:1184`, `:1209`, `:1279`, `:1540`, `:1641` và `SplitDeclarations`): chúng bỏ qua backslash. Cùng
   nợ đã ghi ở §6 về `stripComments`/`readString`.
 * Selector value giữ nguyên cặp escape: Goosie lưu `a[title="x\<NL>y"]`, Chromium serialize
   `a[title="xy"]`. Chưa sửa vì chưa có trang nào trong corpus/sweep cần; oracle chỉ buộc **rule sau

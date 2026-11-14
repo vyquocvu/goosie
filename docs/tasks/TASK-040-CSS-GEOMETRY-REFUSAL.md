@@ -58,13 +58,13 @@ Tokenizer trên chính các chuỗi đó:
 #8e8e8e    -> Hash      value="8e8e8e"                                ← không phải số
 ```
 
-`internal/engine/limits.go:239-241` áp `MaxGeometry = 2<<20` (= 2,097,152, khai báo tại `:53`)
+`internal/engine/limits.go:194-195` áp `MaxGeometry = 2<<20` (= 2,097,152, khai báo tại `:40`)
 cho `TokenDimension`/`TokenPercentage`/`TokenNumber` có đơn vị ⇒ `|−8e8| = 8×10⁸` vượt cap ⇒
 **cả document bị từ chối**. Matrix hành vi đo được khớp chính xác từng dòng:
 
 | Input | rc | Lý do theo token đã đo |
 | --- | --- | --- |
-| `:root{--8e8:1}` | 0 | Number thuần, cap chủ ý bỏ qua (`limits.go:233-238`) |
+| `:root{--8e8:1}` | 0 | Number thuần, cap chủ ý bỏ qua (`limits.go:190-194`) |
 | `:root{--8e8e8:1}` | 1 | Dimension −8e8 → vượt cap |
 | `:root{--1e9e9:1}` | 1 | Dimension −1e9 → vượt cap |
 | `:root{--8e5e5:1}` | 0 | Dimension −800,000 → dưới cap |
@@ -138,7 +138,7 @@ khít, phủ đúng `[0,8)`. Cái trông như trùng lặp là *chuỗi value* c
 token một đã tiêu thụ. Bằng chứng tự động:
 `test/css/hyphen_ident_test.go:TestTokenSpansCoverInputExactly`.
 
-`cssPropertyAt(src, offset)` (limits.go:291 hiện tại) trên từng document:
+`cssPropertyAt(src, offset)` (limits.go:224 hiện tại) trên từng document:
 
 | Declaration | token bị nghi | property mà guard quy thuộc |
 | --- | --- | --- |
@@ -199,8 +199,8 @@ CSS do máy tạo (colour-as-name).
   §1 vào `test/engine/limits_test.go` (tag `// qc:BR-…` thích hợp). Chạy **trước khi sửa**:
   các case rc 1 ngày hôm nay phải red theo đúng chiều mong đợi sau fix.
 * **Bước 1 — làm cho message tự giải thích được nó** (độc lập với bug, vẫn có giá trị nếu
-  decision ở bước 2 đổi): cả ba nhánh `limits.go:226`, `:231`, `:241` in cùng một chuỗi vô dụng;
-  cho nó biết *property, value, ngưỡng, và nhánh nào bắn*, theo gương `:249`
+  decision ở bước 2 đổi): cả ba nhánh `limits.go:186`, `:189`, `:195` in cùng một chuỗi vô dụng;
+  cho nó biết *property, value, ngưỡng, và nhánh nào bắn*, theo gương `:202`
   (`CSS declaration limit exceeded (%d)`). Sửa luôn tiền tố đúp `goosie: goosie:` ở `cmd/goosie`.
   Việc này biến mọi lần từ chối trong tương lai thành một bug report tự mô tả.
 * **Bước 2 — quyết định sửa ở tầng nào**, dựa trên số đo §2.1/§2.2:
@@ -234,7 +234,7 @@ Phần duy nhất khác của `internal/engine/limits.go` là message (Bước 1
 document nào được hay bị từ chối, và mutation §4 (ii)+(iii) chứng minh điều đó: hai mutation
 này chỉ giết được các hàng "must refuse"/"must admit", không đụng tới tầng sửa.
 
-**TASK-041 không bị đụng:** `readString` (`internal/css/token.go:201` ở HEAD, `:223` sau commit
+**TASK-041 không bị đụng:** `readString` (`internal/css/token.go:179` ở HEAD, `:201` sau commit
 này vì dispatch mới chen phía trên) giữ nguyên từng ký tự.
 TASK-041 để hàm đó nguyên trạng vì độ dài chuỗi đi vào bộ đếm admission của CSS
 (`MaxCSSDeclarations`, số byte được `cssBudget.check` đếm); thay đổi lần này chỉ nằm

@@ -62,7 +62,7 @@ ID=14 tag="div" X=0 Y=0  W=300 H=76 marg=0,0,0,0 display=1 pad=0,0,0,0
 ```
 
 `display=1` is `DisplayBlock`. That is the whole defect in one line: an anonymous box is *not* inline, so
-`paintBoxDecoration`'s `paintsInlineFragments` test (`internal/paint/builder_box.go:152`) admits it to
+`paintBoxDecoration`'s `paintsInlineFragments` test (`internal/paint/builder_box.go:84`) admits it to
 `paintBoxBackground`, and the style it carries still holds the element's ramp.
 
 ### 1.2 The repo's own paint dump cannot see it, so the display list is read through the API
@@ -111,19 +111,19 @@ identity in §1.3, and both measure **0** doubled pixels in Chromium. No conclus
 ## 2. Cause, and why the style layer owns the fix
 
 - Layout invents the box and hands it the element's style verbatim:
-  `internal/layout/anonymous.go:36` and `:70` both call `style.AnonymousBlockStyle(obj.Style)`, and
-  `spliceAnonymousBlock` (`internal/layout/anonymous.go:134-164`) stores the result on a box with **no node**:
+  `internal/layout/anonymous.go:24` and `:48` both call `style.AnonymousBlockStyle(obj.Style)`, and
+  `spliceAnonymousBlock` (`internal/layout/anonymous.go:100-130`) stores the result on a box with **no node**:
   `*a.Get(id) = Object{Style: s, Parent: parent, FirstKid: first, LastKid: last, flags: flagAnonymous}`
-  (`internal/layout/anonymous.go:139`).
-- `AnonymousBlockStyle` (`internal/style/style.go:593`) begins with `s = *parent` (`:598`) — a whole-struct copy of
+  (`internal/layout/anonymous.go:105`).
+- `AnonymousBlockStyle` (`internal/style/style.go:436`) begins with `s = *parent` (`:441`) — a whole-struct copy of
   the generating element's `ComputedStyle`, all four background layers included — and until this change cleared
-  **only one** of them: `s.BackgroundColor = css.Color{}` (`:618`). `BackgroundImage`, `BackgroundGradient` and
-  `BackgroundRadialGradient` (`:619-621` now) were handed out intact.
+  **only one** of them: `s.BackgroundColor = css.Color{}` (`:457`). `BackgroundImage`, `BackgroundGradient` and
+  `BackgroundRadialGradient` (`:457-459` now) were handed out intact.
 - The builder then faithfully emits every layer it is given: `paintBoxBackground`
-  (`internal/paint/builder_box.go:178-190`) appends the colour fill, then `CmdGradient`, then `CmdRadialGradient`,
+  (`internal/paint/builder_box.go:106-113`) appends the colour fill, then `CmdGradient`, then `CmdRadialGradient`,
   then `paintBackground`. A translucent layer given twice composites twice.
 - **The engine already knew the answer, in the sibling function.** `AnonymousTableStyle`
-  (`internal/style/style.go:630`) clears all four layers — `:646` colour, `:647` image, `:652` linear, `:653` radial
+  (`internal/style/style.go:464`) clears all four layers — `:477` colour, `:477` image, `:480` linear, `:480` radial
   — with the comment "borders, backgrounds, shadows and images stay on the real elements, so the wrapper neither
   doubles their paint nor invents spacing". The block builder and the table builder disagreed about the same fact for
   the same reason. That inconsistency is the defect, and it is a style-layer inconsistency.
@@ -131,15 +131,15 @@ identity in §1.3, and both measure **0** doubled pixels in Chromium. No conclus
 Why not the paint builder, even though a gate there would also make the pixels right:
 
 1. Paint has no trustworthy signal for "I am anonymous". Layout's own marker, `flagAnonymous`
-   (`internal/layout/arena.go:133-137`), is an unexported bit read only inside `internal/layout`. Worse, it is not
+   (`internal/layout/arena.go:61-61`), is an unexported bit read only inside `internal/layout`. Worse, it is not
    even the same predicate as `obj.Node == nil`: `buildPseudoElement` sets `flags |= flagAnonymous`
-   (`internal/layout/arena.go:606`) and *then* gives the box a synthetic text node (`:615-616`), so pseudo-element
+   (`internal/layout/arena.go:388`) and *then* gives the box a synthetic text node (`:397-398`), so pseudo-element
    boxes are anonymous to layout and non-nil to paint — and they must keep their own background, which TASK-048's
    controls pin. A builder gate keyed on `Node == nil` works by coincidence of two unrelated representations.
    `Object.Key` is no help either: anonymous boxes are unkeyed, so `BoxKey.Kind()` reports `BoxKindUnknown`
-   (`internal/layout/boxkey.go:17,66`) for them along with any other unkeyed box.
+   (`internal/layout/boxkey.go:10,50`) for them along with any other unkeyed box.
 2. It would stack a **second** owner test on top of TASK-048's `fragmentOwnsBackground`
-   (`internal/paint/builder_box.go:65-75`), whose first clause already returns `true` at `obj.Node == nil` — the
+   (`internal/paint/builder_box.go:29-29`), whose first clause already returns `true` at `obj.Node == nil` — the
    exact branch an anonymous block takes. Paint would then hold two competing answers about the same box.
 3. "This box owns no background" is a fact about the box, not about drawing. `css-backgrounds-3` §4 attaches a
    background to the element's own boxes; `css-cascade-4` §6.4 makes `background-*` non-inherited. A copy that keeps
@@ -331,8 +331,8 @@ The collapse zeroes `BackgroundImage` for the anonymous copy, and the style orac
 
 - **code**: decoded background pixels are attached only to boxes that have a DOM node —
   `if n := candidate.Objects[i].Node; n != nil { ... if img, ok := s.bgImages[n.ID]; ok { candidate.Objects[i].BgImage = img } }`
-  (`internal/engine/engine.go:1317-1324`) — and `paintBackground` requires `obj.BgImage.(image.Image)`
-  (`internal/paint/builder_background.go:91-92`). A node-less box can therefore never carry pixels to paint, whatever
+  (`internal/engine/engine.go:936-942`) — and `paintBackground` requires `obj.BgImage.(image.Image)`
+  (`internal/paint/builder_background.go:71-72`). A node-less box can therefore never carry pixels to paint, whatever
   its style says.
 - **measurement**: my probe `/tmp/t049-work/anon-img.html` declares a well-formed `background-image:
   url("data:image/svg+xml,...rgba(200,0,0,0.5)...")` on the very same 300x76 block. Chromium paints it:
@@ -347,7 +347,7 @@ because it never paints at all. §8 proposes that gap be registered as a defect 
 ### 6.2 Box-shadow: the anonymous bands duplicate it too — measured, deliberately not fixed
 
 `AnonymousBlockStyle` copies `BoxShadow` and clears nothing, and `paintBoxDecoration` calls `paintBoxShadow` without
-the owner gate (`internal/paint/builder_box.go:161-163`). Two documents differing **only** in whether the text is
+the owner gate (`internal/paint/builder_box.go:93-95`). Two documents differing **only** in whether the text is
 split by a block child, same `box-shadow: 0 0 10px 6px rgba(200,0,0,.5)` on a 300x76 box, 400x200 DPR 1, same build
 (`/tmp/t049-work/shadow-anon.html` against `/tmp/t049-work/shadow-plain.html`): **21,363 px differ, 15,289 of them by
 more than 30 levels**, in rows 0-101 — the rows above and inside the box. With the wrapper shape Goosie reads
@@ -360,8 +360,8 @@ source of the same class of duplication and belongs in that entry, not in a new 
 ### 6.3 Four other fields still differ between the two anonymous builders
 
 `AnonymousTableStyle` also clears `BorderRadius`, `MaskImage`/`MaskRepeat`/`MaskSize`/`MaskPosition`, `BoxShadow`,
-`TextShadow` and `BorderImage` (`internal/style/style.go:645-654`); `AnonymousBlockStyle` clears none of them, and
-this task leaves them alone. Borders *are* zeroed in both (`:607`, `:644`), which is why border width never showed
+`TextShadow` and `BorderImage` (`internal/style/style.go:477-480`); `AnonymousBlockStyle` clears none of them, and
+this task leaves them alone. Borders *are* zeroed in both (`:448`, `:477`), which is why border width never showed
 up as a duplicate. Each of the five is a separate decision with its own evidence requirement — widening this commit
 to "make the two builders identical" would have made a P2 fix unreviewable.
 
@@ -575,9 +575,9 @@ inline-SVG background written with `%23ccc` and paints 27,314 px in Goosie again
 a `)` inside the payload: a throwaway cascade probe printed `ComputedStyle.BackgroundImage` as the full 140-char URI for
 the working form and as `…fill='rgb(0,0,255` — 133 chars, cut at the first `)` — for the broken one. So the loss is in the
 CSS **tokenizer/parser** (`url("…")` is a quoted string per CSS Syntax L3 4.3.9; the closing paren is data, not a
-delimiter), `internal/engine/limits.go:944` then unescapes a URI that is no longer XML, `DecodeSVGAt` fails at
-`internal/engine/engine.go:1245`, and `obj.BgImage` is never set at `:1251`. The paint layer is not the gap:
-`internal/paint/builder_background.go:92` does read `obj.BgImage`. Registered as **GOOSIE-CSSURLPAREN-001 (P1)**; it adds
+delimiter), `internal/engine/limits.go:743` then unescapes a URI that is no longer XML, `DecodeSVGAt` fails at
+`internal/engine/engine.go:874`, and `obj.BgImage` is never set at `:878`. The paint layer is not the gap:
+`internal/paint/builder_background.go:72` does read `obj.BgImage`. Registered as **GOOSIE-CSSURLPAREN-001 (P1)**; it adds
 a sixth open P0/P1 entry, which the rc-sweep gate reads.
 
 **§6.2's shadow evidence, re-measured.** Same-shape documents (`/tmp/t49-shadow/p.html` vs `/tmp/t49-shadow/a.html`, one

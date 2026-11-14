@@ -61,7 +61,7 @@ Sprint 1 là sprint nền tảng (foundation sprint) của Goosie Browser, tập
 
 | Task ID | Task Name | Description | DoD |
 | :--- | :--- | :--- | :--- |
-| 1.1 | Define import rules table | Create `internal/archtest/rules.go:40-64` với allowed-imports matrix | Table covers all 10 packages, zero ambiguities |
+| 1.1 | Define import rules table | Create `internal/archtest/rules.go:20-44` với allowed-imports matrix | Table covers all 10 packages, zero ambiguities |
 | 1.2 | Implement TestImportRules | Verify mọi package chỉ import từ allowed list | `go test ./internal/archtest/ -run TestImportRules` PASS |
 | 1.3 | Implement TestCgoConfinement | Verify cgo chỉ xuất hiện trong `internal/platform/darwin` | `go test ./internal/archtest/ -run TestCgoConfinement` PASS |
 | 1.4 | Implement TestNoMutableGlobals | Verify zero mutable package-level globals trong `internal/` | `go test ./internal/archtest/ -run TestNoMutableGlobals` PASS |

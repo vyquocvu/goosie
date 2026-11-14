@@ -13,14 +13,14 @@
 **Standing rules:** `gofmt -w` before every commit (`TestRepoIsGofmtFormatted` enforces). NEVER pipe test output through `tail` (masks exit codes) — redirect to `/tmp` logs, `echo $?`, then read. Revert mutations with `git checkout` ONLY after the surrounding work is committed. Read `docs/roadmap-v2.md` with sed/Grep (Read fails on its size). No new mutable package-level vars under `internal/` (the manager lives in `cmd/goosie` and is an owned value). cgo stays confined to `internal/platform/darwin` — SP-6a adds none.
 
 **Key terrain facts (verified 2026-11-12):**
-- `build(c config) (*framePath, error)` — `cmd/goosie/main.go:232-474`. Callers: `main.go:936` (production), `main_test.go:782,798,808`, `e2e_test.go:53,507,563`, `journey_history_private_test.go:35`. Keep `build(c)` working identically.
-- Profile stores created inline in `build`: `main.go:235-277` (preferences/downloadDir/fonts/client/bookmarks/history) and the `framePath` literal `main.go:332-349` (client, privateClient, fonts, bookmarks, history, downloads, storage, incognitoStorage, broadcastHub, incognitoBroadcastHub, theme, userscripts, flags, perms, preferences). Load calls `main.go:354-362`; theme default `:351-353`.
-- Per-window machinery in `build`: sched/pool/composer/layer/rec/spec (`:311-330`), nav channels/zoom (`:338-340`), drain goroutines (`:363-373`), toolbar/tabMgr wiring (`:374-467`), initial plan (`:468-472`).
-- `run(args)` — `main.go:902-1126`. Early returns: clearData (`:907`), printPDF (`:915`). Interactive orchestration: `:936-1126`. Paced/screenshot driver setup: `:990-1030`. Loop goroutine `:1051`, shutdown goroutine `:1061-1089`, Runner handoff `:1091-1095`, final save `:1097-1118`, report `:1125`.
-- `onCloseLast` wired at `main.go:378-382` → `f.window.Close()`; fired by `tabs.TabManager.CloseTab` when the last tab closes (`internal/tabs/manager.go:154-161`, in a goroutine). **Keep this wiring** — the manager observes the resulting window close.
-- `runSessionSnapshots`/`saveActiveSession` (`navigation.go:901,925`) write `f.config.sessionActiveFile` (one profile-level file) and no-op when it is `""`. Secondary windows get `sessionActiveFile=""` so they do not clobber the primary's journal (window-aware grouping is deferred to SP-6b).
-- `report(d *driver)` (`report.go:21`) prints a summary to stderr and returns nil when `c.out==""`; `report(nil)` is the interactive exit path.
-- Headless: `platform.Select` → `headless.New` (SystemClock when no Clock plumbed); `headless.Window.Inject` (`headless/window.go:222`), `Close` idempotent. Two headless windows already coexist (`render_work_test.go:699,1124`). E2E harness `newBrowserE2E` (`e2e_test.go:40-78`) uses `build`+`openWindow`+manual loop, NOT `run()`.
+- `build(c config) (*framePath, error)` — `cmd/goosie/main.go:139-356`. Callers: `main.go:750` (production), `main_test.go:771,787,797`, `e2e_test.go:53,504,560`, `journey_history_private_test.go:35`. Keep `build(c)` working identically.
+- Profile stores created inline in `build`: `main.go:139-172` (preferences/downloadDir/fonts/client/bookmarks/history) and the `framePath` literal `main.go:224-241` (client, privateClient, fonts, bookmarks, history, downloads, storage, incognitoStorage, broadcastHub, incognitoBroadcastHub, theme, userscripts, flags, perms, preferences). Load calls `main.go:246-254`; theme default `:243-245`.
+- Per-window machinery in `build`: sched/pool/composer/layer/rec/spec (`:203-222`), nav channels/zoom (`:230-232`), drain goroutines (`:255-265`), toolbar/tabMgr wiring (`:266-348`), initial plan (`:349-353`).
+- `run(args)` — `main.go:722-886`. Early returns: clearData (`:727`), printPDF (`:735`). Interactive orchestration: `:750-886`. Paced/screenshot driver setup: `:782-814`. Loop goroutine `:833`, shutdown goroutine `:840-856`, Runner handoff `:856-857`, final save `:859-878`, report `:885`.
+- `onCloseLast` wired at `main.go:266-270` → `f.window.Close()`; fired by `tabs.TabManager.CloseTab` when the last tab closes (`internal/tabs/manager.go:141-148`, in a goroutine). **Keep this wiring** — the manager observes the resulting window close.
+- `runSessionSnapshots`/`saveActiveSession` (`navigation.go:766,786`) write `f.config.sessionActiveFile` (one profile-level file) and no-op when it is `""`. Secondary windows get `sessionActiveFile=""` so they do not clobber the primary's journal (window-aware grouping is deferred to SP-6b).
+- `report(d *driver)` (`report.go:12`) prints a summary to stderr and returns nil when `c.out==""`; `report(nil)` is the interactive exit path.
+- Headless: `platform.Select` → `headless.New` (SystemClock when no Clock plumbed); `headless.Window.Inject` (`headless/window.go:145`), `Close` idempotent. Two headless windows already coexist (`render_work_test.go:693,1098`). E2E harness `newBrowserE2E` (`e2e_test.go:40-78`) uses `build`+`openWindow`+manual loop, NOT `run()`.
 
 ---
 
@@ -28,13 +28,13 @@
 
 **Files:**
 - Create: `cmd/goosie/profile.go`
-- Modify: `cmd/goosie/main.go` (`build` `:232-474`)
+- Modify: `cmd/goosie/main.go` (`build` `:139-356`)
 
 This task changes NO behavior. `build(c)` must produce an identical `framePath`. The existing suite (E2E, main_test, journey_history_private, and every `build` caller) is the regression guard.
 
 - [ ] **Step 1: Create the profile struct + buildProfile**
 
-Create `cmd/goosie/profile.go`. Move the profile-level store creation out of `build` into `buildProfile`. Read `main.go:235-277` and `:332-362` first and move exactly those blocks.
+Create `cmd/goosie/profile.go`. Move the profile-level store creation out of `build` into `buildProfile`. Read `main.go:139-172` and `:224-254` first and move exactly those blocks.
 
 ```go
 package main
@@ -172,11 +172,11 @@ func (p *profile) close() {
 }
 ```
 
-NOTE: confirm the import paths and constructor signatures against the existing `build` body (`main.go:235-362`) — they are copied verbatim from there. `programErrorLine` is defined at `main.go:858`. The `effectiveDir` is used for the downloads manager exactly as `build` used `c.downloadDir` after resolution (`:243,337`).
+NOTE: confirm the import paths and constructor signatures against the existing `build` body (`main.go:139-254`) — they are copied verbatim from there. `programErrorLine` is defined at `main.go:682`. The `effectiveDir` is used for the downloads manager exactly as `build` used `c.downloadDir` after resolution (`:243,337`).
 
 - [ ] **Step 2: Rewrite build as buildWindow + wrapper**
 
-In `cmd/goosie/main.go`, replace the body of `build` (`:232-474`) so that:
+In `cmd/goosie/main.go`, replace the body of `build` (`:139-356`) so that:
 1. `build(c config) (*framePath, error)` becomes a wrapper:
 
 ```go
@@ -189,7 +189,7 @@ func build(c config) (*framePath, error) {
 }
 ```
 
-2. Add `buildWindow(c config, p *profile) (*framePath, error)` containing the **per-window** remainder of the old build: the scene/layer selection (`:279-309`), the worker pool + recorder (`:311-322`), the `framePath` literal (`:323-350`) with profile fields assigned from `p`, the drain goroutines (`:363-373`), the toolbar/tabMgr wiring (`:374-467`), and the initial plan (`:468-472`). The literal's profile fields become:
+2. Add `buildWindow(c config, p *profile) (*framePath, error)` containing the **per-window** remainder of the old build: the scene/layer selection (`:174-201`), the worker pool + recorder (`:203-214`), the `framePath` literal (`:215-242`) with profile fields assigned from `p`, the drain goroutines (`:255-265`), the toolbar/tabMgr wiring (`:266-348`), and the initial plan (`:349-353`). The literal's profile fields become:
 
 ```go
 	f := &framePath{
@@ -222,16 +222,16 @@ func build(c config) (*framePath, error) {
 	}
 ```
 
-Delete the now-duplicated profile creation (`:235-277`), the theme default (`:351-353`), and the Load calls (`:354-362`) from `buildWindow` — they live in `buildProfile` now. Keep `dev := c.devSize()` and `scale := float32(c.dpr)` at the top of `buildWindow`. Keep the `onCloseLast → f.window.Close()` wiring (`:378-382`) UNCHANGED. The scene/layer block references `client.Close()` on the sceneSpec error path (`:290`); change that to `p.client.Close()`.
+Delete the now-duplicated profile creation (`:139-172`), the theme default (`:243-245`), and the Load calls (`:246-254`) from `buildWindow` — they live in `buildProfile` now. Keep `dev := c.devSize()` and `scale := float32(c.dpr)` at the top of `buildWindow`. Keep the `onCloseLast → f.window.Close()` wiring (`:266-270`) UNCHANGED. The scene/layer block references `client.Close()` on the sceneSpec error path (`:185`); change that to `p.client.Close()`.
 
-NOTE: read the whole old `build` before editing. Every line that is not profile creation moves to `buildWindow`, but the profile locals (`fonts`, `client`, `profilePreferences`, `bookmarkStore`, `historyStore`) now live in `buildProfile`, so the per-window remainder must substitute them. The verified substitutions (grep `\bfonts\b|\bclient\b|\bprofilePreferences\b` over `main.go:279-472`) are EXACTLY:
-- `:290` `_ = client.Close()` → `_ = p.client.Close()` (sceneSpec error path)
-- `:311` `raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts))` → use `p.fonts` for both `fonts`
-- `:375` `toolbar.NewState(dev.W, fonts)` → `toolbar.NewState(dev.W, p.fonts)`
-- `:398` `normalizeAddress(c.url, profilePreferences.SearchURLTemplate)` → `p.preferences.SearchURLTemplate`
-- `:404` `shouldRestoreSession(c.private, profilePreferences.StartupMode)` → `p.preferences.StartupMode`
+NOTE: read the whole old `build` before editing. Every line that is not profile creation moves to `buildWindow`, but the profile locals (`fonts`, `client`, `profilePreferences`, `bookmarkStore`, `historyStore`) now live in `buildProfile`, so the per-window remainder must substitute them. The verified substitutions (grep `\bfonts\b|\bclient\b|\bprofilePreferences\b` over `main.go:174-353`) are EXACTLY:
+- `:185` `_ = client.Close()` → `_ = p.client.Close()` (sceneSpec error path)
+- `:203` `raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts))` → use `p.fonts` for both `fonts`
+- `:266` `toolbar.NewState(dev.W, fonts)` → `toolbar.NewState(dev.W, p.fonts)`
+- `:286` `normalizeAddress(c.url, profilePreferences.SearchURLTemplate)` → `p.preferences.SearchURLTemplate`
+- `:290` `shouldRestoreSession(c.private, profilePreferences.StartupMode)` → `p.preferences.StartupMode`
 
-The `framePath` literal's profile fields are already shown above with `p.xxx`. The toolbar wiring (`:374-467`) otherwise references `f.downloads`, `f.toolbar`, `f.tabMgr` — unchanged, since `f.downloads` now points at the shared `p.downloads`. After editing, `go build ./...` must pass; any remaining bare `fonts`/`client`/`profilePreferences` in `buildWindow` is a missed substitution.
+The `framePath` literal's profile fields are already shown above with `p.xxx`. The toolbar wiring (`:266-348`) otherwise references `f.downloads`, `f.toolbar`, `f.tabMgr` — unchanged, since `f.downloads` now points at the shared `p.downloads`. After editing, `go build ./...` must pass; any remaining bare `fonts`/`client`/`profilePreferences` in `buildWindow` is a missed substitution.
 
 - [ ] **Step 3: Verify the refactor is behavior-preserving**
 
@@ -530,7 +530,7 @@ var _ = syscall.SIGTERM
 var _ = platform.Headless
 ```
 
-NOTE: the trailing `var _ = ...` lines are temporary placeholders that keep the `frame`, `session`, `signal`, `syscall`, and `platform` imports compiling until Task 4 adds `run`/`save`, which use them. **Task 4 removes all five placeholders.** After Task 4, `frame` is no longer referenced (`run`/`save` use `platform`, `session`, `signal`, `syscall`, `fmt`, `os`, `context`, `sync`, `time`), so drop the `frame` import then. Confirm `f.loop`, `f.pool`, `f.runCtx`, `f.runCancel`, `f.navWg`, `f.started` field names against `main.go:122-228`.
+NOTE: the trailing `var _ = ...` lines are temporary placeholders that keep the `frame`, `session`, `signal`, `syscall`, and `platform` imports compiling until Task 4 adds `run`/`save`, which use them. **Task 4 removes all five placeholders.** After Task 4, `frame` is no longer referenced (`run`/`save` use `platform`, `session`, `signal`, `syscall`, `fmt`, `os`, `context`, `sync`, `time`), so drop the `frame` import then. Confirm `f.loop`, `f.pool`, `f.runCtx`, `f.runCancel`, `f.navWg`, `f.started` field names against `main.go:74-135`.
 
 - [ ] **Step 4: Run it green**
 
@@ -706,7 +706,7 @@ func TestManagerRunSavesAndTearsDown(t *testing.T) {
 }
 ```
 
-Add `"os"` to the test imports. NOTE: `bookmarks.Store` exposes `Toggle(url, title) bool` (adds when absent, removes when present) and `Contains(url) bool` — verified at `internal/bookmarks/bookmarks.go:79,139`. There is no `Add` method; `Toggle` returns bool, no error.
+Add `"os"` to the test imports. NOTE: `bookmarks.Store` exposes `Toggle(url, title) bool` (adds when absent, removes when present) and `Contains(url) bool` — verified at `internal/bookmarks/bookmarks.go:59,109`. There is no `Add` method; `Toggle` returns bool, no error.
 
 - [ ] **Step 2: Run it red**
 
@@ -788,7 +788,7 @@ func (m *windowManager) save() {
 
 Add `"fmt"` to the imports. Ensure `platform`, `session`, `signal`, `syscall`, `frame` imports are all used now (`frame` may still be unused — if so, drop it; `run`/`save` use `platform`, `session`, `signal`, `syscall`, `fmt`, `os`, `context`, `sync`, `time`). Remove any import that is no longer referenced.
 
-NOTE: `m.errs` channels are buffered (size 1) and each loop goroutine sends exactly once before closing `stopped`, so receiving after `<-m.done` never blocks. `primary.report(nil)` matches the interactive exit at `main.go:1125` (`d` is nil for interactive). Confirm `sessionState`, `session.Save`, `primary.restoredActiveURL`, `navigateTabNoHistory` against `navigation.go:851,634` and `main.go:1100`.
+NOTE: `m.errs` channels are buffered (size 1) and each loop goroutine sends exactly once before closing `stopped`, so receiving after `<-m.done` never blocks. `primary.report(nil)` matches the interactive exit at `main.go:885` (`d` is nil for interactive). Confirm `sessionState`, `session.Save`, `primary.restoredActiveURL`, `navigateTabNoHistory` against `navigation.go:724,531` and `main.go:863`.
 
 - [ ] **Step 4: Run it green**
 
@@ -808,13 +808,13 @@ git commit -m "feat(goosie): windowManager.run drives N loops with one final sav
 ## Task 5: route the interactive run() through the manager
 
 **Files:**
-- Modify: `cmd/goosie/main.go` (`run` `:902-1126`)
+- Modify: `cmd/goosie/main.go` (`run` `:722-886`)
 
 The paced/screenshot/private paths keep the existing orchestration **verbatim**. Only the interactive non-private path delegates to the manager.
 
 - [ ] **Step 1: Add the manager branch to run()**
 
-In `cmd/goosie/main.go`, immediately after the printPDF early return (after `:935`, before `f, err := build(c)` at `:936`), insert:
+In `cmd/goosie/main.go`, immediately after the printPDF early return (after `:749`, before `f, err := build(c)` at `:750`), insert:
 
 ```go
 	if !c.paced() && !c.private {
@@ -827,9 +827,9 @@ In `cmd/goosie/main.go`, immediately after the printPDF early return (after `:93
 	}
 ```
 
-Leave the rest of `run` (`:936-1126`) unchanged. It now serves only paced/screenshot/private runs. `c.paced()` is `gate||bench||screenshot` (`config.go:104`), so `-gate`, `-bench`, `-screenshot`, `-print-pdf` (early return), and `-private` all bypass the manager exactly as before.
+Leave the rest of `run` (`:750-886`) unchanged. It now serves only paced/screenshot/private runs. `c.paced()` is `gate||bench||screenshot` (`config.go:94`), so `-gate`, `-bench`, `-screenshot`, `-print-pdf` (early return), and `-private` all bypass the manager exactly as before.
 
-NOTE: `m.cleanup()` closes the shared clients and any live pools; `m.run()` already waits for all windows to tear down before returning, so cleanup runs after teardown. The old path's `defer f.pool.Close()` / `defer f.client.Close()` (`:940-945`) remain for the bypass paths. Do not delete them.
+NOTE: `m.cleanup()` closes the shared clients and any live pools; `m.run()` already waits for all windows to tear down before returning, so cleanup runs after teardown. The old path's `defer f.pool.Close()` / `defer f.client.Close()` (`:753-754`) remain for the bypass paths. Do not delete them.
 
 - [ ] **Step 2: Verify no regression to the bypass paths + build**
 
@@ -857,7 +857,7 @@ git commit -m "feat(goosie): route interactive runs through the windowManager (S
 **Files:**
 - Modify: `cmd/goosie/window_manager_test.go`
 
-The mechanism already exists: `onCloseLast → f.window.Close()` (`main.go:378`) → loop stops → `startWindow` teardown → `removeWindow`. This test pins it.
+The mechanism already exists: `onCloseLast → f.window.Close()` (`main.go:266`) → loop stops → `startWindow` teardown → `removeWindow`. This test pins it.
 
 - [ ] **Step 1: Write the test**
 
@@ -904,12 +904,12 @@ func TestManagerLastTabClosesWindow(t *testing.T) {
 }
 ```
 
-NOTE: confirm `f.tabMgr.Tabs()` returns `[]*tabs.Tab` and `Tab.ID()` exists (`internal/tabs/manager.go`). `closeTab` is `interaction.go:1319`. The startup tab is created in `buildWindow` (`main.go:384`). If a spawned window starts with zero tabs because no URL was given, confirm against `buildWindow` — the interactive path always creates `firstTab` (`:384`), so count is 1.
+NOTE: confirm `f.tabMgr.Tabs()` returns `[]*tabs.Tab` and `Tab.ID()` exists (`internal/tabs/manager.go`). `closeTab` is `interaction.go:1194`. The startup tab is created in `buildWindow` (`main.go:272`). If a spawned window starts with zero tabs because no URL was given, confirm against `buildWindow` — the interactive path always creates `firstTab` (`:272`), so count is 1.
 
 - [ ] **Step 2: Run it green**
 
 Run: `go test ./cmd/goosie/ -run TestManagerLastTabClosesWindow -count=1 > /tmp/sp6a-t6.log 2>&1; echo $?; cat /tmp/sp6a-t6.log`
-Expected: `0`, PASS. If it fails because `onCloseLast` fires asynchronously (`manager.go:159` uses `go m.onCloseLast()`), `waitWindows` already polls up to 3s — that covers the goroutine. If the window does not close, verify `buildWindow` kept the `onCloseLast → f.window.Close()` wiring.
+Expected: `0`, PASS. If it fails because `onCloseLast` fires asynchronously (`manager.go:146` uses `go m.onCloseLast()`), `waitWindows` already polls up to 3s — that covers the goroutine. If the window does not close, verify `buildWindow` kept the `onCloseLast → f.window.Close()` wiring.
 
 - [ ] **Step 3: Commit**
 
@@ -999,7 +999,7 @@ func TestManagerPerWindowTabIsolation(t *testing.T) {
 }
 ```
 
-NOTE: verified APIs — `bookmarks.Store.Toggle(url, title) bool` and `Contains(url) bool` (`internal/bookmarks/bookmarks.go:79,139`); `tabs.TabManager.Count() int` (`manager.go:457`), `Tabs() []*Tab` (`manager.go:463`); `f.newTab()` (`interaction.go:1258`). The bookmark store is non-nil for a non-private config with a writable HOME (the harness sets `t.TempDir()`), so the `Skip` guard is belt-and-suspenders.
+NOTE: verified APIs — `bookmarks.Store.Toggle(url, title) bool` and `Contains(url) bool` (`internal/bookmarks/bookmarks.go:59,109`); `tabs.TabManager.Count() int` (`manager.go:429`), `Tabs() []*Tab` (`manager.go:435`); `f.newTab()` (`interaction.go:1140`). The bookmark store is non-nil for a non-private config with a writable HOME (the harness sets `t.TempDir()`), so the `Skip` guard is belt-and-suspenders.
 
 - [ ] **Step 2: Run them green**
 

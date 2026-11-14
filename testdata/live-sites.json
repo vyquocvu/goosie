@@ -21,7 +21,7 @@
       ]
     },
     "spacing_ms": 150,
-    "note": "viewport-only on both sides: goosie screenshot mode never scrolls (cmd/goosie/drive.go:134)"
+    "note": "viewport-only on both sides: goosie screenshot mode never scrolls (cmd/goosie/drive.go:88)"
   },
   "counts": {
     "news-vn": 18,

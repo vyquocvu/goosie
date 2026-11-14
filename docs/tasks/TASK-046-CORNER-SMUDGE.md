@@ -5,8 +5,8 @@ ORACLE vĩnh viễn trong package sở hữu lỗi.
 **Defect:** `GOOSIE-LIVE-006` — **để open**; hai điều kiện đóng mà registry nêu không cái nào task
 này tự đóng được bằng dữ liệu hợp lệ (§6, §7.3).
 **Liên quan:** `docs/tasks/TASK-039-LIVE-PAGE-NO-OUTPUT.md` §5.5 + §5.11.4 (nhánh F),
-`internal/paint/builder_box.go` (nơi sửa), `internal/paint/cmd.go:151-154` (quy ước bị vi phạm),
-`internal/raster/tile.go:180-189, 297-305` (nơi quy ước đó được thi hành), `testdata/parity.py`
+`internal/paint/builder_box.go` (nơi sửa), `internal/paint/cmd.go:99-99` (quy ước bị vi phạm),
+`internal/raster/tile.go:115-119, 211-219` (nơi quy ước đó được thi hành), `testdata/parity.py`
 (chỉ đọc — không sửa trong task này).
 
 Kết luận, tóm tắt trước khi đọc số:
@@ -102,7 +102,7 @@ border rect 0×0 toạ độ content (0,0), mỗi box có `box-shadow` như trê
 khác độ đậm**. Box visible paint các ring với alpha chiết khấu (`layerOpacity = opacity * frac`:
 51·1.0 = 51 và 51·0.5 ≈ 26) → 255·0.8 = 204 và 255·0.8·0.9 = 184. Box `opacity:0` thì
 `layerOpacity = 0 · frac = 0`, mà `0` nghĩa là "unset → opaque" (`applyOpacity`,
-`internal/raster/tile.go:180-189`; `opacityCoverage`, `:297-305`), nên mỗi ring paint ở **alpha đầy
+`internal/raster/tile.go:115-119`; `opacityCoverage`, `:211-219`), nên mỗi ring paint ở **alpha đầy
 đủ 51**. Hai box nhân đôi số lớp: hàng 0 trên nền trắng
 
 ```
@@ -116,7 +116,7 @@ nghi ngờ nào nữa: vệt là shadow của box `opacity:0`, và nó paint ở
 vì độ chiết khấu của blur, đúng như quy ước "0 = opaque" dự báo.
 
 Cũng quy ước đó giải thích vì sao bug vô hình suốt thời gian dài: nó chỉ lộ khi **toán ra 0**, tức
-chỉ khi element thật sự transparent hoàn toàn — trường hợp mà `internal/paint/cmd.go:151-154` và
+chỉ khi element thật sự transparent hoàn toàn — trường hợp mà `internal/paint/cmd.go:99-99` và
 hai hàm trên đều giả định "đã bị drop trước khi thành lệnh". Giả định đó chưa từng được thực thi
 ở đâu trong builder. `bg-op0.html` là bằng chứng nó sai tới mức nào: **1600 px opaque đỏ** ở nơi
 Chromium paint không một pixel nào. Vệt góc chỉ là trường hợp 20 px của cùng lỗi đó, tình cờ rơi
@@ -138,17 +138,17 @@ Lý do không sửa downstream:
 
 Hai hunk, 17 dòng thêm / 1 dòng xoá, trong cùng một file:
 
-1. `internal/paint/builder_box.go:27-35` — `paintBox` trả về sớm khi `obj.Style.Opacity == 0`.
+1. `internal/paint/builder_box.go:22-25` — `paintBox` trả về sớm khi `obj.Style.Opacity == 0`.
    `opacity: 0` làm tròn cả subtree về alpha 0, nên không một lệnh nào dưới nó được quyền tới
    display list; và cũng không được quyền mang xuống như command opacity, vì `DisplayCmd.Opacity`
-   0 nghĩa là "opaque". Đây là đúng điều `cmd.go:151-154` đã viết thành hợp đồng.
-2. `internal/paint/builder_box.go:73-80` — `boxPaintContext.hidden` giờ cũng bật khi
+   0 nghĩa là "opaque". Đây là đúng điều `cmd.go:99-99` đã viết thành hợp đồng.
+2. `internal/paint/builder_box.go:29-34` — `boxPaintContext.hidden` giờ cũng bật khi
    `obj.Style.Visibility != "visible"`, ngoài điều kiện clip suy biến đã có. `hidden` là cổng "box
    này không tự vẽ gì" trong `paintBox`: decoration + contents bị bỏ, con vẫn được đi qua — đúng
    ngữ nghĩa `visibility: hidden` (subtree có thể override lại `visible`). Cách kiểm tra này lấy
-   nguyên từ đường marker, `internal/paint/builder_controls.go:466`. `ComputedStyle.Visibility`
-   mặc định `"visible"` (`internal/style/style.go:679`), kế thừa (`:2389`), và chỉ đổi khi có
-   khai báo (`:2560`) — nên `!= "visible"` là an toàn với phần tử không khai báo gì.
+   nguyên từ đường marker, `internal/paint/builder_controls.go:396`. `ComputedStyle.Visibility`
+   mặc định `"visible"` (`internal/style/style.go:484`), kế thừa (`:1986`), và chỉ đổi khi có
+   khai báo (`:2124`) — nên `!= "visible"` là an toàn với phần tử không khai báo gì.
 
 Sau fix: `shadow-op0` 20 → 0, `bg-op0` 1600 → 0, vnexpress offline 20 → 0, còn `shadow0` (box
 visible, shadow thật) giữ nguyên 20 px — nghĩa là fix không dập bóng hợp lệ.
@@ -238,7 +238,7 @@ defect; nó không tự tạo band. Nhãn của vnexpress offline là `BLANK_OUT
    người khác.
 5. **Chưa chứng minh trên native macOS.** Mọi số đo là `cmd/goosie-headless`; `make gate` chạy darwin
    backend nhưng là benchmark 600 frame, không phải một trang có box `opacity:0`.
-6. **Còn một chỗ va chạm quy ước khác, chưa sửa.** `internal/paint/builder_controls.go:403` đặt
+6. **Còn một chỗ va chạm quy ước khác, chưa sửa.** `internal/paint/builder_controls.go:348` đặt
    `Opacity: float32(caretColor.A) / 255.0` — alpha caret hợp lệ có thể bằng 0 (caret trong), và
    `applyOpacity`/`opacityCoverage` sẽ đọc nó thành opaque. Cùng kiểu lỗi, đường code khác, chưa có
    fixture/oracle nên để ngỏ có chủ đích thay vì vá thêm một condition trong cùng một change.

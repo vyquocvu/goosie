@@ -104,14 +104,14 @@ Trong quá trình xác định mutation, lượt chỉ bypass `imgdec.Decode` nh
 
 ### AC-05 — test no-crash-only được tìm thấy
 
-- `test/engine/fuzz_input_test.go:51-55` — `FuzzClickAt`, gọi `ClickAt` và chỉ kiểm tra panic/deadlock.
-- `test/engine/fuzz_input_test.go:64-67` — `FuzzSetHover`, không assertion kết quả.
-- `test/engine/fuzz_input_test.go:75-78` — `FuzzFocusControl`, không assertion kết quả.
-- `test/engine/fuzz_input_test.go:86-90` — `FuzzSelectAtTo`, không assertion kết quả.
-- `test/engine/fuzz_input_test.go:104-110` — `FuzzEdit`, không assertion kết quả.
-- `test/engine/fuzz_input_test.go:118-145` — `FuzzInteractionSequence`, chỉ thực thi các thao tác.
-- `test/engine/js_integration_test.go:68-79` — `TestJSMutationSinkWithoutInvalidationIsNoop`, gọi sink nhưng không kiểm tra trạng thái/reasons sau đó.
-- `test/style/shadow_test.go:195-215` — `TestShadowPanicsNoPanic`, chạy các khai báo qua resolver nhưng không kiểm tra style được tạo ra.
+- `test/engine/fuzz_input_test.go:44-48` — `FuzzClickAt`, gọi `ClickAt` và chỉ kiểm tra panic/deadlock.
+- `test/engine/fuzz_input_test.go:57-60` — `FuzzSetHover`, không assertion kết quả.
+- `test/engine/fuzz_input_test.go:68-71` — `FuzzFocusControl`, không assertion kết quả.
+- `test/engine/fuzz_input_test.go:79-83` — `FuzzSelectAtTo`, không assertion kết quả.
+- `test/engine/fuzz_input_test.go:97-103` — `FuzzEdit`, không assertion kết quả.
+- `test/engine/fuzz_input_test.go:111-138` — `FuzzInteractionSequence`, chỉ thực thi các thao tác.
+- `test/engine/js_integration_test.go:59-69` — `TestJSMutationSinkWithoutInvalidationIsNoop`, gọi sink nhưng không kiểm tra trạng thái/reasons sau đó.
+- `test/style/shadow_test.go:174-192` — `TestShadowPanicsNoPanic`, chạy các khai báo qua resolver nhưng không kiểm tra style được tạo ra.
 
 ### Gap còn lại
 

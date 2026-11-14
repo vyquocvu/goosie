@@ -33,7 +33,7 @@
 
 **Verification ceiling (honest):** No automated test here creates an `NSWindow` (needs `GoosieHasDisplay()`). The changed C functions are verified by `go build`/`go vet` (cgo darwin/arm64) + the existing native tests that link the shim + N=1 equivalence reasoning. The Go wiring gets full headless TDD. This matches SP-6a and all prior native work.
 
-**One spec refinement (recorded in Task 6):** the spec said "no atomics, no C static" for the registry. The registry and `_appQuit` stay main-thread-confined ObjC ivars (no lock). The create trampoline additionally needs ONE off-main-readable signal so it never `dispatch_sync`s into a main queue that nothing drains once `GoosieAppRun` has returned (which would hang). That signal is a single file-scope `static _Atomic int g_appLoopRunning` in `shim_darwin.m`, set/cleared only on the main thread in `GoosieAppRun`. archtest scans `.go` files only (`internal/archtest/rules.go:467`), so a C atomic in the cgo-confined `.m` is allowed and introduces no mutable Go global.
+**One spec refinement (recorded in Task 6):** the spec said "no atomics, no C static" for the registry. The registry and `_appQuit` stay main-thread-confined ObjC ivars (no lock). The create trampoline additionally needs ONE off-main-readable signal so it never `dispatch_sync`s into a main queue that nothing drains once `GoosieAppRun` has returned (which would hang). That signal is a single file-scope `static _Atomic int g_appLoopRunning` in `shim_darwin.m`, set/cleared only on the main thread in `GoosieAppRun`. archtest scans `.go` files only (`internal/archtest/rules.go:361`), so a C atomic in the cgo-confined `.m` is allowed and introduces no mutable Go global.
 
 ---
 

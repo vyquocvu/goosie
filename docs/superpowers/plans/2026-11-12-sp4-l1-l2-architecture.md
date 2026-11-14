@@ -44,7 +44,7 @@
 ## Task 1: byKey index + setKey/ForKey + BoxKindWord
 
 **Files:**
-- Modify: `internal/layout/boxkey.go` (enum), `internal/layout/arena.go:254-321,430,509,677,699`
+- Modify: `internal/layout/boxkey.go` (enum), `internal/layout/arena.go:124-152,236,300,457,478`
 - Test: `test/layout/boxkey_bijection_test.go` (create)
 
 - [ ] **Step 1: Write the failing bijection test (element/pseudo boxes only)**
@@ -136,10 +136,10 @@ func (a *Arena) ForKey(k BoxKey) (ObjectID, bool) {
 - [ ] **Step 4: Migrate the four existing key-assignment sites to setKey**
 
 Read each site first, then replace the direct `.Key =` write with `a.setKey(id, …)`:
-- `arena.go:430` root: `a.setKey(rootID, NewBoxKey(uint32(doc.Node.ID), BoxKindBlock, 0))`
-- `arena.go:509` element: `a.setKey(id, NewBoxKey(uint32(n.ID), boxKindForStyle(obj.Style), 0))`
-- `arena.go:677` pseudo: `a.setKey(id, NewBoxKey(uint32(nodeID), kind, 0))` (match the actual local var names)
-- `arena.go:699` first-letter: `a.setKey(id, NewBoxKey(uint32(nodeID), BoxKindPseudoFirstLetter, 0))` (match actual locals)
+- `arena.go:236` root: `a.setKey(rootID, NewBoxKey(uint32(doc.Node.ID), BoxKindBlock, 0))`
+- `arena.go:300` element: `a.setKey(id, NewBoxKey(uint32(n.ID), boxKindForStyle(obj.Style), 0))`
+- `arena.go:457` pseudo: `a.setKey(id, NewBoxKey(uint32(nodeID), kind, 0))` (match the actual local var names)
+- `arena.go:478` first-letter: `a.setKey(id, NewBoxKey(uint32(nodeID), BoxKindPseudoFirstLetter, 0))` (match actual locals)
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -161,7 +161,7 @@ git commit -m "feat(layout): index BoxKey and add ForKey/setKey (SP-4 L1)"
 ## Task 2: Key word/text-run boxes
 
 **Files:**
-- Modify: `internal/layout/inline.go:724-736`, `internal/layout/arena.go` (wordSeq already added)
+- Modify: `internal/layout/inline.go:597-604`, `internal/layout/arena.go` (wordSeq already added)
 - Test: `test/layout/boxkey_bijection_test.go` (extend)
 
 - [ ] **Step 1: Extend the bijection test to assert word boxes are keyed**
@@ -232,7 +232,7 @@ git commit -m "feat(layout): key word boxes with a per-generation ordinal (SP-4 
 ## Task 3: Key anonymous + anonymous-table boxes
 
 **Files:**
-- Modify: `internal/layout/anonymous.go:134-164`, `internal/layout/arena.go` (anonNodeID helper)
+- Modify: `internal/layout/anonymous.go:100-130`, `internal/layout/arena.go` (anonNodeID helper)
 - Test: `test/layout/boxkey_bijection_test.go` (extend)
 
 - [ ] **Step 1: Extend the bijection test for anonymous/table boxes**
@@ -295,7 +295,7 @@ if a.anonSeq < ^uint16(0) {
 	a.anonSeq++
 }
 ```
-This covers anonymous blocks AND anonymous table rows/cells (both go through `spliceAnonymousBlock`, per `table.go:336,362`).
+This covers anonymous blocks AND anonymous table rows/cells (both go through `spliceAnonymousBlock`, per `table.go:265,287`).
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -317,7 +317,7 @@ git commit -m "feat(layout): key anonymous and table boxes by generation ordinal
 ## Task 4: Migrate paint selection map to BoxKey
 
 **Files:**
-- Modify: `internal/paint/selection.go:9-16`, `internal/paint/builder.go:19,67-75`, `internal/paint/builder_text.go:40`, `internal/engine/selection.go:564,590`
+- Modify: `internal/paint/selection.go:9-13`, `internal/paint/builder.go:13,39-44`, `internal/paint/builder_text.go:39`, `internal/engine/selection.go:499,520`
 - Test: existing selection tests (read `test/engine` + `test/paint` for selection/highlight tests)
 
 - [ ] **Step 1: Confirm the existing selection oracle is green (baseline)**
@@ -342,7 +342,7 @@ type SelSpan struct {
 
 - [ ] **Step 3: Change the builder map + setter + consumer**
 
-`internal/paint/builder.go:19`: `selection map[layout.BoxKey]SelSpan`.
+`internal/paint/builder.go:13`: `selection map[layout.BoxKey]SelSpan`.
 `SetSelection` (~70-75):
 ```go
 func (b *Builder) SetSelection(spans []SelSpan) {
@@ -353,12 +353,12 @@ func (b *Builder) SetSelection(spans []SelSpan) {
 }
 ```
 Update the `SetSelection` doc comment to say identity is by `BoxKey`, not pointer.
-`internal/paint/builder_text.go:40`: `if sp, ok := b.selection[obj.Key]; ok {`.
+`internal/paint/builder_text.go:39`: `if sp, ok := b.selection[obj.Key]; ok {`.
 
 - [ ] **Step 4: Change the engine producers**
 
-`internal/engine/selection.go:564`: `spans = append(spans, paint.SelSpan{Key: words[i].Key, Start: start, End: end})`.
-`internal/engine/selection.go:590`: `return []paint.SelSpan{{Key: markedObj.Key, Start: start, End: end}}`.
+`internal/engine/selection.go:499`: `spans = append(spans, paint.SelSpan{Key: words[i].Key, Start: start, End: end})`.
+`internal/engine/selection.go:520`: `return []paint.SelSpan{{Key: markedObj.Key, Start: start, End: end}}`.
 (`words[i]` and `markedObj` are `*layout.Object`; `.Key` is populated by Tasks 2-3.)
 
 - [ ] **Step 5: Build + run the selection oracle**
@@ -381,7 +381,7 @@ git commit -m "refactor(paint): key selection spans by BoxKey, not arena pointer
 ## Task 5: Migrate paint find map to BoxKey
 
 **Files:**
-- Modify: `internal/paint/find.go:8-15`, `internal/paint/builder.go:20,77-85`, `internal/paint/builder_text.go:37`, `internal/engine/paint.go:77-87`
+- Modify: `internal/paint/find.go:8-12`, `internal/paint/builder.go:14,44-51`, `internal/paint/builder_text.go:36`, `internal/engine/paint.go:61-71`
 - Test: existing find-in-page tests
 
 - [ ] **Step 1: Confirm the find oracle is green (baseline)**
@@ -405,7 +405,7 @@ type FindMark struct {
 
 - [ ] **Step 3: Change the builder map + setter + consumer**
 
-`internal/paint/builder.go:20`: `find map[layout.BoxKey][]FindMark`.
+`internal/paint/builder.go:14`: `find map[layout.BoxKey][]FindMark`.
 `SetFind` (~80-85):
 ```go
 func (b *Builder) SetFind(marks []FindMark) {
@@ -416,11 +416,11 @@ func (b *Builder) SetFind(marks []FindMark) {
 }
 ```
 Update the `SetFind` doc comment (identity by `BoxKey`).
-`internal/paint/builder_text.go:37`: `if marks := b.find[obj.Key]; len(marks) > 0 {`.
+`internal/paint/builder_text.go:36`: `if marks := b.find[obj.Key]; len(marks) > 0 {`.
 
 - [ ] **Step 4: Change the engine find producer (with nil guard)**
 
-`internal/engine/paint.go:77-87`: `m.obj` is `*layout.Object` and may be nil for a mark whose box was not resolved. Today a nil `Obj` keys nil and is silently never matched; after migration `m.obj.Key` would panic. Skip nil boxes:
+`internal/engine/paint.go:61-71`: `m.obj` is `*layout.Object` and may be nil for a mark whose box was not resolved. Today a nil `Obj` keys nil and is silently never matched; after migration `m.obj.Key` would panic. Skip nil boxes:
 ```go
 if len(s.findMarks) > 0 {
 	marks := make([]paint.FindMark, 0, len(s.findMarks))
@@ -458,12 +458,12 @@ git commit -m "refactor(paint): key find marks by BoxKey, not arena pointer (SP-
 ## Task 6: Pointer-lifetime rule + archtest no-pointer-map guard
 
 **Files:**
-- Modify: `internal/layout/arena.go:8-12,301-303` (comments), `internal/archtest/` (new rule)
+- Modify: `internal/layout/arena.go:1-1,143-145` (comments), `internal/archtest/` (new rule)
 - Test: `internal/archtest` (the rule itself)
 
 - [ ] **Step 1: Correct the false Alloc comment**
 
-`internal/layout/arena.go:301-303` — replace the stability claim with:
+`internal/layout/arena.go:143-145` — replace the stability claim with:
 ```go
 // Alloc reserves a new ObjectID and returns a pointer to the object. The pointer
 // is valid ONLY until the next call that can allocate: growing the Objects slice
@@ -473,7 +473,7 @@ git commit -m "refactor(paint): key find marks by BoxKey, not arena pointer (SP-
 
 - [ ] **Step 2: Correct the stale package doc**
 
-`internal/layout/arena.go:8-12` — read it, then replace the "block, inline, float, flex, grid, table" order claim with the real one:
+`internal/layout/arena.go:1-1` — read it, then replace the "block, inline, float, flex, grid, table" order claim with the real one:
 ```go
 // Layout runs as Block, then Inline, then Positioning. The Block pass dispatches
 // each box to its formatting-context pass (block flow, flex, grid, table) by used
@@ -550,7 +550,7 @@ If Steps 1-4 required fixes, commit them with `fix(layout): … (SP-4 L1)`. Othe
 
 **Files:**
 - Create: `internal/layout/fc.go`
-- Modify: `internal/layout/block.go:253-271` (dispatch), `internal/layout/arena.go` (PassCounts + FCCount)
+- Modify: `internal/layout/block.go:180-191` (dispatch), `internal/layout/arena.go` (PassCounts + FCCount)
 - Test: `test/layout/fc_registry_test.go` (create)
 
 - [ ] **Step 1: Write the failing per-FC counter test**
@@ -669,7 +669,7 @@ func (a *Arena) FCCount(k FCKind) uint64 { return a.PassCounts[k] }
 
 - [ ] **Step 5: Replace the dispatch chain (behavior-preserving)**
 
-Read `internal/layout/block.go:253-271` and the block-flow `else` body (272-611). Replace ONLY the `else if table / else if grid / else if flex` branches with a registry dispatch, keeping the `ContentVisibility=="hidden"` first branch and the block-flow `else` body byte-for-byte:
+Read `internal/layout/block.go:180-191` and the block-flow `else` body (272-611). Replace ONLY the `else if table / else if grid / else if flex` branches with a registry dispatch, keeping the `ContentVisibility=="hidden"` first branch and the block-flow `else` body byte-for-byte:
 ```go
 if obj.Style != nil && obj.Style.ContentVisibility == "hidden" {
 	// … unchanged W/H short-circuit …
@@ -848,7 +848,7 @@ That misposition is what produces the parity blank band at rows (469,520).
 ## Task 12: L2 second landing — authoritative FC roots
 
 **Files:**
-- Modify: `internal/layout/block.go` (establishesFC + containment), `internal/layout/inline.go:84` (boundary)
+- Modify: `internal/layout/block.go` (establishesFC + containment), `internal/layout/inline.go:72` (boundary)
 - Test: the Task-11 anchor + existing float/clearance fixtures
 
 **This landing changes behavior. It is gated on the Chromium anchor, not zero-diff. If it cannot match Chromium without regressing the corpus within budget, STOP and defer to SP-5 with evidence (spec §3.2); SP-4 ships L1 + L2-first.**
@@ -872,7 +872,7 @@ No engine files were changed for Task 12; nothing to revert.
 
 - [ ] **Step 1: Separate establishesFC from the margin predicate**
 
-Read `startsNewFC` (`block.go:2893-2913`) and all 6 callers. Keep `startsNewFC` unchanged for the margin-collapse callers (`collapsesThroughTop/Bottom` at 2925/2935). Add a new `establishesFC(a, obj)` encoding the full CSS rule set: own `float`, `position:absolute/fixed`, `display:inline-block`, `display:table-cell`, flex/grid item (parent display), `overflow` not visible, `contain:paint/layout`, `flow-root`. Write a unit test (`test/layout/fc_establishes_test.go`) asserting the predicate on a table of shapes BEFORE wiring it into containment (red→green).
+Read `startsNewFC` (`block.go:2215-2234`) and all 6 callers. Keep `startsNewFC` unchanged for the margin-collapse callers (`collapsesThroughTop/Bottom` at 2925/2935). Add a new `establishesFC(a, obj)` encoding the full CSS rule set: own `float`, `position:absolute/fixed`, `display:inline-block`, `display:table-cell`, flex/grid item (parent display), `overflow` not visible, `contain:paint/layout`, `flow-root`. Write a unit test (`test/layout/fc_establishes_test.go`) asserting the predicate on a table of shapes BEFORE wiring it into containment (red→green).
 
 - [ ] **Step 2: Run the predicate test (red→green)**
 
@@ -880,7 +880,7 @@ Write the test first, run it red (function undefined), implement `establishesFC`
 
 - [ ] **Step 3: Route containment through FC roots**
 
-Read the local seed/merge patch (`block.go:545-599`) and the float-intrusion boundary (`inline.go:84`). Make the block pass descend into FC roots and merge their float extents using `establishesFC` as the boundary, replacing the ad-hoc hand-down/merge-up. Do this incrementally: keep the existing fixtures green at each sub-step. Remove the local patch only once the new path reproduces it.
+Read the local seed/merge patch (`block.go:404-437`) and the float-intrusion boundary (`inline.go:72`). Make the block pass descend into FC roots and merge their float extents using `establishesFC` as the boundary, replacing the ad-hoc hand-down/merge-up. Do this incrementally: keep the existing fixtures green at each sub-step. Remove the local patch only once the new path reproduces it.
 
 - [ ] **Step 4: Run the anchor + the full float/clearance corpus**
 
@@ -931,7 +931,7 @@ In `docs/roadmap-v2.md`, add an SP-4 status block (match the Vietnamese prose st
 
 - [ ] **Step 3: Correct the review's stale L1/L2 snapshot refs**
 
-In `docs/engine-compatibility-review.md` §6 L1/L2 (and §4.1/4.2 where they cite shifted lines), add a short "Status (2026-11-12, SP-4)" note recording what landed and correcting the stale claims (BoxKey already existed; pseudo-bg maps keyed by style not Object; dispatch is 5-branch at block.go:253-271; startsNewFC at 2893). Keep it additive — do not rewrite the historical audit.
+In `docs/engine-compatibility-review.md` §6 L1/L2 (and §4.1/4.2 where they cite shifted lines), add a short "Status (2026-11-12, SP-4)" note recording what landed and correcting the stale claims (BoxKey already existed; pseudo-bg maps keyed by style not Object; dispatch is 5-branch at block.go:180-191; startsNewFC at 2893). Keep it additive — do not rewrite the historical audit.
 
 - [ ] **Step 4: Commit docs**
 

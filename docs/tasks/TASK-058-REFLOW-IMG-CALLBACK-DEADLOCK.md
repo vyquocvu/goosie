@@ -19,15 +19,15 @@ No exit in 60 s (killed); a SIGQUIT dump of the hung process shows goroutine 1 a
 
 ```
 sync.Mutex.Lock
-engine.(*Session).beginScriptImage        internal/engine/script_image.go:71
-engine.(*Session).LoadScriptImage         internal/engine/script_image.go:55
-js.(*Runtime).startImageLoad              internal/js/element_interfaces.go:1575
+engine.(*Session).beginScriptImage        internal/engine/script_image.go:40
+engine.(*Session).LoadScriptImage         internal/engine/script_image.go:28
+js.(*Runtime).startImageLoad              internal/js/element_interfaces.go:1482
   (HTMLImageElement.src setter)
-js.(*Runtime).fireIntersectionCallback    internal/js/intersection.go:465
-js.(*Runtime).CheckIntersections          internal/js/intersection.go:302
-engine.(*Session).Reflow                  internal/engine/engine.go:1457
-engine.(*Session).RestyleAndReflow        internal/engine/engine.go:2382
-engine.NewSession                         internal/engine/engine.go:567
+js.(*Runtime).fireIntersectionCallback    internal/js/intersection.go:382
+js.(*Runtime).CheckIntersections          internal/js/intersection.go:249
+engine.(*Session).Reflow                  internal/engine/engine.go:1018
+engine.(*Session).RestyleAndReflow        internal/engine/engine.go:1784
+engine.NewSession                         internal/engine/engine.go:319
 ```
 
 No other goroutine is running engine code: the process is idle, not slow.
@@ -39,7 +39,7 @@ runs exactly as on a live page. Pre-fix it fails at the 10 s watchdog; every run
 
 ## 2. Cause
 
-`Reflow` took `imgMu` with `defer Unlock` for its whole body (`engine.go:1319-1320`). Its last step is
+`Reflow` took `imgMu` with `defer Unlock` for its whole body (`engine.go:938-939`). Its last step is
 `CheckIntersections()`, which invokes page callbacks **synchronously on the Reflow goroutine**. A
 callback that assigns `img.src` calls the injected `ImageLoader`, which is the session itself, and
 `beginScriptImage` takes `imgMu` again. Go mutexes are not reentrant, so the load path waits on a lock
@@ -60,9 +60,9 @@ can take**.
 - `imgMu` is released immediately before `CheckIntersections` (and before the observer geometry
   setters), then the callbacks run unlocked.
 
-No other `imgMu` section dispatches page code: `applyImages` (engine.go:1151) and `fetchImages`
-(engine.go:1067) are pure Go; `LoadDeferredImages` calls its `onReady` after unlocking
-(engine.go:896-899). `drainScriptImages` on the TASK-057 integration branch also runs no JS.
+No other `imgMu` section dispatches page code: `applyImages` (engine.go:804) and `fetchImages`
+(engine.go:729) are pure Go; `LoadDeferredImages` calls its `onReady` after unlocking
+(engine.go:568-571). `drainScriptImages` on the TASK-057 integration branch also runs no JS.
 
 ## 4. Verification measured on this host
 

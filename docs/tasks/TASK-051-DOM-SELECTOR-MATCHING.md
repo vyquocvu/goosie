@@ -48,15 +48,15 @@ element-scoped `querySelectorAll`:
 
 ### 2.1 The index fast path swallows anything lowercase
 
-`internal/js/js.go:2147 querySelectorAllIndexed` answers from the document indexes when the selector starts
-with `.` or when `isLowerTag(sel)` is true. `isLowerTag` (`js.go:2097`) only rejects strings that contain an
+`internal/js/js.go:1742 querySelectorAllIndexed` answers from the document indexes when the selector starts
+with `.` or when `isLowerTag(sel)` is true. `isLowerTag` (`js.go:1692`) only rejects strings that contain an
 uppercase letter, so `"div > p"`, `"p.a"`, `"*"`, `"[data-x]"`, `"p:first-child"` all qualify as tag names,
-`ElementsByTagName` finds nothing, the function returns `ok == true`, and the general walk at `:2139` is
+`ElementsByTagName` finds nothing, the function returns `ok == true`, and the general walk at `:1734` is
 never reached. A fast path must be able to *decline*; this one cannot.
 
 ### 2.2 The matcher underneath implements three forms
 
-`matchSelector` (`js.go:2186`) — its own comment: *"Supported forms are tag name ("p"), ID ("#main"), and
+`matchSelector` (`js.go:1781`) — its own comment: *"Supported forms are tag name ("p"), ID ("#main"), and
 class (".active")"* — is the only matcher, so fixing 2.1 alone converts silent zeros into silent zeros from
 the walk. The cascade is not the problem: `internal/css/selector.go` already implements all of it
 (`Selector.Matches:490`, `MatchesIndexed:503`, `matchAttr:674`, `matchPseudoClass:706`, `matchHas:1004`,
@@ -66,7 +66,7 @@ the walk. The cascade is not the problem: `internal/css/selector.go` already imp
 
 ### 3.1 The import-table decision, made deliberately
 
-`internal/archtest/rules.go:40-64` lets `internal/js` import `internal/dom` and `internal/media` only.
+`internal/archtest/rules.go:20-44` lets `internal/js` import `internal/dom` and `internal/media` only.
 Add `internal/css` to that entry. Justification to state in the commit: `css` imports `dom` and nothing
 else, so `js → css → dom` introduces no cycle and keeps `dom` the import-free leaf; the alternative —
 re-implementing selector matching inside `js` — creates a second source of truth for the same semantics,
@@ -80,7 +80,7 @@ clause — say whether you edited it.
   `Element.matches`, `Element.closest` (audit the whole list; if one of them is missing from
   `internal/js` today, report that as its own defect rather than adding it silently) through parsed
   `css.Selector` values and `Selector.Matches`/`MatchesIndexed`.
-- Cache compiled selectors per document. `js.go:1085` already records that this path was hot enough to
+- Cache compiled selectors per document. `js.go:768` already records that this path was hot enough to
   need the index fast path, so a naive parse-per-node walk is a regression, not a fix. Measure it: report
   allocations or wall time for a fixed number of queries before and after (the gate suite asserts counters,
   not durations — put the number in the task doc, not in a duration assertion).
@@ -91,7 +91,7 @@ clause — say whether you edited it.
   1. `*` counts every element under the root, doc-level and element-scoped (8 and 3 in §1).
   2. Compound forms without combinators (`p.a`, `div#o`) match both parts on one element.
   3. Attribute presence `[data-x]` and equality with a **quoted** value `[data-x="y"]`. Note the existing
-     `test/js/element_query_test.go:42 TestElementQuerySelectorAttr` covers only the unquoted
+     `test/js/element_query_test.go:39 TestElementQuerySelectorAttr` covers only the unquoted
      `[jsname=sIJmDf]` form, which is why the quoted form is broken today — keep that test passing and add
      the quoted one.
   4. Combinators `>`, ` `, `+`, `~`, and selector lists, with document order and de-duplicated results
@@ -105,7 +105,7 @@ clause — say whether you edited it.
 - Case rules: tag names ASCII-case-insensitive in HTML, `id`/attribute values case-sensitive — do not
   regress `isLowerTag`'s original purpose (uppercase-in-tag-name must not take the index path).
 - Caps: no new limit; the selector string is already admitted input. State whether compiled-selector caching
-  interacts with `internal/engine/limits.go:23-59` per-document caps and what you did about it.
+  interacts with `internal/engine/limits.go:23-46` per-document caps and what you did about it.
 
 ## 4. Oracles
 
@@ -188,7 +188,7 @@ throws; every expectation is the number measured on Chromium 153.0.8010.12 (§8.
 | BR-228 | the compound fast-path answer on the id-index fixture: doc-level `p.x` = 3 and `p` = 3, element-scoped `#inner p` = 1, `#inner #inner` = null; the old expectation for `p.x` was 0 | `TestJSQueryContainment` (expectation corrected in place) | `test/dom/id_index_test.go` | keep the index path |
 
 `BenchmarkSelectorMatchingQueryAll` is a benchmark, not a case: no BR id, and no test asserts a duration —
-the numbers are recorded in §8.4 instead. The pre-existing `test/js/element_query_test.go:42
+the numbers are recorded in §8.4 instead. The pre-existing `test/js/element_query_test.go:39
 TestElementQuerySelectorAttr` (unquoted `[jsname=sIJmDf]`) was left untouched and still passes in §8.3.
 
 ### 8.2 Oracle: commands, numbers, exit codes
@@ -286,7 +286,7 @@ with page script. A plan holds the raw string, the parsed `[]css.Selector`, an o
 message and the simple-selector shape — **no DOM pointers**. Scoped copies (`:scope` rewrites) are made per
 call and are never cached, so no detached node can be retained through the cache.
 
-Interaction with `internal/engine/limits.go:23-59`: none, and no new limit was added. Those caps
+Interaction with `internal/engine/limits.go:23-46`: none, and no new limit was added. Those caps
 (`MaxDocumentBytes`, `MaxDocumentNodes`, `MaxDocumentDepth`, `MaxAttributes`, `MaxCSSBytes`, `MaxCSSTokens`,
 `MaxCSSRules`, `MaxCSSSelectors`, `MaxCSSDeclarations`, `MaxSelectorParts`, `MaxSelectorConditions`, …) are
 admitted-input caps for a document and its stylesheets; the selector string here is script input the page

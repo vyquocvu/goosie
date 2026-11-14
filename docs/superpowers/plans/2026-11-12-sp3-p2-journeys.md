@@ -242,7 +242,7 @@ Expected: PASS (exit=0).
 - [ ] **Step 5: Run the whole toolbar package (existing tests may need rect updates)**
 
 Run: `go test ./internal/toolbar/ -count=1 > /tmp/sp3-t1-pkg.log 2>&1; echo exit=$?`
-If a test hardcodes the old Downloads rect (e.g. `toolbar_test.go:424`), read it; if it computes the rect dynamically it stays green. Update only hardcoded assertions to the new layout (Downloads now sits left of Menu) and document the change in the commit body. Expected: PASS.
+If a test hardcodes the old Downloads rect (e.g. `toolbar_test.go:406`), read it; if it computes the rect dynamically it stays green. Update only hardcoded assertions to the new layout (Downloads now sits left of Menu) and document the change in the commit body. Expected: PASS.
 
 - [ ] **Step 6: Mutant check**
 
@@ -490,7 +490,7 @@ func TestJourneyResizeKeepsControlsReachable(t *testing.T) {
 }
 ```
 
-Adjust `Scale`/`Size` semantics to the harness (read `TestInterceptResizeReportsLogicalContentSize`, main_test.go:658, for device-vs-logical width). If the harness uses dpr 1 and logical width, `Size.W` is the device width = logical width. Confirm `navigateViaAddressBar` works after a resize (it reads `devSize()`).
+Adjust `Scale`/`Size` semantics to the harness (read `TestInterceptResizeReportsLogicalContentSize`, main_test.go:653, for device-vs-logical width). If the harness uses dpr 1 and logical width, `Size.W` is the device width = logical width. Confirm `navigateViaAddressBar` works after a resize (it reads `devSize()`).
 
 - [ ] **Step 2: Run it to verify it fails or passes**
 
@@ -607,7 +607,7 @@ func TestInspectHighlightDetachedNodeIsSkipped(t *testing.T) {
 }
 ```
 
-Confirm `target.OuterHTML()` exists on `*dom.Node` (grep `func (n *Node) OuterHTML`); if the method name differs, use the actual serializer. Confirm `s.Doc.NewElement` exists (node.go:2044 — yes).
+Confirm `target.OuterHTML()` exists on `*dom.Node` (grep `func (n *Node) OuterHTML`); if the method name differs, use the actual serializer. Confirm `s.Doc.NewElement` exists (node.go:1705 — yes).
 
 - [ ] **Step 3: Run both to verify they fail**
 

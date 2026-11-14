@@ -13,13 +13,13 @@ chúng tự động hoá được. Task này là bằng chứng cho nhận đị
 
 | Hành vi | Chỗ trong code | Rule đọc từ source |
 | --- | --- | --- |
-| Back/Forward là node AX có cờ disabled | `cmd/goosie/toolbar_window.go:286-287` | `appendTool("goosie.back", …, !canBack, false)`, `appendTool("goosie.forward", …, !canForward, false)` |
-| Trail rỗng ⇒ không đi được | `internal/toolbar/history.go:13-15,121-131` | `NewHistory()` khởi tạo `index: -1`; `CanBack/CanForward` lấy từ lock |
-| Nút Reload biến thành Stop khi đang tải | `cmd/goosie/toolbar_window.go:290`, `internal/toolbar/toolbar.go:1099,1179` | `reloadLabel = "Stop loading"`; có `drawStop` riêng |
-| Callback Stop | `internal/toolbar/toolbar.go:105,706-708`, `cmd/goosie/main.go:382` | `OnStop func()` được wire ở app; invoke lấy `cb := s.OnStop` |
-| Cờ loading của tab | `cmd/goosie/navigation.go:481-485` (`tab.Nav.Loading = true`, `Serial++`, `Nav.Cancel`) | loading là state thật, không suy ra từ timing |
-| Zoom bị chặn biên | `cmd/goosie/interaction.go:648-657` | `minZoom = 0.25`, `maxZoom = 5.0`, `clampZoom` |
-| Phím zoom và reset | `cmd/goosie/toolbar_window.go:1128-1139` | `onZoom(zoomStep)` / `onZoom(-zoomStep)` / `onZoom(0)` cho Cmd+0 |
+| Back/Forward là node AX có cờ disabled | `cmd/goosie/toolbar_window.go:248-249` | `appendTool("goosie.back", …, !canBack, false)`, `appendTool("goosie.forward", …, !canForward, false)` |
+| Trail rỗng ⇒ không đi được | `internal/toolbar/history.go:9-11,97-105` | `NewHistory()` khởi tạo `index: -1`; `CanBack/CanForward` lấy từ lock |
+| Nút Reload biến thành Stop khi đang tải | `cmd/goosie/toolbar_window.go:252`, `internal/toolbar/toolbar.go:964,1043` | `reloadLabel = "Stop loading"`; có `drawStop` riêng |
+| Callback Stop | `internal/toolbar/toolbar.go:95,613-615`, `cmd/goosie/main.go:270` | `OnStop func()` được wire ở app; invoke lấy `cb := s.OnStop` |
+| Cờ loading của tab | `cmd/goosie/navigation.go:398-401` (`tab.Nav.Loading = true`, `Serial++`, `Nav.Cancel`) | loading là state thật, không suy ra từ timing |
+| Zoom bị chặn biên | `cmd/goosie/interaction.go:577-586` | `minZoom = 0.25`, `maxZoom = 5.0`, `clampZoom` |
+| Phím zoom và reset | `cmd/goosie/toolbar_window.go:1006-1017` | `onZoom(zoomStep)` / `onZoom(-zoomStep)` / `onZoom(0)` cho Cmd+0 |
 
 **Phải đo trước khi viết assertion (không được giả định):**
 * Indicator zoom hiển thị ở đâu và qua node AX nào (id/label/value). Nếu **không tồn tại**
@@ -86,15 +86,15 @@ Không được chứng minh bằng cách trả giá trị sai: phải tắt ch�
 ## 5. Ngoài phạm vi
 
 BR-132 (zoom per-tab khi chuyển tab) — cần quyết định policy scope trước; BR-133..137
-(find-in-page: `runFind` `interaction.go:731`, `findStep` `:758`, `closeFind` `:797`,
-`clearFindHighlights` `:816` — đã tồn tại nhưng cần batch riêng vì số lượng 5 case và cần
+(find-in-page: `runFind` `interaction.go:653`, `findStep` `:678`, `closeFind` `:712`,
+`clearFindHighlights` `:731` — đã tồn tại nhưng cần batch riêng vì số lượng 5 case và cần
 highlight oracle); BR-032/BR-033 (drag tab, overflow) cần pointer-level fixture;
 BR-141 (theme) thuộc họ parity pixel.
 
 ## 6. Kết quả
 
 **Kết luận trước, và nó sửa §1:** indicator zoom **không phải gap pixel, mà là gap AX.** Badge
-`150%` vẫn được paint (`internal/toolbar/toolbar.go:1466`, trong `drawAddressBar`), nhưng chưa từng
+`150%` vẫn được paint (`internal/toolbar/toolbar.go:1316`, trong `drawAddressBar`), nhưng chưa từng
 có node AX nào mang nó. Vì thế hai assertion `if _, ok := findAXNode(..., "goosie.zoom"); ok {…}`
 trong `cmd/goosie/journey_p1_chrome_zoom_ax_test.go` **không bao giờ chạy nhánh đúng**: product có
 xoá luôn badge đi thì test vẫn xanh. Batch này xoá cả hai chỗ vacuous đó và làm hành vi thành thật
@@ -104,9 +104,9 @@ xoá luôn badge đi thì test vẫn xanh. Batch này xoá cả hai chỗ vacuou
 
 | Chỗ | Vai trò |
 | --- | --- |
-| `internal/toolbar/toolbar.go:302 zoomBadgeRect` | vị từ duy nhất: ẩn khi `FindActive`, khi `Zoom <= 0`, và khi `Zoom == 1.0` sau grace 2.5s. Paint path đọc nó (`:1466`), hit-test đọc nó (`:425`, `:747`). |
-| `internal/toolbar/toolbar.go:328 ZoomBadge(toolbarW)` | API mới, **gọi lại chính `zoomBadgeRect`**, trả `label` (đúng `FormatZoomPercent`, `:298`) + rect ở toạ độ logical của hàng toolbar (dựng device rect như `drawAddressBar` rồi chia `sc`); `shown=false` đúng khi paint ẩn badge. Không restating rule. |
-| `cmd/goosie/toolbar_window.go:306-308` | node được phát tại chỗ các node chrome khác, dùng `appendTool` (`:276`) — hàm này nay nhận `ax.Role` làm tham số đầu tiên (4 call site cũ truyền `ax.RoleButton`, không đổi hành vi), node zoom là `ax.RoleMeter` + label `"Zoom level"` + value là nhãn percent, rect của badge dịch vào hàng toolbar bằng `translateAxRect(..., toolY)` như mọi nút khác. `RoleMeter` đã có đường map sang `GOOSIE_AX_METER` (`internal/platform/darwin/window.go:452`). |
+| `internal/toolbar/toolbar.go:271 zoomBadgeRect` | vị từ duy nhất: ẩn khi `FindActive`, khi `Zoom <= 0`, và khi `Zoom == 1.0` sau grace 2.5s. Paint path đọc nó (`:1316`), hit-test đọc nó (`:381`, `:650`). |
+| `internal/toolbar/toolbar.go:295 ZoomBadge(toolbarW)` | API mới, **gọi lại chính `zoomBadgeRect`**, trả `label` (đúng `FormatZoomPercent`, `:267`) + rect ở toạ độ logical của hàng toolbar (dựng device rect như `drawAddressBar` rồi chia `sc`); `shown=false` đúng khi paint ẩn badge. Không restating rule. |
+| `cmd/goosie/toolbar_window.go:268-270` | node được phát tại chỗ các node chrome khác, dùng `appendTool` (`:238`) — hàm này nay nhận `ax.Role` làm tham số đầu tiên (4 call site cũ truyền `ax.RoleButton`, không đổi hành vi), node zoom là `ax.RoleMeter` + label `"Zoom level"` + value là nhãn percent, rect của badge dịch vào hàng toolbar bằng `translateAxRect(..., toolY)` như mọi nút khác. `RoleMeter` đã có đường map sang `GOOSIE_AX_METER` (`internal/platform/darwin/window.go:331`). |
 
 Không thêm package-level global, không thêm import mới — `go test -count=1 ./internal/archtest/` exit 0 (6.5).
 
@@ -115,9 +115,9 @@ Không thêm package-level global, không thêm import mới — `go test -count
 1. **Indicator có tồn tại ở chỗ user nhìn thấy, và nay có node AX:** `goosie.zoom`, value là đúng
    nhãn whole-percent badge paint (`150%`, `100%`), rect nằm trong hàng toolbar.
 2. **Cmd+0 KHÔNG ẩn badge.** §1 và prompt đều giả định "sau reset thì badge biến mất"; đo lại:
-   `onZoom(0)` → `framePath.handleZoom(0)` (`cmd/goosie/interaction.go:675-688`) đặt zoom 1.0 rồi gọi
-   `toolbar.SetZoom(1.0)` (`internal/toolbar/toolbar.go:275`) — tức **nối lại** grace 2.5s.
-   `ResetZoom()` (ẩn ngay, `:283`) chỉ chạy khi bấm vào badge (`:749`, wire tại `cmd/goosie/main.go:409`).
+   `onZoom(0)` → `framePath.handleZoom(0)` (`cmd/goosie/interaction.go:602-613`) đặt zoom 1.0 rồi gọi
+   `toolbar.SetZoom(1.0)` (`internal/toolbar/toolbar.go:248`) — tức **nối lại** grace 2.5s.
+   `ResetZoom()` (ẩn ngay, `:256`) chỉ chạy khi bấm vào badge (`:652`, wire tại `cmd/goosie/main.go:295`).
    Nên BR-131 assert vế product thật hứa: **node tồn tại với `100%`**; hai vế ẩn (hết grace, và
    `Zoom <= 0`) được đóng đinh không cần đồng hồ trong `test/toolbar/zoom_badge_ax_test.go`. Nếu QC
    muốn Cmd+0 ẩn indicator ngay, đó là **quyết định product**, không phải việc của batch test này —
@@ -139,20 +139,20 @@ API trả gì, và `Draw` thật sơn gì (đếm pixel đúng màu pill `frame.
 
 ### 6.4 Journey: hai assertion đã unconditional
 
-* Helper mới `awaitZoomNode` (`cmd/goosie/journey_p1_chrome_zoom_ax_test.go:71`): poll **giá trị đã
+* Helper mới `awaitZoomNode` (`cmd/goosie/journey_p1_chrome_zoom_ax_test.go:62`): poll **giá trị đã
   publish trong cây AX** cho tới khi khớp nhãn, hết hạn thì FAIL theo hai nhánh tách bạch — "không có
   node nào được publish" vs "node publish giá trị khác" — kèm nhãn toolbar đang paint và
-  `b.diagnostics()`. Cây AX chỉ dựng lại theo frame được present (`cmd/goosie/presentation.go:185`),
+  `b.diagnostics()`. Cây AX chỉ dựng lại theo frame được present (`cmd/goosie/presentation.go:145`),
   nên poll giá trị đã publish là thứ chống race; không đếm frame, không `time.Sleep`, không assert duration.
-* BR-129 `:314` — unconditional: value `150%`, `role == ax.RoleMeter`, hộp chữ nhật khả kiến nằm
+* BR-129 `:240` — unconditional: value `150%`, `role == ax.RoleMeter`, hộp chữ nhật khả kiến nằm
   trong hàng toolbar, và value == `ZoomPercent()`.
-* BR-131 `:383` — unconditional: sau Cmd+0 node phải có value `100%` (kèm `ZoomPercent() == "100%"`
-  đã có ở `:378`), lý do đo được ghi thẳng trong comment của test.
+* BR-131 `:290` — unconditional: sau Cmd+0 node phải có value `100%` (kèm `ZoomPercent() == "100%"`
+  đã có ở `:290`), lý do đo được ghi thẳng trong comment của test.
 * `grep -n 'if _, ok := findAXNode.*goosie.zoom' cmd/goosie/journey_p1_chrome_zoom_ax_test.go` →
   **0 kết quả, exit 1** (grep trả exit 1 khi không khớp) — hai guard vacuous đã biến mất. Tìm `findAXNode`
   nói chung còn **12 khớp** (`grep -c findAXNode` → 12), trong đó duy nhất một chỗ dùng `ok` để **bỏ qua** là
-  vòng poll của `awaitZoomNode` (`:80`, mọi nhánh thoát bằng `t.Fatalf`); `:49` là helper `toolbarNode`
-  `t.Fatalf` khi node vắng; `:219` và `:235` là `if _, ok := ...; !ok { t.Fatal(...) }` của test Stop đã có
+  vòng poll của `awaitZoomNode` (`:65`, mọi nhánh thoát bằng `t.Fatalf`); `:42` là helper `toolbarNode`
+  `t.Fatalf` khi node vắng; `:174` và `:190` là `if _, ok := ...; !ok { t.Fatal(...) }` của test Stop đã có
   trước — chúng **FAIL khi node vắng mặt**, tức assertion một chiều; 7 chỗ còn lại là vị từ của `waitFor`
   (bản thân `waitFor` `t.Fatalf` khi hết hạn). Không còn guard nào cho phép assertion bị nhảy.
 
@@ -258,7 +258,7 @@ và **đúng 6 row** đổi `"tests": null` → danh sách test:
 ### 6.8 Còn mở / chưa gate được (khai báo)
 
 1. **Node chỉ mới bằng tốc độ present.** Cây AX dựng lại trong `publishAccessibility`
-   (`cmd/goosie/presentation.go:185`), nên badge hết hạn theo đồng hồ (100% sau grace 2.5s) vẫn có thể
+   (`cmd/goosie/presentation.go:145`), nên badge hết hạn theo đồng hồ (100% sau grace 2.5s) vẫn có thể
    ngồi trong **tree đã publish cuối** cho tới frame kế tiếp. Hành vi này có từ trước, thuộc cả
    document tree chứ riêng gì zoom. Không có assertion nào cho nó vì sẽ là assert duration;
    `test/toolbar/zoom_badge_ax_test.go` đóng đinh rule ở tầng API+pixel thay thế.
@@ -269,7 +269,7 @@ và **đúng 6 row** đổi `"tests": null` → danh sách test:
    **thêm thuần** (25 dòng, một method mới) — `drawAddressBar`/`zoomBadgeRect` không đổi một dòng nào,
    rect và nhãn badge paint vẫn như cũ; `test/gate` và corpus không đổi số đo. Cộng với ràng buộc của
    prompt (3 agent khác đang chạy, cấm `testdata/parity.py --render` và `live-parity.py`), không có
-   measurement parity mới trong batch này. Oracle hình ảnh của badge: `cmd/goosie/find_and_zoom_test.go:116`
+   measurement parity mới trong batch này. Oracle hình ảnh của badge: `cmd/goosie/find_and_zoom_test.go:112`
    (đỏ nếu badge không sơn) + bbox-check mới ở 6.3.
 4. **BR-126/127/128/130 giữ nguyên như agent trước viết**; batch này chỉ tái-đo sau merge (xanh, 6.6)
    và không nới helper nào của `e2e_test.go`.

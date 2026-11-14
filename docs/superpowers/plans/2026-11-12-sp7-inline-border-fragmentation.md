@@ -23,7 +23,7 @@
 - Revert mutations by re-editing the source back (NEVER `git checkout`).
 - Stage files by name (never `git add -A`).
 - archtest invariants: no `*layout.Object` fields added to `internal/engine`, no mutable package-level Go globals (the new map is an `Arena` instance field, not a global), cgo confined to `internal/platform/darwin` (untouched here).
-- Coordinate spaces: `layout.Object.X/Y/W/H` and `frame.RectF` are float32 **CSS px**; `frame.Rect` is int32 **device px**. `InlineFragments` is `[]frame.RectF`; paint converts each with `.ToDevice(b.scale)`, mirroring `paintContextFor` (`builder_box.go:164`).
+- Coordinate spaces: `layout.Object.X/Y/W/H` and `frame.RectF` are float32 **CSS px**; `frame.Rect` is int32 **device px**. `InlineFragments` is `[]frame.RectF`; paint converts each with `.ToDevice(b.scale)`, mirroring `paintContextFor` (`builder_box.go:96`).
 
 ## File Structure
 
@@ -882,7 +882,7 @@ EOF
 
 **2. Placeholder scan:** the only intentional fill-ins are commit short hashes (`<task1-short-hash>` etc.) in Task 6, which cannot be known until the commits exist; every code step has complete literal code, every run step has an exact command and expected output. No "TBD"/"handle edge cases"/"similar to Task N". ✓
 
-**3. Type consistency:** `InlineFragments []frame.RectF` used identically in arena.go (Task 1 Step 3), the layout test (Task 1 Step 1), `finalizeInlineFragments` (Step 8), and paint `paintInlineBorderFragments` (Task 2 Step 3, `.ToDevice(b.scale)` → `frame.Rect`). `recordInlineFrag(gen ObjectID, line int, r frame.RectF)`, `inlineFragmentGenerator(a *Arena, frag *Object) (ObjectID, bool)`, `unionRectF(a, b frame.RectF) frame.RectF`, `finalizeInlineFragments(id ObjectID)`, `paintBorderFragment(obj *layout.Object, rect frame.Rect, opacity float32, first, last, rtl bool)`, `paintInlineBorderFragments(obj *layout.Object, opacity float32)` — signatures match across all call sites. `minF`/`maxF` exist (block.go:3046/3053). `sort` added to inline.go imports. ✓
+**3. Type consistency:** `InlineFragments []frame.RectF` used identically in arena.go (Task 1 Step 3), the layout test (Task 1 Step 1), `finalizeInlineFragments` (Step 8), and paint `paintInlineBorderFragments` (Task 2 Step 3, `.ToDevice(b.scale)` → `frame.Rect`). `recordInlineFrag(gen ObjectID, line int, r frame.RectF)`, `inlineFragmentGenerator(a *Arena, frag *Object) (ObjectID, bool)`, `unionRectF(a, b frame.RectF) frame.RectF`, `finalizeInlineFragments(id ObjectID)`, `paintBorderFragment(obj *layout.Object, rect frame.Rect, opacity float32, first, last, rtl bool)`, `paintInlineBorderFragments(obj *layout.Object, opacity float32)` — signatures match across all call sites. `minF`/`maxF` exist (block.go:2333/3053). `sort` added to inline.go imports. ✓
 
 ---
 

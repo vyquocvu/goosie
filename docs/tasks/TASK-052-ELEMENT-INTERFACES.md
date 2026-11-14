@@ -10,7 +10,7 @@
 - **Do not touch** `docs/qa-test-catalog.md`, `docs/qa-open-defects.json`, `docs/qa-ratchet.json`,
   `test/qc/catalog.go`, `test/qc/traceability.golden.json`, `testdata/render-known-gaps.json`,
   `testdata/parity.py`. Propose BR ids and exact test names in §8.
-- `internal/archtest/rules.go:40-64` may be edited **only** if URL reflection genuinely needs a package `js`
+- `internal/archtest/rules.go:20-44` may be edited **only** if URL reflection genuinely needs a package `js`
   cannot currently reach, and only with the justification in the commit message (TASK-051 sets the pattern).
   Prefer solving reflection with `internal/dom`, which `js` already imports.
 - No `git push`, no merge, no PR. Measure before writing; correct anything in this doc your data disproves.
@@ -76,7 +76,7 @@ in the document, with `src` triggering the same decode path a parsed `<img>` use
 through the existing event machinery, and `decode()` returning a promise. Two hard constraints:
 - **Admission.** A script-created image must pass the same caps as a parsed one:
   `internal/image/decode.go:14-18` (probe encoded size, dimensions and pixel count before decoding) and
-  `internal/engine/limits.go:23-59` for the per-document budget. A new `Image` must not be able to bypass the
+  `internal/engine/limits.go:23-46` for the per-document budget. A new `Image` must not be able to bypass the
   reservation in `internal/engine/engine.go` (`imgReservation`), and an unbounded script loop calling
   `new Image()` must stay inside the caps — say which cap stops it and test the answer.
 - **The harness caveat.** `cmd/goosie-headless` installs no image fetcher, so script-driven loads cannot

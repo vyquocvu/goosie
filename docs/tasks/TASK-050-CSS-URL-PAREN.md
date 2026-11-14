@@ -66,13 +66,13 @@ of them — and the URL ends at the first `)` **that is not inside the quoted st
 
 ### 2.2 What Goosie does
 
-The engine's tokenizer is already correct: `internal/css/parser.go:1311` and `:1891` handle 4.3.9 quotes.
+The engine's tokenizer is already correct: `internal/css/parser.go:1178` and `:1739` handle 4.3.9 quotes.
 The defect is in the *second* pass — the handful of places that re-extract a URL from an already-parsed
 declaration string with a flat `strings.IndexByte(rest, ')')`, which cannot see whether the parenthesis is
 inside quotes:
 
 ```go
-// internal/style/style.go:4655 extractBackgroundURL
+// internal/style/style.go:4050 extractBackgroundURL
 rest := v[i+len("url("):]
 end := strings.IndexByte(rest, ')')   // :4662 — first ')', quote-blind
 target := strings.TrimSpace(rest[:end])
@@ -81,7 +81,7 @@ target = strings.Trim(target, "\"'")  // :4667 — strips quotes *after* the cut
 
 Stripping the quotes *after* cutting at the first `)` is the whole bug in three lines: for
 `url("…fill='rgb(0,0,255)'/></svg>")` the payload is returned as `"data:…fill='rgb(0,0,255` , which
-`internal/engine/limits.go:944 decodeDataImageURL` then rejects (mediatype parses, but the SVG is truncated →
+`internal/engine/limits.go:743 decodeDataImageURL` then rejects (mediatype parses, but the SVG is truncated →
 decode error, or worse: a syntactically valid but wrong image).
 
 ### 2.3 Every site to audit — five, found by searching for the pattern
@@ -90,11 +90,11 @@ Search: `strings.IndexByte(<x>, ')')` over `internal/`. Do **not** fix only the 
 
 | site | function | state today | what a fix must prove |
 |------|----------|-------------|-----------------------|
-| `internal/style/style.go:4662` | `extractBackgroundURL` | **broken**, proven by §1 | quoted + unquoted payloads containing `)`, `(`, `;`, `,` all reach `Style.BackgroundImage` whole |
-| `internal/css/border_image.go:86` | `borderImageURL` | **same shape, unproven** | must be measured (a `border-image-source` with a `)` in the payload) and either fixed by the shared helper or reported as an independent defect |
-| `internal/engine/limits.go:1013` | `absolutizeCSSURLs` | **same shape, unproven, and worse** | it cuts at the first `)` *then* re-emits the tail as new text, so a fetched stylesheet's quoted data URI is both truncated **and** rewritten; needs a `file://` `<link>`-stylesheet case measured end to end |
-| `internal/engine/imports.go:122` | `importRef` | quote-naive: `unquote(rest[4:close])` | `@import url("…)")` behaviour; low blast radius, must be stated not assumed |
-| `internal/engine/engine.go:706` | font URL extraction | **already quote-aware**: `:698-705` handles a leading quote before falling back to `)` | use as the reference for what the shared helper must do, and prove with a test that the font path keeps a `)` payload |
+| `internal/style/style.go:4054` | `extractBackgroundURL` | **broken**, proven by §1 | quoted + unquoted payloads containing `)`, `(`, `;`, `,` all reach `Style.BackgroundImage` whole |
+| `internal/css/border_image.go:57` | `borderImageURL` | **same shape, unproven** | must be measured (a `border-image-source` with a `)` in the payload) and either fixed by the shared helper or reported as an independent defect |
+| `internal/engine/limits.go:786` | `absolutizeCSSURLs` | **same shape, unproven, and worse** | it cuts at the first `)` *then* re-emits the tail as new text, so a fetched stylesheet's quoted data URI is both truncated **and** rewritten; needs a `file://` `<link>`-stylesheet case measured end to end |
+| `internal/engine/imports.go:101` | `importRef` | quote-naive: `unquote(rest[4:close])` | `@import url("…)")` behaviour; low blast radius, must be stated not assumed |
+| `internal/engine/engine.go:419` | font URL extraction | **already quote-aware**: `:413-419` handles a leading quote before falling back to `)` | use as the reference for what the shared helper must do, and prove with a test that the font path keeps a `)` payload |
 
 **Sixth reader, found in the finishing pass.** `ParseBorderImageShorthand`
 (`internal/css/border_image.go`) splits the value on whitespace and then re-joins the source token with a
@@ -112,7 +112,7 @@ pinned by `TestBorderImageShorthandURLParen`.
   parsers, `absolutizeCSSURLs`, `importRef`) the scanner must return enough to slice exactly, so no caller
   re-implements the cut.
 - Placement is the implementer's decision, but state it and justify it against
-  `internal/archtest/rules.go:40-64`: `internal/css` is the only package both `internal/style` and
+  `internal/archtest/rules.go:20-44`: `internal/css` is the only package both `internal/style` and
   `internal/engine` already import, so a helper there needs no new table entry. Do not add a new package.
 - Behaviour rules, each of which needs a test:
   1. `url("a)b")` → `a)b`; `url('a)b')` → `a)b` (quotes stripped, payload kept whole).
@@ -127,7 +127,7 @@ pinned by `TestBorderImageShorthandURLParen`.
      today. Any regression here is a blocker, not a footnote.
 - Cap discipline: the scanner runs on values that already passed admission; do not add a second size limit
   and do not let a quote-aware scan grow the work beyond one linear pass per value. Say which limit, if any,
-  your change touches (`internal/engine/limits.go:23-59`).
+  your change touches (`internal/engine/limits.go:23-46`).
 
 ## 4. Oracles
 
@@ -237,7 +237,7 @@ Oracles in `internal/css/url_test.go`:
    engine's existing first-paint behaviour, kept deliberately and pinned by unit tests; the parity fixture
    uses only Chromium-valid forms.
 3. **The `file://` premise in §2.3 row 3 is not reachable on main.** `resolveSubresourceURL`
-   (`internal/engine/limits.go:829`) accepts only http/https for a subresource, and both callers of
+   (`internal/engine/limits.go:662`) accepts only http/https for a subresource, and both callers of
    `absolutizeCSSURLs` are linked-sheet fetches. The branch's file:// test therefore never exercised the
    function; it was rewritten to drive an https sheet with a fake linker
    (`TestExpandCSSImportsURLKeepsParenPayload`), and the author-sheet pipeline is covered separately by

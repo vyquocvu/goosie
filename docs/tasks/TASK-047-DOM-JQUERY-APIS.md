@@ -409,7 +409,7 @@ Vì vậy cổng có **hai** phần và test tách riêng từng phần:
 **Không thêm cap mới** trong `internal/engine/limits.go`: cả hai gate dùng `MaxDocumentNodes
 = 1000000` và `MaxDocumentDepth = 128` sẵn có (dòng 27-28). Bộ limit của `createHTMLDocument`
 (1024 node / depth 32 / 256 attribute / 4096 byte) là literal **trong `internal/js`**, không
-phải ở `limits.go`, vì archtest (`internal/archtest/rules.go:40-64`) cho `internal/js` import
+phải ở `limits.go`, vì archtest (`internal/archtest/rules.go:20-44`) cho `internal/js` import
 `{internal/dom, internal/media}` — muốn đọc cap của engine thì phải import `internal/engine`,
 và `internal/engine` import `internal/js` nên vòng import sẽ hỏng build. Con số chọn theo đúng
 bộ `internal/js` đã áp cho một lần viết `innerHTML` (js.go, fragment path: 1024 node, depth 32).
@@ -453,7 +453,7 @@ không còn xác mutant. Bảng đầy đủ (exit code là của `go test`, kh�
 | M03 location parts không được cài | `internal/js/js.go` | 1 | `location_parts_test.go:101: page pattern result = "THREW:Cannot read property 'hostname' of undefined", want the matched…` |
 | M04 `document.implementation` không cài | `internal/js/js.go` | 1 | `document_implementation_test.go:68: Evaluate(typeof document.implementation.createHTMLDocument): eval:1: TypeError: Cann…` |
 | M05 `document.defaultView` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:230: defaultView identity = "false,false", want "true,true"` |
-| M06 `window.getComputedStyle` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:103: inline:1: TypeError: Object has no member 'getComputedStyle'` (4 test chết: `:103`, `:116 Evaluate(`, `:129 …ReferenceError: getComputedStyle is not defined`, `:169 …`) |
+| M06 `window.getComputedStyle` thiếu | `internal/js/js.go` | 1 | `computed_style_test.go:103: inline:1: TypeError: Object has no member 'getComputedStyle'` (4 test chết: `:70`, `:116 Evaluate(`, `:129 …ReferenceError: getComputedStyle is not defined`, `:169 …`) |
 | M07 accessor `childNodes` bị xoá | `internal/js/node_api.go` | 1 | `document_implementation_test.go:68: Evaluate((function(){var d=document.implementation.createHTMLDocument("Scratch");ret…` |
 | M08 accessor `lastChild` bị xoá | `internal/js/node_api.go` | 1 | `document_implementation_test.go:68: Evaluate((function(){var d=document.implementation.createHTMLDocument("Scratch");return […]})()): eval:1: TypeError: Cannot read property 'nodeType' of undefined` (8 test chết; anchor của chính cluster là `node_tree_test.go:119: insertBefore = "B\|I\|U/NotFoundError/3", want "B\|U\|I/NotFoundError/3"`) |
 | M09 accessor `ownerDocument` bị xoá | `internal/js/node_api.go` | 1 | `document_implementation_test.go:69: own documentElement identity: got "false,false" want "true,true"` |
@@ -480,11 +480,11 @@ lại, không phải lần định chạy).
 Tám dòng **M02 / M05 / M06 / M08 / M11 / M16 / M21 / MU-A** được chạy lại trên cây cuối, thành
 hai round, vì các edit comment (`internal/js/node_api.go`, `internal/js/computed_style.go`) và
 thêm assertion (`test/js/computed_style_test.go`) làm **số dòng trong file test đổi** —
-`node_tree_test.go:113 → :119`, `:161 → :167`. Round 1 (`/tmp/t047/mutation-recheck.log`) chạy
+`node_tree_test.go:82 → :119`, `:161 → :167`. Round 1 (`/tmp/t047/mutation-recheck.log`) chạy
 M08/M16/M21/MU-A; round 2 (`/tmp/t047/mutation-recheck2.log`) chạy M02/M05/M06/M11. Kết quả
-round 2: M02 vẫn là `computed_style_test.go:258`, M05 vẫn là `:230`, M11 vẫn là `:130` — ba dòng
+round 2: M02 vẫn là `computed_style_test.go:191`, M05 vẫn là `:171`, M11 vẫn là `:91` — ba dòng
 đó đúng nguyên văn như bảng trên — nhưng **M06 đổi chỗ đỏ đầu tiên**: không còn là assertion
-`defaultView shape` (dòng cũ tôi dẫn là `:253`), mà là `:103: TypeError: Object has no member
+`defaultView shape` (dòng cũ tôi dẫn là `:186`), mà là `:103: TypeError: Object has no member
 'getComputedStyle'`, vì chính test đó chạy trước trong package. Mỗi round đều có một lần baseline
 và một lần sau khi restore, cả hai `exit=0` (`test/js 3.397s`, `test/engine 5.497s`).
 
@@ -684,7 +684,7 @@ nạp được offline, không phải DOM API thiếu.
 
 | Tên | Lý do |
 | --- | --- |
-| `className` → thuộc tính `class` | Đo được rằng `className` là **data property snapshot** (`js.go:1248`, refresh ở `js.go:1397`); gán `className` không ghi attribute nên không bao giờ select được. `jQuery.addClass` chính là `elem.className = value`. Fix nằm ở tầng wrap-snapshot, không phải ở cluster này; fixture `js-dom/02` dùng `setAttribute` và ghi rõ lý do trong comment. |
+| `className` → thuộc tính `class` | Đo được rằng `className` là **data property snapshot** (`js.go:923`, refresh ở `js.go:1057`); gán `className` không ghi attribute nên không bao giờ select được. `jQuery.addClass` chính là `elem.className = value`. Fix nằm ở tầng wrap-snapshot, không phải ở cluster này; fixture `js-dom/02` dùng `setAttribute` và ghi rõ lý do trong comment. |
 | `href` IDL reflection, `defaultValue` | Cùng họ `className`: cần cơ chế reflection attribute↔IDL, chưa có. Vì state form trong Goosie là attribute (`__setChecked__`/`__setValue__`), `defaultValue` cũng không có gì tách khỏi `value`. |
 | `Image` constructor | vnexpress gọi (`validateCachePage`). Đây là subresource + loader, không phải DOM tree; đã ghi để task sau. |
 | `location.assign/replace/reload` | Engine chưa có navigation. Gọi sẽ TypeError **nêu tên member thiếu** — thất-đoà-loud đúng hợp đồng của package; một no-op im lặng để lại trang tưởng đã đổi trang. |
@@ -771,7 +771,7 @@ Năm lần `go test -race -count=1 ./...` trên branch (mtime của log):
 | 08:27:13 `final-race2.log` | **FAIL 40.394s** — cùng một assertion, `presents=475 injected=10` |
 | 09:01:36 `final-gates3.log` | `ok` (race exit=0, 42 packages) — cây cuối, máy yên |
 
-Cả hai lần đỏ là đúng một dòng, `cmd/goosie/journey_p1_tabs_test.go:102`, và hai trang của journey
+Cả hai lần đỏ là đúng một dòng, `cmd/goosie/journey_p1_tabs_test.go:95`, và hai trang của journey
 đó **không có script nào** — không có đường nào từ change tới test.  Nhưng "không có đường" vẫn
 chỉ là lập luận.  Thí nghiệm trực tiếp (`/tmp/t047/load-race.sh`, branch vs bản export của
 `fe4928c` đặt ở `/tmp/t047/base-src`, cùng lệnh, cùng `-race`, xen kẽ branch/base để drift của
@@ -829,7 +829,7 @@ cây cùng chịu một tải, nhưng không phải full suite.
 
 Bốn điều đo được, không điều nào đến từ việc đọc code:
 
-1. **Base cũng đỏ, cùng một dòng.** `B-base-4` fail đúng `journey_p1_tabs_test.go:102`, hết
+1. **Base cũng đỏ, cùng một dòng.** `B-base-4` fail đúng `journey_p1_tabs_test.go:95`, hết
    11.027 s, `presents=473` — `B-branch-5` fail cùng assertion, hết 8.683 s, `presents=470`.
    Tải đủ lớn thì test đó timeout **trên cả hai phía**, nên đỏ không phải bằng chứng cho change.
 2. **Cả họ journey đều nhạy tải, cả trước change.** Khi chạy nguyên package dưới 12 burner, base
@@ -1117,8 +1117,8 @@ Chuỗi nguyên nhân, mỗi mắt xích một số đo, không có mắt xích 
    iframe.
 3. Đo `u`: `jQuery(document.createElement("form")).appendTo(document.body).css("display")` →
    **`undefined`**; `div` và `p` cũng vậy. Lý do ở engine:
-   `internal/engine/computed_style.go:26` trả `nil` khi node chưa có trong `s.Styles[n.ID]`, và
-   `internal/js/computed_style.go:119`/`:121` (`computedStyleObject`, vòng `Set` chạy trên
+   `internal/engine/computed_style.go:11` trả `nil` khi node chưa có trong `s.Styles[n.ID]`, và
+   `internal/js/computed_style.go:51`/`:53` (`computedStyleObject`, vòng `Set` chạy trên
    chính map đó) chỉ `Set` những tên có giá trị ⇒ node vừa được cài **không
    có box đã resolve trong chính task đó**.
 4. `u === undefined` → phép gán `elemdisplay[nodeName] = undefined` → `values[i]` giữ
@@ -1131,8 +1131,8 @@ Chuỗi nguyên nhân, mỗi mắt xích một số đo, không có mắt xích 
    `undefined` / `""`.
 
 Nói cách khác: defect nằm ở **độ hạt resolve trong một task**, không ở CSSOM binding. Chỗ sửa là
-provider được inject (`internal/js/computed_style.go:52`), vì archtest đóng bảng import —
-`"internal/js": {"internal/dom", "internal/media"}` (`internal/archtest/rules.go:56`) — nên
+provider được inject (`internal/js/computed_style.go:11`), vì archtest đóng bảng import —
+`"internal/js": {"internal/dom", "internal/media"}` (`internal/archtest/rules.go:36`) — nên
 `internal/js` không được import `internal/style`/`internal/engine`; provider phải tự
 resolve-on-demand thay vì trả `nil`.
 
@@ -1156,11 +1156,11 @@ cùng một đáp án). Trang dùng `in`/`hasOwnProperty` để feature-detect t
 Cũng đo: object không có `length`, `item()`, `parentRule` (cả ba `undefined`), nên
 `Array.prototype.slice.call(getComputedStyle(el))` cho `[]`.
 
-Hai điểm trung thực phải nói thêm: (a) comment ở `internal/js/computed_style.go:116-118` và header
-của test `TestGetComputedStyleOnlyReportsEngineValues` (`test/js/computed_style_test.go:153`) viết
+Hai điểm trung thực phải nói thêm: (a) comment ở `internal/js/computed_style.go:48-50` và header
+của test `TestGetComputedStyleOnlyReportsEngineValues` (`test/js/computed_style_test.go:111`) viết
 "property không mô hình đọc ra chuỗi rỗng" — **đúng cho `getPropertyValue`, sai cho accessor**;
 (b) chính hai test đó không phân biệt được hai hành vi, vì `[...].join("|")` render `undefined`
-thành `""` — nên `cs.zIndex` trong expectation `"|||"` (`:167`) pass dù accessor trả `undefined`.
+thành `""` — nên `cs.zIndex` trong expectation `"|||"` (`:116`) pass dù accessor trả `undefined`.
 Test không sai, nhưng nó **không neo** hành vi này; ai sửa CSSOM-shape sẽ không bị hai test đó
 chặn. Tôi để nguyên, không nới và không viết thêm assertion giả.
 
@@ -1181,8 +1181,8 @@ bao giờ khớp rule class**, nên `.row { padding; border-bottom }` không áp
 vạch kẻ, dù node tồn tại và sơn text. `innerHTML`/`textContent` là setter ghi được (đo
 `innerHTML` là `string`), nhưng cùng họ phản chiếu với `className`.
 
-§6 đã gọi tên defect này ("`className` → thuộc tính `class`", chỉ ra `js.go:1248` và refresh ở
-`js.go:1397`). Số ở trên là phần còn thiếu của hồ sơ: một check tái hiện tối giản
+§6 đã gọi tên defect này ("`className` → thuộc tính `class`", chỉ ra `js.go:923` và refresh ở
+`js.go:1057`). Số ở trên là phần còn thiếu của hồ sơ: một check tái hiện tối giản
 (`frag-gcs.html`, 37 dòng) và con số demand thật trong bundle.
 
 Cùng phép đo đó cho ra một defect nữa, **không** có tên ở §6: `Element.outerHTML` không tồn tại
@@ -1213,9 +1213,9 @@ task này: **member thiếu thì loud ở đọc và ở gọi, nhưng silent �
 | `document.querySelector("#app h1") === null` | true | true |
 
 Ba dòng cuối là hai defect khác nhau: engine không hiểu combinator, **và** danh sách selector
-(dấu phẩy) cũng trả rỗng. Nguồn: `internal/js/js.go:2270` → `querySelectorAllIndexed` (`:2283`,
-fast path chỉ nhận `.class` và tag trụi) → fallback `collectMatching` (`:2313`) → `matchSelector`
-(`:2323`), mà doc comment của chính nó chép: *"Supported forms are tag name (`p`), ID (`#main`),
+(dấu phẩy) cũng trả rỗng. Nguồn: `internal/js/js.go:1863` → `querySelectorAllIndexed` (`:1874`,
+fast path chỉ nhận `.class` và tag trụi) → fallback `collectMatching` (`:1902`) → `matchSelector`
+(`:1912`), mà doc comment của chính nó chép: *"Supported forms are tag name (`p`), ID (`#main`),
 and class (`.active`)"*.
 
 Hệ quả đo được, không phải suy đoán:
@@ -1226,7 +1226,7 @@ Hệ quả đo được, không phải suy đoán:
   `d.qsa`), tức cùng engine, cùng 0.
 - vnexpress: `swapZone` poll `document.querySelector(selector)` cho ô quảng cáo — selector phức
   tạp thì không bao giờ khớp, `setInterval` chạy tới hết 5.000 ms rồi `clearInterval`.
-- ngay trong repo: `test/wpt/wpt_report.go:256` lọc bảng bằng
+- ngay trong repo: `test/wpt/wpt_report.go:245` lọc bảng bằng
   `document.querySelectorAll('#results tbody tr')` — báo cáo HTML tự filter bằng JS, và filter đó
   im lặng không làm gì.
 - `document.title` của `sel-desc.html` ghi lại chính các con số lúc chạy trong body script:
@@ -1245,9 +1245,9 @@ Array.prototype.map.call(document.childNodes, n => n.nodeType+":"+n.nodeName).jo
 ```
 
 Document detached từ `createHTMLDocument` có **cùng thứ tự** (`1,HTML,10,#doctype`). Nguyên nhân ở
-parser, không ở binding mới: `internal/dom/parser.go:329` cài `<html>` ngầm định (`insertElement`
+parser, không ở binding mới: `internal/dom/parser.go:285` cài `<html>` ngầm định (`insertElement`
 cho mode "before html") **trước** khi token `<!DOCTYPE>` được xử lý, và doctype được
-`AppendChild` ở `internal/dom/parser.go:942-944` — sau. Theo HTML Standard, mode
+`AppendChild` ở `internal/dom/parser.go:873-875` — sau. Theo HTML Standard, mode
 "initial insertion mode" tạo và append node `DocumentType` **trước** khi "before html" tạo `<html>`
 và append nó, nên ở parser tuân thủ thì doctype là con đầu; DOM Standard cũng định nghĩa getter
 `Document.doctype` trả node `DocumentType` hoặc `null`. **Tôi không đo Chromium trên máy này**
@@ -1258,14 +1258,14 @@ Hai điều phải khai, vì đó là chữ của tôi:
 
 1. Sub-case `"html first, doctype present"` nằm trong test tên là
    `TestCreateHTMLDocumentBuildsTheStandardSkeleton`
-   (`test/js/document_implementation_test.go:54`) — **tên test nói "standard" nhưng nó neo tính
-   nhất quán của parser**, không neo thứ tự standard. Assertion bổ sung ở `:76`
+   (`test/js/document_implementation_test.go:19`) — **tên test nói "standard" nhưng nó neo tính
+   nhất quán của parser**, không neo thứ tự standard. Assertion bổ sung ở `:41`
    (`"1,10,#doctype"` cho document live) càng làm rõ ý đó. Tôi không nới assertion: thu nó lại sẽ
    ẩn đúng lệch mà người sau phải sửa. Nó được đăng ký thành defect ở §11 thay vì thành test.
-2. `TestDocumentImplementationOmitsUnimplementedMembers` (`:276`) neo `document.title` của document
+2. `TestDocumentImplementationOmitsUnimplementedMembers` (`:197`) neo `document.title` của document
    live là `""` trên trang có `<title>Main</title>`, vì đường host-seed
    (`js.Options.Title` cho browser chrome) thắng. DOM Standard buộc `title` phản chiếu text của
-   element `title`. Đây cũng là lệch có chủ đích, comment ở `:270-275` đã nói lý do; tôi ghi lại ở
+   element `title`. Đây cũng là lệch có chủ đích, comment ở `:191-196` đã nói lý do; tôi ghi lại ở
    §11 để nó không bị đọc nhầm là "đã đúng chuẩn".
 
 ### 10.9 Mutation proof — một cơ chế mỗi lần, 11 lần
@@ -1350,12 +1350,12 @@ thứ liên quan Chromium trong doc này do agent kia đo và agent kia nộp.
 ### 10.11 Unresolved / limits, nói thẳng
 
 1. **Trong một task, node vừa cài không có computed style.** Đây là thứ chặn `.show()` (§10.4), sửa
-   được ở provider `internal/engine/computed_style.go:26` + `internal/js/computed_style.go:52`,
+   được ở provider `internal/engine/computed_style.go:11` + `internal/js/computed_style.go:11`,
    không sửa được trong `internal/js` vì bảng import.
 2. **`cmd/goosie-headless` không pump timer** (GOOSIE-LIVE-001 nhánh D): reproA 0 px dù 0 lỗi và
    DOM đã đổi; chỉ harness probe của tôi (`-js -inv -pump 3`) sơn tới 35.943 px. Số của §10.2 không
    phải số của sản phẩm.
-3. **`PumpJS` chỉ re-resolve khi có invalidation**: `engine.go:2254-2293` chỉ resolve lại khi
+3. **`PumpJS` chỉ re-resolve khi có invalidation**: `engine.go:1662-1698` chỉ resolve lại khi
    `s.focusStylePending || (s.inv != nil && !s.inv.Empty())`. Harness không gọi
    `engine.WithInvalidation(...)` thì pump có chạy mà style/layout không theo. Đây là lý do probe
    của tôi phải có cờ `-inv`.
@@ -1400,7 +1400,7 @@ thứ liên quan Chromium trong doc này do agent kia đo và agent kia nộp.
 - Không push, không amend, không merge, không rebase; ba commit `5b2434f`/`4054bde`/`24ee057` là
   commit mới, cộng thêm commit doc này (`git add` từng đường file, không `git add -A`).
 - Bảng import của archtest giữ nguyên: `internal/js` vẫn không import `internal/style`/
-  `internal/engine` (`internal/archtest/rules.go:40-64`), nên computed style ở lại dạng provider
+  `internal/engine` (`internal/archtest/rules.go:20-44`), nên computed style ở lại dạng provider
   được inject.
 - `cmd/probe-t047/` **không** còn trong worktree (agent kia đã xóa); probe của tôi là binary dựng
   ngoài repo (`/tmp/t047-work/probe-final.go` → `bin/probe-before`, `bin/probe-head`), nên không có
@@ -1444,18 +1444,18 @@ Tổng oracle của ba commit tôi chứng nhận: **55** (12+9+9+8+8+4+5). Ki�
 `TestCreateHTMLDocumentBuildsTheStandardSkeleton`,
 `TestCreateElementOnTheLiveDocumentStillUsesTheLiveTree`,
 `TestGetComputedStyleForANodeTheSessionNeverResolved` (tên đầy đủ kèm `file:line` ở §10 cho ba cái
-cuối là `document_implementation_test.go:54`, `:294` và
-`computed_style_render_test.go:113`). Integrator tag theo file thì 55 test tự đủ, không cần thêm id.
+cuối là `document_implementation_test.go:19`, `:212` và
+`computed_style_render_test.go:75`). Integrator tag theo file thì 55 test tự đủ, không cần thêm id.
 
 ### 11.2 Defect nên **đăng ký** thay vì viết test (tên đề nghị đã đối chiếu 42 id hiện có, không trùng)
 
 | id đề nghị | một dòng, kèm số đo |
 | --- | --- |
-| `GOOSIE-SELQUERY-001` | `querySelectorAll`/`querySelector` trả **0** cho mọi combinator (`#app h1`, `.box>p`, `p+p`) **và** cho danh sách selector có dấu phẩy (`h1,p`), trong khi selector đơn giản đúng (`p`→3, `h1`→1). Đo `probe-before` = `probe-head` ⇒ pre-existing, không do TASK-047. Nguồn: `internal/js/js.go:2283`/`:2313`/`:2323`. Viết test lúc này là **neo** câu trả lời sai, nên đăng ký. |
+| `GOOSIE-SELQUERY-001` | `querySelectorAll`/`querySelector` trả **0** cho mọi combinator (`#app h1`, `.box>p`, `p+p`) **và** cho danh sách selector có dấu phẩy (`h1,p`), trong khi selector đơn giản đúng (`p`→3, `h1`→1). Đo `probe-before` = `probe-head` ⇒ pre-existing, không do TASK-047. Nguồn: `internal/js/js.go:1874`/`:1902`/`:1912`. Viết test lúc này là **neo** câu trả lời sai, nên đăng ký. |
 | `GOOSIE-CSSOMTASK-001` | `getComputedStyle` trên node vừa được cài **trong cùng task** không có giá trị: accessor `undefined`, `getPropertyValue` `""`; cùng node đó đọc sau một lần re-resolve thì `block`. Chuỗi nhân quả đã đo từng mắt xích ở §10.4 và là lý do thật khiến `$("#form1").show()` không sơn. Kèm luôn phần shape: thiếu `length`/`item`/`parentRule` (§10.5). |
 | `GOOSIE-IDLREFLECT-001` | Attribute IDL không phản chiếu xuống content attribute: `el.className="row2"` sau `setAttribute("class","row")` → `getAttribute("class")` vẫn `"row"`; node dựng bằng fragment + `className` có `getAttribute("class") === null` nên rule class không áp dụng. §6 đã gọi tên, hồ sơ đo ở §10.6. (Họ của `GOOSIE-FORMVALUE-001/002`.) |
 | `GOOSIE-OUTERHTML-001` | `Element.outerHTML` không tồn tại **và** phép gán bị nuốt im lặng: `el.outerHTML="<p>swapped</p>"` tạo own property trên wrapper, cây không đổi (`tag=DIV`, `#app` 3 child, `querySelectorAll("p")` 0). Trang thật dùng để đổi ô quảng cáo (vnexpress byte 9.642, `swapZone`). Rule chung rút ra từ phép đo này: member thiếu thì loud ở đọc và ở gọi, nhưng **silent ở ghi**. |
-| `GOOSIE-DOCTYPE-001` | `Document.doctype` không được cài (`!!document.doctype === false`) và doctype là con **cuối** (`1:HTML|10:#doctype`) do `internal/dom/parser.go:329` cài `<html>` trước khi `:942-944` append doctype — lệch so với "initial insertion mode" → "before html". Hai test ở §10.8 đang neo hành vi này như nhất quán parser; đăng ký để không đọc nhầm thành "đúng chuẩn". |
+| `GOOSIE-DOCTYPE-001` | `Document.doctype` không được cài (`!!document.doctype === false`) và doctype là con **cuối** (`1:HTML|10:#doctype`) do `internal/dom/parser.go:285` cài `<html>` trước khi `:873-875` append doctype — lệch so với "initial insertion mode" → "before html". Hai test ở §10.8 đang neo hành vi này như nhất quán parser; đăng ký để không đọc nhầm thành "đúng chuẩn". |
 | `GOOSIE-IFRAME-001` | Không có `contentWindow`/`contentDocument` trên `<iframe>` (đo `typeof` → `undefined`); jQuery chạm `contentDocument` 3 lần (bundle 27.600, `S.fn.contents`). Không chặn reproB (bundle này không có chuỗi `iframe`), nhưng chặn mọi measurement-by-iframe và `contents()` trên iframe. |
 | `GOOSIE-IMAGE-001` *(nếu integrator muốn một id riêng; §6 đã nêu tên cùng defect)* | `Image` constructor chưa có; là lỗi **duy nhất** còn lại trên vnexpress (`ReferenceError: Image is not defined at validateCachePage (inline:6:832(100))`) và chặn luôn `location.reload()` phía sau nó (§10.11 mục 8). |
 | *(đã có, chỉ bổ sung số đo)* `GOOSIE-LIVE-001` nhánh D | headless không pump timer: reproA 0 px / 0 lỗi, cùng trang đó dưới harness có pump 35.943 px. Con số này nên vào hồ sơ defect vì nó chứng minh phần DOM **đã** thông và phần còn lại đúng là timer. |
@@ -1464,7 +1464,7 @@ cuối là `document_implementation_test.go:54`, `:294` và
 ### 11.3 Ba phát hiện tôi nộp lại bằng lời, không nộp bằng test
 
 1. §10.5: comment/expectation "đọc ra chuỗi rỗng" chỉ đúng cho `getPropertyValue`; hai test
-   `test/js/computed_style_test.go:153` và `:178` **không phân biệt** `undefined` với `""` vì
+   `test/js/computed_style_test.go:111` và `:127` **không phân biệt** `undefined` với `""` vì
    `[...].join("|")`. Đây là khoảng trống oracle thật, nhưng lấp nó bây giờ là chốt cứng hành vi
    chưa khớp CSSOM — nên để `GOOSIE-CSSOMTASK-001` quyết định sau.
 2. §10.8: tên test `TestCreateHTMLDocumentBuildsTheStandardSkeleton` và sub-case

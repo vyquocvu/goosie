@@ -42,8 +42,8 @@ nên `opacity:0` không những không làm mất lệnh vẽ mà còn vào lệ
 
 | Tầng | Bằng chứng | Hệ quả |
 | --- | --- | --- |
-| `style` lưu giá trị | `internal/style/style.go:2559` `case "visibility": cs.Visibility = value`; `:2796-2803` `case "opacity": cs.Opacity = float32(parsed.Num)`; mặc định `Visibility: "visible"` (`:679`), `Opacity: 1.0` (`:655`) | Cascade **có** giữ cả hai field; `internal/engine/style_diff.go:20,101` cũng trở `Visibility`/`ContentVisibility` qua boundary |
-| `paint` dùng giá trị | `internal/paint/builder_box.go:63` `opacity: obj.Style.Opacity`; `internal/paint/builder_controls.go:466` là **nơi duy nhất** trong tree đọc `s.Visibility` (chỉ cho list marker) | `visibility:hidden` **không có** nhánh nào cho box/text → luôn vẽ. `opacity` **có** nhánh, nhưng display list ở §1.1 vẫn emit alpha 255 → hoặc `cs.Opacity` không phải 0 như cascade promise, hoặc `parsed.Num` cho value `"0"` không phải số, hoặc builder đọc field khác |
+| `style` lưu giá trị | `internal/style/style.go:2123` `case "visibility": cs.Visibility = value`; `:2336-2343` `case "opacity": cs.Opacity = float32(parsed.Num)`; mặc định `Visibility: "visible"` (`:484`), `Opacity: 1.0` (`:480`) | Cascade **có** giữ cả hai field; `internal/engine/style_diff.go:17,98` cũng trở `Visibility`/`ContentVisibility` qua boundary |
+| `paint` dùng giá trị | `internal/paint/builder_box.go:29` `opacity: obj.Style.Opacity`; `internal/paint/builder_controls.go:396` là **nơi duy nhất** trong tree đọc `s.Visibility` (chỉ cho list marker) | `visibility:hidden` **không có** nhánh nào cho box/text → luôn vẽ. `opacity` **có** nhánh, nhưng display list ở §1.1 vẫn emit alpha 255 → hoặc `cs.Opacity` không phải 0 như cascade promise, hoặc `parsed.Num` cho value `"0"` không phải số, hoặc builder đọc field khác |
 
 Việc đầu tiên của task: **xác định opacity hỏng ở tầng nào** bằng một oracle cấp `test/` (không đoán từ đọc code),
 rồi sửa đúng tầng đó. Ghi rõ kết luận vào §5.
@@ -85,7 +85,7 @@ Phía user-visible thiếu là semantics ẩn, tức task này.
    và áp cho **cả** background, border, text của element cùng subtree. Nếu đường tile hiện tại chỉ nhân alpha
    per-command (không group-composite), thì khai báo trung thực: overlapping children trong cùng group sẽ
    cho kết quả khác Chromium; ghi giới hạn đó vào §5 và defect, **không** giấu.
-3. **ContentVisibility** (`style.go:2561`) đang có field mà không có consumer: để nguyên hoặc ghi rõ chưa dùng;
+3. **ContentVisibility** (`style.go:2125`) đang có field mà không có consumer: để nguyên hoặc ghi rõ chưa dùng;
    đừng nhân tiện "tiện tay" bật nó.
 
 ## 4. Điều kiện nhận (không cái nào là "test chạy xanh")
@@ -360,9 +360,9 @@ liệu chốt ở đây được giữ sống bằng oracle vĩnh cửu dưới.
 hơn báo cáo một chút — **bốn** shape, không phải ba.
 
 **Cơ chế.** `style.AnonymousBlockStyle` và `style.AnonymousTableStyle` copy nguyên
-`ComputedStyle` của phần tử sinh (`s = *parent`, `internal/style/style.go:593-611`, `:619+`)
+`ComputedStyle` của phần tử sinh (`s = *parent`, `internal/style/style.go:436-451`, `:619+`)
 và **không** xoá `Opacity`; `style.inheritStyle` cũng copy cho mọi text node
-(`cs := *parent`, `:1613-1625`). Walk của pass 1 (`internal/paint/builder_box.go:29-42` tại
+(`cs := *parent`, `:1319-1328`). Walk của pass 1 (`internal/paint/builder_box.go:22-29` tại
 `8eb00bc`) nhân `obj.Style.Opacity` vào `effective` cho **mọi** box, vô danh hay không.
 Chromium tính một khai báo đúng **một lần trên phần tử khai báo nó**, vô luận layout chèn
 bao nhiêu box.
@@ -418,14 +418,14 @@ Lý do: **multiplier thứ hai không phải anonymous block, mà là text run �
 `Node`** (node text thật, `style.inheritStyle`). Guard kiểu đó bỏ được một trong hai lần
 nhân: `anondiv` đi từ 0.125 lên 0.25, vẫn sai. Hai biến thể khác cũng đã đo thật:
 `obj.Node.Element()` làm xanh cả bảy shape nhưng **giết** `::before{opacity:.5}` (0.5 → 1) —
-`layout.buildPseudoElement`/`buildFirstLetterPseudoElement` (`internal/layout/arena.go:604-633`)
+`layout.buildPseudoElement`/`buildFirstLetterPseudoElement` (`internal/layout/arena.go:386-414`)
 cho hộp pseudo một `doc.NewText` **không cha**, còn `style.computePseudoStyle`
-(`internal/style/pseudo.go:124-159`) là kết quả cascade riêng, không copy `Opacity` của
+(`internal/style/pseudo.go:110-143`) là kết quả cascade riêng, không copy `Opacity` của
 parent; và biến thể nhận diện pseudo bằng `obj.Key.Kind()` hỏng vì tách word ở
-`internal/layout/inline.go:724-768` dùng `nodeCopy := *k.Node`, để `Key` bằng 0 và **set
+`internal/layout/inline.go:597-629` dùng `nodeCopy := *k.Node`, để `Key` bằng 0 và **set
 `Node` của hộp nguồn về nil**.
 
-Luật chốt — `boxDeclaresOpacity`, `internal/paint/builder_box.go:22-37`: một box chỉ mang
+Luật chốt — `boxDeclaresOpacity`, `internal/paint/builder_box.go:22-27`: một box chỉ mang
 opacity của riêng nó khi node của nó **là phần tử** hoặc **không thuộc phần tử nào**
 (generated content). Clamp `[0,1]`, nhánh bỏ hộp khi `effective <= 0`, và cách xử lý
 `visibility` giữ nguyên như pass 1. **Không** sửa `AnonymousBlockStyle`/`AnonymousTableStyle`:
@@ -503,7 +503,7 @@ trả ba fixture về đúng điểm trước khi nhánh tồn tại. **Known ga
 - `::first-letter` mờ: rule mới áp dụng cho nó bằng cùng nhánh "node không cha", nhưng tôi
   **chưa đo pixel** cho shape đó và không có oracle riêng — ghi là chưa chứng minh.
 - Text run vẽ lại nền của phần tử sinh (`bgRawText` ở trên) là defect **khác, có trước**,
-  liên quan tới `paintsInlineFragments` ở `internal/paint/builder_box.go:112-131`; để nguyên,
+  liên quan tới `paintsInlineFragments` ở `internal/paint/builder_box.go:57-70`; để nguyên,
   khai báo ở đây vì nó là lý do fixture 13 tránh nền translucent.
 
 ## 6. Ngoài phạm vi

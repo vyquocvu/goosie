@@ -13,7 +13,7 @@ Cho tới trước task này, đó là **một câu mô tả quy trình**, khôn
 
 Hai lỗi cụ thể mà "chạy tay" mắc phải, và script này chặn:
 - Quên `-count=1`: `go test ./...` tái dùng kết quả cache từ **một tree khác** rồi in `ok` — release được "chứng minh" bởi code không phải đang ship.
-- Chạy thiếu archtest: toàn bộ quy tắc import-graph (`internal/archtest/rules.go:40-64`) không được kiểm trên commit ứng viên.
+- Chạy thiếu archtest: toàn bộ quy tắc import-graph (`internal/archtest/rules.go:20-44`) không được kiểm trên commit ứng viên.
 
 ## 2. Thiết kế
 

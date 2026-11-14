@@ -37,7 +37,7 @@ Expected: 10 files removed from index and disk. Build is broken until Task 2 —
 **Files:**
 - Modify: `internal/engine/engine.go` (field ~332-335, option ~662-669, NewSession hook ~780-794, Reflow hook ~1900-1909)
 - Modify: `internal/engine/paint.go` (hook ~97-106, `dom` import line 6)
-- Modify: `internal/archtest/rules.go:67,70`
+- Modify: `internal/archtest/rules.go:47,50`
 
 - [ ] **Step 1: Remove the `phaseTracker` field from `Session` in `internal/engine/engine.go`**
 
@@ -208,7 +208,7 @@ Expected: FAIL — the current early-break loop stops at the "Below" band (y≈2
 ### Task 4: Order-independent HasTextAt — implementation
 
 **Files:**
-- Modify: `internal/engine/selection.go:132-192` (HasTextAt + textLineRect), import block lines 3-10
+- Modify: `internal/engine/selection.go:118-167` (HasTextAt + textLineRect), import block lines 3-10
 
 - [ ] **Step 1: Add `sort` to the import block**
 
@@ -372,7 +372,7 @@ git commit -m "test(selection): guard the column gutter against band fusion"
 ### Task 6: Harden the no-:hover work-delta test
 
 **Files:**
-- Modify: `cmd/goosie/render_work_test.go:379-398` (`TestHoverWithoutPseudoClassDoesNotRepaint`)
+- Modify: `cmd/goosie/render_work_test.go:375-394` (`TestHoverWithoutPseudoClassDoesNotRepaint`)
 
 - [ ] **Step 1: Replace the test with:**
 
@@ -417,7 +417,7 @@ func TestHoverWithoutPseudoClassDoesNotRepaint(t *testing.T) {
 }
 ```
 
-Rationale: `SetHover` (`internal/engine/focus.go:3292`) dispatches `mouseenter` synchronously; the listener only writes a render-irrelevant `data-*` attribute, so the zero work delta still holds. The script runs during `NewSession`, before the `before` snapshot.
+Rationale: `SetHover` (`internal/engine/focus.go:3027`) dispatches `mouseenter` synchronously; the listener only writes a render-irrelevant `data-*` attribute, so the zero work delta still holds. The script runs during `NewSession`, before the `before` snapshot.
 
 - [ ] **Step 2: Run it**
 
@@ -437,9 +437,9 @@ git commit -m "test(hover): assert the no-:hover zero-delta test actually hovers
 ### Task 7: Trim comments, delete dead HoverDamageRect
 
 **Files:**
-- Modify: `cmd/goosie/interaction.go:203-210,223-225`
+- Modify: `cmd/goosie/interaction.go:188-192,203-203`
 - Modify: `internal/platform/darwin/shim_darwin.m:1102-1107`
-- Modify: `internal/engine/hover_optimization.go:9-32`
+- Modify: `internal/engine/hover_optimization.go:9-19`
 
 - [ ] **Step 1: Trim the hoverContent comments in `cmd/goosie/interaction.go`**
 

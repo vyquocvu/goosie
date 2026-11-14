@@ -926,7 +926,7 @@ and delete the old roadmap bullet from section 2. Keep the rest of section 2 unc
 
 - [ ] **Step 2: Correct the stale review lines**
 
-In `docs/engine-compatibility-review.md`, replace the claim at ~line 344 ("Every testharness.js test is skipped with the reason 'requires JS DOM' (test/wpt/curate.go:370-373)") with:
+In `docs/engine-compatibility-review.md`, replace the claim at ~line 344 ("Every testharness.js test is skipped with the reason 'requires JS DOM' (test/wpt/curate.go:325-328)") with:
 
 ```markdown
 The blanket testharness.js skip is gone: `test/wpt/curate.go` curates ~25
@@ -939,7 +939,7 @@ job now does this against the pinned commit.
 Replace the claim at ~line 354 (suite inside `go test ./...`, paid twice) with:
 
 ```markdown
-`TestWPTSuite` is opt-in (`WPT_RUN_SUITE=1`, test/wpt/wpt_test.go:63-66);
+`TestWPTSuite` is opt-in (`WPT_RUN_SUITE=1`, test/wpt/wpt_test.go:41-44);
 `go test ./...` never starts it. CI runs only the 8-pair local pilot
 (corrected 2026-11-12, SP-2 audit).
 ```
