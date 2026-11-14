@@ -621,15 +621,20 @@ func (f *framePath) finishKeyActivation(tab *tabs.Tab, focused *dom.Node, enter 
 	return true
 }
 
+func scrollScreenHeight(h int32) int32 {
+	page := h * 9 / 10
+	if page < 1 {
+		page = 1
+	}
+	return page
+}
+
 func (f *framePath) scrollContentKey(tab *tabs.Tab, key rune, shift bool) bool {
 	if f.sched == nil || tab == nil || tab.Layer() == nil {
 		return false
 	}
 	vp := f.sched.Viewport()
-	page := vp.Size.H * 9 / 10
-	if page < 1 {
-		page = 1
-	}
+	page := scrollScreenHeight(vp.Size.H)
 	switch key {
 	case ' ':
 		if shift {

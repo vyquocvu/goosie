@@ -1806,6 +1806,23 @@
     "enforced": false
   },
   {
+    "id": "BR-287",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/sequence_test.go:TestScrollScreensFlagIsRefusedWhenItCannotMeanAnything",
+      "cmd/goosie/sequence_test.go:TestSequenceScrollPhaseEndsWhenThePageDoesNotMove",
+      "cmd/goosie/sequence_test.go:TestSequenceScrollPhaseHoldsUntilTheOffsetIsDrawn",
+      "cmd/goosie/sequence_test.go:TestSequenceScrollsBeforeItCaptures",
+      "cmd/goosie/sequence_test.go:TestSequenceStillCapturesWhenThePageCannotScroll"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

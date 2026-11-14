@@ -23,6 +23,7 @@ type config struct {
 	screenshotSeq       string
 	seqCount            int
 	seqInterval         time.Duration
+	seqScrollScreens    int
 	printPDF            string
 	backend             string
 	frames              int
@@ -105,6 +106,7 @@ func parse(args []string) (config, error) {
 	fs.StringVar(&c.screenshotSeq, "screenshot-seq", "", "write a numbered PNG sequence of one -url session to a directory and exit")
 	fs.IntVar(&c.seqCount, "seq-frames", 5, "captures to write with -screenshot-seq")
 	fs.DurationVar(&c.seqInterval, "seq-interval", time.Second, "dwell between -screenshot-seq captures")
+	fs.IntVar(&c.seqScrollScreens, "seq-scroll-screens", 0, "screens to scroll with -screenshot-seq before the first capture")
 	fs.StringVar(&c.printPDF, "print-pdf", "", "export document to PDF at path and exit")
 	fs.StringVar(&c.backend, "backend", "", "window backend: headless or native (empty means whatever this machine has)")
 	fs.IntVar(&c.frames, "frames", defaultFrames, "frames to draw with -gate and -bench")
@@ -174,6 +176,11 @@ func parse(args []string) (config, error) {
 		if c.seqInterval <= 0 {
 			return c, fmt.Errorf("%w: -seq-interval must be positive", errUsage)
 		}
+		if c.seqScrollScreens < 0 {
+			return c, fmt.Errorf("%w: -seq-scroll-screens must not be negative", errUsage)
+		}
+	} else if c.seqScrollScreens > 0 {
+		return c, fmt.Errorf("%w: -seq-scroll-screens requires -screenshot-seq", errUsage)
 	}
 	if c.screenshot {
 		if c.out == "" {

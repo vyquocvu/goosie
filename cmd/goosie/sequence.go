@@ -17,21 +17,32 @@ type frameShot struct {
 	PaintingBytes int64  `json:"painting_bytes"`
 	Presents      int64  `json:"presents"`
 	Frames        int64  `json:"frames"`
+	ScrollY       int32  `json:"scroll_y"`
+}
+
+type seqScroll struct {
+	Screens int
+	Screen  func() int32
+	Scroll  func(int32)
+	Offset  func() int32
 }
 
 type sequenceReport struct {
-	URL        string      `json:"url"`
-	Started    time.Time   `json:"started"`
-	OS         string      `json:"os"`
-	Arch       string      `json:"arch"`
-	Backend    string      `json:"backend"`
-	ViewportW  int         `json:"viewport_width"`
-	ViewportH  int         `json:"viewport_height"`
-	DPR        float64     `json:"dpr"`
-	Zoom       float64     `json:"zoom"`
-	IntervalMS int64       `json:"interval_ms"`
-	Frames     []frameShot `json:"frames"`
-	Error      string      `json:"error,omitempty"`
+	URL           string      `json:"url"`
+	Started       time.Time   `json:"started"`
+	OS            string      `json:"os"`
+	Arch          string      `json:"arch"`
+	Backend       string      `json:"backend"`
+	ViewportW     int         `json:"viewport_width"`
+	ViewportH     int         `json:"viewport_height"`
+	DPR           float64     `json:"dpr"`
+	Zoom          float64     `json:"zoom"`
+	IntervalMS    int64       `json:"interval_ms"`
+	ScrollScreens int         `json:"scroll_screens"`
+	ScrollPresses int         `json:"scroll_presses"`
+	ScrollLanded  *bool       `json:"scroll_landed,omitempty"`
+	Frames        []frameShot `json:"frames"`
+	Error         string      `json:"error,omitempty"`
 }
 
 type frameSequence struct {
@@ -44,6 +55,13 @@ type frameSequence struct {
 	report   sequenceReport
 	next     time.Time
 	err      error
+	scroll   seqScroll
+	presses  int
+	awaiting bool
+	moved    bool
+	from     int32
+	drawn    int64
+	finished bool
 }
 
 func newFrameSequence(c config, dir string, count int, interval time.Duration, writePNG func(string) error, stats func() (bool, int, int64, int64, int64), zoom float64, backend string) *frameSequence {
@@ -69,8 +87,53 @@ func newFrameSequence(c config, dir string, count int, interval time.Duration, w
 	}
 }
 
+func (s *frameSequence) setScroll(sc seqScroll) {
+	s.scroll = sc
+	s.report.ScrollScreens = sc.Screens
+}
+
 func (s *frameSequence) horizon() time.Duration {
-	return time.Duration(s.count) * s.interval
+	return time.Duration(s.count+s.scroll.Screens) * s.interval
+}
+
+func (s *frameSequence) finish(landed bool) {
+	s.report.ScrollLanded = &landed
+	s.finished = true
+}
+
+func (s *frameSequence) press(drawn int64) {
+	s.from = s.scroll.Offset()
+	s.drawn = drawn
+	s.presses++
+	s.report.ScrollPresses = s.presses
+	s.scroll.Scroll(s.scroll.Screen())
+	s.awaiting = true
+}
+
+func (s *frameSequence) rolling() bool {
+	if s.scroll.Screens <= 0 || s.finished {
+		return false
+	}
+	_, _, _, _, drawn := s.stats()
+	if !s.awaiting {
+		s.press(drawn)
+		return true
+	}
+	if drawn < s.drawn+2 {
+		return true
+	}
+	s.awaiting = false
+	if s.scroll.Offset() == s.from {
+		s.finish(s.moved)
+		return false
+	}
+	s.moved = true
+	if s.presses >= s.scroll.Screens {
+		s.finish(true)
+		return false
+	}
+	s.press(drawn)
+	return true
 }
 
 func (s *frameSequence) capture(now time.Time) bool {
@@ -78,6 +141,9 @@ func (s *frameSequence) capture(now time.Time) bool {
 		return false
 	}
 	if len(s.report.Frames) > 0 && now.Before(s.next) {
+		return true
+	}
+	if s.rolling() {
 		return true
 	}
 	name := fmt.Sprintf("frame-%03d.png", len(s.report.Frames))
@@ -90,6 +156,7 @@ func (s *frameSequence) capture(now time.Time) bool {
 		PaintingBytes: painting,
 		Presents:      presents,
 		Frames:        frames,
+		ScrollY:       s.scroll.Offset(),
 	}
 	if err := s.writePNG(filepath.Join(s.dir, name)); err != nil {
 		s.err = err

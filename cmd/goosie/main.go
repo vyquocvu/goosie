@@ -805,6 +805,20 @@ func run(args []string) (runErr error) {
 				st := f.loop.Stats()
 				return st.Last.Needed == 0 && st.Last.PaintingBytes == 0, st.Last.Needed, st.Last.PaintingBytes, st.Presents, st.Frames
 			}, f.zoom, backend)
+			seq.setScroll(seqScroll{
+				Screens: c.seqScrollScreens,
+				Screen:  func() int32 { return scrollScreenHeight(f.sched.Viewport().Size.H) },
+				Scroll: func(dy int32) {
+					vp := f.sched.Viewport()
+					vp.Offset.Y += dy
+					f.sched.SetViewport(vp)
+					if sess := f.pacedSession; sess != nil {
+						at := f.sched.Viewport().Offset
+						sess.SyncViewportScroll(float64(at.X), float64(at.Y))
+					}
+				},
+				Offset: func() int32 { return f.sched.Viewport().Offset.Y },
+			})
 			sd.watchSequence(seq.capture, seq.horizon())
 		}
 		defer func() {
