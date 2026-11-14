@@ -372,6 +372,8 @@ type Runtime struct {
 	cssRuleListObjects                 map[*dom.Node]cachedCSSRuleList
 	cssomCollectionProtos              map[string]*goja.Object
 	cssomCollections                   map[*goja.Object]string
+	cssSheetOwners                     map[*goja.Object]*dom.Node
+	cssRuleWrappers                    map[*goja.Object]cssRuleInfo
 	selectorPlans                      map[string]*selectorPlan
 
 	canvasContexts map[int]*canvasContext2D

@@ -36,6 +36,25 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 	}
 	r.cssStyleRuleProto = r.vm.NewObject()
 	_ = r.cssStyleRuleProto.SetPrototype(r.cssRuleProto)
+	_ = r.cssRuleProto.DefineAccessorProperty("type", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		r.requireCSSRuleInfo(call.This)
+		return r.vm.ToValue(1)
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	_ = r.cssRuleProto.DefineAccessorProperty("cssText", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(cssRuleStyleText(r.requireCSSRuleInfo(call.This).rule))
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	_ = r.cssRuleProto.DefineAccessorProperty("parentStyleSheet", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return r.wrapCSSStyleSheet(r.requireCSSRuleInfo(call.This).owner)
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	_ = r.cssRuleProto.DefineAccessorProperty("parentRule", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		r.requireCSSRuleInfo(call.This)
+		return goja.Null()
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	_ = r.cssStyleRuleProto.DefineAccessorProperty("selectorText", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		return r.vm.ToValue(cssRuleSelectorText(r.requireCSSRuleInfo(call.This).rule))
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	r.defineInterfaceToStringTag("CSSRule", r.cssRuleProto)
+	r.defineInterfaceToStringTag("CSSStyleRule", r.cssStyleRuleProto)
 	r.cssStyleSheetProto = r.vm.NewObject()
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("cssRules", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		return r.cssRuleListForSheet(r.sheetOwner(call.This))
@@ -342,7 +361,10 @@ func (r *Runtime) wrapCSSStyleSheet(owner *dom.Node) *goja.Object {
 func (r *Runtime) cssStyleSheetObject(owner *dom.Node) *goja.Object {
 	obj := r.vm.NewObject()
 	_ = obj.SetPrototype(r.cssStyleSheetProto)
-	_ = obj.Set("__sheetOwner", r.wrapNode(owner))
+	if r.cssSheetOwners == nil {
+		r.cssSheetOwners = make(map[*goja.Object]*dom.Node)
+	}
+	r.cssSheetOwners[obj] = owner
 	return obj
 }
 
@@ -351,7 +373,7 @@ func (r *Runtime) sheetOwner(sheet goja.Value) *dom.Node {
 	if !ok {
 		return nil
 	}
-	return r.getNode(obj.Get("__sheetOwner"))
+	return r.cssSheetOwners[obj]
 }
 
 func (r *Runtime) mediaListOf(owner *dom.Node) goja.Value {
@@ -447,13 +469,45 @@ func (r *Runtime) cssRuleListForSheet(owner *dom.Node) goja.Value {
 func (r *Runtime) wrapCSSStyleRule(owner *dom.Node, rule css.Rule) *goja.Object {
 	obj := r.vm.NewObject()
 	_ = obj.SetPrototype(r.cssStyleRuleProto)
-	selectorParts := make([]string, len(rule.SelectorStrs))
-	for i, part := range rule.SelectorStrs {
-		selectorParts[i] = normalizeSelectorFunctionWhitespace(part)
+	if r.cssRuleWrappers == nil {
+		r.cssRuleWrappers = make(map[*goja.Object]cssRuleInfo)
 	}
-	selector := strings.Join(selectorParts, ", ")
-	_ = obj.Set("type", 1)
-	_ = obj.Set("selectorText", selector)
+	r.cssRuleWrappers[obj] = cssRuleInfo{owner: owner, rule: rule}
+	return obj
+}
+
+type cssRuleInfo struct {
+	owner *dom.Node
+	rule  css.Rule
+}
+
+func (r *Runtime) cssRuleInfoOf(value goja.Value) (cssRuleInfo, bool) {
+	obj, ok := value.(*goja.Object)
+	if !ok {
+		return cssRuleInfo{}, false
+	}
+	info, ok := r.cssRuleWrappers[obj]
+	return info, ok
+}
+
+func (r *Runtime) requireCSSRuleInfo(value goja.Value) cssRuleInfo {
+	info, ok := r.cssRuleInfoOf(value)
+	if !ok {
+		panic(r.vm.NewTypeError("Illegal invocation"))
+	}
+	return info
+}
+
+func cssRuleSelectorText(rule css.Rule) string {
+	parts := make([]string, len(rule.SelectorStrs))
+	for i, part := range rule.SelectorStrs {
+		parts[i] = normalizeSelectorFunctionWhitespace(part)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func cssRuleStyleText(rule css.Rule) string {
+	selector := cssRuleSelectorText(rule)
 	declarations := make([]string, 0, len(rule.Declarations))
 	for _, declaration := range rule.Declarations {
 		value := declaration.Value
@@ -462,9 +516,7 @@ func (r *Runtime) wrapCSSStyleRule(owner *dom.Node, rule css.Rule) *goja.Object 
 		}
 		declarations = append(declarations, declaration.Property+": "+value+";")
 	}
-	_ = obj.Set("cssText", selector+" { "+strings.Join(declarations, " ")+" }")
-	_ = obj.Set("parentStyleSheet", r.wrapCSSStyleSheet(owner))
-	return obj
+	return selector + " { " + strings.Join(declarations, " ") + " }"
 }
 
 func normalizeSelectorFunctionWhitespace(selector string) string {

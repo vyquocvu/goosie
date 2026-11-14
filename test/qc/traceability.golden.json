@@ -3379,6 +3379,21 @@
     "enforced": false
   },
   {
+    "id": "BR-299",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/cssom_rule_wrapper_test.go:TestCSSRuleMembersLiveOnThePrototype",
+      "test/js/cssom_rule_wrapper_test.go:TestCSSStyleRuleWrapperBrandsItsPrototype",
+      "test/js/cssom_rule_wrapper_test.go:TestStyleSheetWrapperOwnsNoInternals"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
