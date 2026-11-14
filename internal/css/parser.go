@@ -280,7 +280,7 @@ func (p *parser) parseLayerRule(sheet *Stylesheet) {
 
 func (p *parser) parseContainerRule(sheet *Stylesheet) {
 	p.pos++
-	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != '(' {
 		p.pos++
 	}
 	p.skipWhitespace()
@@ -339,7 +339,7 @@ func (p *parser) parseContainerRule(sheet *Stylesheet) {
 
 func (p *parser) parseScopeRule(sheet *Stylesheet) {
 	p.pos++
-	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' {
+	for p.pos < len(p.input) && p.input[p.pos] != ' ' && p.input[p.pos] != '\t' && p.input[p.pos] != '\n' && p.input[p.pos] != '\r' && p.input[p.pos] != '{' && p.input[p.pos] != ';' && p.input[p.pos] != '(' {
 		p.pos++
 	}
 	p.skipWhitespace()
@@ -425,7 +425,7 @@ func (p *parser) atRuleName() string {
 	p.pos++
 	for p.pos < len(p.input) {
 		c := p.input[p.pos]
-		if c == '{' || c == ';' || c == ' ' || c == '\t' || c == '\n' || c == '\r' {
+		if c == '{' || c == ';' || c == '(' || c == ' ' || c == '\t' || c == '\n' || c == '\r' {
 			break
 		}
 		p.pos++
@@ -433,6 +433,20 @@ func (p *parser) atRuleName() string {
 	name := strings.ToLower(p.input[save+1 : p.pos])
 	p.pos = save
 	return name
+}
+
+func atRuleCondition(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "@") {
+		return text
+	}
+	for i := 1; i < len(text); i++ {
+		switch text[i] {
+		case '(', '{', ';', ' ', '\t', '\n', '\r':
+			return strings.TrimSpace(text[i:])
+		}
+	}
+	return ""
 }
 
 func (p *parser) parseMediaRule(sheet *Stylesheet) {
@@ -448,12 +462,7 @@ func (p *parser) parseMediaRule(sheet *Stylesheet) {
 		p.pos++
 		return
 	}
-	cond := strings.TrimSpace(p.input[at:p.pos])
-	if sp := strings.IndexByte(cond, ' '); sp >= 0 {
-		cond = strings.TrimSpace(cond[sp+1:])
-	} else {
-		cond = strings.TrimSpace(strings.TrimPrefix(cond, "@media"))
-	}
+	cond := atRuleCondition(p.input[at:p.pos])
 	p.pos++
 	depth := 1
 	bodyStart := p.pos
@@ -506,12 +515,7 @@ func (p *parser) parseSupportsRule(sheet *Stylesheet) {
 		p.pos++
 		return
 	}
-	cond := strings.TrimSpace(p.input[at:p.pos])
-	if sp := strings.IndexByte(cond, ' '); sp >= 0 {
-		cond = strings.TrimSpace(cond[sp+1:])
-	} else {
-		cond = strings.TrimSpace(strings.TrimPrefix(cond, "@supports"))
-	}
+	cond := atRuleCondition(p.input[at:p.pos])
 	p.pos++
 	bodyStart := p.pos
 	depth := 1

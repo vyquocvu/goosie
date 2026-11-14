@@ -1836,6 +1836,28 @@
     "enforced": false
   },
   {
+    "id": "BR-289",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/at_rule_prelude_test.go:TestAtRuleConditionKeepsTheTextBeforeTheFirstParen",
+      "test/css/at_rule_prelude_test.go:TestAtRuleKeywordEndsAtThePreludeOpeningParen",
+      "test/css/at_rule_prelude_test.go:TestAtRuleWithNoPreludeIsUnchangedByTheParenRule",
+      "test/css/at_rule_prelude_test.go:TestMinifiedNestedAtRulesReachTheCascadeInSourceOrder",
+      "test/css/at_rule_prelude_test.go:TestMinifiedPreludeKeepsPrintAndAllMediaLists",
+      "test/css/at_rule_prelude_test.go:TestMinifiedPreludeKeepsTheQueryTextOfEveryAtRuleFamily",
+      "test/css/at_rule_prelude_test.go:TestMinifiedSupportsPreludeStillGatesOnTheFeature",
+      "test/css/at_rule_prelude_test.go:TestUnknownAtRuleWithAMinifiedPreludeIsStillSkipped",
+      "test/layout/grid_minified_at_rule_test.go:TestMinifiedAtRulePreludeReachesGridGeometry",
+      "test/layout/grid_minified_at_rule_test.go:TestMinifiedMediaBranchesAreSelectedByWidthNotIgnored"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [

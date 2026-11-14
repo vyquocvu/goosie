@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@supports(display:grid){.glue-grid{display:grid;grid-column-gap:28px;grid-template-columns:repeat(4,minmax(5px,1fr))}}
+@supports(display:grid){@media(min-width:600px){.glue-grid{grid-column-gap:40px;grid-template-columns:repeat(12,minmax(5px,1fr))}}}
+@supports(display:grid){.glue-grid .glue-grid__col--span-4{display:block;grid-column-end:span 4}}
+@supports(display:grid){.glue-grid .glue-grid__col--span-8{display:block;grid-column-end:span 8}}
+.glue-cards{list-style:none;margin:0;padding:0}
+body{margin:0;padding:24px;background:#ffffff;font-family:monospace;font-size:16px;color:#111111}
+.card{height:96px;padding:8px;box-sizing:border-box}
+.a{background:#c0392b}.b{background:#2980b9}.c{background:#27ae60}.d{background:#8e44ad}
+.wide{background:#f39c12}
+h2{margin:0 0 16px 0;font-size:20px;background:#dfe6e9;padding:6px}
+</style>
+</head>
+<body>
+<h2>Products</h2>
+<ul class="glue-cards glue-grid">
+<li class="glue-grid__col glue-grid__col--span-4"><div class="card a">Support</div></li>
+<li class="glue-grid__col glue-grid__col--span-4"><div class="card b">Store</div></li>
+<li class="glue-grid__col glue-grid__col--span-4"><div class="card c">Account</div></li>
+<li class="glue-grid__col glue-grid__col--span-4"><div class="card d">Access</div></li>
+</ul>
+<h2>More</h2>
+<ul class="glue-cards glue-grid">
+<li class="glue-grid__col glue-grid__col--span-8"><div class="card wide">Pixel</div></li>
+<li class="glue-grid__col glue-grid__col--span-4"><div class="card a">Gemini</div></li>
+</ul>
+</body>
+</html>

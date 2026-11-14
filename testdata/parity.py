@@ -164,7 +164,14 @@ PASS_AT = 90.0
 # a collapsed rect and a zero-size box that must paint nothing, and a soft card.  100.0% PASS
 # against 86.535% FAIL on the pre-fix binary; the corpus moved 118/119 -> 119/119 at 96.390 ->
 # 96.569 average, with the four other blurred-shadow rows improving and no row regressing.
-MIN_SCORED_FIXTURES = 119
+# 120: grid/03-minified-at-rule-cards.html (GOOSIE-ATPRELUDE-001) - the `@supports(display:grid)`
+# and `@media(min-width:600px)` blocks a shipped CSS bundle writes with no space before the prelude,
+# which the at-rule dispatcher used to read as one long keyword and skip, so the grid never reached
+# the cascade at all. Two span-4 rows and a span-8/span-4 row over a 12-column `repeat()` track list:
+# pre-fix the whole block fell back to stacked full-width bands (coverage 1.3005, worst band IoU
+# 0.7989).  99.572% PASS against 24.581% FAIL on the pre-fix binary; the corpus moved 119/120 ->
+# 120/120 at 95.971 -> 96.596 average, with this row the only one that changed.
+MIN_SCORED_FIXTURES = 120
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")
