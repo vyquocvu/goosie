@@ -21,6 +21,9 @@ type config struct {
 	gate                bool
 	bench               bool
 	screenshot          bool
+	screenshotSeq       string
+	seqCount            int
+	seqInterval         time.Duration
 	printPDF            string
 	backend             string
 	frames              int
@@ -101,7 +104,9 @@ func (c config) vsyncPeriod() time.Duration {
 // paced reports whether this run is driven by a fixed frame count rather than by a
 // person closing the window. It takes a pointer so the session-journal goroutine
 // does not copy the whole config, whose viewport fields the chrome pump resizes.
-func (c *config) paced() bool { return c.gate || c.bench || c.screenshot }
+func (c *config) paced() bool {
+	return c.gate || c.bench || c.screenshot || c.screenshotSeq != ""
+}
 
 // parse turns os.Args into a config, and rejects the combinations that would draw
 // something other than what was asked for.
@@ -112,6 +117,9 @@ func parse(args []string) (config, error) {
 	fs.BoolVar(&c.gate, "gate", false, "drive -frames scripted scroll frames at real pacing, then report")
 	fs.BoolVar(&c.bench, "bench", false, "run frames as fast as the clock allows, headless, and report the rate")
 	fs.BoolVar(&c.screenshot, "screenshot", false, "render -url to a PNG at -out and exit")
+	fs.StringVar(&c.screenshotSeq, "screenshot-seq", "", "write a numbered PNG sequence of one -url session to a directory and exit")
+	fs.IntVar(&c.seqCount, "seq-frames", 5, "captures to write with -screenshot-seq")
+	fs.DurationVar(&c.seqInterval, "seq-interval", time.Second, "dwell between -screenshot-seq captures")
 	fs.StringVar(&c.printPDF, "print-pdf", "", "export document to PDF at path and exit")
 	fs.StringVar(&c.backend, "backend", "", "window backend: headless or native (empty means whatever this machine has)")
 	fs.IntVar(&c.frames, "frames", defaultFrames, "frames to draw with -gate and -bench")
@@ -166,12 +174,23 @@ func parse(args []string) (config, error) {
 	if _, err := sceneSpec(c.scene); err != nil {
 		return c, err
 	}
-	if c.bench || c.screenshot {
+	if c.bench || c.screenshot || c.screenshotSeq != "" {
 		// A rate run that depended on a panel's refresh would report the panel, and
 		// the nightly job wants the machine. An explicit -backend still wins, so a
 		// caller who means to measure a real display can say so with -gate.
 		if fs.Lookup("backend").Value.String() == "" {
 			c.backend = platform.Headless
+		}
+	}
+	if c.screenshotSeq != "" {
+		if c.url == "" {
+			return c, fmt.Errorf("%w: -screenshot-seq requires -url", errUsage)
+		}
+		if c.seqCount < 1 {
+			return c, fmt.Errorf("%w: -seq-frames must be at least 1", errUsage)
+		}
+		if c.seqInterval <= 0 {
+			return c, fmt.Errorf("%w: -seq-interval must be positive", errUsage)
 		}
 	}
 	if c.screenshot {

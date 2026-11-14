@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const expectedCaseCount = 285
+const expectedCaseCount = 286
 
 var caseLine = regexp.MustCompile(`^- \*\*(BR-[0-9]{3}) \| (P[0-2]) \| ([^|]+) \| ([^*]+)\*\* — (.*)$`)
 

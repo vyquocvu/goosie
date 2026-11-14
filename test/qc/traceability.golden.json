@@ -1123,11 +1123,18 @@
     "id": "BR-085",
     "priority": "P1",
     "methods": [
-      "CUA",
+      "INT",
       "PARITY"
     ],
-    "status": "NOT RUN",
-    "tests": null,
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/sequence_test.go:TestSequenceFlagsAreRefusedWhenTheyCannotMeanAnything",
+      "cmd/goosie/sequence_test.go:TestSequenceHoldsOnlyAfterAFrameWorthWriting",
+      "cmd/goosie/sequence_test.go:TestSequenceOfAStaticPageIsPixelIdentical",
+      "cmd/goosie/sequence_test.go:TestSequenceRecordNamesTheConditionsItCapturedUnder",
+      "cmd/goosie/sequence_test.go:TestSequenceSeparatesARepaintingBoxFromAStaticOne",
+      "cmd/goosie/sequence_test.go:TestSequenceSpacesItsCapturesByTheInterval"
+    ],
     "enforced": false
   },
   {
@@ -1780,6 +1787,21 @@
       "test/js/cssom_collections_test.go:TestCSSOMCollectionsOwnOnlyTheirIndices",
       "test/js/cssom_collections_test.go:TestCSSOMCollectionsStayLiveThroughOneObject",
       "test/js/cssom_collections_test.go:TestMediaListReportsTheOwnersAttribute"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-286",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/live_frame_stability_test.go:TestLiveFrameStabilityRefusesAnUnrunnableRequest",
+      "test/gatecheck/live_frame_stability_test.go:TestLiveFrameStabilityScoresWithTheParityHarnessNumbers",
+      "test/gatecheck/live_frame_stability_test.go:TestLiveFrameStabilitySelftestIsGreen"
     ],
     "enforced": false
   },

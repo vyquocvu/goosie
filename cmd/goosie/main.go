@@ -862,7 +862,11 @@ func (c config) clearBrowsingData() ([]string, error) {
 	return removed, nil
 }
 
-func run(args []string) error {
+// run drives one invocation to completion. The return value is named because a
+// capture sequence writes its record on the way out: a -screenshot-seq run that
+// never got its PNGs has no evidence to grade, and that has to reach the exit
+// code rather than only the stderr line.
+func run(args []string) (runErr error) {
 	c, err := parse(args)
 	if err != nil {
 		return err
@@ -970,7 +974,7 @@ func run(args []string) error {
 		// Run so no measured frame sees an unpumped page.
 		d.watchVsync(f.pumpJS)
 		finish = d.done
-	} else if c.screenshot {
+	} else if c.screenshot || c.screenshotSeq != "" {
 		sd := newSteadyDriver(f, steadyFloorFrames)
 		f.loop = surface.NewLoop(sd, f.sched, f.composer, f.rec)
 		// Same seam as the gate driver: every vsync pumps the page before the run
@@ -994,11 +998,42 @@ func run(args []string) error {
 			return st.Rasterize, outstanding
 		})
 		finish = sd.done
+		// A sequence asks the same question the screenshot answers - is this
+		// frame worth writing - and then asks it again a second later, five
+		// times, from the one page session. It is attached to the settle law
+		// rather than to a clock of its own so that no capture can be a frame
+		// the engine would not have written.
+		var seq *frameSequence
+		if c.screenshotSeq != "" {
+			writer, ok := f.window.(interface{ WritePNG(string) error })
+			if !ok {
+				return fmt.Errorf("%w: -screenshot-seq needs a backend that can write PNGs; run it with -backend headless", errUsage)
+			}
+			if err := os.MkdirAll(c.screenshotSeq, 0o755); err != nil {
+				return fmt.Errorf("goosie: create sequence directory: %w", err)
+			}
+			backend := c.backend
+			if backend == "" {
+				backend = platform.Headless
+			}
+			seq = newFrameSequence(c, c.screenshotSeq, c.seqCount, c.seqInterval, writer.WritePNG, func() (bool, int, int64, int64, int64) {
+				st := f.loop.Stats()
+				return st.Last.Needed == 0 && st.Last.PaintingBytes == 0, st.Last.Needed, st.Last.PaintingBytes, st.Presents, st.Frames
+			}, f.zoom, backend)
+			sd.watchSequence(seq.capture, seq.horizon())
+		}
 		defer func() {
 			// After the loop exits, write the PNG from the headless window.
 			if hw, ok := f.window.(interface{ WritePNG(string) error }); ok {
-				if err := hw.WritePNG(c.out); err != nil {
-					fmt.Fprintf(os.Stderr, "goosie: write screenshot: %v\n", err)
+				if c.out != "" {
+					if err := hw.WritePNG(c.out); err != nil {
+						fmt.Fprintf(os.Stderr, "goosie: write screenshot: %v\n", err)
+					}
+				}
+			}
+			if seq != nil {
+				if err := seq.write(); err != nil && runErr == nil {
+					runErr = fmt.Errorf("goosie: screenshot sequence: %w", err)
 				}
 			}
 		}()
@@ -1094,7 +1129,7 @@ func run(args []string) error {
 	if err := <-loopErr; err != nil {
 		return fmt.Errorf("goosie: %w", err)
 	}
-	if c.screenshot {
+	if c.screenshot || c.screenshotSeq != "" {
 		return nil
 	}
 	return f.report(d)

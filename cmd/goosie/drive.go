@@ -230,6 +230,11 @@ type steadyDriver struct {
 	revealFn    func() (time.Duration, bool)
 	revealStart time.Time
 
+	// seqFn is a capture sequence's hold: it is consulted only on a frame the
+	// ordinary law already called worth writing, and it answers whether the run
+	// still owes captures. See watchSequence.
+	seqFn func(time.Time) bool
+
 	mu   sync.Mutex
 	sent int
 }
@@ -299,6 +304,22 @@ func (d *steadyDriver) turn() bool {
 	return pump()
 }
 
+// watchSequence installs the capture sequence a -screenshot-seq run records and
+// buys it the wall clock: the sequence's own horizon goes on top of the
+// screenshot deadline, because a five-frame, one-second sweep needs six seconds
+// of run and the single-PNG deadline is spent deciding one frame, not holding a
+// sequence. The hold can only ever delay the end of a run that the ordinary law
+// already wanted to end; it never makes an unsettled frame look settled, so the
+// settle law the screenshots depend on is untouched. Like the other watchers
+// this one runs on the pump's goroutine, and it is called with no lock held
+// because it writes files.
+func (d *steadyDriver) watchSequence(seq func(time.Time) bool, horizon time.Duration) {
+	d.mu.Lock()
+	d.seqFn = seq
+	d.deadline += horizon
+	d.mu.Unlock()
+}
+
 func (d *steadyDriver) Events() <-chan surface.Event { return d.out }
 
 func (d *steadyDriver) pump() {
@@ -345,15 +366,41 @@ func (d *steadyDriver) pump() {
 	}
 }
 
-// ready decides whether the run has a frame worth writing. Ending on the frame
-// count alone truncated the viewport: under the parallel load a screenshot sweep
-// puts on the machine, the vsyncs pass while whole 256px tile blocks are still
-// un-rasterized, and the PNG shows the layer background through them. So the
-// count is only the floor, and past it the run waits for frames that need no tile
-// work and hold none on order - twice in a row, because the pump sees the vsync
-// before the loop has composed the frame it names. A ceiling and a deadline keep a
-// page that never settles from hanging the run.
+// ready is the run's last question: is this the frame to end on? A capture
+// sequence gets first refusal on any frame the ordinary law would have ended
+// the run with, so a -screenshot-seq sweep records the frames it was asked for
+// before it stops, and an ordinary screenshot run answers nil and stops exactly
+// where it always did.
 func (d *steadyDriver) ready(started time.Time) bool {
+	if !d.frameReady(started) {
+		return false
+	}
+	d.mu.Lock()
+	seq := d.seqFn
+	d.mu.Unlock()
+	if seq == nil {
+		return true
+	}
+	// The ordinary law has just called this frame worth writing, so this is the
+	// moment a sequence run records. Its answer can only postpone the end.
+	if seq(time.Now()) {
+		return false
+	}
+	d.mu.Lock()
+	d.seqFn = nil
+	d.mu.Unlock()
+	return true
+}
+
+// frameReady decides whether the run has a frame worth writing. Ending on the
+// frame count alone truncated the viewport: under the parallel load a screenshot
+// sweep puts on the machine, the vsyncs pass while whole 256px tile blocks are
+// still un-rasterized, and the PNG shows the layer background through them. So
+// the count is only the floor, and past it the run waits for frames that need no
+// tile work and hold none on order - twice in a row, because the pump sees the
+// vsync before the loop has composed the frame it names. A ceiling and a deadline
+// keep a page that never settles from hanging the run.
+func (d *steadyDriver) frameReady(started time.Time) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.sent < d.n {
