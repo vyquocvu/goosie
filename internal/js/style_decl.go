@@ -455,7 +455,7 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 			if !ok {
 				return s.runtime.vm.ToValue("")
 			}
-			return s.runtime.vm.ToValue(decl.Value)
+			return s.runtime.vm.ToValue(normalizeDeclarationValue(decl.Value))
 		})
 	case "getPropertyPriority":
 		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -483,7 +483,7 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 	if !ok {
 		return nil
 	}
-	return s.runtime.vm.ToValue(decl.Value)
+	return s.runtime.vm.ToValue(normalizeDeclarationValue(decl.Value))
 }
 
 func (s *ruleStyleDeclaration) Set(key string, value goja.Value) bool {

@@ -530,18 +530,63 @@ func cssRuleSelectorText(rule css.Rule) string {
 
 func cssRuleDeclarationText(declarations []css.Declaration) string {
 	parts := make([]string, 0, len(declarations))
-	for _, declaration := range declarations {
-		value := declaration.Value
-		if declaration.Important {
-			value += " !important"
+	for _, important := range []bool{false, true} {
+		for _, declaration := range declarations {
+			if declaration.Important != important {
+				continue
+			}
+			value := normalizeDeclarationValue(declaration.Value)
+			if declaration.Important {
+				value += " !important"
+			}
+			parts = append(parts, declaration.Property+": "+value+";")
 		}
-		parts = append(parts, declaration.Property+": "+value+";")
 	}
 	return strings.Join(parts, " ")
 }
 
+func normalizeDeclarationValue(value string) string {
+	out := make([]byte, 0, len(value)+8)
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if escaped {
+			out = append(out, ch)
+			escaped = false
+			continue
+		}
+		if quote != 0 {
+			out = append(out, ch)
+			if ch == '\\' {
+				escaped = true
+			} else if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			out = append(out, ch)
+			continue
+		}
+		out = append(out, ch)
+		if ch == ',' && i+1 < len(value) {
+			next := value[i+1]
+			if next != ' ' && next != '\t' && next != '\n' && next != '\r' && next != '\f' {
+				out = append(out, ' ')
+			}
+		}
+	}
+	return string(out)
+}
+
 func cssRuleStyleText(rule css.Rule) string {
-	return cssRuleSelectorText(rule) + " { " + cssRuleDeclarationText(rule.Declarations) + " }"
+	decls := cssRuleDeclarationText(rule.Declarations)
+	if decls == "" {
+		return cssRuleSelectorText(rule) + " { }"
+	}
+	return cssRuleSelectorText(rule) + " { " + decls + " }"
 }
 
 func normalizeSelectorFunctionWhitespace(selector string) string {

@@ -3409,6 +3409,21 @@
     "enforced": false
   },
   {
+    "id": "BR-302",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/rule_serialization_test.go:TestRuleCSSTextReSerialisesDeclarationLists",
+      "test/js/rule_serialization_test.go:TestRuleStyleCSSTextSharesTheReSerialisation",
+      "test/js/rule_serialization_test.go:TestRuleStyleValueReadsReSerialise"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

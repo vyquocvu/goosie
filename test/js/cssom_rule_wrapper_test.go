@@ -99,7 +99,7 @@ func TestCSSRuleMembersLiveOnThePrototype(t *testing.T) {
 			String(sheet.cssRules[0].selectorText === 'p.a1')
 		].join(' | ')
 	`)
-	want := "function,undefined,true,true | function,undefined,true,true | function,undefined,true,true | function,undefined,true,true | function,undefined,true,true | p.a1 { color: rgb(10,0,0); } | true"
+	want := "function,undefined,true,true | function,undefined,true,true | function,undefined,true,true | function,undefined,true,true | function,undefined,true,true | p.a1 { color: rgb(10, 0, 0); } | true"
 	if got != want {
 		t.Errorf("CSSRule prototype accessors\ngot:  %s\nwant: %s", got, want)
 	}

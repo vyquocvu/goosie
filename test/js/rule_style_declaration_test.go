@@ -72,7 +72,7 @@ func TestRuleStyleReadsItsDeclarations(t *testing.T) {
 			multi.style.cssText
 		].join(' | ')
 	`)
-	want := "color: rgb(10,0,0); | 1 | rgb(10,0,0) | 3 | margin-top | font-weight | 4px | 4px | important |  | margin-top: 4px; font-weight: 700 !important; background: red;"
+	want := "color: rgb(10, 0, 0); | 1 | rgb(10, 0, 0) | 3 | margin-top | font-weight | 4px | 4px | important |  | margin-top: 4px; background: red; font-weight: 700 !important;"
 	if got != want {
 		t.Errorf("rule.style declaration reads\ngot:  %s\nwant: %s", got, want)
 	}
