@@ -3300,6 +3300,21 @@
     "enforced": false
   },
   {
+    "id": "BR-293",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/abort_signal_any_test.go:TestAbortSignalAnyComposesWithTimeoutSignal",
+      "test/js/abort_signal_any_test.go:TestAbortSignalAnyEmptyListAndBadArgument",
+      "test/js/abort_signal_any_test.go:TestAbortSignalAnyForwardsFirstAbortedSignalReasonAndEvent",
+      "test/js/abort_signal_any_test.go:TestAbortSignalAnyIsAbortedUpFrontWhenAnInputAlreadyAborted"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

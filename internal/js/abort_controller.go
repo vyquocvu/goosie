@@ -65,6 +65,50 @@ func (r *Runtime) setupAbortController() {
 		return signal
 	})
 
+	_ = signalObj.Set("any", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			panic(r.vm.NewTypeError("Failed to execute 'any' on 'AbortSignal': 1 argument required, but only 0 present."))
+		}
+		out := r.newAbortSignal(false, goja.Undefined())
+		outAbort, hasOutAbort := goja.AssertFunction(out.Get("__abort__"))
+		if !hasOutAbort {
+			panic(r.vm.NewTypeError("Failed to execute 'any' on 'AbortSignal': signal has no abort algorithm"))
+		}
+		forward := r.vm.ToValue(func(fnCall goja.FunctionCall) goja.Value {
+			source, isObject := fnCall.This.(*goja.Object)
+			if !isObject {
+				return goja.Undefined()
+			}
+			_, _ = outAbort(out, source.Get("reason"))
+			return goja.Undefined()
+		})
+		seen := make(map[*goja.Object]bool)
+		var failure error
+		r.vm.ForOf(call.Arguments[0], func(item goja.Value) bool {
+			object, isObject := item.(*goja.Object)
+			if !isObject {
+				panic(r.vm.NewTypeError("Failed to execute 'any' on 'AbortSignal': Parameter 1 is not of type 'AbortSignal'."))
+			}
+			register, ok := goja.AssertFunction(object.Get("__registerAbortAlgorithm__"))
+			if !ok {
+				panic(r.vm.NewTypeError("Failed to execute 'any' on 'AbortSignal': Parameter 1 is not of type 'AbortSignal'."))
+			}
+			if seen[object] {
+				return true
+			}
+			seen[object] = true
+			if _, err := register(object, forward); err != nil {
+				failure = err
+				return false
+			}
+			return true
+		})
+		if failure != nil {
+			panic(failure)
+		}
+		return out
+	})
+
 	_ = r.vm.Set("AbortSignal", signalObj)
 	if win := r.vm.Get("window"); win != nil {
 		if winObj, ok := win.(*goja.Object); ok {
