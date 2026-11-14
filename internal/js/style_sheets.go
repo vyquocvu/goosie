@@ -53,6 +53,13 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 	_ = r.cssStyleRuleProto.DefineAccessorProperty("selectorText", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(cssRuleSelectorText(r.requireCSSRuleInfo(call.This).rule))
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	r.cssStyleDeclarationProto = r.vm.NewObject()
+	r.defineInterfaceToStringTag("CSSStyleDeclaration", r.cssStyleDeclarationProto)
+	_ = r.cssStyleRuleProto.DefineAccessorProperty("style", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		r.requireCSSRuleInfo(call.This)
+		obj, _ := call.This.(*goja.Object)
+		return r.ruleStyleDeclaration(obj)
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	r.defineInterfaceToStringTag("CSSRule", r.cssRuleProto)
 	r.defineInterfaceToStringTag("CSSStyleRule", r.cssStyleRuleProto)
 	r.cssStyleSheetProto = r.vm.NewObject()
@@ -498,6 +505,21 @@ func (r *Runtime) requireCSSRuleInfo(value goja.Value) cssRuleInfo {
 	return info
 }
 
+func (r *Runtime) ruleStyleDeclaration(ruleWrapper *goja.Object) *goja.Object {
+	if r.ruleStyleObjects == nil {
+		r.ruleStyleObjects = make(map[*goja.Object]*goja.Object)
+	}
+	if obj := r.ruleStyleObjects[ruleWrapper]; obj != nil {
+		return obj
+	}
+	obj := r.vm.NewDynamicObject(&ruleStyleDeclaration{runtime: r, ruleWrapper: ruleWrapper})
+	if r.cssStyleDeclarationProto != nil {
+		_ = obj.SetPrototype(r.cssStyleDeclarationProto)
+	}
+	r.ruleStyleObjects[ruleWrapper] = obj
+	return obj
+}
+
 func cssRuleSelectorText(rule css.Rule) string {
 	parts := make([]string, len(rule.SelectorStrs))
 	for i, part := range rule.SelectorStrs {
@@ -506,17 +528,20 @@ func cssRuleSelectorText(rule css.Rule) string {
 	return strings.Join(parts, ", ")
 }
 
-func cssRuleStyleText(rule css.Rule) string {
-	selector := cssRuleSelectorText(rule)
-	declarations := make([]string, 0, len(rule.Declarations))
-	for _, declaration := range rule.Declarations {
+func cssRuleDeclarationText(declarations []css.Declaration) string {
+	parts := make([]string, 0, len(declarations))
+	for _, declaration := range declarations {
 		value := declaration.Value
 		if declaration.Important {
 			value += " !important"
 		}
-		declarations = append(declarations, declaration.Property+": "+value+";")
+		parts = append(parts, declaration.Property+": "+value+";")
 	}
-	return selector + " { " + strings.Join(declarations, " ") + " }"
+	return strings.Join(parts, " ")
+}
+
+func cssRuleStyleText(rule css.Rule) string {
+	return cssRuleSelectorText(rule) + " { " + cssRuleDeclarationText(rule.Declarations) + " }"
 }
 
 func normalizeSelectorFunctionWhitespace(selector string) string {

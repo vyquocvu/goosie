@@ -3394,6 +3394,21 @@
     "enforced": false
   },
   {
+    "id": "BR-301",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/rule_style_declaration_test.go:TestRuleStyleAbsentAndUnindexedReads",
+      "test/js/rule_style_declaration_test.go:TestRuleStyleIsACssStyleDeclaration",
+      "test/js/rule_style_declaration_test.go:TestRuleStyleReadsItsDeclarations"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

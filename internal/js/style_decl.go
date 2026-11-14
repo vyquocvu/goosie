@@ -398,3 +398,123 @@ func cssNameFromJS(name string) string {
 	}
 	return normalizeInlineProperty(b.String())
 }
+
+type ruleStyleDeclaration struct {
+	runtime     *Runtime
+	ruleWrapper *goja.Object
+}
+
+func (s *ruleStyleDeclaration) declarations() []css.Declaration {
+	if s == nil || s.runtime == nil {
+		return nil
+	}
+	info, ok := s.runtime.cssRuleWrappers[s.ruleWrapper]
+	if !ok {
+		return nil
+	}
+	return info.rule.Declarations
+}
+
+func ruleDeclarationValue(decls []css.Declaration, name string) (css.Declaration, bool) {
+	name = normalizeInlineProperty(name)
+	for i := len(decls) - 1; i >= 0; i-- {
+		if sameInlineProperty(decls[i].Property, name) {
+			return decls[i], true
+		}
+	}
+	return css.Declaration{}, false
+}
+
+func (s *ruleStyleDeclaration) Get(key string) goja.Value {
+	if s == nil || s.runtime == nil || s.runtime.vm == nil {
+		return nil
+	}
+	decls := s.declarations()
+	switch key {
+	case "cssText":
+		return s.runtime.vm.ToValue(cssRuleDeclarationText(decls))
+	case "length":
+		return s.runtime.vm.ToValue(len(decls))
+	case "item":
+		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return s.runtime.vm.ToValue("")
+			}
+			i, err := strconv.Atoi(call.Arguments[0].String())
+			if err != nil || i < 0 || i >= len(decls) {
+				return s.runtime.vm.ToValue("")
+			}
+			return s.runtime.vm.ToValue(decls[i].Property)
+		})
+	case "getPropertyValue":
+		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return s.runtime.vm.ToValue("")
+			}
+			decl, ok := ruleDeclarationValue(decls, call.Arguments[0].String())
+			if !ok {
+				return s.runtime.vm.ToValue("")
+			}
+			return s.runtime.vm.ToValue(decl.Value)
+		})
+	case "getPropertyPriority":
+		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return s.runtime.vm.ToValue("")
+			}
+			decl, ok := ruleDeclarationValue(decls, call.Arguments[0].String())
+			if !ok || !decl.Important {
+				return s.runtime.vm.ToValue("")
+			}
+			return s.runtime.vm.ToValue("important")
+		})
+	}
+	if i, err := strconv.Atoi(key); err == nil {
+		if i >= 0 && i < len(decls) {
+			return s.runtime.vm.ToValue(decls[i].Property)
+		}
+		return nil
+	}
+	name := cssNameFromJS(key)
+	if name == "" {
+		return nil
+	}
+	decl, ok := ruleDeclarationValue(decls, name)
+	if !ok {
+		return nil
+	}
+	return s.runtime.vm.ToValue(decl.Value)
+}
+
+func (s *ruleStyleDeclaration) Set(key string, value goja.Value) bool {
+	return false
+}
+
+func (s *ruleStyleDeclaration) Has(key string) bool {
+	switch key {
+	case "cssText", "length", "item", "getPropertyValue", "getPropertyPriority":
+		return true
+	}
+	if i, err := strconv.Atoi(key); err == nil {
+		return i >= 0 && i < len(s.declarations())
+	}
+	name := cssNameFromJS(key)
+	if name == "" {
+		return false
+	}
+	_, ok := ruleDeclarationValue(s.declarations(), name)
+	return ok
+}
+
+func (s *ruleStyleDeclaration) Delete(key string) bool {
+	return false
+}
+
+func (s *ruleStyleDeclaration) Keys() []string {
+	decls := s.declarations()
+	keys := make([]string, len(decls))
+	for i := range decls {
+		keys[i] = strconv.Itoa(i)
+	}
+	return keys
+}

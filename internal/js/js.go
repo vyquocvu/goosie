@@ -235,6 +235,7 @@ type Runtime struct {
 	cssStyleSheetProto                 *goja.Object
 	cssRuleProto                       *goja.Object
 	cssStyleRuleProto                  *goja.Object
+	cssStyleDeclarationProto           *goja.Object
 	fileListProto                      *goja.Object
 	characterDataProto                 *goja.Object
 	textProto                          *goja.Object
@@ -374,6 +375,7 @@ type Runtime struct {
 	cssomCollections                   map[*goja.Object]string
 	cssSheetOwners                     map[*goja.Object]*dom.Node
 	cssRuleWrappers                    map[*goja.Object]cssRuleInfo
+	ruleStyleObjects                   map[*goja.Object]*goja.Object
 	selectorPlans                      map[string]*selectorPlan
 
 	canvasContexts map[int]*canvasContext2D
