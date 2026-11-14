@@ -3713,6 +3713,21 @@
     "enforced": false
   },
   {
+    "id": "BR-300",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/accessibility_heading_level_test.go:TestAccessibilityHeadingLevelDefaultsAndIgnoresOutOfRangeAriaLevel",
+      "test/engine/accessibility_heading_level_test.go:TestAccessibilityHeadingLevelHonoursValidAriaLevel",
+      "test/engine/accessibility_heading_level_test.go:TestAccessibilityNativeHeadingsCarryTheirLevel"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-145",
     "priority": "P1",
     "methods": [

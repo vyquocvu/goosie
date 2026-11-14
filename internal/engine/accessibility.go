@@ -2,6 +2,7 @@ package engine
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/vyquocvu/goosie/internal/ax"
@@ -116,6 +117,9 @@ func (s *Session) appendAccessibilityNodesWithoutLayout(root *ax.Node) {
 					item := ax.Node{
 						Role: role, RoleName: standardName, DOMNodeID: uint64(node.ID),
 						ID: node.GetAttribute("id"), Label: name,
+					}
+					if role == ax.RoleHeading {
+						item.Level = headingLevel(node)
 					}
 					parentAX := root
 					for parent := node.Parent; parent != nil; parent = parent.Parent {
@@ -264,6 +268,9 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			}
 			accessible := emit(role, name, "", "")
 			accessible.RoleName = standardName
+			if role == ax.RoleHeading {
+				accessible.Level = headingLevel(n)
+			}
 			return accessible, axBubble{}
 		}
 	}
@@ -302,7 +309,9 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 		if text := optionTextValue(n.TextContent()); text != "" {
 			label = text
 		}
-		return emit(ax.RoleHeading, label, "", ""), axBubble{}
+		node := emit(ax.RoleHeading, label, "", "")
+		node.Level = headingLevel(n)
+		return node, axBubble{}
 	case dom.AtomA:
 		if href := n.GetAttribute("href"); href != "" && visible {
 			return emit(ax.RoleLink, label, "", href), axBubble{}
@@ -545,6 +554,30 @@ func elementInternalsAXRole(role string) (ax.Role, string, bool) {
 		}
 	}
 	return 0, "", false
+}
+
+func headingLevel(n *dom.Node) int {
+	implicit := 2
+	switch n.DataAtom {
+	case dom.AtomH1:
+		implicit = 1
+	case dom.AtomH2:
+		implicit = 2
+	case dom.AtomH3:
+		implicit = 3
+	case dom.AtomH4:
+		implicit = 4
+	case dom.AtomH5:
+		implicit = 5
+	case dom.AtomH6:
+		implicit = 6
+	}
+	if raw := strings.TrimSpace(n.GetAttribute("aria-level")); raw != "" {
+		if level, err := strconv.Atoi(raw); err == nil && level >= 1 && level <= 6 {
+			return level
+		}
+	}
+	return implicit
 }
 
 func (b *axBuilder) associatedLabel(n *dom.Node) string {

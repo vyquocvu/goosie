@@ -93,6 +93,7 @@ type Node struct {
 	Disabled   bool
 	AddressBar bool
 	Focused    bool
+	Level      int
 	Props      []Prop
 
 	X0, Y0, X1, Y1 float32
