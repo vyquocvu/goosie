@@ -3257,6 +3257,20 @@
     "enforced": false
   },
   {
+    "id": "BR-290",
+    "priority": "P1",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "internal/js/base64_window_test.go:TestAtobIgnoresAsciiWhitespaceAndOptionalPadding",
+      "internal/js/base64_window_test.go:TestBtoaAtobRoundTripKnownVectors",
+      "internal/js/base64_window_test.go:TestBtoaRejectsAboveLatin1AndAtobRejectsBadLength"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

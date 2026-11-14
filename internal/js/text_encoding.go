@@ -1,6 +1,7 @@
 package js
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"strings"
@@ -145,4 +146,69 @@ func (r *Runtime) setupTextEncoding() {
 			_ = winObj.Set("TextDecoder", decVal)
 		}
 	}
+
+	_ = r.installGlobal("btoa", r.vm.ToValue(r.base64Encode))
+	_ = r.installGlobal("atob", r.vm.ToValue(r.base64Decode))
+}
+
+func (r *Runtime) installGlobal(name string, val goja.Value) error {
+	if err := r.vm.Set(name, val); err != nil {
+		return err
+	}
+	if win := r.vm.Get("window"); win != nil {
+		if winObj, ok := win.(*goja.Object); ok {
+			_ = winObj.Set(name, val)
+		}
+	}
+	return nil
+}
+
+func (r *Runtime) base64Encode(call goja.FunctionCall) goja.Value {
+	var input string
+	if len(call.Arguments) >= 1 {
+		input = call.Arguments[0].String()
+	}
+	octets := make([]byte, 0, len(input))
+	for _, ru := range input {
+		if ru > 0xFF {
+			panic(r.newDOMExceptionValue("InvalidCharacterError", "The string to be encoded contains characters outside of the Latin1 range."))
+		}
+		octets = append(octets, byte(ru))
+	}
+	return r.vm.ToValue(base64.StdEncoding.EncodeToString(octets))
+}
+
+func (r *Runtime) base64Decode(call goja.FunctionCall) goja.Value {
+	var input string
+	if len(call.Arguments) >= 1 {
+		input = call.Arguments[0].String()
+	}
+	var compact strings.Builder
+	for _, ru := range input {
+		switch ru {
+		case ' ', '\t', '\n', '\r', '\f':
+			continue
+		default:
+			compact.WriteRune(ru)
+		}
+	}
+	data := compact.String()
+	if len(data) == 0 {
+		return r.vm.ToValue("")
+	}
+	if len(data)%4 == 1 {
+		panic(r.newDOMExceptionValue("InvalidCharacterError", "The string to be decoded is not correctly encoded."))
+	}
+	if pad := len(data) % 4; pad != 0 {
+		data += strings.Repeat("=", 4-pad)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil {
+		panic(r.newDOMExceptionValue("InvalidCharacterError", "The string to be decoded is not correctly encoded."))
+	}
+	runes := make([]rune, len(decoded))
+	for i, b := range decoded {
+		runes[i] = rune(b)
+	}
+	return r.vm.ToValue(string(runes))
 }
