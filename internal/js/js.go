@@ -564,6 +564,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupClipboard()
 	r.setupBroadcastChannel()
 	r.setupMessageChannel()
+	r.setupStructuredClone()
 	r.setupCSS()
 	r.setupDragDrop()
 	r.setupMicrodata()

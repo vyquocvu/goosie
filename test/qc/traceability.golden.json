@@ -3285,6 +3285,21 @@
     "enforced": false
   },
   {
+    "id": "BR-292",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/structured_clone_test.go:TestStructuredCloneDeepCopiesSupportedTypes",
+      "test/js/structured_clone_test.go:TestStructuredCloneDetachesTransferredArrayBuffer",
+      "test/js/structured_clone_test.go:TestStructuredClonePreservesSharedAndCyclicReferences",
+      "test/js/structured_clone_test.go:TestStructuredCloneThrowsDataCloneErrorForUncloneableValues"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
