@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// qc:BR-286
+// qc:BR-286 BR-288
 func TestLiveFrameStabilitySelftestIsGreen(t *testing.T) {
 	py := parityPython(t)
 	root := parityRepoRoot(t)

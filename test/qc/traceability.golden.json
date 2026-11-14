@@ -1823,6 +1823,19 @@
     "enforced": false
   },
   {
+    "id": "BR-288",
+    "priority": "P1",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/gatecheck/live_frame_stability_test.go:TestLiveFrameStabilitySelftestIsGreen"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-088",
     "priority": "P0",
     "methods": [
