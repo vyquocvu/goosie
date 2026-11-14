@@ -33,6 +33,7 @@ type Session struct {
 	metrics     layout.Metrics
 	viewportW   float32
 	viewportH   float32
+	dpr         float32
 	linkBase    string
 	linker      CSSLinker
 	documentURL string
@@ -245,6 +246,14 @@ func WithViewportH(h float32) Option {
 	}
 }
 
+func WithDevicePixelRatio(dpr float32) Option {
+	return func(s *Session) {
+		if validateScale(float64(dpr)) == nil {
+			s.dpr = dpr
+		}
+	}
+}
+
 func validateDocumentTreeLimits(doc *dom.Document, limits dom.ParseLimits) error {
 	if doc == nil {
 		return fmt.Errorf("pre-parsed document is nil")
@@ -428,6 +437,9 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 		return nil, err
 	}
 	s.viewportW = viewportW
+	if s.dpr <= 0 {
+		s.dpr = 1.0
+	}
 	if len(html) > MaxDocumentBytes {
 		return nil, fmt.Errorf("HTML byte limit exceeded (%d)", MaxDocumentBytes)
 	}
@@ -611,6 +623,7 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		s.jsRT.SetImageLoader(s)
 		s.jsRT.SetImagePixelSink(s.retainScriptImage)
 		s.jsRT.SetViewportRect(0, 0, s.viewportW, s.viewportH)
+		s.jsRT.SetDevicePixelRatio(float64(s.dpr))
 		s.jsRT.ChainActiveElementProvider(s.ActiveElement)
 		s.jsRT.ChainOnFocusChange(func(node *dom.Node, focused bool) {
 			if focused {
@@ -1390,6 +1403,18 @@ func (s *Session) Viewport() (w, h float32) {
 	return s.viewportW, s.viewportH
 }
 
+func (s *Session) SetDevicePixelRatio(dpr float32) {
+	if s == nil || validateScale(float64(dpr)) != nil {
+		return
+	}
+	s.opMu.Lock()
+	s.dpr = dpr
+	s.opMu.Unlock()
+	if s.jsRT != nil {
+		s.jsRT.SetDevicePixelRatio(float64(dpr))
+	}
+}
+
 func (s *Session) Reflow(viewportW float32) error {
 	s.opMu.Lock()
 	defer s.opMu.Unlock()
@@ -1498,6 +1523,7 @@ func (s *Session) Reflow(viewportW float32) error {
 		s.imgMu.Unlock()
 		imgLocked = false
 		s.jsRT.SetViewportRect(0, 0, s.viewportW, s.viewportH)
+		s.jsRT.SetDevicePixelRatio(float64(s.dpr))
 		for i := range candidate.Objects {
 			if n := candidate.Objects[i].Node; n != nil {
 				s.jsRT.SetElementRect(int(n.ID), candidate.Objects[i].X, candidate.Objects[i].Y, candidate.Objects[i].W, candidate.Objects[i].H)

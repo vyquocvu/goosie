@@ -441,6 +441,9 @@ type Runtime struct {
 	scrollQueued    map[*dom.Node]bool
 	scrollQueue     []*dom.Node
 
+	dprMu            sync.Mutex
+	devicePixelRatio float64
+
 	winMu                 sync.Mutex
 	winListeners          []*windowListener
 	ready                 string
@@ -515,6 +518,7 @@ func New(opts Options) (*Runtime, error) {
 		dataTransferItemIndexCount: make(map[*goja.Object]int),
 		dataTransferItemLists:      make(map[*goja.Object]dataTransferItemListBinding),
 		dataTransferTypesCache:     make(map[*goja.Object]dataTransferTypesCacheEntry),
+		devicePixelRatio:           1.0,
 	}
 
 	r.setupConsole(consoleWriter)

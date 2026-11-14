@@ -113,6 +113,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		sessOpts := []engine.Option{
 			engine.WithMetrics(fonts),
 			engine.WithViewportH(float32(viewportH)),
+			engine.WithDevicePixelRatio(scale),
 			engine.WithDarkMode(appMode.dark),
 			engine.WithHighContrast(appMode.highContrast),
 		}
@@ -182,6 +183,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			sessOpts := []engine.Option{
 				engine.WithMetrics(fonts),
 				engine.WithViewportH(float32(viewportH)),
+				engine.WithDevicePixelRatio(scale),
 				engine.WithDarkMode(appMode.dark),
 				engine.WithHighContrast(appMode.highContrast),
 			}
@@ -539,6 +541,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	sessOpts := []engine.Option{
 		engine.WithMetrics(fonts),
 		engine.WithViewportH(float32(viewportH)),
+		engine.WithDevicePixelRatio(scale),
 		engine.WithLinkedCSS(resp.URL, linker),
 		engine.WithScripts(resp.URL, scriptFetcher),
 		engine.WithIFrameDocumentLoader(iframeFetcher),

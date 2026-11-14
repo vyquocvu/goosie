@@ -2,6 +2,7 @@ package js
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/dop251/goja"
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -722,6 +723,13 @@ func (r *Runtime) installWindowScrollMethods() {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 
+	_ = win.DefineAccessorProperty("devicePixelRatio", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		r.dprMu.Lock()
+		v := r.devicePixelRatio
+		r.dprMu.Unlock()
+		return r.vm.ToValue(v)
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+
 	for _, prop := range []string{"scrollX", "pageXOffset"} {
 		prop := prop
 		_ = win.DefineAccessorProperty(prop, r.vm.ToValue(func(goja.FunctionCall) goja.Value {
@@ -748,6 +756,15 @@ func (r *Runtime) installWindowScrollMethods() {
 			return goja.Undefined()
 		})
 	}
+}
+
+func (r *Runtime) SetDevicePixelRatio(dpr float64) {
+	if !(dpr > 0) || math.IsInf(dpr, 0) {
+		return
+	}
+	r.dprMu.Lock()
+	r.devicePixelRatio = dpr
+	r.dprMu.Unlock()
 }
 
 func (r *Runtime) handleWindowScroll(method string, call goja.FunctionCall) {

@@ -3345,6 +3345,25 @@
     "enforced": false
   },
   {
+    "id": "BR-297",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/device_pixel_ratio_test.go:TestDocumentReadsPlumbedDevicePixelRatio",
+      "test/engine/device_pixel_ratio_test.go:TestSessionDevicePixelRatioDefaultsToOne",
+      "test/engine/device_pixel_ratio_test.go:TestSessionDevicePixelRatioFollowsTheOptionAndZoom",
+      "test/js/device_pixel_ratio_test.go:TestDevicePixelRatioIsANumberByDefault",
+      "test/js/device_pixel_ratio_test.go:TestDevicePixelRatioIsReadOnly",
+      "test/js/device_pixel_ratio_test.go:TestDevicePixelRatioRejectsInvalidValues",
+      "test/js/device_pixel_ratio_test.go:TestDevicePixelRatioTracksTheConfiguredRatio"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

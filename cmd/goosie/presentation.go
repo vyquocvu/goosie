@@ -56,6 +56,7 @@ func (f *framePath) handleResize(contentW, contentH int) {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		return
 	}
+	tab.Session().SetDevicePixelRatio(f.effectiveScale())
 
 	f.repaintTab(tab, frame.Rect{})
 }
