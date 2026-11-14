@@ -3315,6 +3315,20 @@
     "enforced": false
   },
   {
+    "id": "BR-294",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/date_gmt_string_test.go:TestDateToGMTStringIsAFunctionOnThePrototype",
+      "test/js/date_gmt_string_test.go:TestDateToGMTStringMatchesToUTCString",
+      "test/js/date_gmt_string_test.go:TestDateToGMTStringRejectsNonDateReceiver"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

@@ -546,6 +546,7 @@ func New(opts Options) (*Runtime, error) {
 	r.setupResponse()
 	r.setupFormData()
 	r.setupAbortController()
+	r.setupDateLegacyAliases()
 	r.setupCrypto()
 	r.setupPerformance()
 	r.setupHistory()
