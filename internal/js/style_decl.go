@@ -143,7 +143,7 @@ func (s *inlineStyleDeclaration) Get(key string) goja.Value {
 		}
 		return nil
 	}
-	name := cssNameFromJS(key)
+	name := idlCSSPropertyName(key)
 	if name == "" {
 		return nil
 	}
@@ -162,7 +162,7 @@ func (s *inlineStyleDeclaration) Set(key string, value goja.Value) bool {
 	if key == "length" || key == "item" || key == "getPropertyValue" || key == "getPropertyPriority" || key == "setProperty" || key == "removeProperty" {
 		return false
 	}
-	name := cssNameFromJS(key)
+	name := idlCSSPropertyName(key)
 	if name == "" {
 		return false
 	}
@@ -178,7 +178,7 @@ func (s *inlineStyleDeclaration) Has(key string) bool {
 	if i, err := strconv.Atoi(key); err == nil {
 		return i >= 0 && i < len(parseInlineStyle(s.node.GetAttribute("style")))
 	}
-	return cssNameFromJS(key) != ""
+	return idlCSSPropertyName(key) != ""
 }
 
 func (s *inlineStyleDeclaration) Delete(key string) bool {
@@ -192,7 +192,7 @@ func (s *inlineStyleDeclaration) Delete(key string) bool {
 		}
 		return true
 	}
-	name := cssNameFromJS(key)
+	name := idlCSSPropertyName(key)
 	if name != "" {
 		s.replaceProperty(name, "", "", true)
 	}
@@ -396,6 +396,13 @@ func isJSIntrinsicKey(key string) bool {
 	return false
 }
 
+func idlCSSPropertyName(key string) string {
+	if key == "cssFloat" {
+		return "float"
+	}
+	return cssNameFromJS(key)
+}
+
 func cssNameFromJS(name string) string {
 	if name == "" {
 		return ""
@@ -588,7 +595,7 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 		}
 		return nil
 	}
-	name := cssNameFromJS(key)
+	name := idlCSSPropertyName(key)
 	if name == "" {
 		return nil
 	}
@@ -612,7 +619,7 @@ func (s *ruleStyleDeclaration) Set(key string, value goja.Value) bool {
 		s.store(ruleDeclarationListFromText(text))
 		return true
 	}
-	name := cssNameFromJS(key)
+	name := idlCSSPropertyName(key)
 	if name == "" {
 		return false
 	}
@@ -628,7 +635,7 @@ func (s *ruleStyleDeclaration) Has(key string) bool {
 	if i, err := strconv.Atoi(key); err == nil {
 		return i >= 0 && i < len(s.declarations())
 	}
-	name := cssNameFromJS(key)
+	name := idlCSSPropertyName(key)
 	if name == "" {
 		return false
 	}
@@ -651,7 +658,7 @@ func (s *ruleStyleDeclaration) Delete(key string) bool {
 		s.store(out)
 		return true
 	}
-	name := cssNameFromJS(key)
+	name := idlCSSPropertyName(key)
 	if name == "" {
 		return false
 	}
