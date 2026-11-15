@@ -71,3 +71,38 @@ func TestStructuredCloneDetachesTransferredArrayBuffer(t *testing.T) {
 		t.Errorf("structuredClone transfer: %v", err)
 	}
 }
+
+// qc:BR-308
+func TestStructuredClonePreservesMapAndSetCollections(t *testing.T) {
+	r := newDOMRuntime(t, testDOM(t))
+	if err := r.Run(`
+		function chk(cond, msg) { if (!cond) throw new Error(msg); }
+		const src = new Map([["k","v"],[2,{a:1}]]);
+		const m = structuredClone(src);
+		chk(Object.prototype.toString.call(m) === "[object Map]", "clone is not branded [object Map]");
+		chk(m instanceof Map, "clone lost instanceof Map");
+		chk(m.size === 2, "Map size wrong");
+		chk(m.get("k") === "v", "Map lost string-keyed entry");
+		chk(m.get(2) && m.get(2).a === 1, "Map lost number-keyed object value");
+		chk(m.get(2) !== src.get(2), "Map value aliases the source object");
+		src.get(2).a = 99;
+		chk(m.get(2).a === 1, "Map value is not independent of source");
+		const s = structuredClone(new Set([1,2,3]));
+		chk(Object.prototype.toString.call(s) === "[object Set]", "clone is not branded [object Set]");
+		chk(s instanceof Set, "clone lost instanceof Set");
+		chk(s.size === 3 && s.has(2) && !s.has(4), "Set contents wrong");
+		const nested = new Map([["o",{x:1}]]);
+		const cn = structuredClone(nested);
+		chk(cn.get("o") !== nested.get("o") && cn.get("o").x === 1, "Map nested value not deep-cloned");
+		const shared = { v: 1 };
+		const sm = structuredClone(new Map([["a", shared], ["b", shared]]));
+		chk(sm.get("a") === sm.get("b") && sm.get("a") !== shared, "Map lost shared-reference identity");
+		const cyc = new Map(); cyc.set("self", cyc);
+		const cc = structuredClone(cyc);
+		chk(cc instanceof Map && cc.get("self") === cc, "Map cycle not preserved");
+		chk(structuredClone(new Map()).size === 0, "empty Map clone wrong size");
+		chk(structuredClone(new Set()).size === 0, "empty Set clone wrong size");
+	`, "inline"); err != nil {
+		t.Errorf("structuredClone Map/Set: %v", err)
+	}
+}

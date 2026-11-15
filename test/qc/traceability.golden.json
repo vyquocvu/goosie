@@ -3474,6 +3474,18 @@
     "enforced": false
   },
   {
+    "id": "BR-308",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/structured_clone_test.go:TestStructuredClonePreservesMapAndSetCollections"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

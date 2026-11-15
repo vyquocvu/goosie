@@ -316,6 +316,16 @@ func (c *messageValueCloner) clone(value goja.Value, depth int) (goja.Value, err
 	if c.nodes > maxBroadcastCloneNodes {
 		return nil, errBroadcastDataClone
 	}
+	if mapCtor := c.source.vm.Get("Map"); mapCtor != nil && !goja.IsUndefined(mapCtor) && !goja.IsNull(mapCtor) {
+		if ctorObj, ok := mapCtor.(*goja.Object); ok && c.source.vm.InstanceOf(object, ctorObj) {
+			return c.cloneMapEntries(object, object.Get("size"), depth)
+		}
+	}
+	if setCtor := c.source.vm.Get("Set"); setCtor != nil && !goja.IsUndefined(setCtor) && !goja.IsNull(setCtor) {
+		if ctorObj, ok := setCtor.(*goja.Object); ok && c.source.vm.InstanceOf(object, ctorObj) {
+			return c.cloneSetMembers(object, object.Get("size"), depth)
+		}
+	}
 	if buffer, ok := object.Export().(goja.ArrayBuffer); ok {
 		if buffer.Detached() {
 			return nil, errBroadcastDataClone
@@ -534,6 +544,102 @@ func (c *messageValueCloner) clone(value goja.Value, depth int) (goja.Value, err
 	default:
 		return nil, errBroadcastDataClone
 	}
+}
+
+func (c *messageValueCloner) cloneMapEntries(object *goja.Object, sizeValue goja.Value, depth int) (goja.Value, error) {
+	size := sizeValue.ToInteger()
+	if size < 0 || size > maxBroadcastCloneNodes {
+		return nil, errBroadcastDataClone
+	}
+	destCtor, ok := c.destination.vm.Get("Map").(*goja.Object)
+	if !ok {
+		return nil, errBroadcastDataClone
+	}
+	cloned, err := c.destination.vm.New(destCtor)
+	if err != nil {
+		return nil, errBroadcastDataClone
+	}
+	c.seen[object] = cloned
+	setFn, ok := goja.AssertFunction(cloned.Get("set"))
+	if !ok {
+		return nil, errBroadcastDataClone
+	}
+	_ = c.source.vm.Set("__cloneSource__", object)
+	entriesValue, err := c.source.vm.RunString("Array.from(__cloneSource__.entries())")
+	_ = c.source.vm.Set("__cloneSource__", nil)
+	if err != nil {
+		return nil, errBroadcastDataClone
+	}
+	entries, ok := entriesValue.(*goja.Object)
+	if !ok {
+		return nil, errBroadcastDataClone
+	}
+	length := entries.Get("length").ToInteger()
+	if length < 0 || length > maxBroadcastCloneNodes {
+		return nil, errBroadcastDataClone
+	}
+	for index := int64(0); index < length; index++ {
+		pair, ok := entries.Get(strconv.FormatInt(index, 10)).(*goja.Object)
+		if !ok {
+			return nil, errBroadcastDataClone
+		}
+		key, err := c.clone(pair.Get("0"), depth+1)
+		if err != nil {
+			return nil, err
+		}
+		value, err := c.clone(pair.Get("1"), depth+1)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := setFn(cloned, key, value); err != nil {
+			return nil, errBroadcastDataClone
+		}
+	}
+	return cloned, nil
+}
+
+func (c *messageValueCloner) cloneSetMembers(object *goja.Object, sizeValue goja.Value, depth int) (goja.Value, error) {
+	size := sizeValue.ToInteger()
+	if size < 0 || size > maxBroadcastCloneNodes {
+		return nil, errBroadcastDataClone
+	}
+	destCtor, ok := c.destination.vm.Get("Set").(*goja.Object)
+	if !ok {
+		return nil, errBroadcastDataClone
+	}
+	cloned, err := c.destination.vm.New(destCtor)
+	if err != nil {
+		return nil, errBroadcastDataClone
+	}
+	c.seen[object] = cloned
+	addFn, ok := goja.AssertFunction(cloned.Get("add"))
+	if !ok {
+		return nil, errBroadcastDataClone
+	}
+	_ = c.source.vm.Set("__cloneSource__", object)
+	valuesValue, err := c.source.vm.RunString("Array.from(__cloneSource__)")
+	_ = c.source.vm.Set("__cloneSource__", nil)
+	if err != nil {
+		return nil, errBroadcastDataClone
+	}
+	values, ok := valuesValue.(*goja.Object)
+	if !ok {
+		return nil, errBroadcastDataClone
+	}
+	length := values.Get("length").ToInteger()
+	if length < 0 || length > maxBroadcastCloneNodes {
+		return nil, errBroadcastDataClone
+	}
+	for index := int64(0); index < length; index++ {
+		member, err := c.clone(values.Get(strconv.FormatInt(index, 10)), depth+1)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := addFn(cloned, member); err != nil {
+			return nil, errBroadcastDataClone
+		}
+	}
+	return cloned, nil
 }
 
 func cloneMessageValueWithTransfers(source, destination *Runtime, value goja.Value, transfers map[*goja.Object]goja.Value) (goja.Value, error) {
