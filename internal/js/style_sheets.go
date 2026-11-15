@@ -56,6 +56,32 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	r.cssStyleDeclarationProto = r.vm.NewObject()
 	r.defineInterfaceToStringTag("CSSStyleDeclaration", r.cssStyleDeclarationProto)
+	_ = r.cssStyleDeclarationProto.DefineDataPropertySymbol(goja.SymIterator, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		self, ok := call.This.(*goja.Object)
+		if !ok {
+			return r.vm.NewArray()
+		}
+		length := 0
+		if lv := self.Get("length"); lv != nil {
+			length = int(lv.ToInteger())
+		}
+		if length < 0 {
+			length = 0
+		}
+		items := make([]interface{}, 0, length)
+		for i := 0; i < length; i++ {
+			if v := self.Get(strconv.Itoa(i)); v != nil {
+				items = append(items, v)
+			}
+		}
+		arr := r.vm.NewArray(items...)
+		if fn, ok := goja.AssertFunction(arr.GetSymbol(goja.SymIterator)); ok {
+			if it, err := fn(arr); err == nil {
+				return it
+			}
+		}
+		return arr
+	}), goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 	_ = r.cssStyleRuleProto.DefineAccessorProperty("style", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		r.requireCSSRuleInfo(call.This)
 		obj, _ := call.This.(*goja.Object)

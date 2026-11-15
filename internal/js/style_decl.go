@@ -87,6 +87,8 @@ func (s *inlineStyleDeclaration) Get(key string) goja.Value {
 		return s.runtime.vm.ToValue(serializeInlineStyle(s.node.GetAttribute("style")))
 	case "length":
 		return s.runtime.vm.ToValue(len(parseInlineStyle(s.node.GetAttribute("style"))))
+	case "parentRule":
+		return goja.Null()
 	case "item":
 		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) == 0 {
@@ -159,7 +161,7 @@ func (s *inlineStyleDeclaration) Set(key string, value goja.Value) bool {
 		s.runtime.setInlineStyleText(s.node, text)
 		return true
 	}
-	if key == "length" || key == "item" || key == "getPropertyValue" || key == "getPropertyPriority" || key == "setProperty" || key == "removeProperty" {
+	if key == "length" || key == "item" || key == "getPropertyValue" || key == "getPropertyPriority" || key == "setProperty" || key == "removeProperty" || key == "parentRule" {
 		return false
 	}
 	name := idlCSSPropertyName(key)
@@ -172,7 +174,7 @@ func (s *inlineStyleDeclaration) Set(key string, value goja.Value) bool {
 
 func (s *inlineStyleDeclaration) Has(key string) bool {
 	switch key {
-	case "cssText", "length", "item", "getPropertyValue", "getPropertyPriority", "setProperty", "removeProperty":
+	case "cssText", "length", "item", "getPropertyValue", "getPropertyPriority", "setProperty", "removeProperty", "parentRule":
 		return true
 	}
 	if i, err := strconv.Atoi(key); err == nil {
@@ -536,6 +538,11 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 		return s.runtime.vm.ToValue(cssRuleDeclarationText(decls))
 	case "length":
 		return s.runtime.vm.ToValue(len(decls))
+	case "parentRule":
+		if s.ruleWrapper != nil {
+			return s.ruleWrapper
+		}
+		return goja.Null()
 	case "item":
 		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			if len(call.Arguments) == 0 {
@@ -629,7 +636,7 @@ func (s *ruleStyleDeclaration) Set(key string, value goja.Value) bool {
 
 func (s *ruleStyleDeclaration) Has(key string) bool {
 	switch key {
-	case "cssText", "length", "item", "getPropertyValue", "getPropertyPriority", "setProperty", "removeProperty":
+	case "cssText", "length", "item", "getPropertyValue", "getPropertyPriority", "setProperty", "removeProperty", "parentRule":
 		return true
 	}
 	if i, err := strconv.Atoi(key); err == nil {
