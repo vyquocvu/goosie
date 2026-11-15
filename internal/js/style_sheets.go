@@ -690,7 +690,7 @@ func cssRuleDeclarationText(declarations []css.Declaration) string {
 			if declaration.Important != important {
 				continue
 			}
-			value := normalizeDeclarationValue(declaration.Value)
+			value := serializeDeclarationValue(declaration.Property, declaration.Value)
 			if declaration.Important {
 				value += " !important"
 			}
@@ -734,6 +734,141 @@ func normalizeDeclarationValue(value string) string {
 		}
 	}
 	return string(out)
+}
+
+func serializeDeclarationValue(property, value string) string {
+	if strings.HasPrefix(property, "--") {
+		return normalizeDeclarationValue(value)
+	}
+	return normalizeDeclarationValue(normalizeNumbers(value))
+}
+
+func normalizeNumbers(value string) string {
+	out := make([]byte, 0, len(value))
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); {
+		ch := value[i]
+		if escaped {
+			out = append(out, ch)
+			escaped = false
+			i++
+			continue
+		}
+		if quote != 0 {
+			if ch == '\\' {
+				escaped = true
+			} else if ch == quote {
+				quote = 0
+			}
+			out = append(out, ch)
+			i++
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			out = append(out, ch)
+			i++
+			continue
+		}
+		if numberStart(value, i) && (i == 0 || !isIdentByte(value[i-1])) {
+			end, normalized, ok := scanNumberLiteral(value, i)
+			if ok {
+				out = append(out, normalized...)
+				i = end
+				continue
+			}
+		}
+		out = append(out, ch)
+		i++
+	}
+	return string(out)
+}
+
+func numberStart(value string, i int) bool {
+	c := value[i]
+	if isDigitByte(c) {
+		return true
+	}
+	if c == '.' {
+		return i+1 < len(value) && isDigitByte(value[i+1])
+	}
+	if c == '+' || c == '-' {
+		if i+1 < len(value) && isDigitByte(value[i+1]) {
+			return true
+		}
+		return i+2 < len(value) && value[i+1] == '.' && isDigitByte(value[i+2])
+	}
+	return false
+}
+
+func scanNumberLiteral(value string, start int) (int, []byte, bool) {
+	i := start
+	if value[i] == '+' || value[i] == '-' {
+		i++
+	}
+	for i < len(value) && isDigitByte(value[i]) {
+		i++
+	}
+	if i < len(value) && value[i] == '.' {
+		j := i + 1
+		for j < len(value) && isDigitByte(value[j]) {
+			j++
+		}
+		if j > i+1 {
+			i = j
+		}
+	}
+	if i >= len(value) {
+		return i, []byte(normalizeMantissa(value[start:i])), true
+	}
+	if value[i] == 'e' || value[i] == 'E' {
+		return start, nil, false
+	}
+	return i, []byte(normalizeMantissa(value[start:i])), true
+}
+
+func normalizeMantissa(mantissa string) string {
+	negative := false
+	digits := mantissa
+	if digits[0] == '+' {
+		digits = digits[1:]
+	} else if digits[0] == '-' {
+		negative = true
+		digits = digits[1:]
+	}
+	intPart := digits
+	fracPart := ""
+	if dot := strings.IndexByte(digits, '.'); dot >= 0 {
+		intPart = digits[:dot]
+		fracPart = digits[dot+1:]
+	}
+	if intPart == "" {
+		intPart = "0"
+	}
+	for len(intPart) > 1 && intPart[0] == '0' {
+		intPart = intPart[1:]
+	}
+	for len(fracPart) > 0 && fracPart[len(fracPart)-1] == '0' {
+		fracPart = fracPart[:len(fracPart)-1]
+	}
+	if intPart == "0" && fracPart == "" {
+		return "0"
+	}
+	result := intPart
+	if fracPart != "" {
+		result += "." + fracPart
+	}
+	if negative {
+		result = "-" + result
+	}
+	return result
+}
+
+func isDigitByte(c byte) bool { return c >= '0' && c <= '9' }
+
+func isIdentByte(c byte) bool {
+	return isDigitByte(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '-' || c >= 0x80
 }
 
 func cssRuleStyleText(rule css.Rule) string {

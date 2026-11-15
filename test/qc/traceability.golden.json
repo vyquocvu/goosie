@@ -3514,6 +3514,19 @@
     "enforced": false
   },
   {
+    "id": "BR-311",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/rule_value_normalization_test.go:TestRuleStyleValueReadsNormaliseNumbers",
+      "test/js/rule_value_normalization_test.go:TestRuleValueNormalisesDecimalNumbers"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

@@ -481,7 +481,7 @@ func (s *ruleStyleDeclaration) mutateRemove(rawName string) string {
 	removed := false
 	for _, declaration := range decls {
 		if !removed && sameInlineProperty(declaration.Property, name) {
-			previous = normalizeDeclarationValue(declaration.Value)
+			previous = serializeDeclarationValue(declaration.Property, declaration.Value)
 			removed = true
 			continue
 		}
@@ -533,7 +533,7 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 			if !ok {
 				return s.runtime.vm.ToValue("")
 			}
-			return s.runtime.vm.ToValue(normalizeDeclarationValue(decl.Value))
+			return s.runtime.vm.ToValue(serializeDeclarationValue(decl.Property, decl.Value))
 		})
 	case "getPropertyPriority":
 		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -580,7 +580,7 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 	if !ok {
 		return nil
 	}
-	return s.runtime.vm.ToValue(normalizeDeclarationValue(decl.Value))
+	return s.runtime.vm.ToValue(serializeDeclarationValue(decl.Property, decl.Value))
 }
 
 func (s *ruleStyleDeclaration) Set(key string, value goja.Value) bool {
