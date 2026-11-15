@@ -98,7 +98,7 @@ func TestCSSOMCollectionPrototypesOwnTheMeasuredMembers(t *testing.T) {
 			String(media.toString === MediaList.prototype.toString)
 		].join(' | ')
 	`)
-	want := "length+item+constructor | length+item+constructor | length+mediaText+item+toString+constructor | length+mediaText+item+toString | function,undefined,true,true | function,1,true | function,true,true | function,0,true | false,true,true | false,true,true | true | true | true | true | true"
+	want := "length+item+constructor | length+item+constructor | length+mediaText+appendMedium+deleteMedium+item+toString+constructor | length+mediaText+appendMedium+deleteMedium+item+toString | function,undefined,true,true | function,1,true | function,true,true | function,0,true | false,true,true | false,true,true | true | true | true | true | true"
 	if got != want {
 		t.Errorf("CSSOM collection prototypes\ngot: %s\nwant: %s", got, want)
 	}
@@ -258,5 +258,59 @@ func TestCSSOMCollectionsAreCachedPerOwner(t *testing.T) {
 	want := "true,true,true,true,true,true,true,true"
 	if got != want {
 		t.Errorf("CSSOM collection identity law\ngot: %s\nwant: %s", got, want)
+	}
+}
+
+// qc:BR-304
+func TestMediaListAppendDeleteMediumMutateTheirOwnView(t *testing.T) {
+	r := cssomColRuntime(t)
+	got := mustCSSOM(t, r, shapeJS+`
+		var attr = document.getElementById('C1');
+		var out = [];
+		out.push('start:' + media.mediaText + '|' + media.length);
+		out.push('append_ret:' + String(media.appendMedium('handheld')));
+		out.push('after_append:' + media.mediaText + '|' + media.length + '|' + media.item(2) + '|attr=' + attr.getAttribute('media'));
+		media.appendMedium('screen');
+		out.push('dup:' + media.mediaText + '|' + media.length);
+		media.appendMedium('');
+		out.push('empty_append:' + media.mediaText + '|' + media.length);
+		out.push('del_ret:' + String(media.deleteMedium('print')));
+		out.push('after_del:' + media.mediaText + '|' + media.length);
+		try { media.deleteMedium('nope'); out.push('missing:nothrow'); } catch (e) { out.push('missing:' + e.name); }
+		media.deleteMedium('SCREEN');
+		out.push('del_case:' + media.mediaText + '|' + media.length + '|attr=' + attr.getAttribute('media'));
+		out.push('del_empty:' + String(media.deleteMedium('')) + '|' + media.mediaText);
+		out.join(' || ')
+	`)
+	want := "start:screen, print|2 || append_ret:undefined || after_append:screen, print, handheld|3|handheld|attr=screen, print || dup:screen, print, handheld|3 || empty_append:screen, print, handheld|3 || del_ret:undefined || after_del:screen, handheld|2 || missing:NotFoundError || del_case:handheld|1|attr=screen, print || del_empty:undefined|handheld"
+	if got != want {
+		t.Errorf("MediaList appendMedium/deleteMedium\ngot: %s\nwant: %s", got, want)
+	}
+}
+
+// qc:BR-304
+func TestMediaListMediumMutationsMatchChromiumShape(t *testing.T) {
+	r := cssomColRuntime(t)
+	got := mustCSSOM(t, r, shapeJS+`
+		var attr = document.getElementById('C1');
+		var a2 = list[3].media;
+		var out = [];
+		media.appendMedium('tv');
+		out.push('stringify:' + String(media));
+		attr.setAttribute('media', 'aural');
+		out.push('after_setattr:' + media.mediaText + '|' + media.length + '|names=' + names(media));
+		out.push('a2_start:' + a2.mediaText + '|' + a2.length);
+		a2.appendMedium('print');
+		out.push('a2_dup:' + a2.mediaText + '|' + a2.length);
+		out.push('proto_names:' + names(MediaList.prototype));
+		out.push('arity:' + MediaList.prototype.appendMedium.length + ',' + MediaList.prototype.deleteMedium.length + ',' + MediaList.prototype.appendMedium.name);
+		out.push(err(function () { return MediaList.prototype.appendMedium.call({}); }));
+		out.push(err(function () { return media.appendMedium(); }));
+		out.push(err(function () { return MediaList.prototype.deleteMedium.call(rules, 'x'); }));
+		out.join(' || ')
+	`)
+	want := "stringify:screen, print, tv || after_setattr:aural|1|names=0 || a2_start:print|1 || a2_dup:print|1 || proto_names:length+mediaText+appendMedium+deleteMedium+item+toString+constructor || arity:1,1,appendMedium || TypeError: Illegal invocation || TypeError: Failed to execute 'appendMedium' on 'MediaList': 1 argument required, but only 0 present. || TypeError: Illegal invocation"
+	if got != want {
+		t.Errorf("MediaList mutation shape\ngot: %s\nwant: %s", got, want)
 	}
 }

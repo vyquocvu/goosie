@@ -3424,6 +3424,19 @@
     "enforced": false
   },
   {
+    "id": "BR-304",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/cssom_collections_test.go:TestMediaListAppendDeleteMediumMutateTheirOwnView",
+      "test/js/cssom_collections_test.go:TestMediaListMediumMutationsMatchChromiumShape"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

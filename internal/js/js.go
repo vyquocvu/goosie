@@ -374,6 +374,7 @@ type Runtime struct {
 	cssomCollectionProtos              map[string]*goja.Object
 	cssomCollections                   map[*goja.Object]string
 	cssSheetOwners                     map[*goja.Object]*dom.Node
+	cssMediaListStates                 map[*goja.Object]*mediaListState
 	cssRuleWrappers                    map[*goja.Object]cssRuleInfo
 	ruleStyleObjects                   map[*goja.Object]*goja.Object
 	selectorPlans                      map[string]*selectorPlan

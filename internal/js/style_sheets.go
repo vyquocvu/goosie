@@ -398,31 +398,45 @@ func (r *Runtime) mediaListOf(owner *dom.Node) goja.Value {
 	return list
 }
 
+type mediaListState struct {
+	owner    *dom.Node
+	override []string
+	base     string
+}
+
+func (st *mediaListState) attributeText() string {
+	if st == nil || st.owner == nil {
+		return ""
+	}
+	return st.owner.GetAttribute("media")
+}
+
+func (st *mediaListState) text() string {
+	attr := st.attributeText()
+	if st.override != nil && attr == st.base {
+		return strings.Join(st.override, ", ")
+	}
+	st.override = nil
+	return attr
+}
+
+func (st *mediaListState) segments() []string {
+	attr := st.attributeText()
+	if st.override != nil && attr == st.base {
+		return st.override
+	}
+	st.override = nil
+	return mediaSegments(attr)
+}
+
 func (r *Runtime) newMediaList(owner *dom.Node) goja.Value {
-	mediaText := func() string {
-		if owner == nil {
-			return ""
-		}
-		return owner.GetAttribute("media")
-	}
-	segments := func() []string {
-		text := mediaText()
-		if strings.TrimSpace(text) == "" {
-			return nil
-		}
-		parts := strings.Split(text, ",")
-		out := make([]string, 0, len(parts))
-		for _, part := range parts {
-			if part = strings.TrimSpace(part); part != "" {
-				out = append(out, part)
-			}
-		}
-		return out
-	}
+	state := &mediaListState{owner: owner}
+	mediaText := func() string { return state.text() }
+	segments := func() []string { return state.segments() }
 	proto := r.cssomCollectionProto("MediaList")
 	target := r.vm.NewObject()
 	_ = target.SetPrototype(proto)
-	return r.cssomCollection(r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
+	proxy := r.vm.NewProxy(target, &goja.ProxyTrapConfig{
 		Get: func(proxied *goja.Object, property string, _ goja.Value) goja.Value {
 			switch property {
 			case "mediaText":
@@ -466,7 +480,66 @@ func (r *Runtime) newMediaList(owner *dom.Node) goja.Value {
 			}
 			return r.vm.NewArray(keys...)
 		},
-	})), "MediaList")
+	})
+	value := r.vm.ToValue(proxy)
+	if r.cssMediaListStates == nil {
+		r.cssMediaListStates = map[*goja.Object]*mediaListState{}
+	}
+	if obj, ok := value.(*goja.Object); ok {
+		r.cssMediaListStates[obj] = state
+	}
+	return r.cssomCollection(value, "MediaList")
+}
+
+func (r *Runtime) mediaStateOf(obj *goja.Object) *mediaListState {
+	if obj == nil {
+		return nil
+	}
+	return r.cssMediaListStates[obj]
+}
+
+func mediaSegments(text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	parts := strings.Split(text, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func (st *mediaListState) appendMedium(medium string) {
+	if medium == "" {
+		return
+	}
+	segs := st.segments()
+	for _, existing := range segs {
+		if strings.EqualFold(existing, medium) {
+			return
+		}
+	}
+	st.override = append(append([]string{}, segs...), medium)
+	st.base = st.attributeText()
+}
+
+func (st *mediaListState) deleteMedium(medium string) bool {
+	if medium == "" {
+		return true
+	}
+	segs := st.segments()
+	for i, existing := range segs {
+		if strings.EqualFold(existing, medium) {
+			next := append(append([]string{}, segs[:i]...), segs[i+1:]...)
+			st.override = next
+			st.base = st.attributeText()
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runtime) cssRuleListForSheet(owner *dom.Node) goja.Value {

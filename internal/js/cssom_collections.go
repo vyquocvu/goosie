@@ -24,6 +24,22 @@ func (r *Runtime) cssomCollectionProto(name string) *goja.Object {
 		_ = proto.DefineAccessorProperty("mediaText", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			return cssomProperty(r.cssomCollectionReceiver(call.This, name), "mediaText")
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+		_ = proto.DefineDataProperty("appendMedium", r.cssomMethod("appendMedium", true, func(call goja.FunctionCall) goja.Value {
+			obj := r.cssomCollectionReceiver(call.This, "MediaList")
+			medium := r.cssomMediumArgument(call, "appendMedium")
+			if state := r.mediaStateOf(obj); state != nil {
+				state.appendMedium(medium)
+			}
+			return goja.Undefined()
+		}), goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_TRUE)
+		_ = proto.DefineDataProperty("deleteMedium", r.cssomMethod("deleteMedium", true, func(call goja.FunctionCall) goja.Value {
+			obj := r.cssomCollectionReceiver(call.This, "MediaList")
+			medium := r.cssomMediumArgument(call, "deleteMedium")
+			if state := r.mediaStateOf(obj); state != nil && medium != "" && !state.deleteMedium(medium) {
+				panic(r.domError("NotFoundError", "The medium provided ("+medium+") was not found."))
+			}
+			return goja.Undefined()
+		}), goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
 	_ = proto.DefineDataProperty("item", r.cssomMethod("item", true, r.cssomItemFor(name)), goja.FLAG_TRUE, goja.FLAG_TRUE, goja.FLAG_TRUE)
 	if name == "MediaList" {
@@ -74,6 +90,16 @@ func (r *Runtime) cssomItemFor(name string) func(goja.FunctionCall) goja.Value {
 		}
 		return value
 	}
+}
+
+func (r *Runtime) cssomMediumArgument(call goja.FunctionCall, method string) string {
+	if len(call.Arguments) == 0 {
+		panic(r.vm.NewTypeError("Failed to execute '" + method + "' on 'MediaList': 1 argument required, but only 0 present."))
+	}
+	if _, isSymbol := call.Argument(0).(*goja.Symbol); isSymbol {
+		panic(r.vm.NewTypeError("Cannot convert a Symbol value to a string"))
+	}
+	return call.Argument(0).String()
 }
 
 func (r *Runtime) cssomCollectionReceiver(this goja.Value, name string) *goja.Object {
