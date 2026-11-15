@@ -7,6 +7,8 @@ func filterFirstLineProperties(cs *ComputedStyle) {
 	cs.MarginRight = 0
 	cs.MarginBottom = 0
 	cs.MarginLeft = 0
+	cs.MarginLeftAuto = false
+	cs.MarginRightAuto = false
 	cs.PaddingTop = 0
 	cs.PaddingRight = 0
 	cs.PaddingBottom = 0

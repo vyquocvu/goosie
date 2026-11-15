@@ -997,10 +997,10 @@ func gridItemMaxContentW(a *Arena, id ObjectID) float32 {
 	}
 	clearInlineLaidOut(a, id)
 	mLeft, mRight := it.Style.MarginLeft, it.Style.MarginRight
-	if mLeft == style.MarginAuto {
+	if it.Style.MarginLeftAuto {
 		mLeft = 0
 	}
-	if mRight == style.MarginAuto {
+	if it.Style.MarginRightAuto {
 		mRight = 0
 	}
 	return contentW + it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight + mLeft + mRight

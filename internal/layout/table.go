@@ -86,8 +86,8 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	}
 	colW := distributeColumns(colMin, colMax, available)
 	if s != nil {
-		leftAuto := s.MarginLeft == style.MarginAuto
-		rightAuto := s.MarginRight == style.MarginAuto
+		leftAuto := s.MarginLeftAuto
+		rightAuto := s.MarginRightAuto
 		if leftAuto || rightAuto {
 			boxW := available + gaps + obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
 			remaining := containingW - boxW

@@ -1232,8 +1232,9 @@ func atomicInlineReplaced(a *Arena, id ObjectID, lines *[]lineBox, current *line
 		k.BorderBottom, k.BorderLeft = ubw[2], ubw[3]
 		margins := [4]float32{s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft}
 		dst := [4]*float32{&k.MarginTop, &k.MarginRight, &k.MarginBottom, &k.MarginLeft}
+		auto := [4]bool{false, s.MarginRightAuto, false, s.MarginLeftAuto}
 		for i, m := range margins {
-			if m == style.MarginAuto {
+			if auto[i] {
 				*dst[i] = 0
 			} else {
 				*dst[i] = resolvePctLength(m, bc.contentW)

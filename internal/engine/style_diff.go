@@ -34,6 +34,7 @@ type layoutStyleKey struct {
 	MaxWidthCalc, MaxHeightCalc                   style.DeferredLength
 	MarginTop, MarginRight                        float32
 	MarginBottom, MarginLeft                      float32
+	MarginLeftAuto, MarginRightAuto               bool
 	PaddingTop, PaddingRight                      float32
 	PaddingBottom, PaddingLeft                    float32
 	BorderTopWidth, BorderRightWidth              float32
@@ -110,6 +111,7 @@ func makeLayoutStyleKey(s *style.ComputedStyle) layoutStyleKey {
 		WidthCalc: s.WidthCalc, HeightCalc: s.HeightCalc, MinWidthCalc: s.MinWidthCalc, MinHeightCalc: s.MinHeightCalc,
 		MaxWidthCalc: s.MaxWidthCalc, MaxHeightCalc: s.MaxHeightCalc,
 		MarginTop: s.MarginTop, MarginRight: s.MarginRight, MarginBottom: s.MarginBottom, MarginLeft: s.MarginLeft,
+		MarginLeftAuto: s.MarginLeftAuto, MarginRightAuto: s.MarginRightAuto,
 		PaddingTop: s.PaddingTop, PaddingRight: s.PaddingRight, PaddingBottom: s.PaddingBottom, PaddingLeft: s.PaddingLeft,
 		BorderTopWidth: s.BorderTopWidth, BorderRightWidth: s.BorderRightWidth,
 		BorderBottomWidth: s.BorderBottomWidth, BorderLeftWidth: s.BorderLeftWidth,

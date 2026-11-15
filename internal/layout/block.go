@@ -231,10 +231,10 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					closeRow()
 					resolveBoxSizes(a, k, contentW, childH)
 					k = a.Get(kid)
-					if k.Style.MarginLeft == style.MarginAuto {
+					if k.Style.MarginLeftAuto {
 						k.MarginLeft = 0
 					}
-					if k.Style.MarginRight == style.MarginAuto {
+					if k.Style.MarginRightAuto {
 						k.MarginRight = 0
 					}
 					extra := k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
@@ -2066,8 +2066,8 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 		}
 	}
 
-	leftAuto := s.MarginLeft == style.MarginAuto
-	rightAuto := s.MarginRight == style.MarginAuto
+	leftAuto := s.MarginLeftAuto
+	rightAuto := s.MarginRightAuto
 
 	if leftAuto {
 		obj.MarginLeft = 0
@@ -2081,12 +2081,6 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 	}
 	obj.MarginTop = s.MarginTop
 	obj.MarginBottom = s.MarginBottom
-	if obj.MarginTop == style.MarginAuto {
-		obj.MarginTop = 0
-	}
-	if obj.MarginBottom == style.MarginAuto {
-		obj.MarginBottom = 0
-	}
 
 	if explicitW >= 0 {
 		obj.W = explicitW

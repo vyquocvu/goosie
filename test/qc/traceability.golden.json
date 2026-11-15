@@ -3620,6 +3620,21 @@
     "enforced": false
   },
   {
+    "id": "BR-319",
+    "priority": "P2",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/negative_margin_auto_test.go:TestLiteralAutoMarginsStillCenter",
+      "test/layout/negative_margin_auto_test.go:TestNegativeOnePxLeftWithAutoRightAnchorsLeft",
+      "test/layout/negative_margin_auto_test.go:TestNegativeOnePxMarginIsNotAuto",
+      "test/layout/negative_margin_auto_test.go:TestWikiHeaderNegativeMarginShorthandAnchorsLeft"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

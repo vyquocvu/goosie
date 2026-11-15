@@ -279,10 +279,12 @@ type ComputedStyle struct {
 	MaxWidthCalc  DeferredLength
 	MaxHeightCalc DeferredLength
 
-	MarginTop    float32
-	MarginRight  float32
-	MarginBottom float32
-	MarginLeft   float32
+	MarginTop       float32
+	MarginRight     float32
+	MarginBottom    float32
+	MarginLeft      float32
+	MarginLeftAuto  bool
+	MarginRightAuto bool
 
 	PaddingTop    float32
 	PaddingRight  float32
@@ -472,6 +474,7 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 	s.Height = -1
 	s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight = 0, 0, -1, -1
 	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
+	s.MarginLeftAuto, s.MarginRightAuto = false, false
 	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
 	s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth = 0, 0, 0, 0
 	s.OutlineWidth, s.OutlineOffset = 0, 0
@@ -504,6 +507,7 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	s.Height = -1
 	s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight = 0, 0, -1, -1
 	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
+	s.MarginLeftAuto, s.MarginRightAuto = false, false
 	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
 	s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth = 0, 0, 0, 0
 	s.BorderRadius = [4][2]float32{}
@@ -2474,7 +2478,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "scroll-padding-left":
 		cs.ScrollPaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "scroll-margin":
-		t, r, b, l := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
+		t, r, b, l, _, _ := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.ScrollMarginTop = t
 		cs.ScrollMarginRight = r
 		cs.ScrollMarginBottom = b
@@ -2665,18 +2669,22 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 
 	case "margin":
-		t, r, b, l := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
+		t, r, b, l, lAuto, rAuto := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop = t
 		cs.MarginRight = r
 		cs.MarginBottom = b
 		cs.MarginLeft = l
+		cs.MarginLeftAuto = lAuto
+		cs.MarginRightAuto = rAuto
 	case "margin-top":
 		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-right":
+		cs.MarginRightAuto = valueIsAuto(parsed)
 		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-bottom":
 		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-left":
+		cs.MarginLeftAuto = valueIsAuto(parsed)
 		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 
 	case "padding":
@@ -2700,20 +2708,30 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "margin-inline":
 		a, b := logicalPair(value, MarginAuto, cs.FontSize, cs.rootFontSize)
 		cs.MarginLeft, cs.MarginRight = a, b
+		parts := splitTopLevelSpace(value)
+		if len(parts) == 1 {
+			cs.MarginLeftAuto, cs.MarginRightAuto = strIsAuto(parts[0]), strIsAuto(parts[0])
+		} else if len(parts) >= 2 {
+			cs.MarginLeftAuto, cs.MarginRightAuto = strIsAuto(parts[0]), strIsAuto(parts[1])
+		}
 	case "margin-block-start":
 		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-block-end":
 		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "margin-inline-start":
 		if cs.Direction == "rtl" {
+			cs.MarginRightAuto = valueIsAuto(parsed)
 			cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 		} else {
+			cs.MarginLeftAuto = valueIsAuto(parsed)
 			cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 		}
 	case "margin-inline-end":
 		if cs.Direction == "rtl" {
+			cs.MarginLeftAuto = valueIsAuto(parsed)
 			cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 		} else {
+			cs.MarginRightAuto = valueIsAuto(parsed)
 			cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 		}
 	case "padding-block":
@@ -3576,6 +3594,14 @@ func parseQuotes(value string) []string {
 }
 
 const MarginAuto float32 = -1
+
+func valueIsAuto(v css.Value) bool {
+	return v.Type == css.ValueKeyword && (v.Str == "auto" || v.Str == "")
+}
+
+func strIsAuto(s string) bool {
+	return valueIsAuto(css.ParseValue(s))
+}
 
 func logicalPair(v string, auto, fontSize float32, rootFontSize ...float32) (float32, float32) {
 	parts := splitTopLevelSpace(v)
@@ -4710,27 +4736,30 @@ func parseBgLen(cs *ComputedStyle, tok string) (float32, bool, bool) {
 	return 0, false, false
 }
 
-func parseMarginShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32) {
+func parseMarginShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32, leftAuto, rightAuto bool) {
 	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
+		auto := strIsAuto(parts[0])
 		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize, rootFontSize...)
-		return val, val, val, val
+		return val, val, val, val, auto, auto
 	case 2:
 		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
 		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
-		return tb, rl, tb, rl
+		auto := strIsAuto(parts[1])
+		return tb, rl, tb, rl, auto, auto
 	case 3:
 		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
 		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
 		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
-		return top, rl, bottom, rl
+		auto := strIsAuto(parts[1])
+		return top, rl, bottom, rl, auto, auto
 	case 4:
 		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
 		right = resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
 		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
 		left = resolveLengthEm(css.ParseValue(parts[3]), MarginAuto, fontSize, rootFontSize...)
-		return
+		return top, right, bottom, left, strIsAuto(parts[3]), strIsAuto(parts[1])
 	}
 	return
 }
