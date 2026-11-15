@@ -1,6 +1,7 @@
 package js
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -740,7 +741,125 @@ func serializeDeclarationValue(property, value string) string {
 	if strings.HasPrefix(property, "--") {
 		return normalizeDeclarationValue(value)
 	}
-	return normalizeDeclarationValue(normalizeNumbers(value))
+	return normalizeDeclarationValue(normalizeNumbers(normalizeHexColors(value)))
+}
+
+func normalizeHexColors(value string) string {
+	out := make([]byte, 0, len(value)+8)
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); {
+		ch := value[i]
+		if escaped {
+			out = append(out, ch)
+			escaped = false
+			i++
+			continue
+		}
+		if quote != 0 {
+			out = append(out, ch)
+			if ch == '\\' {
+				escaped = true
+			} else if ch == quote {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			out = append(out, ch)
+			i++
+			continue
+		}
+		if (ch == 'u' || ch == 'U') && strings.EqualFold(value[i:min(i+4, len(value))], "url(") {
+			rp := strings.IndexByte(value[i:], ')')
+			if rp < 0 {
+				out = append(out, value[i:]...)
+				break
+			}
+			end := i + rp + 1
+			out = append(out, value[i:end]...)
+			i = end
+			continue
+		}
+		if ch == '#' && (i == 0 || !isIdentByte(value[i-1])) {
+			if consumed, css, ok := parseHexColorToken(value[i:]); ok {
+				out = append(out, css...)
+				i += consumed
+				continue
+			}
+		}
+		out = append(out, ch)
+		i++
+	}
+	return string(out)
+}
+
+func parseHexColorToken(s string) (int, string, bool) {
+	body := s[1:]
+	n := 0
+	for n < len(body) && isHexByte(body[n]) {
+		n++
+	}
+	if n != 3 && n != 4 && n != 6 && n != 8 {
+		return 0, "", false
+	}
+	if n < len(body) && isIdentByte(body[n]) {
+		return 0, "", false
+	}
+	var r, g, b, a uint8
+	switch n {
+	case 3:
+		r, g, b = hexVal(body[0])*17, hexVal(body[1])*17, hexVal(body[2])*17
+		a = 255
+	case 4:
+		r, g, b, a = hexVal(body[0])*17, hexVal(body[1])*17, hexVal(body[2])*17, hexVal(body[3])*17
+	case 6:
+		r, g, b = hexPair(body[0], body[1]), hexPair(body[2], body[3]), hexPair(body[4], body[5])
+		a = 255
+	case 8:
+		r, g, b, a = hexPair(body[0], body[1]), hexPair(body[2], body[3]), hexPair(body[4], body[5]), hexPair(body[6], body[7])
+	}
+	channels := strconv.Itoa(int(r)) + ", " + strconv.Itoa(int(g)) + ", " + strconv.Itoa(int(b))
+	if a == 255 {
+		return 1 + n, "rgb(" + channels + ")", true
+	}
+	return 1 + n, "rgba(" + channels + ", " + formatHexAlpha(a) + ")", true
+}
+
+func formatHexAlpha(b uint8) string {
+	v := float64(b) / 255
+	for d := 1; d <= 4; d++ {
+		s := strconv.FormatFloat(v, 'f', d, 64)
+		x, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			continue
+		}
+		if int(math.Floor(x*255+0.5)) == int(b) {
+			for len(s) > 1 && s[len(s)-1] == '0' {
+				s = s[:len(s)-1]
+			}
+			return strings.TrimSuffix(s, ".")
+		}
+	}
+	return strconv.FormatFloat(v, 'f', 3, 64)
+}
+
+func hexVal(c byte) uint8 {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10
+	}
+	return 0
+}
+
+func hexPair(hi, lo byte) uint8 {
+	return hexVal(hi)<<4 | hexVal(lo)
 }
 
 func normalizeNumbers(value string) string {
