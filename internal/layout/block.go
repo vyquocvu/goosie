@@ -567,6 +567,28 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		items[i].basis = clamped
 		items[i].atMax = clamped < basis
 		items[i].declared = true
+		it := a.Get(items[i].id)
+		it.X, it.Y = contentX, contentY
+		blockInto(a, items[i].id, maxFlexMeasureWidth)
+		it = a.Get(items[i].id)
+		inlineInto(a, items[i].id)
+		it = a.Get(items[i].id)
+		extra := it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight
+		floor := inlineMinWidth(a, items[i].id) + extra
+		if items[i].basis < floor {
+			floor = items[i].basis
+		}
+		if explicitMin := resolveBoxMinWidth(a, it.Style, contentW); explicitMin > 0 {
+			if it.Style.BoxSizing == style.BoxSizingBorderBox {
+				floor = explicitMin
+			} else {
+				floor = explicitMin + extra
+			}
+		}
+		if floor < 0 {
+			floor = 0
+		}
+		items[i].minW = floor
 	}
 
 	obj = a.Get(id)
@@ -904,6 +926,20 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				}
 				inlineInto(a, items[i].id)
 				it = a.Get(items[i].id)
+			}
+			if items[i].basis >= 0 && it.Style.Width >= 0 {
+				want := items[i].basis - it.PaddingLeft - it.PaddingRight - it.BorderLeft - it.BorderRight
+				if want < 0 {
+					want = 0
+				}
+				if it.W != want {
+					it.W = want
+					it = a.Get(items[i].id)
+					clearInlineLaidOut(a, items[i].id)
+					blockIntoSized(a, items[i].id, want)
+					inlineInto(a, items[i].id)
+					it = a.Get(items[i].id)
+				}
 			}
 			cursor += flexMargin(it.Style.MarginLeft) + items[i].basis + flexMargin(it.Style.MarginRight) + trackGap
 		}

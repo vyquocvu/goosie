@@ -3605,6 +3605,21 @@
     "enforced": false
   },
   {
+    "id": "BR-318",
+    "priority": "P2",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/flex_declared_used_size_test.go:TestFlexDeclaredWidthItemAutomaticMinimumFloor",
+      "test/layout/flex_declared_used_size_test.go:TestFlexDeclaredWidthItemGrowsToResolvedBasis",
+      "test/layout/flex_declared_used_size_test.go:TestFlexDeclaredWidthItemShrinksToResolvedBasis",
+      "test/layout/flex_declared_used_size_test.go:TestFlexDeclaredWidthItemStaysAtBasisWhenContentFloorIsHigher"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
