@@ -415,6 +415,84 @@ func (s *ruleStyleDeclaration) declarations() []css.Declaration {
 	return info.rule.Declarations
 }
 
+func (s *ruleStyleDeclaration) store(decls []css.Declaration) {
+	if s == nil || s.runtime == nil {
+		return
+	}
+	info, ok := s.runtime.cssRuleWrappers[s.ruleWrapper]
+	if !ok {
+		return
+	}
+	info.rule.Declarations = decls
+	s.runtime.cssRuleWrappers[s.ruleWrapper] = info
+}
+
+func ruleDeclarationListFromText(text string) []css.Declaration {
+	parsed := css.Parse("s{" + text + "}")
+	if len(parsed.Rules) == 0 {
+		return nil
+	}
+	return parsed.Rules[0].Declarations
+}
+
+func ruleStyleArgumentText(value goja.Value) string {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return ""
+	}
+	return value.String()
+}
+
+func (s *ruleStyleDeclaration) mutateSet(rawName, value, priority string) {
+	name := cssNameFromJS(rawName)
+	if name == "" {
+		return
+	}
+	value = strings.TrimSpace(value)
+	important := strings.EqualFold(priority, "important")
+	if value == "" {
+		s.mutateRemove(name)
+		return
+	}
+	decls := s.declarations()
+	out := make([]css.Declaration, 0, len(decls)+1)
+	replaced := false
+	for _, declaration := range decls {
+		if !replaced && sameInlineProperty(declaration.Property, name) {
+			out = append(out, css.Declaration{Property: name, Value: value, Important: important})
+			replaced = true
+			continue
+		}
+		out = append(out, declaration)
+	}
+	if !replaced {
+		out = append(out, css.Declaration{Property: name, Value: value, Important: important})
+	}
+	s.store(out)
+}
+
+func (s *ruleStyleDeclaration) mutateRemove(rawName string) string {
+	name := cssNameFromJS(rawName)
+	if name == "" {
+		return ""
+	}
+	decls := s.declarations()
+	previous := ""
+	out := make([]css.Declaration, 0, len(decls))
+	removed := false
+	for _, declaration := range decls {
+		if !removed && sameInlineProperty(declaration.Property, name) {
+			previous = normalizeDeclarationValue(declaration.Value)
+			removed = true
+			continue
+		}
+		out = append(out, declaration)
+	}
+	if removed {
+		s.store(out)
+	}
+	return previous
+}
+
 func ruleDeclarationValue(decls []css.Declaration, name string) (css.Declaration, bool) {
 	name = normalizeInlineProperty(name)
 	for i := len(decls) - 1; i >= 0; i-- {
@@ -468,6 +546,25 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 			}
 			return s.runtime.vm.ToValue("important")
 		})
+	case "setProperty":
+		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) < 2 {
+				return goja.Undefined()
+			}
+			priority := ""
+			if len(call.Arguments) > 2 {
+				priority = ruleStyleArgumentText(call.Arguments[2])
+			}
+			s.mutateSet(ruleStyleArgumentText(call.Arguments[0]), ruleStyleArgumentText(call.Arguments[1]), priority)
+			return goja.Undefined()
+		})
+	case "removeProperty":
+		return s.runtime.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			if len(call.Arguments) == 0 {
+				return s.runtime.vm.ToValue("")
+			}
+			return s.runtime.vm.ToValue(s.mutateRemove(ruleStyleArgumentText(call.Arguments[0])))
+		})
 	}
 	if i, err := strconv.Atoi(key); err == nil {
 		if i >= 0 && i < len(decls) {
@@ -487,12 +584,29 @@ func (s *ruleStyleDeclaration) Get(key string) goja.Value {
 }
 
 func (s *ruleStyleDeclaration) Set(key string, value goja.Value) bool {
-	return false
+	if s == nil || s.runtime == nil || value == nil {
+		return false
+	}
+	switch key {
+	case "length", "item", "getPropertyValue", "getPropertyPriority", "setProperty", "removeProperty", "parentRule":
+		return false
+	}
+	text := value.String()
+	if key == "cssText" {
+		s.store(ruleDeclarationListFromText(text))
+		return true
+	}
+	name := cssNameFromJS(key)
+	if name == "" {
+		return false
+	}
+	s.mutateSet(name, text, "")
+	return true
 }
 
 func (s *ruleStyleDeclaration) Has(key string) bool {
 	switch key {
-	case "cssText", "length", "item", "getPropertyValue", "getPropertyPriority":
+	case "cssText", "length", "item", "getPropertyValue", "getPropertyPriority", "setProperty", "removeProperty":
 		return true
 	}
 	if i, err := strconv.Atoi(key); err == nil {
@@ -507,7 +621,27 @@ func (s *ruleStyleDeclaration) Has(key string) bool {
 }
 
 func (s *ruleStyleDeclaration) Delete(key string) bool {
-	return false
+	if key == "cssText" || key == "length" {
+		return false
+	}
+	if i, err := strconv.Atoi(key); err == nil {
+		decls := s.declarations()
+		if i < 0 || i >= len(decls) {
+			return false
+		}
+		out := make([]css.Declaration, 0, len(decls)-1)
+		out = append(out, decls[:i]...)
+		out = append(out, decls[i+1:]...)
+		s.store(out)
+		return true
+	}
+	name := cssNameFromJS(key)
+	if name == "" {
+		return false
+	}
+	before := len(s.declarations())
+	s.mutateRemove(name)
+	return len(s.declarations()) < before
 }
 
 func (s *ruleStyleDeclaration) Keys() []string {

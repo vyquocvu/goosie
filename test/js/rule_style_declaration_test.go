@@ -96,3 +96,56 @@ func TestRuleStyleAbsentAndUnindexedReads(t *testing.T) {
 		t.Errorf("rule.style absent reads\ngot:  %s\nwant: %s", got, want)
 	}
 }
+
+// qc:BR-309
+func TestRuleStyleWritesMutateItsDeclarations(t *testing.T) {
+	r := ruleStyleRuntime(t)
+	got := mustCSSOM(t, r, ruleStyleJS+`
+		var rule = document.styleSheets[0].cssRules[0];
+		var st = rule.style;
+		var out = [];
+		st.setProperty('margin-top', '4px', '');
+		out.push(rule.cssText);
+		out.push(String(st.length));
+		st.setProperty('color', 'rgb(0,0,9)', '');
+		out.push(rule.cssText);
+		st.borderLeftWidth = '3px';
+		out.push(st.getPropertyValue('border-left-width'));
+		out.push(st.item(st.length - 1));
+		out.push(st.removeProperty('margin-top'));
+		out.push(rule.cssText);
+		st.setProperty('border-left-width', '', '');
+		out.push(rule.cssText);
+		st.cssText = 'width: 5px; height: 6px';
+		out.push(rule.cssText);
+		out.push(String(st.length));
+		out.push(st.getPropertyValue('width'));
+		out.push(String(st === st));
+		out.join(' | ')
+	`)
+	want := "p.a1 { color: rgb(10, 0, 0); margin-top: 4px; } | 2 | p.a1 { color: rgb(0, 0, 9); margin-top: 4px; } | 3px | border-left-width | 4px | p.a1 { color: rgb(0, 0, 9); border-left-width: 3px; } | p.a1 { color: rgb(0, 0, 9); } | p.a1 { width: 5px; height: 6px; } | 2 | 5px | true"
+	if got != want {
+		t.Errorf("rule.style writes\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+// qc:BR-309
+func TestRuleStylePropertyPriorityAndAbsentRemoval(t *testing.T) {
+	r := ruleStyleRuntime(t)
+	got := mustCSSOM(t, r, ruleStyleJS+`
+		var st = document.styleSheets[0].cssRules[0].style;
+		var out = [];
+		out.push(JSON.stringify(st.removeProperty('z-index')));
+		st.setProperty('color', 'rgb(0, 0, 9)', 'important');
+		out.push(st.getPropertyPriority('color'));
+		out.push(st.getPropertyValue('color'));
+		st.setProperty('color', 'rgb(1, 1, 1)', '');
+		out.push(st.getPropertyPriority('color'));
+		out.push(st.getPropertyValue('color'));
+		out.join(' | ')
+	`)
+	want := "\"\" | important | rgb(0, 0, 9) |  | rgb(1, 1, 1)"
+	if got != want {
+		t.Errorf("rule.style priority/removal\ngot:  %s\nwant: %s", got, want)
+	}
+}
