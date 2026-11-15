@@ -179,6 +179,7 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 
 	r.defineConstructor("CSSRule", r.cssRuleProto)
 	r.defineConstructor("CSSStyleRule", r.cssStyleRuleProto)
+	r.defineConstructor("CSSStyleDeclaration", r.cssStyleDeclarationProto)
 
 	if r.documentProto != nil {
 		_ = r.documentProto.DefineAccessorProperty("styleSheets", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {

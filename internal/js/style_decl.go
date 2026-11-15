@@ -42,6 +42,9 @@ func (r *Runtime) styleDeclaration(node *dom.Node) *goja.Object {
 		return obj
 	}
 	obj := r.vm.NewDynamicObject(&inlineStyleDeclaration{runtime: r, node: node})
+	if r.cssStyleDeclarationProto != nil {
+		_ = obj.SetPrototype(r.cssStyleDeclarationProto)
+	}
 	r.styleObjects[node] = obj
 	return obj
 }
@@ -74,6 +77,9 @@ type inlineStyleDeclaration struct {
 
 func (s *inlineStyleDeclaration) Get(key string) goja.Value {
 	if s == nil || s.runtime == nil || s.runtime.vm == nil || s.node == nil {
+		return nil
+	}
+	if isJSIntrinsicKey(key) {
 		return nil
 	}
 	switch key {
@@ -378,6 +384,16 @@ func sameInlineProperty(a, b string) bool {
 		return a == b
 	}
 	return strings.EqualFold(a, b)
+}
+
+func isJSIntrinsicKey(key string) bool {
+	switch key {
+	case "constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable",
+		"toLocaleString", "toString", "valueOf", "__defineGetter__", "__defineSetter__",
+		"__lookupGetter__", "__lookupSetter__", "__proto__":
+		return true
+	}
+	return false
 }
 
 func cssNameFromJS(name string) string {

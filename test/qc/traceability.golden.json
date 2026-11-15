@@ -3540,6 +3540,19 @@
     "enforced": false
   },
   {
+    "id": "BR-313",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/cssstyledeclaration_brand_test.go:TestCSSStyleDeclarationGlobalAndBranding",
+      "test/js/cssstyledeclaration_brand_test.go:TestInlineAndRuleStyleShareCSSStyleDeclarationBrand"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
