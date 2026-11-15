@@ -742,7 +742,177 @@ func serializeDeclarationValue(property, value string) string {
 	if strings.HasPrefix(property, "--") {
 		return normalizeDeclarationValue(value)
 	}
-	return normalizeDeclarationValue(normalizeNumbers(normalizeHexColors(value)))
+	return normalizeDeclarationValue(normalizeNumbers(normalizeHexColors(normalizeUrls(value))))
+}
+
+func normalizeUrls(value string) string {
+	out := make([]byte, 0, len(value)+8)
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); {
+		ch := value[i]
+		if escaped {
+			out = append(out, ch)
+			escaped = false
+			i++
+			continue
+		}
+		if quote != 0 {
+			out = append(out, ch)
+			if ch == '\\' {
+				escaped = true
+			} else if ch == quote {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			out = append(out, ch)
+			i++
+			continue
+		}
+		if (ch == 'u' || ch == 'U') && strings.EqualFold(value[i:min(i+4, len(value))], "url(") && (i == 0 || !isIdentByte(value[i-1])) {
+			if text, consumed, ok := canonicalURLToken(value[i:]); ok {
+				out = append(out, text...)
+				i += consumed
+				continue
+			}
+			rp := strings.IndexByte(value[i:], ')')
+			if rp < 0 {
+				out = append(out, value[i:]...)
+				break
+			}
+			end := i + rp + 1
+			out = append(out, value[i:end]...)
+			i = end
+			continue
+		}
+		out = append(out, ch)
+		i++
+	}
+	return string(out)
+}
+
+func canonicalURLToken(s string) (string, int, bool) {
+	pos := 4
+	for pos < len(s) && isURLSpace(s[pos]) {
+		pos++
+	}
+	if pos >= len(s) {
+		return "", 0, false
+	}
+	var decoded []byte
+	switch s[pos] {
+	case '"', '\'':
+		q := s[pos]
+		pos++
+		closed := false
+		for pos < len(s) {
+			c := s[pos]
+			if c == '\\' {
+				b, n, ok := decodeCSSEscape(s[pos:])
+				if !ok {
+					pos++
+					continue
+				}
+				decoded = append(decoded, b...)
+				pos += n
+				continue
+			}
+			if c == q {
+				pos++
+				closed = true
+				break
+			}
+			decoded = append(decoded, c)
+			pos++
+		}
+		if !closed {
+			return "", 0, false
+		}
+		for pos < len(s) && isURLSpace(s[pos]) {
+			pos++
+		}
+		if pos >= len(s) || s[pos] != ')' {
+			return "", 0, false
+		}
+		pos++
+	default:
+		for pos < len(s) {
+			c := s[pos]
+			if c == '\\' {
+				b, n, ok := decodeCSSEscape(s[pos:])
+				if !ok {
+					pos++
+					continue
+				}
+				decoded = append(decoded, b...)
+				pos += n
+				continue
+			}
+			if c == ')' || isURLSpace(c) {
+				break
+			}
+			if c == '"' || c == '\'' || c == '(' {
+				return "", 0, false
+			}
+			decoded = append(decoded, c)
+			pos++
+		}
+		for pos < len(s) && isURLSpace(s[pos]) {
+			pos++
+		}
+		if pos >= len(s) || s[pos] != ')' {
+			return "", 0, false
+		}
+		pos++
+	}
+	encoded := make([]byte, 0, len(decoded)+2)
+	for _, c := range decoded {
+		if c == '"' || c == '\\' {
+			encoded = append(encoded, '\\')
+		}
+		encoded = append(encoded, c)
+	}
+	return "url(\"" + string(encoded) + "\")", pos, true
+}
+
+func isURLSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
+}
+
+func decodeCSSEscape(s string) ([]byte, int, bool) {
+	if len(s) < 2 || s[0] != '\\' {
+		return nil, 0, false
+	}
+	c := s[1]
+	if c >= 0x80 {
+		return []byte{c}, 2, true
+	}
+	hexDigits := 0
+	for hexDigits < len(s)-1 && isHexByte(s[1+hexDigits]) {
+		hexDigits++
+	}
+	if hexDigits > 0 {
+		if hexDigits > 6 {
+			hexDigits = 6
+		}
+		cp, err := strconv.ParseUint(s[1:1+hexDigits], 16, 32)
+		j := 1 + hexDigits
+		if j < len(s) && s[j] == ' ' {
+			j++
+		}
+		if err != nil {
+			return []byte{c}, 2, true
+		}
+		return []byte(string(rune(cp))), j, true
+	}
+	if c == '\n' || c == '\r' || c == '\f' {
+		return nil, 0, false
+	}
+	return []byte{c}, 2, true
 }
 
 func normalizeHexColors(value string) string {

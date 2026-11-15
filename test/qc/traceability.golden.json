@@ -3566,6 +3566,19 @@
     "enforced": false
   },
   {
+    "id": "BR-315",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/rule_url_test.go:TestRuleUrlCanonicalisesCssText",
+      "test/js/rule_url_test.go:TestRuleUrlReadPaths"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
