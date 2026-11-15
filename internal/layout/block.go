@@ -574,15 +574,16 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		inlineInto(a, items[i].id)
 		it = a.Get(items[i].id)
 		extra := it.PaddingLeft + it.PaddingRight + it.BorderLeft + it.BorderRight
-		floor := inlineMinWidth(a, items[i].id) + extra
-		if items[i].basis < floor {
-			floor = items[i].basis
-		}
-		if explicitMin := resolveBoxMinWidth(a, it.Style, contentW); explicitMin > 0 {
-			if it.Style.BoxSizing == style.BoxSizingBorderBox {
-				floor = explicitMin
-			} else {
-				floor = explicitMin + extra
+		var floor float32
+		if it.Style.MinWidthAuto {
+			floor = inlineMinWidth(a, items[i].id) + extra
+			if items[i].basis < floor {
+				floor = items[i].basis
+			}
+		} else {
+			floor = resolveBoxMinWidth(a, it.Style, contentW)
+			if it.Style.BoxSizing != style.BoxSizingBorderBox {
+				floor += extra
 			}
 		}
 		if floor < 0 {

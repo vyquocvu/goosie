@@ -3635,6 +3635,20 @@
     "enforced": false
   },
   {
+    "id": "BR-320",
+    "priority": "P2",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/flex_min_width_zero_test.go:TestFlexAutoMinWidthHoldsDeclaredBasis",
+      "test/layout/flex_min_width_zero_test.go:TestFlexExplicitMinWidthZeroShrinksBelowBasis",
+      "test/layout/flex_min_width_zero_test.go:TestFlexMixedMinWidthZeroAndAuto"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

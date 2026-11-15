@@ -272,6 +272,8 @@ type ComputedStyle struct {
 	MaxWidth  float32
 	MaxHeight float32
 
+	MinWidthAuto bool
+
 	WidthCalc     DeferredLength
 	HeightCalc    DeferredLength
 	MinWidthCalc  DeferredLength
@@ -473,6 +475,7 @@ func AnonymousBlockStyle(parent *ComputedStyle) *ComputedStyle {
 	s.Width = -1
 	s.Height = -1
 	s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight = 0, 0, -1, -1
+	s.MinWidthAuto = true
 	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
 	s.MarginLeftAuto, s.MarginRightAuto = false, false
 	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
@@ -506,6 +509,7 @@ func AnonymousTableStyle(parent *ComputedStyle, d Display) *ComputedStyle {
 	s.Width = -1
 	s.Height = -1
 	s.MinWidth, s.MinHeight, s.MaxWidth, s.MaxHeight = 0, 0, -1, -1
+	s.MinWidthAuto = true
 	s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft = 0, 0, 0, 0
 	s.MarginLeftAuto, s.MarginRightAuto = false, false
 	s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft = 0, 0, 0, 0
@@ -539,6 +543,7 @@ func DefaultStyle() ComputedStyle {
 		MinHeight:              0,
 		MaxWidth:               -1,
 		MaxHeight:              -1,
+		MinWidthAuto:           true,
 		Color:                  css.Color{R: 0, G: 0, B: 0, A: 255},
 		FontSize:               16,
 		rootFontSize:           16,
@@ -2642,8 +2647,10 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "min-width", "min-inline-size":
 		if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.MinWidthCalc, cs.MinWidth = d, 0
+			cs.MinWidthAuto = false
 		} else {
 			cs.MinWidthCalc = DeferredLength{}
+			cs.MinWidthAuto = valueIsAuto(parsed)
 			cs.MinWidth = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
 	case "min-height", "min-block-size":

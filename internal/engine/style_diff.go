@@ -28,6 +28,7 @@ type layoutStyleKey struct {
 	LineClamp                                     int
 	ShapeMargin                                   float32
 	Width, Height, MinWidth, MinHeight            float32
+	MinWidthAuto                                  bool
 	MaxWidth, MaxHeight                           float32
 	WidthCalc, HeightCalc                         style.DeferredLength
 	MinWidthCalc, MinHeightCalc                   style.DeferredLength
@@ -108,7 +109,8 @@ func makeLayoutStyleKey(s *style.ComputedStyle) layoutStyleKey {
 		TextWrap: s.TextWrap, ViewTransitionName: s.ViewTransitionName, ShapeOutside: s.ShapeOutside,
 		LineClamp: s.LineClamp, ShapeMargin: s.ShapeMargin,
 		Width: s.Width, Height: s.Height, MinWidth: s.MinWidth, MinHeight: s.MinHeight, MaxWidth: s.MaxWidth, MaxHeight: s.MaxHeight,
-		WidthCalc: s.WidthCalc, HeightCalc: s.HeightCalc, MinWidthCalc: s.MinWidthCalc, MinHeightCalc: s.MinHeightCalc,
+		MinWidthAuto: s.MinWidthAuto,
+		WidthCalc:    s.WidthCalc, HeightCalc: s.HeightCalc, MinWidthCalc: s.MinWidthCalc, MinHeightCalc: s.MinHeightCalc,
 		MaxWidthCalc: s.MaxWidthCalc, MaxHeightCalc: s.MaxHeightCalc,
 		MarginTop: s.MarginTop, MarginRight: s.MarginRight, MarginBottom: s.MarginBottom, MarginLeft: s.MarginLeft,
 		MarginLeftAuto: s.MarginLeftAuto, MarginRightAuto: s.MarginRightAuto,
