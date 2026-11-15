@@ -117,30 +117,23 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 		return goja.Undefined()
 	})
 
-	ctor, ok := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
-		obj := r.vm.NewObject()
-		_ = obj.SetPrototype(r.cssStyleSheetProto)
-		return obj
-	}).(*goja.Object)
-	if ok {
-		_ = ctor.Set("prototype", r.cssStyleSheetProto)
-		_ = r.cssStyleSheetProto.Set("constructor", ctor)
-		r.defineInterfaceToStringTag("CSSStyleSheet", r.cssStyleSheetProto)
-		_ = r.vm.Set("CSSStyleSheet", ctor)
+	r.defineInterfaceToStringTag("CSSStyleSheet", r.cssStyleSheetProto)
+	_ = r.vm.Set("__cssSheetProto__", r.cssStyleSheetProto)
+	ctorValue, ctorErr := r.vm.RunString(`(function(proto) {
+		var C = function CSSStyleSheet() {
+			if (!new.target) throw new TypeError("Failed to construct 'CSSStyleSheet': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+		};
+		Object.defineProperty(C, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
+		Object.defineProperty(proto, 'constructor', { value: C, writable: true, enumerable: false, configurable: true });
+		return C;
+	})(__cssSheetProto__)`)
+	_ = r.vm.Set("__cssSheetProto__", nil)
+	if ctorErr == nil && ctorValue != nil {
+		_ = r.vm.Set("CSSStyleSheet", ctorValue)
 	}
 
-	cssRuleCtor, ok := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object { return r.vm.NewObject() }).(*goja.Object)
-	if ok {
-		_ = cssRuleCtor.Set("prototype", r.cssRuleProto)
-		_ = r.cssRuleProto.Set("constructor", cssRuleCtor)
-		_ = r.vm.Set("CSSRule", cssRuleCtor)
-	}
-	cssStyleRuleCtor, ok := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object { return r.vm.NewObject() }).(*goja.Object)
-	if ok {
-		_ = cssStyleRuleCtor.Set("prototype", r.cssStyleRuleProto)
-		_ = r.cssStyleRuleProto.Set("constructor", cssStyleRuleCtor)
-		_ = r.vm.Set("CSSStyleRule", cssStyleRuleCtor)
-	}
+	r.defineConstructor("CSSRule", r.cssRuleProto)
+	r.defineConstructor("CSSStyleRule", r.cssStyleRuleProto)
 
 	if r.documentProto != nil {
 		_ = r.documentProto.DefineAccessorProperty("styleSheets", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {

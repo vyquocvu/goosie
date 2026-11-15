@@ -12,13 +12,14 @@ func (r *Runtime) setupShadowDOM() {
 		return
 	}
 	if r.shadowRootProto == nil {
-		ctor := r.vm.ToValue(func(goja.ConstructorCall) *goja.Object { panic(r.vm.NewTypeError("Illegal constructor")) }).(*goja.Object)
-		r.shadowRootProto = ctor.Get("prototype").(*goja.Object)
-		_ = r.shadowRootProto.Set("constructor", ctor)
-		_ = r.shadowRootProto.SetPrototype(r.documentFragmentProto)
-		_ = r.vm.Set("ShadowRoot", ctor)
-		if win, ok := r.vm.Get("window").(*goja.Object); ok {
-			_ = win.Set("ShadowRoot", ctor)
+		proto := r.vm.NewObject()
+		_ = proto.SetPrototype(r.documentFragmentProto)
+		r.shadowRootProto = proto
+		ctor := r.defineConstructor("ShadowRoot", proto)
+		if ctor != nil {
+			if win, ok := r.vm.Get("window").(*goja.Object); ok {
+				_ = win.Set("ShadowRoot", ctor)
+			}
 		}
 	}
 	_ = r.shadowRootProto.DefineAccessorProperty("customElementRegistry", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {

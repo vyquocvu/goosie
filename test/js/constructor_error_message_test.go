@@ -91,6 +91,66 @@ func TestCallingAbstractInterfaceThrowsBareIllegalConstructor(t *testing.T) {
 	}
 }
 
+// qc:BR-306
+func TestCSSOMAbstractAndShadowRootConstructorsUseTheSharedLaw(t *testing.T) {
+	r := ctorProbeRuntime(t)
+	res := captureJSON(t, r, `(function(){
+		var names = ['CSSRule','CSSStyleRule','ShadowRoot'];
+		var out = {};
+		for (var i=0;i<names.length;i++){
+			var n = names[i], F = globalThis[n];
+			var row = {present: typeof F, fname: F && F.name, protoCtorEq: String(!!(F && F.prototype && F.prototype.constructor === F))};
+			try { F(); row.call = 'no'; } catch (e) { row.call = e.name + ': ' + e.message; }
+			try { new F(); row.news = 'no'; } catch (e) { row.news = e.name + ': ' + e.message; }
+			out[n] = row;
+		}
+		return JSON.stringify(out);
+	})()`)
+	for _, n := range []string{"CSSRule", "CSSStyleRule", "ShadowRoot"} {
+		row := res[n]
+		if row["present"] != "function" {
+			t.Errorf("typeof %s = %q, want function", n, row["present"])
+			continue
+		}
+		if row["call"] != "TypeError: Illegal constructor" {
+			t.Errorf("%s() threw %q, want TypeError: Illegal constructor", n, row["call"])
+		}
+		want := "TypeError: Failed to construct '" + n + "': Illegal constructor"
+		if row["news"] != want {
+			t.Errorf("new %s() threw %q, want %q", n, row["news"], want)
+		}
+		if row["fname"] != n {
+			t.Errorf("%s.name = %q, want %q", n, row["fname"], n)
+		}
+		if row["protoCtorEq"] != "true" {
+			t.Errorf("%s.prototype.constructor === %s is false", n, n)
+		}
+	}
+}
+
+// qc:BR-306
+func TestCSSStyleSheetConstructorRequiresTheNewOperator(t *testing.T) {
+	r := ctorProbeRuntime(t)
+	res := captureJSON(t, r, `(function(){
+		var row = {};
+		try { CSSStyleSheet(); row.call = 'no'; }
+		catch (e) { row.call = e.name + ': ' + e.message; }
+		try { var s = new CSSStyleSheet(); row.news = 'object'; row.instanceof = String(s instanceof CSSStyleSheet); }
+		catch (e) { row.news = e.name + ': ' + e.message; }
+		return JSON.stringify({CSSStyleSheet: row});
+	})()`)
+	want := "TypeError: Failed to construct 'CSSStyleSheet': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+	if res["CSSStyleSheet"]["call"] != want {
+		t.Errorf("CSSStyleSheet() threw %q, want %q", res["CSSStyleSheet"]["call"], want)
+	}
+	if res["CSSStyleSheet"]["news"] != "object" {
+		t.Errorf("new CSSStyleSheet() = %q, want object", res["CSSStyleSheet"]["news"])
+	}
+	if res["CSSStyleSheet"]["instanceof"] != "true" {
+		t.Errorf("new CSSStyleSheet() instanceof CSSStyleSheet = %q, want true", res["CSSStyleSheet"]["instanceof"])
+	}
+}
+
 // qc:BR-298
 func TestAbstractInterfaceConstructorNameAndPrototypeSurviveTheBranch(t *testing.T) {
 	r := ctorProbeRuntime(t)
