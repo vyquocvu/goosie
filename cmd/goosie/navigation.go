@@ -45,9 +45,24 @@ type navResult struct {
 
 type navRequest = toolbar.Request
 
-type downloadDone struct{ path string }
+type downloadDone struct {
+	path               string
+	url                string
+	contentType        string
+	contentDisposition string
+}
 
 func (e downloadDone) Error() string { return "downloaded to " + e.path }
+
+func (e downloadDone) trigger() string {
+	if e.contentDisposition != "" {
+		return "Content-Disposition: " + e.contentDisposition
+	}
+	if e.contentType != "" {
+		return "Content-Type: " + e.contentType
+	}
+	return "the response was classified as a download"
+}
 
 type downloadPaused struct{ id string }
 

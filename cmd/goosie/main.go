@@ -658,14 +658,32 @@ func programErrorLine(err error) string {
 	return programLabel + msg
 }
 
+var errScreenshotDownload = errors.New("screenshot response routed to downloader")
+
+type screenshotDownloadError struct{ dd downloadDone }
+
+func (e screenshotDownloadError) Error() string {
+	return fmt.Sprintf("goosie: no screenshot for %s: the response was routed to the downloader (%s), saved to %s; nothing to paint", e.dd.url, e.dd.trigger(), e.dd.path)
+}
+
+func (e screenshotDownloadError) Unwrap() error { return errScreenshotDownload }
+
+func exitCodeFor(err error) int {
+	switch {
+	case errors.Is(err, errUsage):
+		return 2
+	case errors.Is(err, errScreenshotDownload):
+		return 3
+	default:
+		return 1
+	}
+}
+
 func main() {
 	runtime.LockOSThread()
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, programErrorLine(err))
-		if errors.Is(err, errUsage) {
-			os.Exit(2)
-		}
-		os.Exit(1)
+		os.Exit(exitCodeFor(err))
 	}
 }
 
@@ -748,6 +766,10 @@ func run(args []string) (runErr error) {
 		if c.paced() {
 			layer, docSpec, bgColor, sess, _, err := loadURLCtx(context.Background(), f.client, f.fonts, normalizeURL(c.url), c.width, c.height, float32(c.dpr), c.downloadDir, false, false)
 			if err != nil {
+				var dd downloadDone
+				if errors.As(err, &dd) && (c.screenshot || c.screenshotSeq != "") {
+					return screenshotDownloadError{dd: dd}
+				}
 				return err
 			}
 			f.layer = layer

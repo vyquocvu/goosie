@@ -301,7 +301,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 					return nil, paint.SceneSpec{}, frame.Color(0), nil, "", context.Canceled
 				}
 			}
-			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath, url: resp.URL, contentType: contentType, contentDisposition: contentDisposition}
 		}
 		var itemID string
 		if mgr != nil {
@@ -318,7 +318,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		if mgr != nil && itemID != "" {
 			mgr.CompleteWithDigest(itemID, savedPath, download.Sum(resp.Body).String())
 		}
-		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath}
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath, url: resp.URL, contentType: contentType, contentDisposition: contentDisposition}
 	}
 	cssCtx, cssCancel := context.WithTimeout(ctx, engine.CSSFetchBudget)
 	defer cssCancel()

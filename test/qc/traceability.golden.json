@@ -4131,6 +4131,21 @@
     "enforced": false
   },
   {
+    "id": "BR-303",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "cmd/goosie/screenshot_download_route_test.go:TestExitCodeForDistinguishesFailureKinds",
+      "cmd/goosie/screenshot_download_route_test.go:TestScreenshotOfAttachmentReportsTheDownload",
+      "cmd/goosie/screenshot_download_route_test.go:TestScreenshotOfRenderedPageStaysSuccessful",
+      "cmd/goosie/screenshot_download_route_test.go:TestScreenshotOfTypedBinaryReportsTheDownload"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-169",
     "priority": "P1",
     "methods": [
