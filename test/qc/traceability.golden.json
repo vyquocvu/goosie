@@ -3592,6 +3592,19 @@
     "enforced": false
   },
   {
+    "id": "BR-317",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/rule_hsl_color_test.go:TestRuleHslColorCanonicalisesCssText",
+      "test/js/rule_hsl_color_test.go:TestRuleHslColorReadPaths"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

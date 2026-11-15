@@ -768,7 +768,7 @@ func serializeDeclarationValue(property, value string) string {
 	if strings.HasPrefix(property, "--") {
 		return normalizeDeclarationValue(value)
 	}
-	return normalizeDeclarationValue(normalizeNumbers(normalizeHexColors(normalizeUrls(value))))
+	return normalizeDeclarationValue(normalizeNumbers(normalizeHexColors(normalizeHslHwbColors(normalizeUrls(value)))))
 }
 
 func normalizeUrls(value string) string {
@@ -1057,6 +1057,266 @@ func hexVal(c byte) uint8 {
 
 func hexPair(hi, lo byte) uint8 {
 	return hexVal(hi)<<4 | hexVal(lo)
+}
+
+func normalizeHslHwbColors(value string) string {
+	out := make([]byte, 0, len(value)+8)
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); {
+		ch := value[i]
+		if escaped {
+			out = append(out, ch)
+			escaped = false
+			i++
+			continue
+		}
+		if quote != 0 {
+			out = append(out, ch)
+			if ch == '\\' {
+				escaped = true
+			} else if ch == quote {
+				quote = 0
+			}
+			i++
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			out = append(out, ch)
+			i++
+			continue
+		}
+		if (ch == 'u' || ch == 'U') && strings.EqualFold(value[i:min(i+4, len(value))], "url(") {
+			rp := strings.IndexByte(value[i:], ')')
+			if rp < 0 {
+				out = append(out, value[i:]...)
+				break
+			}
+			end := i + rp + 1
+			out = append(out, value[i:end]...)
+			i = end
+			continue
+		}
+		if (ch == 'h' || ch == 'H') && (i == 0 || !isIdentByte(value[i-1])) {
+			if consumed, css, ok := serializeHslHwbToken(value[i:]); ok {
+				out = append(out, css...)
+				i += consumed
+				continue
+			}
+		}
+		out = append(out, ch)
+		i++
+	}
+	return string(out)
+}
+
+func serializeHslHwbToken(s string) (int, string, bool) {
+	rp := strings.IndexByte(s, ')')
+	if rp < 0 {
+		return 0, "", false
+	}
+	nameEnd := strings.IndexByte(s, '(')
+	if nameEnd < 0 || nameEnd > rp {
+		return 0, "", false
+	}
+	name := strings.ToLower(s[:nameEnd])
+	if name != "hsl" && name != "hsla" && name != "hwb" {
+		return 0, "", false
+	}
+	inner := s[nameEnd+1 : rp]
+	css, ok := colorFunctionToRGB(name, inner)
+	if !ok {
+		return 0, "", false
+	}
+	return rp + 1, css, true
+}
+
+func colorFunctionToRGB(name, inner string) (string, bool) {
+	list := inner
+	alphaToken := ""
+	hasAlpha := false
+	if i := strings.IndexByte(inner, '/'); i >= 0 {
+		list = inner[:i]
+		alphaToken = inner[i+1:]
+		hasAlpha = true
+	}
+	var toks []string
+	if strings.ContainsRune(list, ',') {
+		parts := strings.Split(list, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		if !hasAlpha && len(parts) == 4 {
+			alphaToken = parts[3]
+			hasAlpha = true
+			parts = parts[:3]
+		}
+		toks = parts
+	} else {
+		toks = strings.Fields(list)
+	}
+	if len(toks) != 3 {
+		return "", false
+	}
+	h, ok := parseColorHue(toks[0])
+	if !ok {
+		return "", false
+	}
+	c1, ok := parseColorPercent(toks[1])
+	if !ok {
+		return "", false
+	}
+	c2, ok := parseColorPercent(toks[2])
+	if !ok {
+		return "", false
+	}
+	alpha := 1.0
+	if hasAlpha {
+		a, ok := parseColorAlpha(alphaToken)
+		if !ok {
+			return "", false
+		}
+		alpha = a
+	}
+	var r, g, b float64
+	if name == "hwb" {
+		r, g, b = hwbToChannels(h, c1, c2)
+	} else {
+		r, g, b = hslToChannels(h, c1, c2)
+	}
+	return emitRGB(r, g, b, alpha), true
+}
+
+func parseColorHue(tok string) (float64, bool) {
+	tok = strings.TrimSpace(tok)
+	if tok == "" || strings.EqualFold(tok, "none") {
+		return 0, true
+	}
+	num := tok
+	mult := 1.0
+	switch {
+	case strings.HasSuffix(strings.ToLower(tok), "deg"):
+		num = tok[:len(tok)-3]
+	case strings.HasSuffix(strings.ToLower(tok), "turn"):
+		num = tok[:len(tok)-4]
+		mult = 360
+	case strings.HasSuffix(strings.ToLower(tok), "grad"):
+		num = tok[:len(tok)-4]
+		mult = 0.9
+	case strings.HasSuffix(strings.ToLower(tok), "rad"):
+		num = tok[:len(tok)-3]
+		mult = 180 / math.Pi
+	}
+	f, err := strconv.ParseFloat(strings.TrimSpace(num), 64)
+	if err != nil {
+		return 0, false
+	}
+	h := math.Mod(f*mult, 360)
+	if h < 0 {
+		h += 360
+	}
+	return h, true
+}
+
+func parseColorPercent(tok string) (float64, bool) {
+	tok = strings.TrimSpace(tok)
+	if tok == "" || strings.EqualFold(tok, "none") {
+		return 0, true
+	}
+	if strings.HasSuffix(tok, "%") {
+		f, err := strconv.ParseFloat(strings.TrimSpace(tok[:len(tok)-1]), 64)
+		if err != nil {
+			return 0, false
+		}
+		return clampUnit(f / 100), true
+	}
+	f, err := strconv.ParseFloat(tok, 64)
+	if err != nil {
+		return 0, false
+	}
+	return clampUnit(f), true
+}
+
+func parseColorAlpha(tok string) (float64, bool) {
+	tok = strings.TrimSpace(tok)
+	if tok == "" || strings.EqualFold(tok, "none") {
+		return 0, true
+	}
+	if strings.HasSuffix(tok, "%") {
+		f, err := strconv.ParseFloat(strings.TrimSpace(tok[:len(tok)-1]), 64)
+		if err != nil {
+			return 0, false
+		}
+		return clampUnit(f / 100), true
+	}
+	f, err := strconv.ParseFloat(tok, 64)
+	if err != nil {
+		return 0, false
+	}
+	return clampUnit(f), true
+}
+
+func clampUnit(x float64) float64 {
+	if math.IsNaN(x) || x < 0 {
+		return 0
+	}
+	if x > 1 {
+		return 1
+	}
+	return x
+}
+
+func hslToChannels(h, s, l float64) (float64, float64, float64) {
+	c := (1 - math.Abs(2*l-1)) * s
+	x := c * (1 - math.Abs(math.Mod(h/60, 2)-1))
+	m := l - c/2
+	var r1, g1, b1 float64
+	switch int(h / 60) {
+	case 0:
+		r1, g1, b1 = c, x, 0
+	case 1:
+		r1, g1, b1 = x, c, 0
+	case 2:
+		r1, g1, b1 = 0, c, x
+	case 3:
+		r1, g1, b1 = 0, x, c
+	case 4:
+		r1, g1, b1 = x, 0, c
+	default:
+		r1, g1, b1 = c, 0, x
+	}
+	return r1 + m, g1 + m, b1 + m
+}
+
+func hwbToChannels(h, w, b float64) (float64, float64, float64) {
+	if w+b >= 1 {
+		grey := w / (w + b)
+		return grey, grey, grey
+	}
+	r1, g1, b1 := hslToChannels(h, 1, 0.5)
+	k := 1 - w - b
+	return r1*k + w, g1*k + w, b1*k + w
+}
+
+func roundColorChannel(x float64) uint8 {
+	v := int(math.RoundToEven(float64(float32(x * 255))))
+	if v < 0 {
+		v = 0
+	}
+	if v > 255 {
+		v = 255
+	}
+	return uint8(v)
+}
+
+func emitRGB(r, g, b, alpha float64) string {
+	channels := strconv.Itoa(int(roundColorChannel(r))) + ", " + strconv.Itoa(int(roundColorChannel(g))) + ", " + strconv.Itoa(int(roundColorChannel(b)))
+	a := roundColorChannel(alpha)
+	if a == 255 {
+		return "rgb(" + channels + ")"
+	}
+	return "rgba(" + channels + ", " + formatHexAlpha(a) + ")"
 }
 
 func normalizeNumbers(value string) string {
