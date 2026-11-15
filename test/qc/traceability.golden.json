@@ -3462,6 +3462,18 @@
     "enforced": false
   },
   {
+    "id": "BR-307",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/constructor_error_message_test.go:TestConstructibleDOMNodeConstructorsReturnRealNodes"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

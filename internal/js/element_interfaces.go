@@ -357,11 +357,11 @@ func (r *Runtime) setupProtoChain() {
 			_ = document.SetPrototype(r.xmlDocumentProto)
 		}
 	}
-	r.defineConstructor("DocumentFragment", r.documentFragmentProto)
+	r.defineConstructibleNodeConstructor("DocumentFragment", r.documentFragmentProto, r.jsCreateDocumentFragment)
 	r.defineConstructor("CharacterData", r.characterDataProto)
 	r.defineConstructor("ProcessingInstruction", r.processingInstructionProto)
-	r.defineConstructor("Text", r.textProto)
-	r.defineConstructor("Comment", r.commentProto)
+	r.defineConstructibleNodeConstructor("Text", r.textProto, r.jsConstructTextNode)
+	r.defineConstructibleNodeConstructor("Comment", r.commentProto, r.jsCreateComment)
 	r.installCharacterDataAccessors()
 
 	for _, tag := range []string{
@@ -769,6 +769,32 @@ func (r *Runtime) defineConstructor(name string, p *goja.Object) *goja.Object {
 	r.ifaceCtors[name] = ctor
 	_ = r.vm.Set(name, v)
 	return ctor
+}
+
+func (r *Runtime) defineConstructibleNodeConstructor(name string, p *goja.Object, factory func(goja.FunctionCall) goja.Value) {
+	r.defineInterfaceToStringTag(name, p)
+	msg := "Failed to construct '" + name + "': Please use the 'new' operator, this DOM object constructor cannot be called as a function."
+	_ = r.vm.Set("__ctorProto__", p)
+	_ = r.vm.Set("__ctorFactory__", r.vm.ToValue(factory))
+	_ = r.vm.Set("__ctorMsg__", msg)
+	v, err := r.vm.RunString(`(function(proto, factory, msg) {
+		var C = function ` + name + `() {
+			if (!new.target) throw new TypeError(msg);
+			return factory.apply(null, arguments);
+		};
+		Object.defineProperty(C, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
+		Object.defineProperty(proto, 'constructor', { value: C, writable: true, enumerable: false, configurable: true });
+		return C;
+	})(__ctorProto__, __ctorFactory__, __ctorMsg__)`)
+	_ = r.vm.Set("__ctorProto__", nil)
+	_ = r.vm.Set("__ctorFactory__", nil)
+	_ = r.vm.Set("__ctorMsg__", nil)
+	if err != nil || v == nil {
+		return
+	}
+	ctor := v.ToObject(r.vm)
+	r.ifaceCtors[name] = ctor
+	_ = r.vm.Set(name, v)
 }
 
 func isJSObject(value goja.Value) bool {

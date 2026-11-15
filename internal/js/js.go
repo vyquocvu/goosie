@@ -5384,12 +5384,23 @@ func (r *Runtime) jsCreateTextNode(call goja.FunctionCall) goja.Value {
 	return r.wrapNode(node)
 }
 
+func (r *Runtime) jsConstructTextNode(call goja.FunctionCall) goja.Value {
+	if r.domDoc == nil {
+		return goja.Null()
+	}
+	data := ""
+	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) {
+		data = call.Arguments[0].String()
+	}
+	return r.wrapNode(r.domDoc.NewText(data))
+}
+
 func (r *Runtime) jsCreateComment(call goja.FunctionCall) goja.Value {
 	if r.domDoc == nil {
 		return goja.Null()
 	}
 	data := ""
-	if len(call.Arguments) > 0 {
+	if len(call.Arguments) > 0 && !goja.IsUndefined(call.Arguments[0]) {
 		data = call.Arguments[0].String()
 	}
 	return r.wrapNode(r.domDoc.NewComment(data))
