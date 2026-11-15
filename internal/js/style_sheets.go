@@ -512,6 +512,15 @@ func mediaSegments(text string) []string {
 	return out
 }
 
+func (st *mediaListState) setMediaText(text string) {
+	segs := mediaSegments(text)
+	if segs == nil {
+		segs = []string{}
+	}
+	st.override = segs
+	st.base = st.attributeText()
+}
+
 func (st *mediaListState) appendMedium(medium string) {
 	if medium == "" {
 		return

@@ -3437,6 +3437,18 @@
     "enforced": false
   },
   {
+    "id": "BR-305",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/cssom_collections_test.go:TestMediaListMediaTextSetterWritesAnOverrideNotTheAttribute"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

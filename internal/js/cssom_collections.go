@@ -23,7 +23,16 @@ func (r *Runtime) cssomCollectionProto(name string) *goja.Object {
 	if name == "MediaList" {
 		_ = proto.DefineAccessorProperty("mediaText", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			return cssomProperty(r.cssomCollectionReceiver(call.This, name), "mediaText")
-		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+		}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			obj := r.cssomCollectionReceiver(call.This, "MediaList")
+			if state := r.mediaStateOf(obj); state != nil {
+				if _, isSymbol := call.Argument(0).(*goja.Symbol); isSymbol {
+					panic(r.vm.NewTypeError("Cannot convert a Symbol value to a string"))
+				}
+				state.setMediaText(call.Argument(0).String())
+			}
+			return goja.Undefined()
+		}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 		_ = proto.DefineDataProperty("appendMedium", r.cssomMethod("appendMedium", true, func(call goja.FunctionCall) goja.Value {
 			obj := r.cssomCollectionReceiver(call.This, "MediaList")
 			medium := r.cssomMediumArgument(call, "appendMedium")

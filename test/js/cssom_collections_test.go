@@ -314,3 +314,33 @@ func TestMediaListMediumMutationsMatchChromiumShape(t *testing.T) {
 		t.Errorf("MediaList mutation shape\ngot: %s\nwant: %s", got, want)
 	}
 }
+
+// qc:BR-305
+func TestMediaListMediaTextSetterWritesAnOverrideNotTheAttribute(t *testing.T) {
+	r := cssomColRuntime(t)
+	got := mustCSSOM(t, r, shapeJS+`
+		var attr = document.getElementById('C1');
+		var d = Object.getOwnPropertyDescriptor(MediaList.prototype, 'mediaText');
+		var out = [];
+		out.push('desc:' + typeof d.get + ',' + typeof d.set + ',' + d.enumerable + ',' + d.configurable);
+		media.mediaText = 'aural, print';
+		out.push('set_spaced:' + media.mediaText + '|' + media.length + '|' + media.item(1) + '|attr=' + attr.getAttribute('media'));
+		media.mediaText = 'tv,radio,print';
+		out.push('set_nospace:' + media.mediaText + '|' + media.length);
+		media.mediaText = '   ';
+		out.push('set_ws:' + media.mediaText + '|' + media.length);
+		media.mediaText = '';
+		out.push('set_empty:' + media.mediaText + '|' + media.length);
+		media.mediaText = 'screen, print';
+		media.appendMedium('tv');
+		out.push('append_after_set:' + media.mediaText + '|' + media.length + '|attr=' + attr.getAttribute('media'));
+		attr.setAttribute('media', 'all');
+		out.push('attr_clears:' + media.mediaText + '|' + media.length);
+		out.push(err(function () { return Object.getOwnPropertyDescriptor(MediaList.prototype, 'mediaText').set.call({}, 'x'); }));
+		out.join(' || ')
+	`)
+	want := "desc:function,function,true,true || set_spaced:aural, print|2|print|attr=screen, print || set_nospace:tv, radio, print|3 || set_ws:|0 || set_empty:|0 || append_after_set:screen, print, tv|3|attr=screen, print || attr_clears:all|1 || TypeError: Illegal invocation"
+	if got != want {
+		t.Errorf("MediaList mediaText setter\ngot: %s\nwant: %s", got, want)
+	}
+}
