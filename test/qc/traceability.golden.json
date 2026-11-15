@@ -3499,6 +3499,21 @@
     "enforced": false
   },
   {
+    "id": "BR-310",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/js/cssom_sheet_mutation_test.go:TestSheetDeleteRuleAndLiveList",
+      "test/js/cssom_sheet_mutation_test.go:TestSheetInsertRuleErrorLaws",
+      "test/js/cssom_sheet_mutation_test.go:TestSheetInsertRulePositionsAndReturn",
+      "test/js/cssom_sheet_mutation_test.go:TestSheetMutationReceiverAndDescriptor"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

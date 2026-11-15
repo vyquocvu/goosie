@@ -170,7 +170,7 @@ func (r *Runtime) cssRuleList(owner *dom.Node) goja.Value {
 	if r.cssRuleListObjects == nil {
 		r.cssRuleListObjects = map[*dom.Node]cachedCSSRuleList{}
 	}
-	value := r.newCSSRuleList(r.sheetRuleObjects(owner))
+	value := r.newCSSRuleList(r.sheetRuleView(owner))
 	r.cssRuleListObjects[owner] = cachedCSSRuleList{text: text, value: value}
 	return value
 }
@@ -180,39 +180,44 @@ type cachedCSSRuleList struct {
 	value goja.Value
 }
 
-func (r *Runtime) newCSSRuleList(items []*goja.Object) goja.Value {
+func (r *Runtime) newCSSRuleList(view *cachedCSSRules) goja.Value {
+	items := func() []*goja.Object { return view.rules }
 	target := r.vm.NewObject()
 	_ = target.SetPrototype(r.cssomCollectionProto("CSSRuleList"))
 	return r.cssomCollection(r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
 		Get: func(proxied *goja.Object, property string, _ goja.Value) goja.Value {
+			current := items()
 			if property == "length" {
-				return r.vm.ToValue(len(items))
+				return r.vm.ToValue(len(current))
 			}
 			if isCanonicalIndex(property) {
 				index, _ := strconv.Atoi(property)
-				if index >= 0 && index < len(items) {
-					return items[index]
+				if index >= 0 && index < len(current) {
+					return current[index]
 				}
 				return goja.Undefined()
 			}
 			return proxied.Get(property)
 		},
 		GetIdx: func(_ *goja.Object, index int, _ goja.Value) goja.Value {
-			if index >= 0 && index < len(items) {
-				return items[index]
+			current := items()
+			if index >= 0 && index < len(current) {
+				return current[index]
 			}
 			return goja.Undefined()
 		},
-		HasIdx: func(_ *goja.Object, index int) bool { return index >= 0 && index < len(items) },
+		HasIdx: func(_ *goja.Object, index int) bool { return index >= 0 && index < len(items()) },
 		GetOwnPropertyDescriptorIdx: func(_ *goja.Object, index int) goja.PropertyDescriptor {
-			if index < 0 || index >= len(items) {
+			current := items()
+			if index < 0 || index >= len(current) {
 				return goja.PropertyDescriptor{}
 			}
-			return goja.PropertyDescriptor{Value: items[index], Writable: goja.FLAG_FALSE, Enumerable: goja.FLAG_TRUE, Configurable: goja.FLAG_TRUE}
+			return goja.PropertyDescriptor{Value: current[index], Writable: goja.FLAG_FALSE, Enumerable: goja.FLAG_TRUE, Configurable: goja.FLAG_TRUE}
 		},
 		OwnKeys: func(proxied *goja.Object) *goja.Object {
-			keys := make([]interface{}, 0, len(items)+len(proxied.Keys()))
-			for index := range items {
+			current := items()
+			keys := make([]interface{}, 0, len(current)+len(proxied.Keys()))
+			for index := range current {
 				keys = append(keys, strconv.Itoa(index))
 			}
 			for _, key := range proxied.Keys() {

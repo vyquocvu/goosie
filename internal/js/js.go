@@ -367,7 +367,7 @@ type Runtime struct {
 	styleObjects                       map[*dom.Node]*goja.Object
 	cssStyleSheetObjects               map[*dom.Node]*goja.Object
 	styleSheetLists                    map[*dom.Document]goja.Value
-	cssRuleLists                       map[*dom.Node]cachedCSSRules
+	cssRuleLists                       map[*dom.Node]*cachedCSSRules
 	cssMediaLists                      map[*dom.Node]goja.Value
 	sheetDisabled                      map[*dom.Node]bool
 	cssRuleListObjects                 map[*dom.Node]cachedCSSRuleList
