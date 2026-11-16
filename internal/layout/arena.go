@@ -146,6 +146,8 @@ type Arena struct {
 
 	FirstLineStyles map[dom.NodeID]*style.ComputedStyle
 
+	PlaceholderStyles map[dom.NodeID]*style.ComputedStyle
+
 	inlineFragLines map[ObjectID]map[int]frame.RectF
 }
 
@@ -298,6 +300,11 @@ func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudo
 				a.FirstLineStyles = make(map[dom.NodeID]*style.ComputedStyle)
 			}
 			a.FirstLineStyles[key.NodeID] = cs
+		} else if key.Pseudo == "placeholder" {
+			if a.PlaceholderStyles == nil {
+				a.PlaceholderStyles = make(map[dom.NodeID]*style.ComputedStyle)
+			}
+			a.PlaceholderStyles[key.NodeID] = cs
 		}
 	}
 	rootScope := &style.CounterScope{}

@@ -3649,6 +3649,20 @@
     "enforced": false
   },
   {
+    "id": "BR-321",
+    "priority": "P2",
+    "methods": [
+      "UNIT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/placeholder_color_test.go:TestPlaceholderDefaultColorUnchanged",
+      "test/paint/placeholder_color_test.go:TestPlaceholderPaintsAuthorColor",
+      "test/style/pseudo_placeholder_test.go:TestPlaceholderPseudoElementCascade"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

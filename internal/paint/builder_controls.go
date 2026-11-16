@@ -33,7 +33,15 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 			return
 		}
 	}
-	b.appendRun(text, rect, s, frame.RGB(117, 117, 117), opacity)
+	col := frame.RGB(117, 117, 117)
+	op := opacity
+	if b.arena != nil && b.arena.PlaceholderStyles != nil {
+		if ps, ok := b.arena.PlaceholderStyles[obj.Node.ID]; ok && ps != nil {
+			col = convertColor(ps.Color)
+			op = opacity * ps.Opacity
+		}
+	}
+	b.appendRun(text, rect, s, col, op)
 }
 
 func (b *Builder) composeControlText(obj *layout.Object, text string) string {

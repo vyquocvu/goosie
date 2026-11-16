@@ -1,6 +1,8 @@
 package style
 
 import (
+	"strings"
+
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 )
@@ -29,13 +31,15 @@ func resolvePseudoElements(doc *dom.Document, index *ruleIndex, elementStyles ma
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after", "first-letter", "first-line"} {
+				for _, pseudo := range []string{"before", "after", "first-letter", "first-line", "placeholder"} {
 					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
 					if cs == nil {
 						continue
 					}
 					if pseudo == "first-line" {
 						filterFirstLineProperties(cs)
+						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+					} else if pseudo == "placeholder" {
 						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 					} else if pseudo == "first-letter" {
 						if cs.Content != "" && cs.Content != "none" {
@@ -81,13 +85,15 @@ func reResolvePseudoSubtree(roots []*dom.Node, index *ruleIndex, elementStyles m
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after", "first-letter", "first-line"} {
+				for _, pseudo := range []string{"before", "after", "first-letter", "first-line", "placeholder"} {
 					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
 					if cs == nil {
 						continue
 					}
 					if pseudo == "first-line" {
 						filterFirstLineProperties(cs)
+						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
+					} else if pseudo == "placeholder" {
 						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
 					} else if pseudo == "first-letter" {
 						if cs.Content != "" && cs.Content != "none" {
@@ -116,37 +122,37 @@ func reResolvePseudoSubtree(roots []*dom.Node, index *ruleIndex, elementStyles m
 }
 
 func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *ComputedStyle, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
-	candidates := index.candidates(n)
-	var matchingDecls []css.Declaration
-	var matchingOrigins []int
-	var matchingABC [][3]int
-	var matchingOrders []int
-
-	for _, entry := range candidates {
+	var entries []cascadeEntry
+	for _, entry := range index.candidates(n) {
 		if !entry.sel.MatchesPseudoElementIndexed(n, pseudo, six) {
 			continue
 		}
-		a, b, c := entry.sel.Specificity()
+		dist := computeScopeDist(n, entry.rule.ScopeRoot)
 		for _, decl := range entry.rule.Declarations {
-			matchingDecls = append(matchingDecls, decl)
-			matchingOrigins = append(matchingOrigins, entry.origin)
-			matchingABC = append(matchingABC, [3]int{a, b, c})
-			matchingOrders = append(matchingOrders, entry.rank)
+			entries = append(entries, cascadeEntry{decl: decl, origin: entry.origin, layerOrder: entry.layerOrder, scopeDist: dist, a: entry.a, b: entry.b, c: entry.c, order: entry.rank})
 		}
 	}
 
-	if len(matchingDecls) == 0 {
+	if len(entries) == 0 {
 		return nil
 	}
+
+	sortCascade(entries)
 
 	cs := DefaultStyle()
 	inheritFromParent(&cs, parent)
 
-	for i, decl := range matchingDecls {
+	if pseudo == "placeholder" {
+		cs.Color = css.Color{R: 117, G: 117, B: 117, A: 255}
+	}
+
+	for _, e := range entries {
+		decl := e.decl
 		applyProperty(&cs, decl.Property, decl.Value, decl.Parsed, parent.FontSize, fonts)
-		_ = matchingOrigins[i]
-		_ = matchingABC[i]
-		_ = matchingOrders[i]
+		if pseudo == "placeholder" && strings.EqualFold(strings.TrimSpace(decl.Property), "color") &&
+			(strings.EqualFold(strings.TrimSpace(decl.Value), "inherit") || strings.EqualFold(strings.TrimSpace(decl.Value), "unset")) {
+			cs.Color = parent.Color
+		}
 	}
 	resolveCustomFont(&cs, fonts)
 
