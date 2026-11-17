@@ -3244,7 +3244,7 @@
       "test/engine/form_submitter_novalidate_test.go:TestBlockedSubmissionStillPromotesTheControl",
       "test/engine/form_submitter_novalidate_test.go:TestCheckValidityAndReportValidityOnAnInvalidForm",
       "test/engine/form_submitter_novalidate_test.go:TestClickFormNoValidateSubmitterSkipsValidation",
-      "test/engine/form_submitter_novalidate_test.go:TestClickInsideADisabledControlStopsAtItsBoundary",
+      "test/engine/form_submitter_novalidate_test.go:TestClickInsideADisabledControlDeliversNoClick",
       "test/engine/form_submitter_novalidate_test.go:TestDisabledFirstSubmitButtonBlocksImplicitSubmission",
       "test/engine/form_submitter_novalidate_test.go:TestDisabledFormControlReceivesNoClick",
       "test/engine/form_submitter_novalidate_test.go:TestFormNoValidateIsABooleanAttribute",

@@ -110,6 +110,7 @@ type Session struct {
 	submittedForm          *FormSubmission
 	rangePointerNode       *dom.Node
 	rangePointerMoved      bool
+	press                  pressSequence
 
 	pendingFilePicker *dom.Node
 
@@ -1653,24 +1654,19 @@ func (s *Session) ClickAt(x, y float32) bool {
 			hitNode = hitNode.Parent
 		}
 	}
-	if disabled := disabledFormControlAt(hitNode); disabled != nil {
-		if disabled != hitNode {
-			path := dom.EventPath(hitNode)
-			for i, node := range path {
-				if node == disabled {
-					path = path[:i]
-					break
-				}
-			}
-			dom.DispatchEventWithPath(hitNode, dom.NewTrustedEvent("click", true, true), path)
-		}
+	count := s.nextPressCount(hitNode, x, y)
+	disabled := disabledFormControlAt(hitNode)
+	if hitNode != nil {
+		s.dispatchPointerSequence(hitNode, x, y, disabled != nil, count)
+	}
+	if disabled != nil {
 		return dismissed || dismissedPopup != nil
 	}
 	if isRangeInput(hitNode) && !dom.IsFormControlDisabled(hitNode) {
 		if s.jsRT != nil {
 			s.jsRT.SetTransientUserActivation(true)
 		}
-		click := dom.NewTrustedEvent("click", true, true)
+		click := newPointerClickEvent(x, y, count)
 		if !dom.DispatchEvent(hitNode, click) {
 			return true
 		}
@@ -1687,6 +1683,9 @@ func (s *Session) ClickAt(x, y float32) bool {
 			}
 			dom.DispatchEvent(hitNode, dom.NewTrustedEvent("change", true, false))
 		}
+		if count == 2 {
+			dispatchDoubleClick(hitNode, x, y)
+		}
 		return true
 	}
 
@@ -1696,9 +1695,19 @@ func (s *Session) ClickAt(x, y float32) bool {
 			if s.jsRT != nil {
 				s.jsRT.SetTransientUserActivation(true)
 			}
-			dom.DispatchEvent(hitNode, dom.NewTrustedEvent("click", true, true))
+			click := newPointerClickEvent(x, y, count)
+			activated := false
+			if dom.DispatchEvent(hitNode, click) {
+				activated = s.activateLabeledControl(hitNode, x, y)
+			}
 			if sel := s.openableSelect(hitNode); sel != nil && sel != dismissedPopup {
 				s.openSelectPopup(sel, x, y)
+				return true
+			}
+			if count == 2 {
+				dispatchDoubleClick(hitNode, x, y)
+			}
+			if activated {
 				return true
 			}
 		}
@@ -1707,12 +1716,86 @@ func (s *Session) ClickAt(x, y float32) bool {
 	if s.jsRT != nil {
 		s.jsRT.SetTransientUserActivation(true)
 	}
-	ev := dom.NewTrustedEvent("click", true, true)
+	ev := newPointerClickEvent(x, y, count)
 	if !dom.DispatchEvent(n, ev) {
 		return true
 	}
 	s.runClickDefault(n)
+	if count == 2 {
+		dispatchDoubleClick(n, x, y)
+	}
 	return true
+}
+
+type pressSequence struct {
+	node  *dom.Node
+	at    time.Time
+	x     float32
+	y     float32
+	count int
+}
+
+const (
+	multiPressInterval = 500 * time.Millisecond
+	multiPressSlop     = float32(4)
+)
+
+func (s *Session) nextPressCount(target *dom.Node, x, y float32) int {
+	now := time.Now()
+	repeated := s.press.node == target && target != nil &&
+		now.Sub(s.press.at) <= multiPressInterval &&
+		abs32(x-s.press.x) <= multiPressSlop && abs32(y-s.press.y) <= multiPressSlop
+	if repeated {
+		s.press.count++
+	} else {
+		s.press.count = 1
+	}
+	s.press.node = target
+	s.press.at = now
+	s.press.x = x
+	s.press.y = y
+	return s.press.count
+}
+
+func abs32(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func newPointerClickEvent(x, y float32, count int) *dom.Event {
+	click := dom.NewTrustedPointerEvent("click", int32(x), int32(y), 0)
+	if pointer := click.AsPointer(); pointer != nil {
+		pointer.Detail = count
+	}
+	return click
+}
+
+func dispatchDoubleClick(target *dom.Node, x, y float32) {
+	if target == nil {
+		return
+	}
+	dom.DispatchEvent(target, dom.NewTrustedMouseEvent("dblclick", int32(x), int32(y), 0, 0, 2))
+}
+
+func (s *Session) dispatchPointerSequence(target *dom.Node, x, y float32, disabled bool, count int) {
+	if target == nil {
+		return
+	}
+	cx, cy := int32(x), int32(y)
+	down := dom.NewTrustedPointerEvent("pointerdown", cx, cy, 0)
+	if pointer := down.AsPointer(); pointer != nil {
+		pointer.Buttons = 1
+	}
+	dom.DispatchEvent(target, down)
+	if disabled {
+		dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointerup", cx, cy, 0))
+		return
+	}
+	dom.DispatchEvent(target, dom.NewTrustedMouseEvent("mousedown", cx, cy, 0, 1, count))
+	dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointerup", cx, cy, 0))
+	dom.DispatchEvent(target, dom.NewTrustedMouseEvent("mouseup", cx, cy, 0, 0, count))
 }
 
 func (s *Session) toggleDetailsWithoutRuntime(n *dom.Node) {

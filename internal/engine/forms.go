@@ -134,9 +134,13 @@ func FirstSubmitButton(form *dom.Node) *dom.Node {
 
 func disabledFormControlAt(n *dom.Node) *dom.Node {
 	for cur := n; cur != nil; cur = cur.Parent {
-		if dom.IsDisableableFormControl(cur) && dom.IsFormControlDisabled(cur) {
+		if !dom.IsDisableableFormControl(cur) {
+			continue
+		}
+		if dom.IsFormControlDisabled(cur) {
 			return cur
 		}
+		return nil
 	}
 	return nil
 }
@@ -582,5 +586,96 @@ func (s *Session) noteControlBlur(n *dom.Node) {
 			form.UserInteracted = true
 			return
 		}
+	}
+}
+
+func (s *Session) activateLabeledControl(hit *dom.Node, x, y float32) bool {
+	label := labelForPointer(hit)
+	if label == nil {
+		return false
+	}
+	control := labeledControl(label)
+	if control == nil || dom.IsFormControlDisabled(control) {
+		return false
+	}
+	s.FocusNode(control)
+	ev := newPointerClickEvent(x, y, 0)
+	if !dom.DispatchEvent(control, ev) {
+		return true
+	}
+	s.runClickDefault(control)
+	return true
+}
+
+func labelForPointer(target *dom.Node) *dom.Node {
+	if target == nil {
+		return nil
+	}
+	for label := target; label != nil; label = label.Parent {
+		if !label.Element() || label.Data != "label" {
+			continue
+		}
+		for node := target; node != nil && node != label; node = node.Parent {
+			if !node.Element() {
+				continue
+			}
+			switch node.Data {
+			case "button", "input", "select", "summary", "textarea":
+				return nil
+			case "a", "area", "audio", "video":
+				if node.HasAttribute("href") || node.HasAttribute("controls") {
+					return nil
+				}
+			}
+		}
+		return label
+	}
+	return nil
+}
+
+func labeledControl(label *dom.Node) *dom.Node {
+	if label == nil || !label.Element() || label.Data != "label" || label.Doc == nil {
+		return nil
+	}
+	if label.HasAttribute("for") {
+		id := label.GetAttribute("for")
+		if id == "" {
+			return nil
+		}
+		target := label.Doc.ElementByID(id)
+		if labelableControl(target) {
+			return target
+		}
+		return nil
+	}
+	var found *dom.Node
+	var visit func(*dom.Node) bool
+	visit = func(node *dom.Node) bool {
+		for ; node != nil; node = node.NextSibling {
+			if node.Element() && labelableControl(node) {
+				found = node
+				return false
+			}
+			if node.Data != "template" && !visit(node.FirstChild) {
+				return false
+			}
+		}
+		return true
+	}
+	visit(label.FirstChild)
+	return found
+}
+
+func labelableControl(node *dom.Node) bool {
+	if node == nil || !node.Element() {
+		return false
+	}
+	switch node.Data {
+	case "button", "meter", "output", "progress", "select", "textarea":
+		return true
+	case "input":
+		return !strings.EqualFold(node.GetAttribute("type"), "hidden")
+	default:
+		return false
 	}
 }

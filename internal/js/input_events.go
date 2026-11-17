@@ -344,6 +344,16 @@ func (r *Runtime) installInputEventConstructors() {
 		value := obj.Get(name)
 		return value != nil && !goja.IsUndefined(value) && !goja.IsNull(value) && value.ToBoolean()
 	}
+	readInt := func(obj *goja.Object, name string) int64 {
+		if obj == nil {
+			return 0
+		}
+		value := obj.Get(name)
+		if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+			return 0
+		}
+		return value.ToInteger()
+	}
 	readInit := func(init goja.Value) (*goja.Object, bool, bool) {
 		if init == nil || goja.IsNull(init) || goja.IsUndefined(init) {
 			return nil, false, false
@@ -864,13 +874,14 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("__initialized", true)
 		_ = obj.Set("__goosieEvent", true)
 		_ = obj.Set("__goosieEventInterface", "MouseEvent")
-		for _, key := range []string{"clientX", "clientY", "screenX", "screenY", "button", "buttons", "detail", "which"} {
+		for _, key := range []string{"clientX", "clientY", "screenX", "screenY", "button", "buttons", "detail"} {
 			v := int64(0)
 			if init != nil && init.Get(key) != nil && !goja.IsUndefined(init.Get(key)) {
 				v = init.Get(key).ToInteger()
 			}
 			_ = obj.Set(key, v)
 		}
+		_ = obj.Set("which", readInt(init, "button")+1)
 		view := goja.Value(goja.Null())
 		if init != nil && init.Get("view") != nil && !goja.IsUndefined(init.Get("view")) {
 			view = init.Get("view")
@@ -917,13 +928,14 @@ func (r *Runtime) installInputEventConstructors() {
 		_ = obj.Set("isTrusted", false)
 		_ = obj.Set("__goosieEvent", true)
 		_ = obj.Set("__goosieEventInterface", "PointerEvent")
-		for _, key := range []string{"clientX", "clientY", "screenX", "screenY", "button", "buttons", "pointerId", "width", "height", "tiltX", "tiltY", "twist"} {
+		for _, key := range []string{"clientX", "clientY", "screenX", "screenY", "button", "buttons", "detail", "pointerId", "width", "height", "tiltX", "tiltY", "twist"} {
 			v := int64(0)
 			if init != nil && init.Get(key) != nil && !goja.IsUndefined(init.Get(key)) {
 				v = init.Get(key).ToInteger()
 			}
 			_ = obj.Set(key, v)
 		}
+		_ = obj.Set("which", readInt(init, "button")+1)
 		for _, key := range []string{"altKey", "ctrlKey", "shiftKey", "metaKey", "isPrimary"} {
 			_ = obj.Set(key, readBool(init, key))
 		}

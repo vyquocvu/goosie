@@ -599,7 +599,10 @@ func (r *Runtime) clickHTMLElement(call goja.FunctionCall) goja.Value {
 		r.activeSubmitter = node
 		r.activationFormFrames = nil
 	}
-	clickEvent := dom.NewTrustedEvent("click", true, true)
+	clickEvent := dom.NewTrustedPointerEvent("click", 0, 0, 0)
+	if pointer := clickEvent.AsPointer(); pointer != nil {
+		pointer.Detail = 1
+	}
 	clickAllowed := r.dispatchClickActivation(node, clickEvent)
 	activationFrames := r.activationFormFrames
 	r.activeSubmitter, r.activationFormFrames = previousSubmitter, previousActivationFrames
@@ -608,7 +611,7 @@ func (r *Runtime) clickHTMLElement(call goja.FunctionCall) goja.Value {
 	}
 	if label := labelForClick(node); label != nil {
 		if control := r.labelControl(label); control != nil && !dom.IsFormControlDisabled(control) {
-			controlClick := dom.NewTrustedEvent("click", true, true)
+			controlClick := dom.NewTrustedPointerEvent("click", 0, 0, 0)
 			if r.dispatchClickActivation(control, controlClick) && r.opts.OnFocusChange != nil {
 				r.opts.OnFocusChange(control, true)
 			}
@@ -1078,11 +1081,25 @@ func (r *Runtime) revealFragmentTarget(fragment string) {
 
 func (r *Runtime) testDriverClick(target goja.Value) {
 	node := r.getNode(target)
-	if node == nil || !node.Element() || dom.IsFormControlDisabled(node) {
+	if node == nil || !node.Element() {
+		return
+	}
+	if dom.IsFormControlDisabled(node) {
+		r.dispatchWithWindowStep(node, dom.NewTrustedPointerEvent("pointerdown", 0, 0, 0))
+		r.dispatchWithWindowStep(node, dom.NewTrustedPointerEvent("pointerup", 0, 0, 0))
 		return
 	}
 	for _, typ := range []string{"pointerdown", "mousedown", "pointerup", "mouseup"} {
-		r.dispatchWithWindowStep(node, dom.NewTrustedEvent(typ, true, true))
+		switch typ {
+		case "pointerdown", "pointerup":
+			r.dispatchWithWindowStep(node, dom.NewTrustedPointerEvent(typ, 0, 0, 0))
+		default:
+			buttons := 0
+			if typ == "mousedown" {
+				buttons = 1
+			}
+			r.dispatchWithWindowStep(node, dom.NewTrustedMouseEvent(typ, 0, 0, 0, buttons, 1))
+		}
 		if typ == "pointerdown" {
 			if r.testDriverPointerDown == nil {
 				r.testDriverPointerDown = make(map[string]*dom.Node)

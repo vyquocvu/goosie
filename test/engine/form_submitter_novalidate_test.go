@@ -196,7 +196,7 @@ func TestDisabledFormControlReceivesNoClick(t *testing.T) {
 }
 
 // qc:BR-279
-func TestClickInsideADisabledControlStopsAtItsBoundary(t *testing.T) {
+func TestClickInsideADisabledControlDeliversNoClick(t *testing.T) {
 	s := newFormSession(t, disabledProbeHTML)
 	seen := map[string]int{}
 	for _, id := range []string{"ins", "bins", "fa", "fsspan", "dfs", "ddiv"} {
@@ -210,8 +210,8 @@ func TestClickInsideADisabledControlStopsAtItsBoundary(t *testing.T) {
 	if s.ClickAt(x, y) {
 		t.Fatal("ClickAt inside a disabled control reported activation")
 	}
-	if seen["ins"] != 1 || seen["bins"] != 0 || seen["fa"] != 0 {
-		t.Fatalf("click delivery = %v, want ins only", seen)
+	if seen["ins"] != 0 || seen["bins"] != 0 || seen["fa"] != 0 {
+		t.Fatalf("click delivery = %v, want none inside a disabled control", seen)
 	}
 	assertNoForm(t, s)
 

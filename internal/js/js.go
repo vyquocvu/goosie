@@ -183,6 +183,7 @@ type Runtime struct {
 	timerNesting             int
 	scriptExecutionDepth     int
 	timedOut                 atomic.Bool
+	consoleOut               io.Writer
 
 	broadcastStateMu sync.Mutex
 	broadcastState   *broadcastState
@@ -590,8 +591,16 @@ func New(opts Options) (*Runtime, error) {
 }
 
 func (r *Runtime) setupConsole(w io.Writer) {
-	console := r.vm.NewObject()
+	r.consoleOut = w
+	_ = r.vm.Set("console", r.newConsole())
+}
 
+func (r *Runtime) newConsole() *goja.Object {
+	w := r.consoleOut
+	if w == nil {
+		w = io.Discard
+	}
+	console := r.vm.NewObject()
 	logFn := func(args ...goja.Value) {
 		parts := make([]string, len(args))
 		for i, arg := range args {
@@ -599,11 +608,12 @@ func (r *Runtime) setupConsole(w io.Writer) {
 		}
 		fmt.Fprintln(w, strings.Join(parts, " "))
 	}
-
 	_ = console.Set("log", logFn)
 	_ = console.Set("warn", logFn)
 	_ = console.Set("error", logFn)
-	_ = r.vm.Set("console", console)
+	_ = console.Set("info", logFn)
+	_ = console.Set("debug", logFn)
+	return console
 }
 
 func formatConsoleArg(v goja.Value) string {
@@ -3903,7 +3913,29 @@ func (r *Runtime) jsDispatchEvent(call goja.FunctionCall) goja.Value {
 		mouse.CtrlKey = readBool("ctrlKey", false)
 		mouse.ShiftKey = readBool("shiftKey", false)
 		mouse.MetaKey = readBool("metaKey", false)
+		mouse.Buttons = readInt("buttons")
+		mouse.Detail = readInt("detail")
 		event = &mouse.Event
+	case "PointerEvent":
+		pointer := dom.NewPointerEvent(typ, bubbles, cancelable, readInt32("clientX"), readInt32("clientY"), readInt("button"))
+		pointer.AltKey = readBool("altKey", false)
+		pointer.CtrlKey = readBool("ctrlKey", false)
+		pointer.ShiftKey = readBool("shiftKey", false)
+		pointer.MetaKey = readBool("metaKey", false)
+		pointer.Buttons = readInt("buttons")
+		pointer.Detail = readInt("detail")
+		pointer.PointerID = readInt32("pointerId")
+		pointer.Width = float32(object.Get("width").ToFloat())
+		pointer.Height = float32(object.Get("height").ToFloat())
+		pointer.Pressure = float32(object.Get("pressure").ToFloat())
+		pointer.TiltX = readInt32("tiltX")
+		pointer.TiltY = readInt32("tiltY")
+		pointer.Twist = readInt32("twist")
+		if pointerType := readString("pointerType"); pointerType != "" {
+			pointer.PointerType = pointerType
+		}
+		pointer.IsPrimary = readBool("isPrimary", true)
+		event = &pointer.Event
 	case "KeyboardEvent":
 		keyboard := dom.NewKeyboardEvent(typ, bubbles, cancelable, readString("key"), readString("code"))
 		keyboard.AltKey = readBool("altKey", false)
@@ -4182,10 +4214,25 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 			_ = obj.Set("relatedTarget", r.wrapNode(me.RelatedTarget))
 		}
 		_ = obj.Set("button", me.Button)
+		_ = obj.Set("buttons", me.Buttons)
+		_ = obj.Set("detail", me.Detail)
+		_ = obj.Set("which", me.Button+1)
 		_ = obj.Set("altKey", me.AltKey)
 		_ = obj.Set("ctrlKey", me.CtrlKey)
 		_ = obj.Set("shiftKey", me.ShiftKey)
 		_ = obj.Set("metaKey", me.MetaKey)
+	}
+
+	if pe := e.AsPointer(); pe != nil {
+		_ = obj.Set("pointerId", pe.PointerID)
+		_ = obj.Set("pointerType", pe.PointerType)
+		_ = obj.Set("isPrimary", pe.IsPrimary)
+		_ = obj.Set("width", pe.Width)
+		_ = obj.Set("height", pe.Height)
+		_ = obj.Set("pressure", pe.Pressure)
+		_ = obj.Set("tiltX", pe.TiltX)
+		_ = obj.Set("tiltY", pe.TiltY)
+		_ = obj.Set("twist", pe.Twist)
 	}
 
 	if we := e.AsWheel(); we != nil {

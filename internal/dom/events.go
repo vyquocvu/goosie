@@ -144,10 +144,25 @@ type MouseEvent struct {
 	ScreenY       int32
 	RelatedTarget *Node
 	Button        int
+	Buttons       int
+	Detail        int
 	AltKey        bool
 	CtrlKey       bool
 	ShiftKey      bool
 	MetaKey       bool
+}
+
+type PointerEvent struct {
+	MouseEvent
+	PointerID   int32
+	Width       float32
+	Height      float32
+	Pressure    float32
+	TiltX       int32
+	TiltY       int32
+	Twist       int32
+	PointerType string
+	IsPrimary   bool
 }
 
 type WheelEvent struct {
@@ -162,6 +177,8 @@ type mouseEventPayload interface {
 }
 
 func (e *MouseEvent) mouseEvent() *MouseEvent { return e }
+
+func (e *PointerEvent) mouseEvent() *MouseEvent { return &e.MouseEvent }
 
 func (e *WheelEvent) mouseEvent() *MouseEvent { return &e.MouseEvent }
 
@@ -404,6 +421,46 @@ func NewMouseEvent(typ string, bubbles, cancelable bool, clientX, clientY, scree
 	return me
 }
 
+func NewPointerEvent(typ string, bubbles, cancelable bool, clientX, clientY int32, button int) *PointerEvent {
+	me := &PointerEvent{
+		MouseEvent: MouseEvent{
+			Event: Event{
+				Type:          typ,
+				bubbles:       bubbles,
+				cancelable:    cancelable,
+				interfaceName: "PointerEvent",
+				timeStamp:     time.Now(),
+			},
+			ClientX: clientX,
+			ClientY: clientY,
+			ScreenX: clientX,
+			ScreenY: clientY,
+			Button:  button,
+		},
+		PointerID:   1,
+		Width:       1,
+		Height:      1,
+		PointerType: "mouse",
+		IsPrimary:   true,
+	}
+	me.Event.payload = me
+	return me
+}
+
+func NewTrustedPointerEvent(typ string, clientX, clientY int32, button int) *Event {
+	pe := NewPointerEvent(typ, true, true, clientX, clientY, button)
+	pe.Event.isTrusted = true
+	return &pe.Event
+}
+
+func NewTrustedMouseEvent(typ string, clientX, clientY int32, button, buttons, detail int) *Event {
+	me := NewMouseEvent(typ, true, true, clientX, clientY, clientX, clientY, button)
+	me.Event.isTrusted = true
+	me.Buttons = buttons
+	me.Detail = detail
+	return &me.Event
+}
+
 type KeyboardEvent struct {
 	Event
 	Key      string
@@ -515,6 +572,11 @@ func (e *Event) AsMouse() *MouseEvent {
 		return nil
 	}
 	return me.mouseEvent()
+}
+
+func (e *Event) AsPointer() *PointerEvent {
+	pe, _ := e.payload.(*PointerEvent)
+	return pe
 }
 
 func (e *Event) AsWheel() *WheelEvent {
