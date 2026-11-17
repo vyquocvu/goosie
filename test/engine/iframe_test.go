@@ -11,6 +11,40 @@ import (
 	"github.com/vyquocvu/goosie/internal/js"
 )
 
+func TestInsertedIframeExposesContentWindowConsole(t *testing.T) {
+	rt, err := js.New(js.Options{URL: "https://example.test/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+
+	html := `<!doctype html><html><head></head><body><script>
+var sa = document.createElement('iframe');
+document.head.appendChild(sa);
+var log = sa.contentWindow.console.log;
+var hasLog = typeof log === 'function';
+var hasDocument = sa.contentDocument !== null && sa.contentDocument.nodeType === 9;
+log('framed');
+</script></body></html>`
+	sess, err := engine.NewSession(html, nil, 800, engine.WithJS(rt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close()
+	if errors := sess.ScriptErrors(); len(errors) != 0 {
+		t.Fatalf("script errors: %+v", errors)
+	}
+	for name, want := range map[string]bool{
+		"hasLog":      true,
+		"hasDocument": true,
+	} {
+		got, ok := rt.Global(name)
+		if !ok || got.Bool != want {
+			t.Errorf("%s = %v (present %v), want %v", name, got.Bool, ok, want)
+		}
+	}
+}
+
 func TestIframeCreatesDistinctAboutBlankDocumentAndFiresLoad(t *testing.T) {
 	rt, err := js.New(js.Options{URL: "https://example.test/"})
 	if err != nil {

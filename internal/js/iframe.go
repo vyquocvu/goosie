@@ -218,6 +218,7 @@ func (r *Runtime) iframeWindow(frame *dom.Node) goja.Value {
 	r.iframeRegistries[frame] = registry
 	_ = win.Set("window", win)
 	_ = win.Set("self", win)
+	_ = win.Set("console", r.newConsole())
 	_ = win.DefineAccessorProperty("event", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		if child := r.iframeChildRuntimes[frame]; child != nil {
 			value := child.legacyWindowEvent
