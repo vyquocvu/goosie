@@ -64,6 +64,24 @@ make gate bench wpt-pilot                # see Makefile
 
 All tests must pass on a machine with no display — gates and surface tests run against `platform/headless`, which exercises the real loop, scheduler, composer, and `Present` path. Timing budgets are gated only on the macOS nightly (`scripts/v2-gate-check.sh`), not on CI, so do not add duration assertions to the gate suite: it asserts on counters (style passes, layout passes, allocs, tiles rasterized vs reused).
 
+## Verification Layer — All Agents
+
+Before claiming a change works, follow the approved base versions of `REVIEW.md`, `docs/verification/README.md`, and `docs/verification/reliability-checklist.md`. These requirements apply regardless of the agent or editor; a change must not modify the checks that judge it. The Claude `/verify` skill is only an adapter, not the verification system's required entry point.
+
+After human-approved installation, run the shared launcher directly:
+
+```sh
+"$(git rev-parse --git-path hooks/goosie-verify)" check --suite smoke
+```
+
+This builds and runs the real headless browser, drives five journeys, and retains logs and a screenshot. Open the image and report the command, exit status, candidate/base identity, evidence paths, and unverified scope. Run the launcher's `task` action before completion and `pr` before PR creation. Full checks require a disposable runner because native tests write the system clipboard; do not declare a personal host disposable. Before adoption, use only the explicitly untrusted bootstrap procedure in `docs/verification/README.md`.
+
+Default commit mode is observe. Enforce allows the next commit after two session blocks, always unverified; a specific `Verification-skip:` explanation can allow an earlier unverified commit. Keep `GOOSIE_VERIFICATION_SESSION` stable across the session's commit commands. Never copy trailers, retry a failed candidate until green, skip flaky tests, or add sleeps. Investigate failures and stop after three unsuccessful self-fix rounds. Unresolved flaky-test removal requires `docs/verification/flaky-log.md` evidence and human approval.
+
+Review only diff-triggered checklist items and classify findings Important / Nit / Pre-existing. New recurring rules need at least two independent PR examples, a recognizable diff trigger, and a separate human-approved policy PR. Review obsolete/duplicate rules and tests every 30 days and at releases; advance the audit date only after that review. Bootstrap results are development evidence, not trusted approval, native UI proof, or a full-suite pass.
+
+The installed Git commit hook is agent-independent. Automatic task/PR event hooks are currently supplied only for Claude; other agents must invoke the shared commands explicitly rather than assume their host enforces them.
+
 ## Visual Verification
 
 Pure backend changes with no user-visible output require the automated tests above. When UI features are added, visual verification through headless comparison against a reference browser is required before the work can be considered complete. `testdata/render/` is the fixture corpus scored against Chromium/Playwright by `testdata/parity.py`; `testdata/interaction-parity/` holds event fixtures with a Chromium `reference-events.json`; `scripts/verify-phase*.js` are the per-phase Playwright checks.

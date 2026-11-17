@@ -74,6 +74,12 @@ func newBrowserE2E(t *testing.T) *browserE2E {
 	b.stopLoop = stopLoop
 	b.loopDone = make(chan error, 1)
 	go func() { b.loopDone <- f.loop.Run(loopCtx) }()
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Logf("FAILURE DIAGNOSTICS: %s", b.diagnostics())
+			t.Logf("FAILURE AX STATE: %+v", b.window.AccessibilityTree())
+		}
+	})
 	return b
 }
 
@@ -225,6 +231,7 @@ func (b *browserE2E) waitFor(t *testing.T, description string, condition func() 
 	defer ticker.Stop()
 	for {
 		if condition() {
+			t.Logf("STEP PASS: %s", description)
 			return
 		}
 		select {
@@ -236,16 +243,19 @@ func (b *browserE2E) waitFor(t *testing.T, description string, condition func() 
 }
 
 func (b *browserE2E) diagnostics() string {
+	findActive, findTotal, findIndex := b.f.toolbar.FindCounts()
+	input, focused, _, _, _, _, _ := b.f.toolbar.AccessibilitySnapshot()
+	state := fmt.Sprintf("tabs=%d find=(active=%t total=%d index=%d) toolbar=(value=%q focused=%t)", b.f.tabMgr.Count(), findActive, findTotal, findIndex, input, focused)
 	active := b.f.tabMgr.Active()
 	if active == nil {
-		return fmt.Sprintf("no active tab; presents=%d", b.window.Stats().Presents)
+		return fmt.Sprintf("%s; no active tab; presents=%d", state, b.window.Stats().Presents)
 	}
 	active.Nav.Mu.Lock()
 	loading := active.Nav.Loading
 	active.Nav.Mu.Unlock()
 	history, _ := active.History().Entries()
 	nameNode, nameFound := findAXNode(b.window.AccessibilityTree(), "name")
-	return fmt.Sprintf("url=%q loading=%t error=%q history=%v nameAX=(%t,%+v) ime=%t presents=%d injected=%d", active.URL(), loading, active.Error(), history, nameFound, nameNode, b.window.IMEEnabled(), b.window.Stats().Presents, b.window.Stats().Injected)
+	return fmt.Sprintf("%s; tab=%d scrollY=%d url=%q loading=%t error=%q history=%v nameAX=(%t,%+v) ime=%t presents=%d injected=%d", state, active.ID(), active.ScrollY(), active.URL(), loading, active.Error(), history, nameFound, nameNode, b.window.IMEEnabled(), b.window.Stats().Presents, b.window.Stats().Injected)
 }
 
 func (b *browserE2E) activeURL() string {

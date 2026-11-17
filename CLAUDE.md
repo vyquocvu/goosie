@@ -9,3 +9,7 @@ In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the re
 If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is the user's decision.
 <!-- CODEGRAPH_END -->
 
+## Verification
+
+Follow the shared [verification requirements for all agents](AGENTS.md#verification-layer--all-agents) and [operating guide](docs/verification/README.md). Use the approved base version of `.claude/skills/verify/SKILL.md` for Claude's `/verify` adapter; it invokes the same agent-independent gate, not a separate verification policy.
+

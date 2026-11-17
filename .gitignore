@@ -27,7 +27,13 @@ bin/
 *~
 .agents
 .qoder
-.claude
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/verify/
+.claude/skills/verify/*
+!.claude/skills/verify/SKILL.md
 .codegraph/
 
 # OS

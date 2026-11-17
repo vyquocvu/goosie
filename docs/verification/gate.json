@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "default_mode": "observe",
+  "requires_disposable_host": true,
+  "review_interval_days": 30,
+  "last_reviewed": "2026-11-17",
+  "protected": [
+    "REVIEW.md", "CLAUDE.md", "AGENTS.md", "agents.md", ".gitignore",
+    ".claude/*", ".github/*", "docs/verification/*",
+    "scripts/*", "test/*", "testdata/*", "internal/archtest/*", "*_test.go",
+    "Makefile", "package.json", "package-lock.json"
+  ],
+  "suites": {
+    "smoke": [
+      {"name": "smoke-contract", "command": ["{python}", "scripts/verify_test.py"], "timeout": 30},
+      {"name": "browser-smoke", "command": ["{python}", "scripts/verify.py", "--out", "{evidence}/browser-smoke"], "timeout": 240}
+    ],
+    "full": [
+      {"name": "build", "command": ["go", "build", "-mod=readonly", "./..."], "timeout": 180},
+      {"name": "fixture-binaries", "command": ["go", "build", "-mod=readonly", "-o", "bin/", "./cmd/goosie", "./cmd/goosie-headless"], "timeout": 180},
+      {"name": "tests", "command": ["go", "test", "-mod=readonly", "-count=1", "-json", "-timeout=180s", "./..."], "timeout": 600},
+      {"name": "vet", "command": ["go", "vet", "-mod=readonly", "-all", "./..."], "timeout": 180},
+      {"name": "event-contract", "command": ["{python}", "scripts/verification_event_test.py"], "timeout": 30},
+      {"name": "gate-contract", "command": ["{python}", "scripts/verification_gate_test.py"], "timeout": 180}
+    ]
+  },
+  "triggers": [
+    {"id": "REL-01", "paths": ["cmd/goosie/e2e_test.go", "cmd/goosie/journey_ime_visual_test.go"], "command": ["go", "test", "-json", "-count=1", "-timeout=90s", "-run", "^TestJourneyIMECompositionInksThePreviewOnce$", "./cmd/goosie"], "timeout": 120},
+    {"id": "REL-02", "paths": ["testdata/parity.py", "testdata/parity_selftest.py"], "command": ["{python}", "testdata/parity_selftest.py"], "timeout": 30},
+    {"id": "REL-03", "paths": ["testdata/parity.py", "scripts/run-parity.sh", "Makefile"], "command": ["go", "test", "-json", "-count=1", "-run", "^TestParityWorkdirIsAccepted$", "./test/gatecheck"], "timeout": 90},
+    {"id": "REL-04", "paths": ["cmd/goosie/context_menu.go", "cmd/goosie/toolbar_window.go"], "command": ["go", "test", "-race", "-json", "-count=1", "-timeout=90s", "-run", "^TestJourneyMainMenuOpensManagers$", "./cmd/goosie"], "timeout": 120},
+    {"id": "REL-05", "paths": ["internal/engine/engine.go", "cmd/goosie/interaction.go"], "command": ["go", "test", "-json", "-count=1", "-timeout=90s", "-run", "Test(FocusLandsBetweenMousedownAndPointerup|PreventDefaultOnMousedownSuppressesFocus|PressOnDisabledControlLeavesFocusAlone|ClickReportsPressFocusChanged)$", "./test/engine"], "timeout": 120},
+    {"id": "REL-06", "paths": ["internal/layout/inline.go"], "command": ["go", "test", "-json", "-count=1", "-run", "^TestTextWrapBalance(KeepsTheSpaceAtARejoinedBreak|PreservesLineCountAndWordGaps)$", "./test/layout"], "timeout": 90},
+    {"id": "REL-07", "paths": ["internal/layout/block.go"], "command": ["go", "test", "-json", "-count=1", "-run", "^TestFlexItemLabelStaysInsideTheItem$", "./test/layout"], "timeout": 90},
+    {"id": "REL-08", "paths": ["internal/engine/limits.go", "internal/engine/imports.go"], "command": ["go", "test", "-json", "-count=1", "-run", "Test(LinkedSheetsRequestedOnceAcrossScriptPasses|ImportedSheetRequestedOnceAcrossPasses|FailedSheetFetchIsRetriedOnLaterPass|LinkedSheetBytesChargedOncePerNavigation)$", "./test/engine", "./internal/engine"], "timeout": 90},
+    {"id": "REL-09", "paths": ["internal/engine/engine.go"], "command": ["go", "test", "-json", "-count=1", "-run", "Test(PureReadScriptsCollectTheSheetSetOnce|MutatingScriptsCollectOncePerChange|ScriptRewrittenHrefFetchesOnlyTheNewSheet)$", "./test/engine"], "timeout": 90},
+    {"id": "REL-10", "paths": ["internal/engine/focus.go", "internal/engine/engine.go", "internal/engine/select.go"], "command": ["go", "test", "-json", "-count=1", "-timeout=90s", "-run", "Test(FocusListenerComputedStyleDuringParse|BlurListenerRefocusWins|SubmitListenerComputedStyle)$", "./test/engine"], "timeout": 120},
+    {"id": "REL-11", "paths": ["internal/js/abort_controller.go", "internal/js/timer.go"], "command": ["go", "test", "-json", "-count=1", "-run", "^TestAbortSignalTimeout", "./test/js"], "timeout": 90},
+    {"id": "REL-12", "paths": ["internal/js/fetch.go", "internal/js/xhr.go", "cmd/goosie/page_load.go"], "command": ["go", "test", "-race", "-json", "-count=1", "-run", "^Test(Fetch|XHR)AbortCancelsContext$", "./test/js"], "timeout": 90},
+    {"id": "REL-13", "paths": ["go.mod", "go.sum", "third_party/goja/go.mod", "third_party/goja/go.sum"], "command": ["go", "test", "-json", "-count=1", "-run", "^TestLinkedDependenciesPinned$", "./test/gatecheck"], "timeout": 90},
+    {"id": "REL-13-audit", "paths": ["go.mod", "go.sum", "third_party/goja/*"], "command": ["govulncheck", "./..."], "timeout": 180},
+    {"id": "REL-14", "paths": ["test/js/fetch_cancel_test.go"], "command": ["go", "test", "-race", "-json", "-count=1", "-run", "^Test(Fetch|XHR)AbortCancelsContext$", "./test/js"], "timeout": 90}
+  ]
+}

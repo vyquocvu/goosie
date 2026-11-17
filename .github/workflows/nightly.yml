@@ -61,3 +61,26 @@ jobs:
           path: |
             /tmp/wpt-results/results.json
             /tmp/wpt-results/report.html
+
+  verification-policy-audit:
+    name: Verification rule cleanup reminder
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Check approved policy review age
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: python3 -I scripts/verification_gate.py audit --base HEAD
+      - name: Retain audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-policy-audit
+          path: ${{ runner.temp }}/goosie-gate-evidence-*/report.json
+          if-no-files-found: error
