@@ -10,6 +10,37 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
+func TestHiddenAttributeYieldsToAuthorDisplay(t *testing.T) {
+	doc := dom.NewDocument()
+	html := doc.NewElement("html")
+	doc.Node.AppendChild(html)
+	body := doc.NewElement("body")
+	html.AppendChild(body)
+	banner := doc.NewElement("div")
+	banner.SetAttribute("class", "banner")
+	banner.SetAttribute("hidden", "hidden")
+	body.AppendChild(banner)
+
+	important := doc.NewElement("div")
+	important.SetAttribute("class", "panel")
+	important.SetAttribute("hidden", "hidden")
+	body.AppendChild(important)
+	bare := doc.NewElement("div")
+	bare.SetAttribute("hidden", "hidden")
+	body.AppendChild(bare)
+
+	styles := style.Resolve(doc, []*css.Stylesheet{css.Parse(`.banner { display: block } .panel { display: flex !important }`)}, nil)
+	if st := styles[banner.ID]; st == nil || st.Display != style.DisplayBlock {
+		t.Fatalf("hidden banner display = %v, want block", st.Display)
+	}
+	if st := styles[important.ID]; st == nil || st.Display != style.DisplayFlex {
+		t.Fatalf("hidden panel display = %v, want flex", st.Display)
+	}
+	if st := styles[bare.ID]; st == nil || st.Display != style.DisplayNone {
+		t.Fatalf("hidden div without author display = %v, want none", st.Display)
+	}
+}
+
 func TestUserSelectCascade(t *testing.T) {
 	doc := dom.NewDocument()
 	html := doc.NewElement("html")
