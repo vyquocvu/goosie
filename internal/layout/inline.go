@@ -800,8 +800,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 }
 
 type lineBox struct {
-	runs []textRun
-	w, h float32
+	runs     []textRun
+	trailing []textRun
+	w, h     float32
 }
 
 func trimTrailingSpaces(a *Arena, lb *lineBox) {
@@ -817,6 +818,7 @@ func trimTrailingSpaces(a *Arena, lb *lineBox) {
 			}
 		}
 		lb.w -= last.w
+		lb.trailing = append(lb.trailing, last)
 		lb.runs = lb.runs[:len(lb.runs)-1]
 	}
 }
@@ -829,27 +831,34 @@ func balanceLines(a *Arena, lines []lineBox, contentW float32) []lineBox {
 	totalW := float32(0)
 	for _, l := range lines {
 		allRuns = append(allRuns, l.runs...)
+		for i := len(l.trailing) - 1; i >= 0; i-- {
+			allRuns = append(allRuns, l.trailing[i])
+			totalW += l.trailing[i].w
+		}
 		totalW += l.w
 	}
 	targetW := totalW / float32(len(lines))
 	var newLines []lineBox
 	var cur lineBox
 	curH := lines[0].h
-	for i, r := range allRuns {
-		if cur.w > 0 && cur.w+r.w > targetW*1.15 && len(newLines) < len(lines)-1 {
+	for _, r := range allRuns {
+		if cur.w > 0 && len(cur.runs) > 0 && cur.w+r.w > targetW*1.15 && len(newLines) < len(lines)-1 {
 			trimTrailingSpaces(a, &cur)
 			newLines = append(newLines, cur)
 			cur = lineBox{h: curH}
+			if isSpaceWord(r.text) {
+				continue
+			}
 		}
 		cur.runs = append(cur.runs, r)
 		cur.w += r.w
 		if r.lineH > cur.h {
 			cur.h = r.lineH
 		}
-		if i == len(allRuns)-1 {
-			trimTrailingSpaces(a, &cur)
-			newLines = append(newLines, cur)
-		}
+	}
+	if len(cur.runs) > 0 {
+		trimTrailingSpaces(a, &cur)
+		newLines = append(newLines, cur)
 	}
 	if len(newLines) == len(lines) {
 		return newLines
