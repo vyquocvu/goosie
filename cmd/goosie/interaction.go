@@ -37,6 +37,14 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	activated := tab.Session().ClickAt(dx, dy)
 	tab.Session().SetUserActivation(false)
 	if activated {
+		if tab.Session().PressFocusChanged() {
+			f.setWindowIME(tab.Session().FocusedEditable())
+			if !tab.Session().CanDeferControlEditReflow() && (tab.Session().HasPseudoClassRule("focus") || tab.Session().HasPseudoClassRule("focus-within") || tab.Session().HasPseudoClassRule("focus-visible")) {
+				if err := tab.Session().RestyleAndReflow(float32(f.contentWidth())); err != nil {
+					fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
+				}
+			}
+		}
 		if f.serviceFilePicker(tab) {
 			return true
 		}
@@ -49,7 +57,7 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 	}
 
 	sess := tab.Session()
-	if !sess.FocusControl(dx, dy) {
+	if !sess.PressFocusChanged() {
 		return false
 	}
 	f.setWindowIME(sess.Focused() != nil)

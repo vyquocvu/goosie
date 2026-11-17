@@ -111,6 +111,7 @@ type Session struct {
 	rangePointerNode       *dom.Node
 	rangePointerMoved      bool
 	press                  pressSequence
+	pressFocusChanged      bool
 
 	pendingFilePicker *dom.Node
 
@@ -1639,6 +1640,9 @@ func isSupportedImageType(typ string) bool {
 }
 
 func (s *Session) ClickAt(x, y float32) bool {
+	s.opMu.Lock()
+	s.pressFocusChanged = false
+	s.opMu.Unlock()
 	s.dismissValidationBubble()
 	var dismissedPopup *dom.Node
 	if open := s.selectPopupNode(); open != nil {
@@ -1793,7 +1797,14 @@ func (s *Session) dispatchPointerSequence(target *dom.Node, x, y float32, disabl
 		dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointerup", cx, cy, 0))
 		return
 	}
-	dom.DispatchEvent(target, dom.NewTrustedMouseEvent("mousedown", cx, cy, 0, 1, count))
+	mouseDown := dom.NewTrustedMouseEvent("mousedown", cx, cy, 0, 1, count)
+	if dom.DispatchEvent(target, mouseDown) {
+		if s.FocusControl(x, y) {
+			s.opMu.Lock()
+			s.pressFocusChanged = true
+			s.opMu.Unlock()
+		}
+	}
 	dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointerup", cx, cy, 0))
 	dom.DispatchEvent(target, dom.NewTrustedMouseEvent("mouseup", cx, cy, 0, 0, count))
 }

@@ -156,6 +156,107 @@ func TestSecondPressEmitsClickDetailTwoAndDblclick(t *testing.T) {
 	}
 }
 
+func TestFocusLandsBetweenMousedownAndPointerup(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body style="margin:0">
+		<input id="box" type="text" value="hello" style="position:absolute;left:10px;top:10px;width:120px;height:24px">
+	</body></html>`)
+	if _, err := s.EvaluateJS(`(function(){
+		window.evts = [];
+		['pointerdown','mousedown','focus','pointerup','mouseup','click'].forEach(function(typ){
+			document.addEventListener(typ, function(e){ window.evts.push(typ + ':' + e.target.id); }, true);
+		});
+	})()`); err != nil {
+		t.Fatalf("install listeners: %v", err)
+	}
+	x, y := clickPoint(t, s, "box")
+	s.ClickAt(x, y)
+	got, err := s.EvaluateJS(`window.evts.join(",")`)
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	want := "pointerdown:box,mousedown:box,focus:box,pointerup:box,mouseup:box,click:box"
+	if got != want {
+		t.Fatalf("press events = %q, want %q", got, want)
+	}
+}
+
+func TestPreventDefaultOnMousedownSuppressesFocus(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body style="margin:0">
+		<input id="box" type="text" value="hello" style="position:absolute;left:10px;top:10px;width:120px;height:24px">
+	</body></html>`)
+	if _, err := s.EvaluateJS(`(function(){
+		window.evts = [];
+		['pointerdown','mousedown','focus','pointerup','mouseup','click'].forEach(function(typ){
+			document.addEventListener(typ, function(e){
+				if (typ === 'mousedown') { e.preventDefault(); }
+				window.evts.push(typ);
+			}, true);
+		});
+	})()`); err != nil {
+		t.Fatalf("install listeners: %v", err)
+	}
+	x, y := clickPoint(t, s, "box")
+	s.ClickAt(x, y)
+	got, err := s.EvaluateJS(`window.evts.join(",")`)
+	if err != nil {
+		t.Fatalf("read events: %v", err)
+	}
+	want := "pointerdown,mousedown,pointerup,mouseup,click"
+	if got != want {
+		t.Fatalf("press events = %q, want %q with no focus event", got, want)
+	}
+	active, err := s.EvaluateJS(`String((document.activeElement && document.activeElement.id) || '')`)
+	if err != nil {
+		t.Fatalf("read activeElement: %v", err)
+	}
+	if active != "" {
+		t.Fatalf("activeElement = %q, want no focused control after mousedown preventDefault", active)
+	}
+}
+
+func TestPressOnDisabledControlLeavesFocusAlone(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body style="margin:0">
+		<input id="box" type="text" value="hello" style="position:absolute;left:10px;top:10px;width:120px;height:24px">
+		<button id="off" disabled style="position:absolute;left:10px;top:40px;width:120px;height:24px">off</button>
+	</body></html>`)
+	if _, err := s.EvaluateJS(`(function(){
+		window.evts = [];
+		['focus','blur'].forEach(function(typ){
+			document.addEventListener(typ, function(e){ window.evts.push(typ + ':' + e.target.id); }, true);
+		});
+		document.getElementById('box').focus();
+	})()`); err != nil {
+		t.Fatalf("focus input: %v", err)
+	}
+	if _, err := s.EvaluateJS(`window.evts = []`); err != nil {
+		t.Fatalf("clear events: %v", err)
+	}
+	x, y := clickPoint(t, s, "off")
+	s.ClickAt(x, y)
+	got, err := s.EvaluateJS(`window.evts.join(",") + '|' + String((document.activeElement && document.activeElement.id) || '')`)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if got != "|box" {
+		t.Fatalf("disabled press state = %q, want no focus or blur events and box still focused", got)
+	}
+}
+
+func TestClickReportsPressFocusChanged(t *testing.T) {
+	s, _ := newJSSession(t, `<html><body style="margin:0">
+		<input id="box" type="text" value="hello" style="position:absolute;left:10px;top:10px;width:120px;height:24px">
+	</body></html>`)
+	x, y := clickPoint(t, s, "box")
+	s.ClickAt(x, y)
+	if !s.PressFocusChanged() {
+		t.Fatalf("press that focused a control did not report a press focus change")
+	}
+	s.ClickAt(x, y)
+	if s.PressFocusChanged() {
+		t.Fatalf("second press at the same caret position reported a press focus change")
+	}
+}
+
 func TestThirdPressEmitsNoSecondDblclick(t *testing.T) {
 	s, _ := newJSSession(t, `<html><body style="margin:0">
 		<div id="target" style="position:absolute;left:10px;top:10px;width:120px;height:60px;background:#eee">x</div>

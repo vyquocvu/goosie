@@ -233,6 +233,7 @@ chk.addEventListener("change", function() {
 	browser.clickElementByID(t, "chk")
 
 	browser.pressKey(t, '\t')
+	browser.pressKey(t, '\t')
 	browser.pressKey(t, ' ')
 
 	browser.clickElementByID(t, "chk")

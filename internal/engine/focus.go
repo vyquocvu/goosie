@@ -118,6 +118,12 @@ func (s *Session) FocusControl(x, y float32) bool {
 	return changed || caretChanged
 }
 
+func (s *Session) PressFocusChanged() bool {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	return s.pressFocusChanged
+}
+
 func (s *Session) placeTextControlCaretLocked(n *dom.Node, x float32) bool {
 	if n == nil || n.DataAtom != dom.AtomInput || !textSelectableControl(n) {
 		return false
