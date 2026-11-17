@@ -227,6 +227,13 @@ func (b *Builder) paintInput(obj *layout.Object, box boxPaintContext, clip *fram
 		b.paintRadio(obj, box.rect, box.opacity)
 	case "range":
 		b.paintRange(obj, box.opacity, clip)
+	case "color":
+		b.paintColorSwatch(obj, box.opacity, clip)
+	case "file":
+		b.paintFileControl(obj, box.opacity, clip)
+	case "date", "month", "week", "time", "datetime-local", "datetime":
+		b.paintControlValue(obj, box.opacity, clip)
+		b.paintDatePlaceholder(obj, box.opacity, clip)
 	case "submit", "reset", "button":
 		b.paintButtonLabel(obj, box.opacity, clip)
 	default:

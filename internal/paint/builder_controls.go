@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/frame"
 	"github.com/vyquocvu/goosie/internal/layout"
 	"github.com/vyquocvu/goosie/internal/style"
@@ -222,6 +223,109 @@ func (b *Builder) paintRadio(obj *layout.Object, rect frame.Rect, opacity float3
 			}
 		}
 	}
+}
+
+func (b *Builder) paintColorSwatch(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	if obj == nil || obj.Node == nil {
+		return
+	}
+	raw := obj.Node.InputControlValue()
+	if raw == "" {
+		raw = "#000000"
+	}
+	parsed, ok := css.ParseColor(raw)
+	if !ok {
+		parsed = css.Color{R: 0, G: 0, B: 0, A: 255}
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	inset := int32(math.Max(1, math.Round(float64(b.scale))))
+	rect = frame.Rect4(rect.X0+inset, rect.Y0+inset, rect.X1-inset, rect.Y1-inset)
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+	}
+	if rect.Empty() {
+		return
+	}
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    rect,
+		Color:   convertColor(parsed),
+		Opacity: opacity,
+	})
+}
+
+func (b *Builder) paintFileControl(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	if obj == nil || obj.Node == nil || obj.Style == nil {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+	}
+	if rect.Empty() {
+		return
+	}
+	buttonW := int32(math.Round(float64(78 * b.scale)))
+	width := rect.X1 - rect.X0
+	if buttonW > width-4 {
+		buttonW = width / 2
+	}
+	if buttonW < 1 {
+		buttonW = 1
+	}
+	button := frame.Rect4(rect.X0, rect.Y0, rect.X0+buttonW, rect.Y1)
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    button,
+		Color:   frame.RGB(239, 239, 239),
+		Opacity: opacity,
+	})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(button.X0, button.Y0, button.X1, button.Y0+1), Color: frame.RGB(118, 118, 118), Opacity: opacity})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: frame.Rect4(button.X1-1, button.Y0, button.X1, button.Y1), Color: frame.RGB(118, 118, 118), Opacity: opacity})
+	label := obj.Node.GetAttribute("value")
+	if label == "" {
+		label = "No file chosen"
+	}
+	b.appendRun("Choose File", button, obj.Style, frame.RGB(0, 0, 0), opacity)
+	nameRect := frame.Rect4(button.X1+int32(math.Max(2, math.Round(float64(4*b.scale)))), rect.Y0, rect.X1, rect.Y1)
+	if !nameRect.Empty() {
+		b.appendRun(label, nameRect, obj.Style, frame.RGB(0, 0, 0), opacity)
+	}
+}
+
+func (b *Builder) paintDatePlaceholder(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	if obj == nil || obj.Node == nil || obj.Style == nil {
+		return
+	}
+	if obj.Node.InputControlValue() != "" {
+		return
+	}
+	var text string
+	switch strings.ToLower(obj.Node.GetAttribute("type")) {
+	case "date":
+		text = "yyyy-mm-dd"
+	case "month":
+		text = "yyyy-mm"
+	case "week":
+		text = "yyyy-Www"
+	case "time":
+		text = "--:--:--"
+	case "datetime-local", "datetime":
+		text = "yyyy-mm-ddT--:--"
+	default:
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+	}
+	if rect.Empty() {
+		return
+	}
+	b.appendRun(text, rect, obj.Style, frame.RGB(117, 117, 117), opacity)
 }
 
 func (b *Builder) paintRange(obj *layout.Object, opacity float32, clip *frame.Rect) {

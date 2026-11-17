@@ -64,3 +64,22 @@ Năm type được special-case thì có đường vẽ riêng (`internal/paint/
 * **Cấm** đổi `internal/engine/limits.go` và mọi hằng số admission.
 * Không `git push`, không merge `main`, không tạo branch phụ. Test phải chạy trên máy không display.
 * Xung đột tiềm tàng với TASK-027 (font coverage) ở đúng các fixture `forms/*`: nếu cả hai cùng chạy, integrator xếp lịch trước/sau, không tự ý rebase lên nhau.
+
+## Status (2026-11-16)
+
+Text, number, checkbox, radio, and range already painted before this pass (UA inset border plus `paintControlValue` / `paintRange`). What still had no interior was color, file, and an empty date-family field.
+
+- Color paints the value as a swatch (`#000000` when the value is empty). It does not draw a hex string.
+- File paints a "Choose File" button and "No file chosen", or the value attribute when one is set. There is no native picker glyph.
+- Date, month, week, time, and datetime-local paint the value when set, and a grey format placeholder when empty. No calendar icon.
+- `forms/04-advanced-inputs` is not in `testdata/render-known-gaps.json`, so there was no band entry to delete. `html-features/01` fold band was left untouched. `PASS_AT` and fixtures were not changed. Layout sizes were not changed.
+
+`go test -count=1 ./test/paint/ -run 'TestColorInputPaintsItsSwatch|TestEmptyColorInputPaintsBlack|TestFileInputPaintsChooseLabel|TestDateInputPaintsValueOrPlaceholder|TestTextInputPaintsItsValue'` PASS.
+
+Mutation, then restore:
+
+- Drop `paintColorSwatch` → `TestColorInputPaintsItsSwatch` FAIL `color input painted no #ff0000 swatch`; `TestEmptyColorInputPaintsBlack` FAIL `empty color input painted no default black swatch`.
+- Drop `paintDatePlaceholder` → `TestDateInputPaintsValueOrPlaceholder` FAIL `empty date glyphs = ""`. The valued date still painted `2026-10-25` through `paintControlValue`.
+- Drop `paintFileControl` → `TestFileInputPaintsChooseLabel` FAIL `file input glyphs = ""`.
+
+Full `go test -count=1 ./test/paint/` after restore: PASS. `GOOSIE-CONTROLINTERIOR-001` stays open for the parts this pass does not claim: bevel borders still paint as a solid strip, and these labels are not a Chromium pixel match.
