@@ -453,8 +453,22 @@ func NewTrustedPointerEvent(typ string, clientX, clientY int32, button int) *Eve
 	return &pe.Event
 }
 
+func NewTrustedPointerEventFlags(typ string, clientX, clientY int32, button int, bubbles, cancelable bool) *Event {
+	pe := NewPointerEvent(typ, bubbles, cancelable, clientX, clientY, button)
+	pe.Event.isTrusted = true
+	return &pe.Event
+}
+
 func NewTrustedMouseEvent(typ string, clientX, clientY int32, button, buttons, detail int) *Event {
 	me := NewMouseEvent(typ, true, true, clientX, clientY, clientX, clientY, button)
+	me.Event.isTrusted = true
+	me.Buttons = buttons
+	me.Detail = detail
+	return &me.Event
+}
+
+func NewTrustedMouseEventFlags(typ string, clientX, clientY int32, button, buttons, detail int, bubbles, cancelable bool) *Event {
+	me := NewMouseEvent(typ, bubbles, cancelable, clientX, clientY, clientX, clientY, button)
 	me.Event.isTrusted = true
 	me.Buttons = buttons
 	me.Detail = detail

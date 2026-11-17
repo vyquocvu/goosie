@@ -190,14 +190,25 @@ func TestMouseEnterLeaveDoNotBubble(t *testing.T) {
 		t.Fatal("parent not found")
 	}
 
+	child := s.Doc.ElementByID("child")
+	if child == nil {
+		t.Fatal("child not found")
+	}
+
 	parentEntered := false
 	dom.AddEventListener(parent, "mouseenter", func(e *dom.Event) {
 		parentEntered = true
 	}, false)
 
 	s.SetHover(25, 25)
+	if !parentEntered {
+		t.Error("hovering the child did not fire mouseenter on the newly entered parent")
+	}
+
+	parentEntered = false
+	dom.DispatchEvent(child, dom.NewEvent("mouseenter", false, false))
 	if parentEntered {
-		t.Error("mouseenter should not bubble to parent")
+		t.Error("synthetic non-bubbling mouseenter on the child reached the parent")
 	}
 }
 

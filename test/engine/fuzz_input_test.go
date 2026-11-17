@@ -98,8 +98,9 @@ func FuzzSetHover(f *testing.F) {
 		}
 		sess.SetHover(float32(math.MaxFloat32), float32(math.MaxFloat32))
 		enters, leaves = 0, 0
-		if !sess.SetHover(tx, ty) || enters+leaves != 1 {
-			t.Fatalf("SetHover on fixture target returned without exactly one enter/leave event (enters=%d leaves=%d)", enters, leaves)
+		entered := sess.SetHover(tx, ty)
+		if !entered || enters < 1 || leaves != 0 {
+			t.Fatalf("SetHover on fixture target returned %t with %d enters and %d leaves, want true with the enter chain firing and no leaves", entered, enters, leaves)
 		}
 		enters, leaves = 0, 0
 		if sess.SetHover(tx, ty) {
@@ -111,9 +112,6 @@ func FuzzSetHover(f *testing.F) {
 		enters, leaves = 0, 0
 		handled := sess.SetHover(x, y)
 		events := enters + leaves
-		if enters > 1 || leaves > 1 {
-			t.Fatalf("SetHover entered %d and left %d nodes, want at most one of each (goosie fires mouseenter/mouseleave on the hit node only)", enters, leaves)
-		}
 		if handled != (events > 0) {
 			t.Fatalf("SetHover returned %t with %d mouseenter/mouseleave events, want handled to agree with an event having fired", handled, events)
 		}

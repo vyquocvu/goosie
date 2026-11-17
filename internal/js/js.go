@@ -1216,6 +1216,25 @@ func (r *Runtime) setupDOM() {
 	_ = r.htmlElementProto.Set("click", func(call goja.FunctionCall) goja.Value {
 		return r.clickHTMLElement(call)
 	})
+	_ = r.elementProto.Set("setPointerCapture", func(call goja.FunctionCall) goja.Value {
+		if node := r.getNode(call.This); node != nil {
+			r.domDoc.RequestPointerCapture(node)
+		}
+		return goja.Undefined()
+	})
+	_ = r.elementProto.Set("releasePointerCapture", func(call goja.FunctionCall) goja.Value {
+		if node := r.getNode(call.This); node != nil {
+			r.domDoc.ReleasePointerCapture(node)
+		}
+		return goja.Undefined()
+	})
+	_ = r.elementProto.Set("hasPointerCapture", func(call goja.FunctionCall) goja.Value {
+		node := r.getNode(call.This)
+		if node == nil {
+			return r.vm.ToValue(false)
+		}
+		return r.vm.ToValue(r.domDoc.HasPointerCapture(node))
+	})
 	_ = r.elementProto.Set("getAttribute", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetAttribute(call)
 	})

@@ -1600,6 +1600,11 @@ type Document struct {
 	qValid                   bool
 	propertiesMu             sync.RWMutex
 	properties               map[string]PropertyDefinition
+	pointerCaptureMu         sync.Mutex
+	pointerPressActive       bool
+	pendingPointerCapture    *Node
+	activePointerCapture     *Node
+	releasedPointerCapture   *Node
 }
 
 func (d *Document) RegisterBeforeNodeRemovalCallback(callback func(parent, child *Node)) func() {

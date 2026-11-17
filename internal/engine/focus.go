@@ -3113,48 +3113,109 @@ func nodeWithin(node, ancestor *dom.Node) bool {
 
 func (s *Session) SetHover(x, y float32) bool {
 	s.opMu.Lock()
-	defer s.opMu.Unlock()
 	if s.Arena == nil {
+		s.opMu.Unlock()
 		return false
 	}
+	target := s.hoverTargetAt(x, y)
+	prev := s.hovered
+	if target == prev {
+		s.opMu.Unlock()
+		if target != nil {
+			dispatchHoverEvents(target, nil, nil, x, y)
+		}
+		return false
+	}
+	leave, enter := hoverBoundaryChains(prev, target)
+	s.hovered = target
+	for _, n := range leave {
+		if n.Element() {
+			css.SetHover(n, false)
+		}
+	}
+	for _, n := range enter {
+		if n.Element() {
+			css.SetHover(n, true)
+		}
+	}
+	s.opMu.Unlock()
+	dispatchHoverEvents(target, leave, enter, x, y)
+	return true
+}
 
-	var hovered *dom.Node
+func (s *Session) hoverTargetAt(x, y float32) *dom.Node {
 	objs := s.Arena.Objects
 	for i := len(objs) - 1; i >= 1; i-- {
 		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
 		x0, y0, x1, y1 := obj.BorderRect()
 		if x < x0 || x >= x1 || y < y0 || y >= y1 {
 			continue
 		}
 		if obj.Node != nil && obj.Node.Element() {
-			hovered = obj.Node
-			break
+			return obj.Node
 		}
 	}
+	return nil
+}
 
-	if hovered == s.hovered {
-		return false
-	}
-
-	prev := s.hovered
-
+func hoverBoundaryChains(prev, next *dom.Node) (leave, enter []*dom.Node) {
 	if prev != nil {
-		for current := prev; current != nil && current.Element(); current = current.Parent {
-			css.SetHover(current, false)
+		inNext := make(map[*dom.Node]bool)
+		for c := next; c != nil; c = c.Parent {
+			inNext[c] = true
 		}
-		dom.DispatchEvent(prev, dom.NewTrustedEvent("mouseleave", false, false))
-	}
-
-	s.hovered = hovered
-
-	if hovered != nil {
-		for current := hovered; current != nil && current.Element(); current = current.Parent {
-			css.SetHover(current, true)
+		for c := prev; c != nil && !inNext[c]; c = c.Parent {
+			leave = append(leave, c)
 		}
-		dom.DispatchEvent(hovered, dom.NewTrustedEvent("mouseenter", false, false))
 	}
+	if next != nil {
+		inPrev := make(map[*dom.Node]bool)
+		for c := prev; c != nil; c = c.Parent {
+			inPrev[c] = true
+		}
+		for c := next; c != nil && !inPrev[c]; c = c.Parent {
+			enter = append(enter, c)
+		}
+		for i, j := 0, len(enter)-1; i < j; i, j = i+1, j-1 {
+			enter[i], enter[j] = enter[j], enter[i]
+		}
+	}
+	return leave, enter
+}
 
-	return true
+func dispatchHoverEvents(target *dom.Node, leave, enter []*dom.Node, x, y float32) {
+	px, py := int32(x), int32(y)
+	if len(leave) > 0 {
+		dom.DispatchEvent(leave[0], dom.NewTrustedPointerEvent("pointerout", px, py, -1))
+		for _, n := range leave {
+			dom.DispatchEvent(n, dom.NewTrustedPointerEventFlags("pointerleave", px, py, -1, false, false))
+		}
+	}
+	if len(enter) > 0 {
+		dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointerover", px, py, -1))
+		for _, n := range enter {
+			dom.DispatchEvent(n, dom.NewTrustedPointerEventFlags("pointerenter", px, py, -1, false, false))
+		}
+	}
+	if len(leave) > 0 {
+		dom.DispatchEvent(leave[0], dom.NewTrustedMouseEvent("mouseout", px, py, 0, 0, 0))
+		for _, n := range leave {
+			dom.DispatchEvent(n, dom.NewTrustedMouseEventFlags("mouseleave", px, py, 0, 0, 0, false, false))
+		}
+	}
+	if len(enter) > 0 {
+		dom.DispatchEvent(target, dom.NewTrustedMouseEvent("mouseover", px, py, 0, 0, 0))
+		for _, n := range enter {
+			dom.DispatchEvent(n, dom.NewTrustedMouseEventFlags("mouseenter", px, py, 0, 0, 0, false, false))
+		}
+	}
+	if target != nil {
+		dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointermove", px, py, -1))
+		dom.DispatchEvent(target, dom.NewTrustedMouseEvent("mousemove", px, py, 0, 0, 0))
+	}
 }
 
 func (s *Session) SetActiveAt(x, y float32, pressed bool) bool {

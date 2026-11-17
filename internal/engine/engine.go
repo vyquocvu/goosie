@@ -1660,8 +1660,13 @@ func (s *Session) ClickAt(x, y float32) bool {
 	}
 	count := s.nextPressCount(hitNode, x, y)
 	disabled := disabledFormControlAt(hitNode)
+	captured := (*dom.Node)(nil)
 	if hitNode != nil {
-		s.dispatchPointerSequence(hitNode, x, y, disabled != nil, count)
+		captured = s.dispatchPointerSequence(hitNode, x, y, disabled != nil, count)
+	}
+	clickNode := hitNode
+	if captured != nil {
+		clickNode = captured
 	}
 	if disabled != nil {
 		return dismissed || dismissedPopup != nil
@@ -1671,7 +1676,7 @@ func (s *Session) ClickAt(x, y float32) bool {
 			s.jsRT.SetTransientUserActivation(true)
 		}
 		click := newPointerClickEvent(x, y, count)
-		if !dom.DispatchEvent(hitNode, click) {
+		if !dom.DispatchEvent(clickNode, click) {
 			return true
 		}
 		s.opMu.Lock()
@@ -1694,17 +1699,20 @@ func (s *Session) ClickAt(x, y float32) bool {
 	}
 
 	n := s.activatableAt(x, y)
+	if captured != nil {
+		n = captured
+	}
 	if n == nil {
-		if hitNode != nil {
+		if clickNode != nil {
 			if s.jsRT != nil {
 				s.jsRT.SetTransientUserActivation(true)
 			}
 			click := newPointerClickEvent(x, y, count)
 			activated := false
-			if dom.DispatchEvent(hitNode, click) {
-				activated = s.activateLabeledControl(hitNode, x, y)
+			if dom.DispatchEvent(clickNode, click) {
+				activated = s.activateLabeledControl(clickNode, x, y)
 			}
-			if sel := s.openableSelect(hitNode); sel != nil && sel != dismissedPopup {
+			if sel := s.openableSelect(clickNode); sel != nil && sel != dismissedPopup {
 				s.openSelectPopup(sel, x, y)
 				return true
 			}
@@ -1783,11 +1791,13 @@ func dispatchDoubleClick(target *dom.Node, x, y float32) {
 	dom.DispatchEvent(target, dom.NewTrustedMouseEvent("dblclick", int32(x), int32(y), 0, 0, 2))
 }
 
-func (s *Session) dispatchPointerSequence(target *dom.Node, x, y float32, disabled bool, count int) {
-	if target == nil {
-		return
+func (s *Session) dispatchPointerSequence(target *dom.Node, x, y float32, disabled bool, count int) *dom.Node {
+	if target == nil || s.Doc == nil {
+		return nil
 	}
 	cx, cy := int32(x), int32(y)
+	s.Doc.BeginPointerPress()
+	defer s.Doc.EndPointerPress()
 	down := dom.NewTrustedPointerEvent("pointerdown", cx, cy, 0)
 	if pointer := down.AsPointer(); pointer != nil {
 		pointer.Buttons = 1
@@ -1795,7 +1805,7 @@ func (s *Session) dispatchPointerSequence(target *dom.Node, x, y float32, disabl
 	dom.DispatchEvent(target, down)
 	if disabled {
 		dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointerup", cx, cy, 0))
-		return
+		return nil
 	}
 	mouseDown := dom.NewTrustedMouseEvent("mousedown", cx, cy, 0, 1, count)
 	if dom.DispatchEvent(target, mouseDown) {
@@ -1805,8 +1815,20 @@ func (s *Session) dispatchPointerSequence(target *dom.Node, x, y float32, disabl
 			s.opMu.Unlock()
 		}
 	}
-	dom.DispatchEvent(target, dom.NewTrustedPointerEvent("pointerup", cx, cy, 0))
-	dom.DispatchEvent(target, dom.NewTrustedMouseEvent("mouseup", cx, cy, 0, 0, count))
+	if captured := s.Doc.PromotePointerCapture(); captured != nil {
+		dom.DispatchEvent(captured, dom.NewTrustedPointerEvent("gotpointercapture", cx, cy, -1))
+	}
+	upTarget := target
+	activeCapture := s.Doc.CapturedPointerNode()
+	if activeCapture != nil {
+		upTarget = activeCapture
+	}
+	dom.DispatchEvent(upTarget, dom.NewTrustedPointerEvent("pointerup", cx, cy, 0))
+	dom.DispatchEvent(upTarget, dom.NewTrustedMouseEvent("mouseup", cx, cy, 0, 0, count))
+	if lost := s.Doc.TakeLostPointerCapture(); lost != nil {
+		dom.DispatchEvent(lost, dom.NewTrustedPointerEvent("lostpointercapture", cx, cy, -1))
+	}
+	return activeCapture
 }
 
 func (s *Session) toggleDetailsWithoutRuntime(n *dom.Node) {
