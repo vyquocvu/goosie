@@ -519,6 +519,24 @@ func validPseudoElement(c Condition) bool {
 	return false
 }
 
+func PseudoElementName(token string) (string, bool) {
+	name, argument := token, ""
+	if open := strings.IndexByte(token, '('); open >= 0 {
+		if open+1 >= len(token) || token[len(token)-1] != ')' {
+			return "", false
+		}
+		name, argument = token[:open], token[open+1:len(token)-1]
+	}
+	name = strings.ToLower(name)
+	if !validIdent(name) {
+		return "", false
+	}
+	if !validPseudoElement(Condition{Value: name, Pseudo: argument}) {
+		return "", false
+	}
+	return name, true
+}
+
 func validSelectorList(s string, relative bool) bool {
 	alts, ok := splitSelectorListExact(s)
 	if !ok || len(alts) == 0 {

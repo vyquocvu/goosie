@@ -3,8 +3,10 @@ package js
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 )
 
@@ -53,6 +55,36 @@ func (r *Runtime) computedValues(node *dom.Node) map[string]string {
 	return out
 }
 
+type pseudoArgKind int
+
+const (
+	pseudoArgElement pseudoArgKind = iota
+	pseudoArgPseudo
+	pseudoArgInvalid
+)
+
+func pseudoElementArg(text string) (string, pseudoArgKind) {
+	if text == "" || strings.ContainsAny(text[:1], " \t\n\r\f\v") {
+		return "", pseudoArgElement
+	}
+	colons := 0
+	for strings.HasPrefix(text, ":") {
+		text = text[1:]
+		colons++
+	}
+	if colons > 2 {
+		return "", pseudoArgInvalid
+	}
+	name, ok := css.PseudoElementName(text)
+	if !ok {
+		if colons > 0 {
+			return "", pseudoArgInvalid
+		}
+		return "", pseudoArgElement
+	}
+	return name, pseudoArgPseudo
+}
+
 func (r *Runtime) jsGetComputedStyle(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) < 1 {
 		panic(r.vm.NewTypeError("Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'."))
@@ -60,6 +92,26 @@ func (r *Runtime) jsGetComputedStyle(call goja.FunctionCall) goja.Value {
 	node := r.getNode(call.Argument(0))
 	if node == nil {
 		panic(r.vm.NewTypeError("Failed to execute 'getComputedStyle' on 'Window': parameter 1 is not of type 'Element'."))
+	}
+	pseudo := ""
+	if len(call.Arguments) >= 2 {
+		arg := call.Argument(1)
+		if !goja.IsNull(arg) && !goja.IsUndefined(arg) {
+			name, kind := pseudoElementArg(arg.String())
+			switch kind {
+			case pseudoArgInvalid:
+				return r.computedStyleObject(map[string]string{})
+			case pseudoArgPseudo:
+				pseudo = name
+			}
+		}
+	}
+	if pseudo != "" {
+		if fn := r.pseudoStyleProvider(); fn != nil {
+			if got := fn(node, pseudo); got != nil {
+				return r.computedStyleObject(got)
+			}
+		}
 	}
 	values := r.computedValues(node)
 	return r.computedStyleObject(values)

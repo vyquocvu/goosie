@@ -37,7 +37,13 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	if cs == nil {
 		return nil
 	}
+	return styleValuesFrom(cs, boxW, boxH, hasBox)
+}
 
+func styleValuesFrom(cs *style.ComputedStyle, boxW, boxH float32, hasBox bool) map[string]string {
+	if cs == nil {
+		return nil
+	}
 	out := map[string]string{}
 	put := func(name, value string) {
 		if value == "" {
@@ -128,21 +134,46 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 }
 
 func (s *Session) pseudoStyleValues(n *dom.Node, pseudo string) map[string]string {
-	if s == nil || n == nil || n.Doc != s.Doc {
+	if s == nil || n == nil || pseudo == "" || n.Doc != s.Doc {
 		return nil
 	}
 	s.refreshStylesForCSSOMRead()
-	s.opMu.Lock()
-	defer s.opMu.Unlock()
-	cs := s.PseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: pseudo}]
-	if cs == nil {
+	cs, ok := s.pseudoStyleForRead(n, pseudo)
+	if !ok {
 		return nil
 	}
-	values := map[string]string{}
+	values := styleValuesFrom(cs, 0, 0, false)
+	if values == nil {
+		return nil
+	}
 	if cs.TextTransform != "" {
 		values["text-transform"] = cs.TextTransform
 	}
+	if text := style.PseudoContentValue(pseudo, cs); text != "" {
+		values["content"] = text
+	}
+	if _, ok := values["width"]; !ok {
+		values["width"] = "auto"
+	}
+	if _, ok := values["height"]; !ok {
+		values["height"] = "auto"
+	}
+	if pseudo == "first-line" {
+		values["width"] = "auto"
+		values["height"] = "auto"
+		values["opacity"] = "1"
+		values["visibility"] = "visible"
+	}
 	return values
+}
+
+func (s *Session) pseudoStyleForRead(n *dom.Node, pseudo string) (*style.ComputedStyle, bool) {
+	s.opMu.Lock()
+	defer s.opMu.Unlock()
+	if cs := s.PseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: pseudo}]; cs != nil {
+		return cs, true
+	}
+	return s.styleResolver.PseudoStyleForRead(n, pseudo, s.Styles, s.customFonts)
 }
 
 func (s *Session) refreshStylesForCSSOMRead() {

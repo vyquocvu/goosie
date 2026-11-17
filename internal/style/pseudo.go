@@ -158,3 +158,73 @@ func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *Co
 
 	return &cs
 }
+
+var pseudoInitialDisplays = map[string]Display{
+	"marker":          DisplayInlineBlock,
+	"backdrop":        DisplayBlock,
+	"cue":             DisplayBlock,
+	"view-transition": DisplayBlock,
+}
+
+var pseudoReadUnresolved = map[string]bool{
+	"part":    true,
+	"slotted": true,
+}
+
+func (r *Resolver) PseudoStyleForRead(n *dom.Node, pseudo string, elementStyles map[dom.NodeID]*ComputedStyle, fonts *CustomFonts) (*ComputedStyle, bool) {
+	if r == nil || r.index == nil || n == nil || !n.Element() || pseudoReadUnresolved[pseudo] {
+		return nil, false
+	}
+	parent := elementStyles[n.ID]
+	if parent == nil {
+		parent = findParentStyle(n, elementStyles)
+	}
+	if parent == nil {
+		return nil, false
+	}
+	cs := computePseudoStyle(n, pseudo, r.index, parent, fonts, css.NewSiblingIndex())
+	if cs == nil {
+		defaulted := DefaultStyle()
+		inheritFromParent(&defaulted, parent)
+		if pseudo == "placeholder" && css.IsPlaceholderShown(n) {
+			defaulted.Color = css.Color{R: 117, G: 117, B: 117, A: 255}
+		}
+		cs = &defaulted
+	} else if pseudo == "first-line" {
+		filterFirstLineProperties(cs)
+	}
+	if cs.Display == DisplayInline {
+		if initial, ok := pseudoInitialDisplays[pseudo]; ok {
+			cs.Display = initial
+		}
+	}
+	return cs, true
+}
+
+func PseudoContentValue(pseudo string, cs *ComputedStyle) string {
+	if cs == nil {
+		return ""
+	}
+	if pseudo == "first-line" || pseudo == "first-letter" {
+		return "normal"
+	}
+	if len(cs.ContentParts) > 0 {
+		return ""
+	}
+	switch cs.Content {
+	case "":
+		if cs.ContentIsString {
+			return `""`
+		}
+		return ""
+	case "normal":
+		if pseudo == "before" || pseudo == "after" {
+			return "none"
+		}
+		return "normal"
+	}
+	if cs.ContentIsString {
+		return `"` + cs.Content + `"`
+	}
+	return cs.Content
+}

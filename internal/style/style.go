@@ -398,6 +398,7 @@ type ComputedStyle struct {
 	BorderSpacingV float32
 
 	Content          string
+	ContentIsString  bool
 	ContentParts     []ContentPart
 	CounterReset     map[string]int
 	CounterSet       map[string]int
@@ -2558,11 +2559,14 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "content":
 		if parsed.Type == css.ValueString {
 			cs.Content = parsed.Str
+			cs.ContentIsString = true
 		} else if parts, ok := ParseContentParts(value); ok {
 			cs.Content = ""
+			cs.ContentIsString = false
 			cs.ContentParts = parts
 		} else {
 			cs.Content = value
+			cs.ContentIsString = false
 		}
 	case "counter-reset":
 		cs.CounterReset = ParseCounterDecls(value, 0)

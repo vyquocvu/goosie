@@ -3663,6 +3663,32 @@
     "enforced": false
   },
   {
+    "id": "BR-322",
+    "priority": "P2",
+    "methods": [
+      "INT"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/pseudo_element_name_test.go:TestPseudoElementNameCanonicalisesTheResolvedFamily",
+      "test/engine/gcs_pseudo_style_test.go:TestGetComputedStyleAnswersUngeneratedPseudoElements",
+      "test/engine/gcs_pseudo_style_test.go:TestGetComputedStyleFirstLineDropsThePropertiesItCannotCarry",
+      "test/engine/gcs_pseudo_style_test.go:TestGetComputedStylePartAndSlottedAnswerTheElementStyle",
+      "test/engine/gcs_pseudo_style_test.go:TestGetComputedStylePlaceholderBaselineFollowsTheShownState",
+      "test/engine/gcs_pseudo_style_test.go:TestGetComputedStylePseudoArgumentLeavesTheElementPathAlone",
+      "test/engine/gcs_pseudo_style_test.go:TestGetComputedStyleResolvesTheGeneratedPseudoStyle",
+      "test/engine/gcs_pseudo_style_test.go:TestReadingAPseudoStyleDoesNotGenerateItsBox",
+      "test/js/gcs_pseudo_element_test.go:TestGetComputedStyleInvalidPseudoArgumentIsEmptyDeclaration",
+      "test/js/gcs_pseudo_element_test.go:TestGetComputedStylePseudoArgumentDoesNotReadTheElementStyleAttribute",
+      "test/js/gcs_pseudo_element_test.go:TestGetComputedStylePseudoArgumentFallsBackToTheElementStyle",
+      "test/js/gcs_pseudo_element_test.go:TestGetComputedStylePseudoArgumentResolvesThePseudoStyle",
+      "test/js/gcs_pseudo_element_test.go:TestGetComputedStylePseudoArgumentSpellingsCanonicalise",
+      "test/js/gcs_pseudo_element_test.go:TestGetComputedStylePseudoDeclarationListsItsOwnNames",
+      "test/js/gcs_pseudo_element_test.go:TestGetComputedStylePseudoWithoutAResolvedStyleFallsBackToTheElement"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
