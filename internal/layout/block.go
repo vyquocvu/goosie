@@ -887,7 +887,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 							extra = spare
 						}
 					}
-					shiftInlineContent(a, items[i].id, finalX+it.BorderLeft+it.PaddingLeft+extra-items[i].srcX, lineY[l]+mTop)
+					shiftInlineContent(a, items[i].id, finalX+it.BorderLeft+it.PaddingLeft+extra-items[i].srcX, lineY[l]+mTop-prevY)
 				}
 			} else {
 				containW := it.W

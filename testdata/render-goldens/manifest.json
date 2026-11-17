@@ -22,7 +22,7 @@
       "family": "flex",
       "fixture": "flex/01-flex-row.html",
       "file": "flex.png",
-      "sha256": "ec3188363358f4609b8dfbcfcb2e12a9386f0605f930569023d71a42549f681a"
+      "sha256": "8b045b12f0b567a9ee9c4cea7422e94461cf1f9b3263c09128cca46073708360"
     },
     {
       "family": "grid",
