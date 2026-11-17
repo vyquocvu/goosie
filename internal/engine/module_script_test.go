@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +34,20 @@ window.moduleResult = moduleOnly;
 	}
 	if got, evalErr := rt.Evaluate(`typeof moduleOnly`); evalErr != nil || got != "undefined" {
 		t.Fatalf("module binding escaped its scope: %q, err=%v", got, evalErr)
+	}
+}
+
+func TestDynamicImportIsRejectedBeforeParsing(t *testing.T) {
+	rt, err := js.New(js.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	s := &Session{jsRT: rt, scriptFetch: func(string, string) ([]byte, error) { return nil, nil }}
+	graphBytes, moduleCount := 0, 0
+	err = s.executeDefaultImportModule(rt, `import("./chunk.js");export{l as __webpack_require__};`, "https://example.test/runtime.js", "runtime.js", time.Now().Add(time.Second), &graphBytes, &moduleCount)
+	if err == nil || !strings.Contains(err.Error(), "supported static default-import subset") {
+		t.Fatalf("dynamic import error = %v", err)
 	}
 }
 

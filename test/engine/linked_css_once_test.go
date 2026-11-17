@@ -113,6 +113,27 @@ func appendedStyle(marker, decl string) string {
 	return fmt.Sprintf("<script>var %s = document.createElement('style'); %s.textContent = '%s'; document.head.appendChild(%s);</script>", marker, marker, decl, marker)
 }
 
+func TestAlternateStylesheetIsNotFetched(t *testing.T) {
+	srv := newSheetServer()
+	srv.text["https://example.test/main.css"] = "p { color: rgb(1, 2, 3); }"
+	srv.text["https://example.test/draft.css"] = "html { background-color: rgb(0, 128, 0); }"
+	html := `<!doctype html><head>
+<link rel="stylesheet" href="main.css">
+<link rel="alternate stylesheet" title="Draft" href="draft.css">
+</head><body><p>Hi</p></html>`
+	sess := newCSSSession(t, newCSSRuntime(t), html, srv.link)
+	if srv.attempted("https://example.test/draft.css") != 0 {
+		t.Fatalf("alternate stylesheet fetches = %d, want 0", srv.attempted("https://example.test/draft.css"))
+	}
+	if srv.count("https://example.test/main.css") == 0 {
+		t.Fatal("preferred stylesheet was not fetched")
+	}
+	r, g, b := colorOf(t, sess, "p")
+	if r != 1 || g != 2 || b != 3 {
+		t.Fatalf("p color = %d,%d,%d, want 1,2,3", r, g, b)
+	}
+}
+
 // qc:BR-282
 func TestLinkedSheetsRequestedOnceAcrossScriptPasses(t *testing.T) {
 	srv := newSheetServer()

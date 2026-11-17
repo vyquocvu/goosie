@@ -728,12 +728,16 @@ const CSSFetchBudget = 6 * time.Second
 
 func stylesheetHref(n *dom.Node) string {
 	isCSS := false
+	alternate := false
 	for _, tok := range strings.Fields(n.GetAttribute("rel")) {
-		if strings.EqualFold(tok, "stylesheet") {
+		switch {
+		case strings.EqualFold(tok, "stylesheet"):
 			isCSS = true
+		case strings.EqualFold(tok, "alternate"):
+			alternate = true
 		}
 	}
-	if !isCSS {
+	if !isCSS || alternate {
 		return ""
 	}
 	return strings.TrimSpace(n.GetAttribute("href"))

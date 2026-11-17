@@ -23,6 +23,13 @@ var (
 	defaultExportLine = regexp.MustCompile(`(?m)^\s*export\s+default\s+`)
 )
 
+func moduleSyntaxOutsideSubset(source string) bool {
+	if strings.Contains(source, "import ") || strings.Contains(source, "import(") || strings.Contains(source, "import\n") || strings.Contains(source, "import\t") {
+		return true
+	}
+	return strings.Contains(source, "export ") || strings.Contains(source, "export{") || strings.Contains(source, "export\n") || strings.Contains(source, "export\t")
+}
+
 func isModuleScript(n *dom.Node) bool {
 	if n == nil || !n.Element() || n.Data != "script" {
 		return false
@@ -141,7 +148,7 @@ func (s *Session) executeDefaultImportModule(runtime *js.Runtime, source, baseUR
 		replacement := "const " + match[1] + " = " + value + ";"
 		source = strings.Replace(source, match[0], replacement, 1)
 	}
-	if strings.Contains(source, "import ") || defaultExportLine.MatchString(source) || strings.Contains(source, "export ") {
+	if moduleSyntaxOutsideSubset(source) || defaultExportLine.MatchString(source) {
 		return errors.New("module syntax is outside the supported static default-import subset")
 	}
 	wrapped := "(function(){\"use strict\";\n" + source + "\n}).call(undefined);"
@@ -186,7 +193,7 @@ func (s *Session) moduleDefaultJSON(runtime *js.Runtime, source, baseURL string,
 		bindings.WriteString(value)
 		bindings.WriteString(";\n")
 	}
-	if strings.Contains(source, "import ") || strings.Contains(source, "export ") {
+	if moduleSyntaxOutsideSubset(source) {
 		loc := defaultExportLine.FindStringIndex(source)
 		if loc == nil {
 			return "", errors.New("module dependency must have one default export")
