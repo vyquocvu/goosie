@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Forms - the CSS-wide keyword in the font shorthand on controls</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; background: #fff; }
+    .label { font-size: 12px; color: #666; margin: 0 0 2px 0; }
+    .row { width: 620px; }
+    .band { height: 6px; margin: 0 0 6px 0; }
+    .b1 { background: #238b45; }
+    .b2 { background: #a63603; }
+    /* The intrinsic width a field takes from its control font is a per-character
+       average this engine cannot read (GOOSIE-CONTROLWIDTH-001), so every box
+       here is pinned by the page: what the rows compare is the glyph size and
+       the glyph face of the value each control shows, which is exactly what the
+       keyword in the shorthand decides. */
+    input, textarea, button { width: 190px; }
+    textarea { width: 190px; height: 44px; }
+    .inh input, .inh textarea, .inh button { font: inherit; }
+    .ini input, .ini textarea, .ini button { font: initial; }
+    .un input, .un button { font: unset; }
+    .bad input, .bad button { font: inherit bold 12px Arial; }
+</style>
+</head>
+<body>
+    <!-- Five rows of the same three controls and the same value text, each row
+         followed by a solid band: a rule that lands on the wrong longhand set
+         changes a row's height and slides every band under it. -->
+
+    <div class=label>no keyword declared: the UA control face, 13.3333px</div>
+    <div class="row"><input type=text value="Goosie 12345"> <input type=search value="Goosie 12345"> <button>Refresh 12345</button></div>
+    <div class="band b1"></div>
+
+    <div class=label>font: inherit - the document's 16px sans-serif</div>
+    <div class="row inh"><input type=text value="Goosie 12345"> <input type=search value="Goosie 12345"> <button>Refresh 12345</button></div>
+    <div class="band b2"></div>
+
+    <div class=label>font: initial - 16px Times, whatever the document asks for</div>
+    <div class="row ini"><input type=text value="Goosie 12345"> <input type=search value="Goosie 12345"> <button>Refresh 12345</button></div>
+    <div class="band b1"></div>
+
+    <div class=label>font: unset - the same group as inherit, because every longhand of it inherits</div>
+    <div class="row un"><input type=text value="Goosie 12345"> <button>Refresh 12345</button></div>
+    <div class="band b2"></div>
+
+    <div class=label>font: inherit bold 12px Arial is invalid, so the UA face stays on this row</div>
+    <div class="row bad"><input type=text value="Goosie 12345"> <button>Refresh 12345</button></div>
+    <div class="band b1"></div>
+
+    <div class=label>a textarea: the UA monospace face, then the document's sans-serif</div>
+    <div class="row"><textarea>Goosie 12345</textarea> <textarea class=x>Goosie 12345</textarea></div>
+    <div class="band b2"></div>
+    <div class="row inh"><textarea>Goosie 12345</textarea> <textarea class=x>Goosie 12345</textarea></div>
+    <div class="band b1"></div>
+</body>
+</html>

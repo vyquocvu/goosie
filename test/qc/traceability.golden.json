@@ -3689,6 +3689,24 @@
     "enforced": false
   },
   {
+    "id": "BR-323",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/layout/control_font_wide_test.go:TestControlFontWideKeywordMovesTheControlsOwnLine",
+      "test/style/font_shorthand_wide_test.go:TestFontShorthandInheritCopiesTheParentsWholeGroup",
+      "test/style/font_shorthand_wide_test.go:TestFontShorthandInitialResetsTheGroupToTheCssInitialValues",
+      "test/style/font_shorthand_wide_test.go:TestFontShorthandRejectsAWholeDeclarationThatMixesAWideKeywordWithComponents",
+      "test/style/font_shorthand_wide_test.go:TestFontShorthandWideKeywordKeepsItsPlaceInTheCascade",
+      "test/style/font_shorthand_wide_test.go:TestPseudoElementFontShorthandWideKeywordsSeeTheHostGroup"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

@@ -171,7 +171,15 @@ PASS_AT = 90.0
 # pre-fix the whole block fell back to stacked full-width bands (coverage 1.3005, worst band IoU
 # 0.7989).  99.572% PASS against 24.581% FAIL on the pre-fix binary; the corpus moved 119/120 ->
 # 120/120 at 95.971 -> 96.596 average, with this row the only one that changed.
-MIN_SCORED_FIXTURES = 120
+# 121: forms/11-control-font-wide-keywords.html (GOOSIE-FONTSHORTHANDWIDE-001, the `font` half) -
+# a 16px sans-serif body and eight labelled control rows that spell `font: inherit`, `initial` and
+# `unset` on field/select/button/textarea, plus solid bands so a wrong line box moves ink rather
+# than only geometry. Every width is pinned by the page, so the registered GOOSIE-CONTROLWIDTH-001
+# 145px content-width constant cannot mask the height change the control's own font drives. The
+# pre-fix engine dropped the keyword and kept the UA 13.3333px Arial on every `inherit` row.
+# 94.711% PASS against 82.056% FAIL on the pre-fix binary (worst band IoU 0.9778 vs 0.2360); the
+# corpus moved 120/121 -> 121/121 at 96.531 -> 96.641 average, with this row the only failure.
+MIN_SCORED_FIXTURES = 121
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

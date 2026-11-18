@@ -141,6 +141,7 @@ func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *Co
 
 	cs := DefaultStyle()
 	inheritFromParent(&cs, parent)
+	cs.inheritedFont = readFontGroup(&cs)
 
 	if pseudo == "placeholder" {
 		cs.Color = css.Color{R: 117, G: 117, B: 117, A: 255}

@@ -353,6 +353,7 @@ type ComputedStyle struct {
 	LineHeight      float32
 	LineHeightRatio float32
 	LineHeightEm    float32
+	inheritedFont   fontGroup
 	Direction       string
 	UnicodeBidi     string
 	TextAlign       TextAlign
@@ -1568,6 +1569,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	if parent != nil {
 		inheritFromParent(&cs, parent)
 	}
+	cs.inheritedFont = readFontGroup(&cs)
 
 	parentFontSize := float32(16)
 	if parent != nil {
@@ -4936,8 +4938,68 @@ func parseBorderColorsWithScheme(v, scheme string) [4]css.Color {
 	return colors
 }
 
+type fontGroup struct {
+	Size      float32
+	Family    frame.FontFamily
+	Custom    string
+	Weight    FontWeight
+	Style     FontStyle
+	Line      float32
+	LineRatio float32
+	LineEm    float32
+}
+
+func readFontGroup(cs *ComputedStyle) fontGroup {
+	return fontGroup{Size: cs.FontSize, Family: cs.FontFamily, Custom: cs.CustomFamily,
+		Weight: cs.FontWeight, Style: cs.FontStyle, Line: cs.LineHeight,
+		LineRatio: cs.LineHeightRatio, LineEm: cs.LineHeightEm}
+}
+
+func (cs *ComputedStyle) writeFontGroup(g fontGroup) {
+	cs.FontSize, cs.FontFamily, cs.CustomFamily = g.Size, g.Family, g.Custom
+	cs.FontWeight, cs.FontStyle = g.Weight, g.Style
+	cs.LineHeight, cs.LineHeightRatio, cs.LineHeightEm = g.Line, g.LineRatio, g.LineEm
+}
+
+func fontGroupInitial() fontGroup {
+	d := DefaultStyle()
+	return readFontGroup(&d)
+}
+
+func isBareCSSWideKeyword(tok string) bool {
+	switch strings.ToLower(tok) {
+	case "inherit", "initial", "unset":
+		return true
+	}
+	return false
+}
+
+func cssWideKeyword(parts []string) (string, bool) {
+	if len(parts) != 1 || !isBareCSSWideKeyword(parts[0]) {
+		return "", false
+	}
+	return strings.ToLower(parts[0]), true
+}
+
+func cssWideKeywordAheadOfTheSize(parts []string, sizeIdx int) bool {
+	for _, p := range parts[:sizeIdx] {
+		if isBareCSSWideKeyword(p) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSize float32, fonts *CustomFonts) {
 	parts := strings.Fields(v)
+	if kw, wide := cssWideKeyword(parts); wide {
+		if kw == "initial" {
+			cs.writeFontGroup(fontGroupInitial())
+		} else {
+			cs.writeFontGroup(cs.inheritedFont)
+		}
+		return
+	}
 	sizeIdx := -1
 	for i, p := range parts {
 		if isFontShorthandSize(p) {
@@ -4945,7 +5007,7 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSiz
 			break
 		}
 	}
-	if sizeIdx < 0 {
+	if sizeIdx < 0 || cssWideKeywordAheadOfTheSize(parts, sizeIdx) {
 		return
 	}
 	for _, p := range parts[:sizeIdx] {
