@@ -91,6 +91,10 @@ func (b *Builder) appendRun(text string, rect frame.Rect, s *style.ComputedStyle
 }
 
 func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32, order []int, levels []byte) {
+	b.appendRunGlyphs(text, rect, s, color, opacity, order, levels, true)
+}
+
+func (b *Builder) appendRunGlyphs(text string, rect frame.Rect, s *style.ComputedStyle, color frame.Color, opacity float32, order []int, levels []byte, decorate bool) {
 	fontSize := int32(s.FontSize * b.scale)
 	if fontSize <= 0 {
 		return
@@ -152,30 +156,53 @@ func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.Comput
 		},
 		Opacity: opacity,
 	})
-	if s.TextDecoration&style.TextDecorationUnderline != 0 && !isBlankText(text) {
-		thick := (s.FontSize * b.scale) / 16
-		if s.TextDecorationThickness > 0 {
-			thick = s.TextDecorationThickness * b.scale
-		}
-		if thick < 1 {
-			thick = 1
-		}
-		offset := float32(thick)
-		if s.TextUnderlineOffset != 0 {
-			offset = s.TextUnderlineOffset * b.scale
-		}
-		y0 := baseline + int32(offset)
-		deco := color
-		if s.TextDecorationColor.A > 0 {
-			deco = convertColor(s.TextDecorationColor)
-		}
-		b.list.Append(DisplayCmd{
-			Kind:    CmdFill,
-			Rect:    frame.Rect4(rect.X0, y0, rect.X1, y0+int32(thick)),
-			Color:   deco,
-			Opacity: opacity,
-		})
+	if decorate {
+		b.appendUnderline(text, rect, s, baseline, color, opacity, nil)
 	}
+}
+
+func (b *Builder) runBaseline(rect frame.Rect, s *style.ComputedStyle) int32 {
+	fontSize := int32(s.FontSize * b.scale)
+	if b.metrics != nil {
+		ascent, _, _ := b.metrics.LineMetrics(fontSize, s.FontSlot())
+		return rect.Y0 + ascent
+	}
+	return rect.Y0 + int32(s.FontSize*b.scale*0.8)
+}
+
+func (b *Builder) appendUnderline(text string, rect frame.Rect, s *style.ComputedStyle, baseline int32, color frame.Color, opacity float32, clip *frame.Rect) {
+	if s.TextDecoration&style.TextDecorationUnderline == 0 || isBlankText(text) {
+		return
+	}
+	thick := (s.FontSize * b.scale) / 16
+	if s.TextDecorationThickness > 0 {
+		thick = s.TextDecorationThickness * b.scale
+	}
+	if thick < 1 {
+		thick = 1
+	}
+	offset := float32(thick)
+	if s.TextUnderlineOffset != 0 {
+		offset = s.TextUnderlineOffset * b.scale
+	}
+	y0 := baseline + int32(offset)
+	deco := color
+	if s.TextDecorationColor.A > 0 {
+		deco = convertColor(s.TextDecorationColor)
+	}
+	bar := frame.Rect4(rect.X0, y0, rect.X1, y0+int32(thick))
+	if clip != nil {
+		bar = bar.Intersection(*clip)
+	}
+	if bar.Empty() {
+		return
+	}
+	b.list.Append(DisplayCmd{
+		Kind:    CmdFill,
+		Rect:    bar,
+		Color:   deco,
+		Opacity: opacity,
+	})
 }
 
 func isBlankText(text string) bool {

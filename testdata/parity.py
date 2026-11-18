@@ -179,7 +179,16 @@ PASS_AT = 90.0
 # pre-fix engine dropped the keyword and kept the UA 13.3333px Arial on every `inherit` row.
 # 94.711% PASS against 82.056% FAIL on the pre-fix binary (worst band IoU 0.9778 vs 0.2360); the
 # corpus moved 120/121 -> 121/121 at 96.531 -> 96.641 average, with this row the only failure.
-MIN_SCORED_FIXTURES = 121
+# 122: forms/12-placeholder-pseudo-box.html (GOOSIE-PLACEHOLDER-001 residual (b)) - seven labelled
+# rows of empty 700px fields, each carrying one declaration on `::placeholder` itself: a background
+# wash, a wash plus a decoration bar, a bordered and padded box, an opacity-dimmed wash, a border-only
+# frame, and a field holding a value so that no placeholder box may appear at all. Solid bands below
+# every row keep a changed line box moving ink. The width is pinned by the page for the same reason
+# as 121: GOOSIE-CONTROLWIDTH-001 makes the intrinsic field width a constant here. 93.639% PASS
+# against 84.494% FAIL on the pre-fix binary (coverage ratio 1.0766 vs 0.6090, worst band IoU 0.9360
+# vs 0.6341); the tree scores 122/122 at 96.615 average, the pre-fix binary 120/122 at 96.435 because
+# on that binary 121 has no fix to score either.
+MIN_SCORED_FIXTURES = 122
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

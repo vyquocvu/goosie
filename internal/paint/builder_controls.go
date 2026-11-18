@@ -23,26 +23,96 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 	if b.focus.object != nil && b.focus.object == obj && b.focus.marked != "" {
 		return
 	}
-	x0, y0, x1, y1 := obj.ContentRect()
-	rect := controlTextRect(frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale), text, s, b.scale, b.metrics)
-	if rect.Empty() {
-		return
-	}
-	if clip != nil {
-		rect = rect.Intersection(*clip)
-		if rect.Empty() {
-			return
-		}
-	}
 	col := frame.RGB(117, 117, 117)
 	op := opacity
+	var ps *style.ComputedStyle
 	if b.arena != nil && b.arena.PlaceholderStyles != nil {
-		if ps, ok := b.arena.PlaceholderStyles[obj.Node.ID]; ok && ps != nil {
+		if declared, ok := b.arena.PlaceholderStyles[obj.Node.ID]; ok && declared != nil {
+			ps = declared
 			col = convertColor(ps.Color)
 			op = opacity * ps.Opacity
 		}
 	}
-	b.appendRun(text, rect, s, col, op)
+	x0, y0, x1, y1 := obj.ContentRect()
+	content := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	leftInset, rightInset, topInset, bottomInset := int32(0), int32(0), int32(0), int32(0)
+	borderTop, borderBottom, borderLeft, borderRight := placeholderBorderWidths(ps, b.scale)
+	if ps != nil {
+		leftInset = borderLeft + placeholderDevice(ps.PaddingLeft, b.scale)
+		rightInset = borderRight + placeholderDevice(ps.PaddingRight, b.scale)
+		topInset = borderTop + placeholderDevice(ps.PaddingTop, b.scale)
+		bottomInset = borderBottom + placeholderDevice(ps.PaddingBottom, b.scale)
+	}
+	ink := controlTextRect(frame.Rect4(content.X0+leftInset, content.Y0+topInset, content.X1-rightInset, content.Y1-bottomInset), text, s, b.scale, b.metrics)
+	if clip != nil {
+		ink = ink.Intersection(*clip)
+	}
+	if ink.Empty() {
+		return
+	}
+	if ps != nil {
+		b.appendPlaceholderBackground(ps, content, op)
+		b.appendPlaceholderBorder(ps, content, borderTop, borderBottom, borderLeft, borderRight, op)
+	}
+	b.appendRunGlyphs(text, ink, s, col, op, nil, nil, false)
+	b.appendUnderline(text, ink, s, b.runBaseline(ink, s), col, op, &content)
+	if ps != nil && !sameDecorationSource(ps, s) {
+		b.appendUnderline(text, ink, ps, b.runBaseline(ink, ps), col, op, &content)
+	}
+}
+
+func placeholderDevice(cssPx float32, scale float32) int32 {
+	if cssPx <= 0 {
+		return 0
+	}
+	if w := int32(cssPx * scale); w > 0 {
+		return w
+	}
+	return 1
+}
+
+func placeholderBorderWidths(ps *style.ComputedStyle, scale float32) (int32, int32, int32, int32) {
+	if ps == nil {
+		return 0, 0, 0, 0
+	}
+	widths := ps.UsedBorderWidths()
+	return placeholderDevice(widths[0], scale), placeholderDevice(widths[2], scale),
+		placeholderDevice(widths[3], scale), placeholderDevice(widths[1], scale)
+}
+
+func (b *Builder) appendPlaceholderBackground(ps *style.ComputedStyle, borderBox frame.Rect, opacity float32) {
+	if ps.BackgroundColor.A == 0 {
+		return
+	}
+	if borderBox.Empty() {
+		return
+	}
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: borderBox, Color: convertColor(ps.BackgroundColor), Opacity: opacity})
+}
+
+func (b *Builder) appendPlaceholderBorder(ps *style.ComputedStyle, content frame.Rect, top, bottom, left, right int32, opacity float32) {
+	edges := []struct {
+		color css.Color
+		rect  frame.Rect
+	}{
+		{ps.BorderTopColor, frame.Rect4(content.X0, content.Y0, content.X1, content.Y0+top)},
+		{ps.BorderBottomColor, frame.Rect4(content.X0, content.Y1-bottom, content.X1, content.Y1)},
+		{ps.BorderLeftColor, frame.Rect4(content.X0, content.Y0, content.X0+left, content.Y1)},
+		{ps.BorderRightColor, frame.Rect4(content.X1-right, content.Y0, content.X1, content.Y1)},
+	}
+	for _, edge := range edges {
+		if edge.color.A == 0 || edge.rect.Empty() {
+			continue
+		}
+		b.list.Append(DisplayCmd{Kind: CmdFill, Rect: edge.rect, Color: convertColor(edge.color), Opacity: opacity})
+	}
+}
+
+func sameDecorationSource(pseudo, host *style.ComputedStyle) bool {
+	return pseudo.TextDecoration == host.TextDecoration &&
+		pseudo.TextDecorationColor == host.TextDecorationColor &&
+		pseudo.TextDecorationThickness == host.TextDecorationThickness &&
+		pseudo.TextUnderlineOffset == host.TextUnderlineOffset
 }
 
 func controlTextRect(rect frame.Rect, text string, s *style.ComputedStyle, scale float32, metrics layout.Metrics) frame.Rect {

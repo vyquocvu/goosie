@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Forms - the placeholder pseudo box its host declares</title>
+<style>
+    body { margin: 20px; font: 16px sans-serif; color: #111; background: #fff; }
+    .label { font-size: 12px; color: #666; margin: 0 0 2px 0; }
+    .row input { width: 700px; }
+    .band { height: 6px; margin: 0 0 6px 0; }
+    .b1 { background: #238b45; }
+    .b2 { background: #a63603; }
+    .bg input::placeholder { background-color: #00aa44; }
+    .box input::placeholder { background-color: #0066cc; border: 2px solid #ff8800; padding: 2px; }
+    .dim input::placeholder { opacity: 0.5; background-color: #7700aa; }
+    .field input::placeholder { border: 2px solid #dd00dd; }
+    .both input::placeholder { background-color: #0066cc; text-decoration: underline solid #ff8800; }
+</style>
+</head>
+<body>
+    <!-- Each row is one empty field, so the placeholder is what shows. A rule
+         that never reaches the display list leaves the row plain white against
+         a coloured reference, and a box law that is off moves the band under
+         it. Only the declarations this engine paints for the pseudo are here;
+         the line-style and thickness longhands are registered gaps. -->
+
+    <div class=label>background only: the field carries a green wash behind the placeholder</div>
+    <div class="row bg"><input placeholder="green wash behind the placeholder text"></div>
+    <div class="band b1"></div>
+
+    <div class=label>background and a bar: a blue field under an orange underline of the advance</div>
+    <div class="row both"><input placeholder="blue field orange bar"></div>
+    <div class="band b2"></div>
+
+    <div class=label>background, border and padding: an inset blue box inside an orange frame</div>
+    <div class="row box"><input placeholder="inset frame"></div>
+    <div class="band b1"></div>
+
+    <div class=label>opacity on the pseudo dims its own background</div>
+    <div class="row dim"><input placeholder="dimmed layer"></div>
+    <div class="band b2"></div>
+
+    <div class=label>background only again, to keep the wash area larger than any single row law</div>
+    <div class="row bg"><input placeholder="green wash again"></div>
+    <div class="band b1"></div>
+
+    <div class=label>a declared border with no background leaves the field white inside a magenta frame</div>
+    <div class="row field"><input placeholder="magenta frame"></div>
+    <div class="band b2"></div>
+
+    <div class=label>a value typed in the field shows no placeholder box at all</div>
+    <div class="row bg"><input placeholder="never shown" value="the value, not the placeholder"></div>
+    <div class="band b1"></div>
+</body>
+</html>
