@@ -448,6 +448,7 @@ type ComputedStyle struct {
 
 	TextUnderlineOffset     float32
 	TextDecorationThickness float32
+	TextDecorationColor     css.Color
 
 	PointerEvents string
 	UserSelect    string
@@ -2191,6 +2192,7 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.AccentColor = parent.AccentColor
 	cs.TextUnderlineOffset = parent.TextUnderlineOffset
 	cs.TextDecorationThickness = parent.TextDecorationThickness
+	cs.TextDecorationColor = parent.TextDecorationColor
 	if parent.PointerEvents != "" {
 		cs.PointerEvents = parent.PointerEvents
 	}
@@ -3212,6 +3214,20 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.TextTransform = strings.ToLower(strings.TrimSpace(value))
 	case "text-decoration":
 		cs.TextDecoration = parseTextDecoration(value)
+		cs.TextDecorationColor = css.Color{}
+		cs.TextDecorationThickness = 0
+		for _, part := range splitTopLevelSpace(value) {
+			if c, ok := css.ParseColorWithScheme(part, cs.scheme()); ok {
+				cs.TextDecorationColor = c
+			}
+		}
+	case "text-decoration-color":
+		v := strings.TrimSpace(strings.ToLower(value))
+		if v == "auto" {
+			cs.TextDecorationColor = css.Color{}
+		} else if c, ok := css.ParseColorWithScheme(value, cs.scheme()); ok {
+			cs.TextDecorationColor = c
+		}
 	case "text-underline-offset":
 		if strings.TrimSpace(strings.ToLower(value)) == "auto" {
 			cs.TextUnderlineOffset = 0

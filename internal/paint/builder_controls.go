@@ -24,7 +24,7 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 		return
 	}
 	x0, y0, x1, y1 := obj.ContentRect()
-	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	rect := controlTextRect(frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale), text, s, b.scale, b.metrics)
 	if rect.Empty() {
 		return
 	}
@@ -43,6 +43,14 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 		}
 	}
 	b.appendRun(text, rect, s, col, op)
+}
+
+func controlTextRect(rect frame.Rect, text string, s *style.ComputedStyle, scale float32, metrics layout.Metrics) frame.Rect {
+	end := runeX(text, rect, s, len([]rune(text)), scale, metrics, nil)
+	if end > rect.X0 && end < rect.X1 {
+		rect.X1 = end
+	}
+	return rect
 }
 
 func (b *Builder) composeControlText(obj *layout.Object, text string) string {
@@ -119,7 +127,7 @@ func (b *Builder) paintControlValue(obj *layout.Object, opacity float32, clip *f
 		text = strings.Repeat("•", len([]rune(text)))
 	}
 	x0, y0, x1, y1 := obj.ContentRect()
-	rect := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	rect := controlTextRect(frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale), text, s, b.scale, b.metrics)
 	if rect.Empty() {
 		return
 	}

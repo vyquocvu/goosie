@@ -165,10 +165,14 @@ func (b *Builder) appendRunOrdered(text string, rect frame.Rect, s *style.Comput
 			offset = s.TextUnderlineOffset * b.scale
 		}
 		y0 := baseline + int32(offset)
+		deco := color
+		if s.TextDecorationColor.A > 0 {
+			deco = convertColor(s.TextDecorationColor)
+		}
 		b.list.Append(DisplayCmd{
 			Kind:    CmdFill,
 			Rect:    frame.Rect4(rect.X0, y0, rect.X1, y0+int32(thick)),
-			Color:   color,
+			Color:   deco,
 			Opacity: opacity,
 		})
 	}

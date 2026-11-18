@@ -3707,6 +3707,28 @@
     "enforced": false
   },
   {
+    "id": "BR-324",
+    "priority": "P2",
+    "methods": [
+      "UNIT",
+      "ANCHOR"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/decoration_color_extent_test.go:TestControlDecorationSpansTextNotField",
+      "test/paint/decoration_color_extent_test.go:TestDecorationColorFallsBackToTextColour",
+      "test/paint/decoration_color_extent_test.go:TestDecorationColorLonghandPaints",
+      "test/paint/decoration_color_extent_test.go:TestDecorationLineUsesDeclaredColorFromShorthand",
+      "test/paint/decoration_color_extent_test.go:TestDecorationShorthandResetsPaintedThicknessBySourceOrder",
+      "test/paint/decoration_color_extent_test.go:TestPlaceholderDecorationSpansTextNotField",
+      "test/style/text_decoration_color_test.go:TestTextDecorationColorFromShorthandAndLonghand",
+      "test/style/text_decoration_color_test.go:TestTextDecorationColorInheritsWithTheDecorationFlags",
+      "test/style/text_decoration_color_test.go:TestTextDecorationShorthandResetsTheColorBySourceOrder",
+      "test/style/text_decoration_color_test.go:TestTextDecorationShorthandResetsThicknessAndLeavesTheOffset"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [
