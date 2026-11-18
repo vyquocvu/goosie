@@ -33,7 +33,7 @@ Rules:
 
 ### 1.1 The declared product
 
-`docs/roadmap-v2.md` defines the product as a daily-use macOS browser built on the Go engine, with a headless path sharing the same engine. It explicitly does not promise full-web compatibility, and it defers password autofill and cloud sync (`docs/roadmap-v2.md:101`). `docs/engine-compat-roadmap.md` adds the compatibility method: publish a supported feature/site set, a test set, reference results, remaining bugs, and security limits rather than a single "Chrome-compatible" label (`docs/engine-compat-roadmap.md:9-11`).
+`docs/roadmap-v2.md` defines the product as a daily-use macOS browser built on the Go engine, with a headless path sharing the same engine. It explicitly does not promise full-web compatibility, and it defers password autofill and cloud sync (`docs/roadmap-v2.md:101`). The compatibility method — publish a supported feature/site set, a test set, reference results, remaining bugs, and security limits rather than a single "Chrome-compatible" label — is now stated in `docs/roadmap-v2.md` itself (`## Quy tắc triển khai và kiểm chứng`, plus the P2 gate rule that a general WPT rate does not replace journey results); it previously lived in `docs/engine-compat-roadmap.md`, removed 2026-11-18 (Section 9).
 
 That contract is sound. The review asks one question against it:
 
@@ -636,8 +636,9 @@ This document is additive. It does not silently rewrite the existing docs; each 
 - **P1 session restore** (`:41`) does not save scroll position (`internal/session/session.go:15-18`) and does not load restored background tabs (`cmd/goosie/interaction.go:701-704`).
 - **P0 suggestions** (`:32`) does not filter profile sources for incognito tabs and can remain visible across tab switches (`cmd/goosie/main.go:374-478`, `internal/toolbar/toolbar.go:284-295`).
 
-### `docs/engine-compat-roadmap.md`
+### `docs/engine-compat-roadmap.md` (removed 2026-11-18)
 
+- **Status:** deleted under the roadmap-consolidation decision — `docs/roadmap-v2.md` is the single roadmap of record, and its `## Quy tắc triển khai và kiểm chứng` section already carries the same method (publish a supported-feature set, the applied test set, reference results, remaining bugs and limits instead of one compatibility label). The `:NN` citations below are historical line references to the removed file; its text is recoverable from git at commit `48866387`.
 - **E1** (`:45-55`) should carry the caveat that the pilot is 8 local pairs and that testharness tests are skipped (`test/wpt/curate.go:325-328`); the upstream full-suite run is separate.
 - **E0–E8** should be relabeled against V0/L1–L5 so there is one sequencing vocabulary. E0/E1 map to V0; E2 to L3/L5; E3 to L3/L4; E4 to L2/L4; E6/E7 to L5 and the deferred chrome work; E8 to the counters used as acceptance evidence.
 - **The 2026-10-24 color/selector baseline** (`:14-17`) is a real measured result and should stay; it is a subset, not a suite claim, which the document already says.
