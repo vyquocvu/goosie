@@ -32,10 +32,18 @@ func (b *Builder) paintBorders(obj *layout.Object, rect frame.Rect, radius frame
 		border.Top = SideSpec{Width: toDevice(obj.BorderTop), Color: convertColor(s.BorderTopColor)}
 	}
 	if obj.BorderRight > 0 {
-		border.Right = SideSpec{Width: toDevice(obj.BorderRight), Color: convertColor(s.BorderRightColor)}
+		rightColour := s.BorderRightColor
+		if obj.CollapsedBorderRight != nil {
+			rightColour = obj.CollapsedBorderRight.BorderRightColor
+		}
+		border.Right = SideSpec{Width: toDevice(obj.BorderRight), Color: convertColor(rightColour)}
 	}
 	if obj.BorderBottom > 0 {
-		border.Bottom = SideSpec{Width: toDevice(obj.BorderBottom), Color: convertColor(s.BorderBottomColor)}
+		bottomColour := s.BorderBottomColor
+		if obj.CollapsedBorderBottom != nil {
+			bottomColour = obj.CollapsedBorderBottom.BorderBottomColor
+		}
+		border.Bottom = SideSpec{Width: toDevice(obj.BorderBottom), Color: convertColor(bottomColour)}
 	}
 	if obj.BorderLeft > 0 {
 		border.Left = SideSpec{Width: toDevice(obj.BorderLeft), Color: convertColor(s.BorderLeftColor)}

@@ -132,9 +132,9 @@ func TestBorderShorthandPartsInAnyOrder(t *testing.T) {
 		{"width last", "border: solid red 2px", 2, "solid", 255, 0, 0, 255},
 		{"explicit zero width", "border: 0 solid red", 0, "solid", 255, 0, 0, 255},
 		{"explicit zero length", "border: 0px solid red", 0, "solid", 255, 0, 0, 255},
-		{"style only", "border: solid", 3, "solid", 0, 0, 0, 0},
-		{"none stays zero", "border: none", 0, "none", 0, 0, 0, 0},
-		{"width only", "border: 4px", 4, "", 0, 0, 0, 0},
+		{"style only", "border: solid", 3, "solid", 0, 0, 0, 255},
+		{"none width stays zero", "border: none", 0, "none", 0, 0, 0, 255},
+		{"width only", "border: 4px", 4, "", 0, 0, 0, 255},
 		{"hex colour", "border: 1px dashed #0088ee", 1, "dashed", 0, 136, 238, 255},
 		{"rgb with spaces", "border: 1px solid rgb(0, 136, 238)", 1, "solid", 0, 136, 238, 255},
 	} {
@@ -150,7 +150,7 @@ func TestBorderShorthandPartsInAnyOrder(t *testing.T) {
 				t.Errorf("%s BorderTopStyle = %q, want %q", tc.decl, s.BorderTopStyle, tc.styleStr)
 			}
 			if c := s.BorderTopColor; c.R != tc.r || c.G != tc.g || c.B != tc.b || c.A != tc.a {
-				t.Errorf("%s BorderTopColor = %+v, want {%v %v %v %v}", tc.decl, c, tc.r, tc.g, tc.b, tc.a)
+				t.Errorf("%s BorderTopColor = %+v, want {%v %v %v %v}: a border shorthand with no colour token resets the colour to its initial value currentcolor, which computes to this element's own colour", tc.decl, c, tc.r, tc.g, tc.b, tc.a)
 			}
 		})
 	}

@@ -155,6 +155,7 @@ func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *Co
 			cs.Color = parent.Color
 		}
 	}
+	resolveBorderColors(&cs, parent, entries, nil, nil)
 	resolveCustomFont(&cs, fonts)
 
 	return &cs

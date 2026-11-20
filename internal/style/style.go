@@ -1758,6 +1758,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 	}
 
 	resolveCurrentColor(&cs, matched, inlineDecls, hintDecls)
+	resolveBorderColors(&cs, parent, normal, important, vars)
 	resolveShadowColors(&cs, parent, normal, important)
 	resolveCustomFont(&cs, fonts)
 	if parent == nil {
@@ -1870,6 +1871,378 @@ func winningDeclValue(prop string, normal, important []cascadeEntry) (string, bo
 		}
 	}
 	return "", false
+}
+
+func resolveBorderColors(cs *ComputedStyle, parent *ComputedStyle, normal, important []cascadeEntry, vars *varExpander) {
+	if !borderColourDeclared(normal, important) {
+		cs.BorderTopColor, cs.BorderRightColor, cs.BorderBottomColor, cs.BorderLeftColor = cs.Color, cs.Color, cs.Color, cs.Color
+		return
+	}
+	var colours [4]css.Color
+	colours[0], colours[1], colours[2], colours[3] = cs.Color, cs.Color, cs.Color, cs.Color
+	var done [4]bool
+	scheme := cs.scheme()
+
+	for p := 0; p < 2; p++ {
+		list := normal
+		if p == 0 {
+			list = important
+		}
+		for i := len(list) - 1; i >= 0; i-- {
+			e := list[i]
+			var sides [4]int
+			n, shorthand := borderColourSidesInto(e.decl.Property, cs, &sides)
+			if n == 0 || (done[0] && done[1] && done[2] && done[3]) {
+				continue
+			}
+			value := e.decl.Value
+			if vars != nil && strings.Contains(value, "var(") {
+				value = vars.expand(value)
+			}
+			var itemBuf [4]string
+			items, overflow := splitColorTokensInto(strings.TrimSpace(value), &itemBuf)
+			if len(items) == 0 {
+				continue
+			}
+			if kw, ok := cssWideKeyword(items); ok {
+				for _, s := range sides[:n] {
+					if done[s] {
+						continue
+					}
+					done[s] = true
+					if kw == "inherit" {
+						colours[s] = borderColourInherited(cs, parent, s)
+					} else {
+						colours[s] = cs.Color
+					}
+				}
+				continue
+			}
+			if shorthand {
+				if overflow {
+					continue
+				}
+				c, has, valid := borderColourShorthand(cs, scheme, items)
+				if !valid {
+					continue
+				}
+				if !has {
+					c = cs.Color
+				}
+				for _, s := range sides[:n] {
+					if !done[s] {
+						done[s] = true
+						colours[s] = c
+					}
+				}
+				continue
+			}
+			if overflow || len(items) > n {
+				continue
+			}
+			var vals [4]css.Color
+			bad := false
+			for idx, it := range items {
+				c, ok := borderColourToken(cs, scheme, it)
+				if !ok {
+					bad = true
+					break
+				}
+				vals[idx] = c
+			}
+			if bad {
+				continue
+			}
+			var out [4]css.Color
+			switch n {
+			case 1:
+				out[0] = vals[0]
+			case 2:
+				if len(items) == 1 {
+					out[0], out[1] = vals[0], vals[0]
+				} else {
+					out[0], out[1] = vals[0], vals[1]
+				}
+			default:
+				switch len(items) {
+				case 1:
+					out[0], out[1], out[2], out[3] = vals[0], vals[0], vals[0], vals[0]
+				case 2:
+					out[0], out[1], out[2], out[3] = vals[0], vals[1], vals[0], vals[1]
+				case 3:
+					out[0], out[1], out[2], out[3] = vals[0], vals[1], vals[2], vals[1]
+				default:
+					out = vals
+				}
+			}
+			for idx, s := range sides[:n] {
+				if !done[s] {
+					done[s] = true
+					colours[s] = out[idx]
+				}
+			}
+		}
+	}
+	cs.BorderTopColor = colours[0]
+	cs.BorderRightColor = colours[1]
+	cs.BorderBottomColor = colours[2]
+	cs.BorderLeftColor = colours[3]
+}
+
+func borderColourToken(cs *ComputedStyle, scheme, item string) (css.Color, bool) {
+	if isCurrentColor(item) {
+		return cs.Color, true
+	}
+	return css.ParseColorWithScheme(item, scheme)
+}
+
+func borderColourInherited(cs, parent *ComputedStyle, side int) css.Color {
+	if parent == nil {
+		return cs.Color
+	}
+	switch side {
+	case 0:
+		return parent.BorderTopColor
+	case 1:
+		return parent.BorderRightColor
+	case 2:
+		return parent.BorderBottomColor
+	}
+	return parent.BorderLeftColor
+}
+
+func borderColourShorthand(cs *ComputedStyle, scheme string, items []string) (css.Color, bool, bool) {
+	var out css.Color
+	have := false
+	for _, it := range items {
+		lower := strings.ToLower(it)
+		if isBorderStyle(lower) {
+			continue
+		}
+		if c, ok := borderColourToken(cs, scheme, lower); ok {
+			if have {
+				return css.Color{}, false, false
+			}
+			out, have = c, true
+			continue
+		}
+		if !isBorderWidthToken(lower) {
+			return css.Color{}, false, false
+		}
+	}
+	return out, have, true
+}
+
+func splitColorTokensInto(v string, buf *[4]string) ([]string, bool) {
+	count := 0
+	overflow := false
+	depth := 0
+	start := -1
+	for i := 0; i < len(v); i++ {
+		switch v[i] {
+		case '(':
+			depth++
+			if start < 0 {
+				start = i
+			}
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ' ', '\t':
+			if depth == 0 {
+				if start >= 0 {
+					var ov bool
+					count, ov = storeColorToken(buf, count, strings.TrimSpace(v[start:i]))
+					overflow = overflow || ov
+					start = -1
+				}
+			} else if start < 0 {
+				start = i
+			}
+		default:
+			if start < 0 {
+				start = i
+			}
+		}
+	}
+	if start >= 0 {
+		var ov bool
+		count, ov = storeColorToken(buf, count, strings.TrimSpace(v[start:]))
+		overflow = overflow || ov
+	}
+	if overflow {
+		return buf[:], true
+	}
+	return buf[:count], false
+}
+
+func storeColorToken(buf *[4]string, count int, tok string) (int, bool) {
+	if count >= len(buf) {
+		return count, true
+	}
+	buf[count] = tok
+	return count + 1, false
+}
+
+func isBorderWidthToken(v string) bool {
+	switch v {
+	case "thin", "medium", "thick":
+		return true
+	}
+	if n := len(v); n > 0 {
+		c := v[0]
+		if (c >= '0' && c <= '9') || c == '.' {
+			return true
+		}
+		if (c == '+' || c == '-') && n > 1 {
+			if d := v[1]; (d >= '0' && d <= '9') || d == '.' {
+				return true
+			}
+		}
+	}
+	parsed := css.ParseValue(v)
+	return parsed.Type == css.ValueNumber || parsed.Type == css.ValueLength || parsed.Type == css.ValueFunc
+}
+
+func borderColourDeclared(normal, important []cascadeEntry) bool {
+	for i := range important {
+		if affectsBorderColour(important[i].decl.Property) {
+			return true
+		}
+	}
+	for i := range normal {
+		if affectsBorderColour(normal[i].decl.Property) {
+			return true
+		}
+	}
+	return false
+}
+
+func affectsBorderColour(prop string) bool {
+	switch prop {
+	case "border", "border-top", "border-right", "border-bottom", "border-left",
+		"border-color", "border-top-color", "border-right-color", "border-bottom-color", "border-left-color",
+		"border-block", "border-block-color", "border-inline", "border-inline-color",
+		"border-block-start", "border-block-start-color", "border-block-end", "border-block-end-color",
+		"border-inline-start", "border-inline-start-color", "border-inline-end", "border-inline-end-color":
+		return true
+	}
+	return false
+}
+
+func borderColourSidesInto(prop string, cs *ComputedStyle, sides *[4]int) (int, bool) {
+	switch prop {
+	case "border":
+		*sides = [4]int{0, 1, 2, 3}
+		return 4, true
+	case "border-top":
+		sides[0] = 0
+		return 1, true
+	case "border-right":
+		sides[0] = 1
+		return 1, true
+	case "border-bottom":
+		sides[0] = 2
+		return 1, true
+	case "border-left":
+		sides[0] = 3
+		return 1, true
+	case "border-color":
+		*sides = [4]int{0, 1, 2, 3}
+		return 4, false
+	case "border-top-color":
+		sides[0] = 0
+		return 1, false
+	case "border-right-color":
+		sides[0] = 1
+		return 1, false
+	case "border-bottom-color":
+		sides[0] = 2
+		return 1, false
+	case "border-left-color":
+		sides[0] = 3
+		return 1, false
+	case "border-block":
+		sides[0], sides[1] = borderBlockStartSide(cs), borderBlockEndSide(cs)
+		return 2, true
+	case "border-block-color":
+		sides[0], sides[1] = borderBlockStartSide(cs), borderBlockEndSide(cs)
+		return 2, false
+	case "border-inline":
+		sides[0], sides[1] = borderInlineStartSide(cs), borderInlineEndSide(cs)
+		return 2, true
+	case "border-inline-color":
+		sides[0], sides[1] = borderInlineStartSide(cs), borderInlineEndSide(cs)
+		return 2, false
+	case "border-block-start":
+		sides[0] = borderBlockStartSide(cs)
+		return 1, true
+	case "border-block-start-color":
+		sides[0] = borderBlockStartSide(cs)
+		return 1, false
+	case "border-block-end":
+		sides[0] = borderBlockEndSide(cs)
+		return 1, true
+	case "border-block-end-color":
+		sides[0] = borderBlockEndSide(cs)
+		return 1, false
+	case "border-inline-start":
+		sides[0] = borderInlineStartSide(cs)
+		return 1, true
+	case "border-inline-start-color":
+		sides[0] = borderInlineStartSide(cs)
+		return 1, false
+	case "border-inline-end":
+		sides[0] = borderInlineEndSide(cs)
+		return 1, true
+	case "border-inline-end-color":
+		sides[0] = borderInlineEndSide(cs)
+		return 1, false
+	}
+	return 0, false
+}
+
+func borderBlockStartSide(cs *ComputedStyle) int {
+	switch cs.WritingMode {
+	case "vertical-rl", "sideways-rl":
+		return 1
+	case "vertical-lr", "sideways-lr":
+		return 3
+	}
+	return 0
+}
+
+func borderBlockEndSide(cs *ComputedStyle) int {
+	switch cs.WritingMode {
+	case "vertical-rl", "sideways-rl":
+		return 3
+	case "vertical-lr", "sideways-lr":
+		return 1
+	}
+	return 2
+}
+
+func borderInlineStartSide(cs *ComputedStyle) int {
+	switch cs.WritingMode {
+	case "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr":
+		return 0
+	}
+	if cs.Direction == "rtl" {
+		return 1
+	}
+	return 3
+}
+
+func borderInlineEndSide(cs *ComputedStyle) int {
+	switch cs.WritingMode {
+	case "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr":
+		return 2
+	}
+	if cs.Direction == "rtl" {
+		return 3
+	}
+	return 1
 }
 
 func resolveCustomFont(cs *ComputedStyle, fonts *CustomFonts) {
@@ -4225,73 +4598,14 @@ func isCurrentColor(v string) bool {
 }
 
 func resolveCurrentColor(cs *ComputedStyle, matched []*indexedSelector, inline, hints []css.Declaration) {
-	var border, top, right, bottom, left, bg bool
+	var bg bool
 	visit := func(prop, value string) {
-		if !isCurrentColor(value) {
-			switch prop {
-			case "border-color":
-				border, top, right, bottom, left = true, true, true, true, true
-			case "border-top-color":
-				top = true
-			case "border-right-color":
-				right = true
-			case "border-bottom-color":
-				bottom = true
-			case "border-left-color":
-				left = true
-			case "background-color":
-				bg = true
-			}
+		if prop != "background-color" || bg {
 			return
 		}
-		switch prop {
-		case "border-color":
-			if border {
-				return
-			}
-			if !top {
-				cs.BorderTopColor = cs.Color
-			}
-			if !right {
-				cs.BorderRightColor = cs.Color
-			}
-			if !bottom {
-				cs.BorderBottomColor = cs.Color
-			}
-			if !left {
-				cs.BorderLeftColor = cs.Color
-			}
-			border, top, right, bottom, left = true, true, true, true, true
-		case "border-top-color":
-			if top {
-				return
-			}
-			cs.BorderTopColor = cs.Color
-			top = true
-		case "border-right-color":
-			if right {
-				return
-			}
-			cs.BorderRightColor = cs.Color
-			right = true
-		case "border-bottom-color":
-			if bottom {
-				return
-			}
-			cs.BorderBottomColor = cs.Color
-			bottom = true
-		case "border-left-color":
-			if left {
-				return
-			}
-			cs.BorderLeftColor = cs.Color
-			left = true
-		case "background-color":
-			if bg {
-				return
-			}
+		bg = true
+		if isCurrentColor(value) {
 			cs.BackgroundColor = cs.Color
-			bg = true
 		}
 	}
 	for i := len(hints) - 1; i >= 0; i-- {

@@ -3743,7 +3743,7 @@
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBackgroundFillsBorderBoxUnderTheBorder",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBackgroundSpansFieldBeforeTheRun",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderDrawsFourEdgesAndInsetsTheRun",
-      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderWithoutColourPaintsNoEdge",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderWithoutColourPaintsThePseudoOwnEdge",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderWithoutStylePaintsNoEdge",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBoxNotPaintedWhenNotShown",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderOpacityDimsEveryPseudoLayer",
@@ -3777,6 +3777,32 @@
       "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentKeepsThePinnedBR322Spellings",
       "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentMergesAdjacentStringAndAttrRuns",
       "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentQuotesAndResolvesURLs"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-327",
+    "priority": "P2",
+    "methods": [
+      "UNIT",
+      "INT",
+      "ANCHOR"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/paint/border_current_color_test.go:TestCollapsedTableOuterBorderTakesTheWinningCellColour",
+      "test/paint/border_current_color_test.go:TestDeclaredBorderColorWinsOverTheElementColour",
+      "test/paint/border_current_color_test.go:TestLogicalBorderColourShorthandPaintsBothEndsOfItsAxis",
+      "test/paint/border_current_color_test.go:TestSidesWithNoEdgeEmitNoBorderPaint",
+      "test/paint/border_current_color_test.go:TestUnspecifiedBorderColorPaintsTheElementEdge",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderColourFollowsThePseudoOwnColour",
+      "test/style/border_current_color_test.go:TestBorderColorInheritOfAnUnresolvedParentColourKeepsTheParentsPaint",
+      "test/style/border_current_color_test.go:TestBorderColorInheritTakesTheParentsColour",
+      "test/style/border_current_color_test.go:TestBorderColourDefaultsToElementColour",
+      "test/style/border_current_color_test.go:TestBorderColourSourceOrderLastDeclarationWins",
+      "test/style/border_current_color_test.go:TestDeclaredBorderColoursWinOverTheElementColour",
+      "test/style/border_current_color_test.go:TestLogicalBorderColourShorthandsMapOneAxisEach",
+      "test/style/border_current_color_test.go:TestPlaceholderBorderColourFollowsThePseudoOwnColour"
     ],
     "enforced": false
   },

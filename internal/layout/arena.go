@@ -29,6 +29,9 @@ type Object struct {
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
 	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
 
+	CollapsedBorderRight  *style.ComputedStyle
+	CollapsedBorderBottom *style.ComputedStyle
+
 	GlyphOrder []int
 
 	BidiLevels []byte

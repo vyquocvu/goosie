@@ -376,15 +376,56 @@ func TestPlaceholderVerticalInsetsKeepTheRunRows(t *testing.T) {
 }
 
 // qc:BR-325
-func TestPlaceholderBorderWithoutColourPaintsNoEdge(t *testing.T) {
+func TestPlaceholderBorderWithoutColourPaintsThePseudoOwnEdge(t *testing.T) {
+	grey := frame.RGB(117, 117, 117)
 	ev := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`,
 		[]string{`input::placeholder { border-width: 2px; border-style: solid; }`})
 	ev.report(t)
-	if len(ev.fills) != 1 {
-		t.Fatalf("a border with no declared colour reached %d fills, want only the field background: this pins CURRENT engine behaviour that diverges from the reference, which paints a rgb(117,117,117) frame here, and is registered as GOOSIE-BORDERCOLOR-001 — when the cascade learns currentcolor, move this test with that record instead of deleting it", len(ev.fills))
+	want := []frame.Rect{
+		frame.Rect4(placeholderFieldLeft, placeholderFieldTop, placeholderFieldRight, placeholderFieldTop+2),
+		frame.Rect4(placeholderFieldLeft, placeholderFieldBottom-2, placeholderFieldRight, placeholderFieldBottom),
+		frame.Rect4(placeholderFieldLeft, placeholderFieldTop, placeholderFieldLeft+2, placeholderFieldBottom),
+		frame.Rect4(placeholderFieldRight-2, placeholderFieldTop, placeholderFieldRight, placeholderFieldBottom),
 	}
-	if ev.fills[0].Color != frame.RGB(255, 255, 255) {
-		t.Errorf("the only fill is %v, want the white field background", ev.fills[0].Color)
+	for _, r := range want {
+		if !ev.hasFill(grey, r) {
+			t.Errorf("missing the 2px rgb(117,117,117) edge %v: the reference resolves an undeclared border colour to the pseudo's own colour", r)
+		}
+	}
+	if got := fillsIn(ev, grey); len(got) != 4 {
+		t.Errorf("grey edge fills = %d, want exactly 4: %v", len(got), got)
+	}
+	if ev.run.X0 != placeholderFieldLeft+2 {
+		t.Errorf("run starts at x=%d, want the field left %d inset by the 2px border", ev.run.X0, placeholderFieldLeft)
+	}
+	if over := ev.overflowsField(grey); over != nil {
+		t.Errorf("the pseudo border grew outside the field box %v: %+v", ev.field, over)
+	}
+}
+
+// qc:BR-327
+func TestPlaceholderBorderColourFollowsThePseudoOwnColour(t *testing.T) {
+	red := frame.RGB(200, 0, 0)
+	grey := frame.RGB(117, 117, 117)
+	ev := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`,
+		[]string{`input::placeholder { border-width: 2px; border-style: solid; color: rgb(200, 0, 0); }`})
+	ev.report(t)
+	want := []frame.Rect{
+		frame.Rect4(placeholderFieldLeft, placeholderFieldTop, placeholderFieldRight, placeholderFieldTop+2),
+		frame.Rect4(placeholderFieldLeft, placeholderFieldBottom-2, placeholderFieldRight, placeholderFieldBottom),
+		frame.Rect4(placeholderFieldLeft, placeholderFieldTop, placeholderFieldLeft+2, placeholderFieldBottom),
+		frame.Rect4(placeholderFieldRight-2, placeholderFieldTop, placeholderFieldRight, placeholderFieldBottom),
+	}
+	for _, r := range want {
+		if !ev.hasFill(red, r) {
+			t.Errorf("missing the 2px rgb(200,0,0) edge %v: the border colour follows the pseudo's declared colour, measured by scripts/verify-border-currentcolor.js", r)
+		}
+	}
+	if got := fillsIn(ev, grey); got != nil {
+		t.Errorf("the UA placeholder grey painted %v where the author declared rgb(200,0,0)", got)
+	}
+	if ev.runColor != red {
+		t.Errorf("run colour = %v, want the declared rgb(200,0,0)", ev.runColor)
 	}
 }
 

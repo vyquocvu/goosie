@@ -4,7 +4,7 @@
       "family": "block",
       "fixture": "basic/01-headings-paragraphs.html",
       "file": "block.png",
-      "sha256": "4a9b0387518d4f09d96d4c8be5eb4b92a47b94b371238d2aec42512ab666bc15"
+      "sha256": "df3561f85f189f33702131f5c68c30af959228adbe3e3a4a47b7703228edcf3a"
     },
     {
       "family": "inline",
@@ -34,7 +34,7 @@
       "family": "table",
       "fixture": "tables/01-basic-table.html",
       "file": "table.png",
-      "sha256": "65cbe0c3dc81c22c0f9169c703c6265c6aedbff3ee90d5dd0530c9f28dbe789b"
+      "sha256": "6c507efa219a6111c041e17546b4b61921a2f1809b3a4f245384238cd1f99998"
     },
     {
       "family": "positioning",

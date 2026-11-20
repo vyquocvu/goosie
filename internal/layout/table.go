@@ -218,8 +218,8 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	obj = a.Get(id)
 	obj.W = available + gaps
 	if s.BorderCollapse {
-		obj.BorderRight = outerBorder(a, id, cells, colCount)
-		obj.BorderBottom = lastRowBorder(a, id, cells, len(rows))
+		obj.BorderRight, obj.CollapsedBorderRight = outerBorder(a, id, cells, colCount)
+		obj.BorderBottom, obj.CollapsedBorderBottom = lastRowBorder(a, id, cells, len(rows))
 		obj.W -= obj.BorderRight
 		if obj.W < 0 {
 			obj.W = 0
@@ -557,10 +557,12 @@ func cellSpecifiedWidth(a *Arena, s *style.ComputedStyle, containingW float32) f
 	return resolvePctLength(s.Width, containingW)
 }
 
-func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) float32 {
+func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) (float32, *style.ComputedStyle) {
 	best := float32(0)
+	var bestStyle *style.ComputedStyle
 	if s := a.Get(id).Style; s != nil {
 		best = s.UsedBorderWidths()[1]
+		bestStyle = s
 	}
 	for i := range cells {
 		c := &cells[i]
@@ -570,15 +572,18 @@ func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) float32
 		obj := a.Get(c.id)
 		if obj.Style != nil && obj.Style.UsedBorderWidths()[1] > best {
 			best = obj.Style.UsedBorderWidths()[1]
+			bestStyle = obj.Style
 		}
 	}
-	return best
+	return best, bestStyle
 }
 
-func lastRowBorder(a *Arena, id ObjectID, cells []tableCell, rowCount int) float32 {
+func lastRowBorder(a *Arena, id ObjectID, cells []tableCell, rowCount int) (float32, *style.ComputedStyle) {
 	best := float32(0)
+	var bestStyle *style.ComputedStyle
 	if s := a.Get(id).Style; s != nil {
 		best = s.UsedBorderWidths()[2]
+		bestStyle = s
 	}
 	for i := range cells {
 		c := &cells[i]
@@ -588,9 +593,10 @@ func lastRowBorder(a *Arena, id ObjectID, cells []tableCell, rowCount int) float
 		obj := a.Get(c.id)
 		if obj.Style != nil && obj.Style.UsedBorderWidths()[2] > best {
 			best = obj.Style.UsedBorderWidths()[2]
+			bestStyle = obj.Style
 		}
 	}
-	return best
+	return best, bestStyle
 }
 
 func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
