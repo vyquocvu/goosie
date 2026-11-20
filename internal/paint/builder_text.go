@@ -104,13 +104,7 @@ func (b *Builder) appendRunGlyphs(text string, rect frame.Rect, s *style.Compute
 		return
 	}
 	slot := s.FontSlot()
-	baseline := rect.Y0
-	if b.metrics != nil {
-		ascent, _, _ := b.metrics.LineMetrics(fontSize, slot)
-		baseline += ascent
-	} else {
-		baseline += int32(s.FontSize * b.scale * 0.8)
-	}
+	baseline := b.runBaseline(rect, s)
 	letterSpacing := int32(s.LetterSpacing * b.scale)
 	wordSpacing := int32(s.WordSpacing * b.scale)
 	glyphs := make([]GlyphRun, 0, len(runes))

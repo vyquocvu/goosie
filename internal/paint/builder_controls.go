@@ -35,15 +35,12 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 	}
 	x0, y0, x1, y1 := obj.ContentRect()
 	content := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
-	leftInset, rightInset, topInset, bottomInset := int32(0), int32(0), int32(0), int32(0)
+	leftInset := int32(0)
 	borderTop, borderBottom, borderLeft, borderRight := placeholderBorderWidths(ps, b.scale)
 	if ps != nil {
-		leftInset = borderLeft + placeholderDevice(ps.PaddingLeft, b.scale)
-		rightInset = borderRight + placeholderDevice(ps.PaddingRight, b.scale)
-		topInset = borderTop + placeholderDevice(ps.PaddingTop, b.scale)
-		bottomInset = borderBottom + placeholderDevice(ps.PaddingBottom, b.scale)
+		leftInset = borderLeft + placeholderPaddingTruncate(ps.PaddingLeft, b.scale)
 	}
-	ink := controlTextRect(frame.Rect4(content.X0+leftInset, content.Y0+topInset, content.X1-rightInset, content.Y1-bottomInset), text, s, b.scale, b.metrics)
+	ink := controlTextRect(frame.Rect4(content.X0+leftInset, content.Y0, content.X1, content.Y1), text, s, b.scale, b.metrics)
 	if clip != nil {
 		ink = ink.Intersection(*clip)
 	}
@@ -56,12 +53,12 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 	}
 	b.appendRunGlyphs(text, ink, s, col, op, nil, nil, false)
 	b.appendUnderline(text, ink, s, b.runBaseline(ink, s), col, op, &content)
-	if ps != nil && !sameDecorationSource(ps, s) {
+	if ps != nil && !decorationMatchesHost(ps, s) {
 		b.appendUnderline(text, ink, ps, b.runBaseline(ink, ps), col, op, &content)
 	}
 }
 
-func placeholderDevice(cssPx float32, scale float32) int32 {
+func placeholderBorderFloor(cssPx float32, scale float32) int32 {
 	if cssPx <= 0 {
 		return 0
 	}
@@ -71,20 +68,24 @@ func placeholderDevice(cssPx float32, scale float32) int32 {
 	return 1
 }
 
+func placeholderPaddingTruncate(cssPx float32, scale float32) int32 {
+	if cssPx <= 0 {
+		return 0
+	}
+	return int32(cssPx * scale)
+}
+
 func placeholderBorderWidths(ps *style.ComputedStyle, scale float32) (int32, int32, int32, int32) {
 	if ps == nil {
 		return 0, 0, 0, 0
 	}
 	widths := ps.UsedBorderWidths()
-	return placeholderDevice(widths[0], scale), placeholderDevice(widths[2], scale),
-		placeholderDevice(widths[3], scale), placeholderDevice(widths[1], scale)
+	return placeholderBorderFloor(widths[0], scale), placeholderBorderFloor(widths[2], scale),
+		placeholderBorderFloor(widths[3], scale), placeholderBorderFloor(widths[1], scale)
 }
 
 func (b *Builder) appendPlaceholderBackground(ps *style.ComputedStyle, borderBox frame.Rect, opacity float32) {
 	if ps.BackgroundColor.A == 0 {
-		return
-	}
-	if borderBox.Empty() {
 		return
 	}
 	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: borderBox, Color: convertColor(ps.BackgroundColor), Opacity: opacity})
@@ -108,7 +109,7 @@ func (b *Builder) appendPlaceholderBorder(ps *style.ComputedStyle, content frame
 	}
 }
 
-func sameDecorationSource(pseudo, host *style.ComputedStyle) bool {
+func decorationMatchesHost(pseudo, host *style.ComputedStyle) bool {
 	return pseudo.TextDecoration == host.TextDecoration &&
 		pseudo.TextDecorationColor == host.TextDecorationColor &&
 		pseudo.TextDecorationThickness == host.TextDecorationThickness &&

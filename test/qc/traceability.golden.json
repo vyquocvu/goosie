@@ -3743,15 +3743,21 @@
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBackgroundFillsBorderBoxUnderTheBorder",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBackgroundSpansFieldBeforeTheRun",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderDrawsFourEdgesAndInsetsTheRun",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderWithoutColourPaintsNoEdge",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBorderWithoutStylePaintsNoEdge",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderBoxNotPaintedWhenNotShown",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderOpacityDimsEveryPseudoLayer",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderOwnDecorationUnderlineSpansTextAdvance",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderOwnDecorationWithoutColourUsesPlaceholderGrey",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderPaddingInsetsTheRunBeyondTheBorder",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderPaddingLeftBeyondTheFieldPaintsNoRun",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderPaddingRightBeyondTheFieldStillPaintsTheRun",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderPseudoBoxStaysInsideTheFieldWithHostDecoration",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderSubPixelBorderKeepsOneDeviceRow",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderSubPixelPaddingKeepsTheRunColumn",
       "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderThickDecorationStaysInsideFieldBox",
-      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderUnstyledKeepsDefaultInkAndNoBox"
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderUnstyledKeepsDefaultInkAndNoBox",
+      "test/paint/placeholder_pseudo_box_test.go:TestPlaceholderVerticalInsetsKeepTheRunRows"
     ],
     "enforced": false
   },

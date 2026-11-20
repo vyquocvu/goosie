@@ -22,6 +22,15 @@ type placeholderEvidence struct {
 
 func paintPlaceholderRun(t *testing.T, body string, authorCSS []string) placeholderEvidence {
 	t.Helper()
+	ev, shown := paintPlaceholderRunIfShown(t, body, authorCSS)
+	if !shown {
+		t.Fatal("placeholder text run was not painted")
+	}
+	return ev
+}
+
+func paintPlaceholderRunIfShown(t *testing.T, body string, authorCSS []string) (placeholderEvidence, bool) {
+	t.Helper()
 	html := `<!doctype html><html><body style="margin:0">` + body + `</body></html>`
 	sess, err := engine.NewSession(html, authorCSS, 800)
 	if err != nil {
@@ -72,10 +81,7 @@ func paintPlaceholderRun(t *testing.T, body string, authorCSS []string) placehol
 			out.fills = append(out.fills, cmd)
 		}
 	}
-	if out.run.Empty() {
-		t.Fatal("placeholder text run was not painted")
-	}
-	return out
+	return out, !out.run.Empty()
 }
 
 func (ev placeholderEvidence) report(t *testing.T) {
@@ -284,6 +290,101 @@ func TestPlaceholderSubPixelBorderKeepsOneDeviceRow(t *testing.T) {
 	}
 	if over := ev.overflowsField(blue); over != nil {
 		t.Errorf("the pseudo border grew outside the field box %v: %+v", ev.field, over)
+	}
+}
+
+// qc:BR-325
+func TestPlaceholderSubPixelPaddingKeepsTheRunColumn(t *testing.T) {
+	half := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`,
+		[]string{`input::placeholder { padding-left: 0.5px; }`})
+	half.report(t)
+	if half.run.X0 != placeholderFieldLeft {
+		t.Errorf("run starts at x=%d for a 0.5px padding, want %d: the measured reference keeps the first inked glyph column, so padding must not snap up to a whole device row", half.run.X0, placeholderFieldLeft)
+	}
+	one := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`,
+		[]string{`input::placeholder { padding-left: 1px; }`})
+	one.report(t)
+	if one.run.X0 != placeholderFieldLeft+1 {
+		t.Errorf("run starts at x=%d for a 1px padding, want %d", one.run.X0, placeholderFieldLeft+1)
+	}
+}
+
+// qc:BR-325
+func TestPlaceholderBorderWithoutStylePaintsNoEdge(t *testing.T) {
+	blue := frame.RGB(0, 0, 255)
+	ev := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`,
+		[]string{`input::placeholder { border: 2px rgb(0, 0, 255); }`})
+	ev.report(t)
+	if got := fillsIn(ev, blue); got != nil {
+		t.Errorf("a width and colour with no border-style painted %v, want no edge at all", got)
+	}
+	if ev.run.X0 != placeholderFieldLeft {
+		t.Errorf("run starts at x=%d, want the field left %d inset by nothing: a style-less border has no used width", ev.run.X0, placeholderFieldLeft)
+	}
+}
+
+// qc:BR-325
+func TestPlaceholderPaddingRightBeyondTheFieldStillPaintsTheRun(t *testing.T) {
+	ev, shown := paintPlaceholderRunIfShown(t, `<input placeholder="HELLOWORLD">`,
+		[]string{`input::placeholder { padding-right: 200px; }`})
+	ev.report(t)
+	if !shown {
+		t.Fatal("a padding-right wider than the field dropped the run: the reference paints the whole word, because padding-right does not clip placeholder ink")
+	}
+	if ev.run.X0 != placeholderFieldLeft {
+		t.Errorf("run starts at x=%d, want the field left %d: only padding-left insets the run", ev.run.X0, placeholderFieldLeft)
+	}
+	if ev.run.X1 > placeholderFieldRight {
+		t.Errorf("run ends at x=%d, past the field right edge %d", ev.run.X1, placeholderFieldRight)
+	}
+}
+
+// qc:BR-325
+func TestPlaceholderPaddingLeftBeyondTheFieldPaintsNoRun(t *testing.T) {
+	_, shown := paintPlaceholderRunIfShown(t, `<input placeholder="HELLOWORLD">`,
+		[]string{`input::placeholder { padding-left: 200px; }`})
+	if shown {
+		t.Fatal("a padding-left wider than the field still painted the run: the reference clips it away entirely")
+	}
+}
+
+// qc:BR-325
+func TestPlaceholderVerticalInsetsKeepTheRunRows(t *testing.T) {
+	const deco = `input::placeholder { text-decoration: underline solid rgb(255, 0, 0);`
+	plain := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`, []string{deco + ` }`})
+	inset := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`,
+		[]string{deco + ` padding-top: 8px; padding-bottom: 8px; border-top: 2px solid rgb(0, 0, 255); }`})
+	plain.report(t)
+	inset.report(t)
+	if inset.run.Y0 != plain.run.Y0 || inset.run.Y1 != plain.run.Y1 {
+		t.Errorf("vertical insets moved the run rows to y=%d..%d, want the uninset %d..%d: the reference keeps placeholder ink on device rows +5..+14 for padding-top 1px/4px/8px, for padding-bottom 8px and for border-top 2px",
+			inset.run.Y0, inset.run.Y1, plain.run.Y0, plain.run.Y1)
+	}
+	if inset.baseline != plain.baseline {
+		t.Errorf("vertical insets moved the baseline to y=%d, want the uninset y=%d", inset.baseline, plain.baseline)
+	}
+	plainBar, insetBar := fillsIn(plain, frame.RGB(255, 0, 0)), fillsIn(inset, frame.RGB(255, 0, 0))
+	if len(plainBar) != 1 || len(insetBar) != 1 {
+		t.Fatalf("decoration fills = %d and %d, want exactly one each", len(plainBar), len(insetBar))
+	}
+	if insetBar[0].Y0 != plainBar[0].Y0 {
+		t.Errorf("bar row = y%d, want the uninset row y%d: the reference inks the bar at +16 in every one of those cases", insetBar[0].Y0, plainBar[0].Y0)
+	}
+	if top := fillsIn(inset, frame.RGB(0, 0, 255)); len(top) != 1 {
+		t.Errorf("border-top painted %v, want exactly one top strip: the box edges still follow the declared insets", top)
+	}
+}
+
+// qc:BR-325
+func TestPlaceholderBorderWithoutColourPaintsNoEdge(t *testing.T) {
+	ev := paintPlaceholderRun(t, `<input placeholder="HELLOWORLD">`,
+		[]string{`input::placeholder { border-width: 2px; border-style: solid; }`})
+	ev.report(t)
+	if len(ev.fills) != 1 {
+		t.Fatalf("a border with no declared colour reached %d fills, want only the field background: this pins CURRENT engine behaviour that diverges from the reference, which paints a rgb(117,117,117) frame here, and is registered as GOOSIE-BORDERCOLOR-001 — when the cascade learns currentcolor, move this test with that record instead of deleting it", len(ev.fills))
+	}
+	if ev.fills[0].Color != frame.RGB(255, 255, 255) {
+		t.Errorf("the only fill is %v, want the white field background", ev.fills[0].Color)
 	}
 }
 
