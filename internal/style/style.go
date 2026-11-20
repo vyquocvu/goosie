@@ -399,6 +399,7 @@ type ComputedStyle struct {
 	BorderSpacingV float32
 
 	Content          string
+	ContentRaw       string
 	ContentIsString  bool
 	ContentParts     []ContentPart
 	CounterReset     map[string]int
@@ -558,6 +559,7 @@ func DefaultStyle() ComputedStyle {
 		WhiteSpace:             WhiteSpaceNormal,
 		FlexBasis:              -1,
 		Content:                "normal",
+		ContentRaw:             "normal",
 		BackgroundOrigin:       BgBoxPadding,
 		BackgroundClip:         BgBoxBorder,
 		ContainerType:          "normal",
@@ -2561,6 +2563,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.HasClip = false
 		}
 	case "content":
+		cs.ContentRaw = strings.TrimSpace(value)
 		if parsed.Type == css.ValueString {
 			cs.Content = parsed.Str
 			cs.ContentIsString = true

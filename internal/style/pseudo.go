@@ -202,12 +202,18 @@ func (r *Resolver) PseudoStyleForRead(n *dom.Node, pseudo string, elementStyles 
 	return cs, true
 }
 
-func PseudoContentValue(pseudo string, cs *ComputedStyle) string {
+func PseudoContentValue(pseudo string, cs *ComputedStyle, attr func(string) (string, bool), resolveURL func(string) string) string {
 	if cs == nil {
 		return ""
 	}
 	if pseudo == "first-line" || pseudo == "first-letter" {
 		return "normal"
+	}
+	if text, ok := readContentValue(cs.ContentRaw, attr, resolveURL); ok {
+		if text == "normal" && (pseudo == "before" || pseudo == "after") {
+			return "none"
+		}
+		return text
 	}
 	if len(cs.ContentParts) > 0 {
 		return ""

@@ -3762,6 +3762,25 @@
     "enforced": false
   },
   {
+    "id": "BR-326",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "ANCHOR"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentEchoesCounterAndQuoteForms",
+      "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentEscapesAndMatchesAttributeCase",
+      "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentEvaluatesAttr",
+      "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentInvalidatesUnsupportedFunctions",
+      "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentKeepsThePinnedBR322Spellings",
+      "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentMergesAdjacentStringAndAttrRuns",
+      "test/engine/gcs_pseudo_content_test.go:TestGetComputedStyleContentQuotesAndResolvesURLs"
+    ],
+    "enforced": false
+  },
+  {
     "id": "BR-125",
     "priority": "P0",
     "methods": [

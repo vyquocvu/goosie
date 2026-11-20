@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
@@ -149,7 +151,7 @@ func (s *Session) pseudoStyleValues(n *dom.Node, pseudo string) map[string]strin
 	if cs.TextTransform != "" {
 		values["text-transform"] = cs.TextTransform
 	}
-	if text := style.PseudoContentValue(pseudo, cs); text != "" {
+	if text := style.PseudoContentValue(pseudo, cs, s.pseudoAttrLookup(n), s.resolveContentURLRef); text != "" {
 		values["content"] = text
 	}
 	if _, ok := values["width"]; !ok {
@@ -174,6 +176,38 @@ func (s *Session) pseudoStyleForRead(n *dom.Node, pseudo string) (*style.Compute
 		return cs, true
 	}
 	return s.styleResolver.PseudoStyleForRead(n, pseudo, s.Styles, s.customFonts)
+}
+
+func (s *Session) pseudoAttrLookup(n *dom.Node) func(string) (string, bool) {
+	if n == nil {
+		return nil
+	}
+	return func(name string) (string, bool) {
+		if !n.HasAttribute(name) {
+			return "", false
+		}
+		return n.GetAttribute(name), true
+	}
+}
+
+func (s *Session) resolveContentURLRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	base := s.documentBase()
+	if base == "" {
+		return ref
+	}
+	b, err := url.Parse(base)
+	if err != nil {
+		return ref
+	}
+	r, err := url.Parse(ref)
+	if err != nil {
+		return ref
+	}
+	return b.ResolveReference(r).String()
 }
 
 func (s *Session) refreshStylesForCSSOMRead() {
