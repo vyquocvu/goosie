@@ -567,6 +567,12 @@ func (s *State) blurLocked() {
 	s.clearSelection()
 }
 
+func (s *State) Blur() {
+	s.mu.Lock()
+	s.blurLocked()
+	s.mu.Unlock()
+}
+
 func (s *State) FocusURL() {
 	s.mu.Lock()
 	pending := s.focusURLLocked()

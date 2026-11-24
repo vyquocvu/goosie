@@ -385,6 +385,7 @@ func (f *framePath) applyNavResult(result navResult) {
 
 	if f.tabMgr.Active() == tab {
 		f.syncTabToToolbar()
+		f.syncContentFocus(tab)
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     result.serial,
 			Layers:     []*frame.Layer{result.layer},

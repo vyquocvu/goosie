@@ -243,6 +243,16 @@ func (f *framePath) setWindowIME(on bool) {
 	}
 }
 
+func (f *framePath) syncContentFocus(tab *tabs.Tab) {
+	if tab == nil || tab.Session() == nil || f.toolbar == nil {
+		return
+	}
+	if tab.Session().Focused() != nil && f.toolbar.GetFocus() == toolbar.FocusAddress {
+		f.toolbar.Blur()
+	}
+	f.setWindowIME(tab.Session().FocusedEditable())
+}
+
 func (f *framePath) imeEvent(ev surface.Event) bool {
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {

@@ -1201,6 +1201,7 @@ func atomicInlineBlock(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox
 			clampWidth(a, k, bc.contentW)
 			k = a.Get(id)
 			clearInlineLaidOut(a, id)
+			blockIntoSized(a, id, k.W)
 			inlineInto(a, id)
 			k = a.Get(id)
 		}

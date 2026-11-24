@@ -73,7 +73,12 @@ func (f *framePath) pumpJS() bool {
 	if sess == nil {
 		return false
 	}
+	focusedBefore := sess.Focused()
 	changed := sess.PumpJS(float32(f.contentWidth()))
+	if sess.Focused() != focusedBefore {
+		f.syncContentFocus(tab)
+		changed = true
+	}
 	changed = f.serviceFilePicker(tab) || changed
 	if !changed {
 		return false

@@ -2014,6 +2014,7 @@ func (r *Runtime) setupDOM() {
 		visit(&r.domDoc.Node)
 	}
 	r.installWindowFrameProperties()
+	r.installDocumentNamedProperties(doc, docNID)
 }
 
 func (r *Runtime) wrapNode(node *dom.Node) goja.Value {

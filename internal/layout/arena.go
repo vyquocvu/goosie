@@ -76,6 +76,7 @@ const (
 	flagOutOfFlow
 	flagRowPlaced
 	flagAnonymous
+	flagMinHeightClamped
 )
 
 func (o *Object) ContentRect() (x0, y0, x1, y1 float32) {

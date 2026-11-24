@@ -339,13 +339,13 @@ func (b *axBuilder) visit(id layout.ObjectID) (*ax.Node, axBubble) {
 			"date", "time", "datetime-local", "month", "week":
 			return nil, axBubble{}
 		default:
-			return emit(ax.RoleTextField, n.GetAttribute("placeholder"), n.InputControlValue(), ""), axBubble{}
+			return emit(ax.RoleTextField, b.textControlLabel(n), n.InputControlValue(), ""), axBubble{}
 		}
 	case dom.AtomTextarea:
 		if !visible {
 			return nil, axBubble{}
 		}
-		node := emit(ax.RoleTextField, n.GetAttribute("placeholder"), b.session.controlValue(n), "")
+		node := emit(ax.RoleTextField, b.textControlLabel(n), b.session.controlValue(n), "")
 		node.Children = nil
 		return node, axBubble{}
 	case dom.AtomSelect:
@@ -578,6 +578,22 @@ func headingLevel(n *dom.Node) int {
 		}
 	}
 	return implicit
+}
+
+func (b *axBuilder) textControlLabel(n *dom.Node) string {
+	if n == nil {
+		return ""
+	}
+	if label := strings.TrimSpace(n.GetAttribute("aria-label")); label != "" {
+		return label
+	}
+	if label := b.associatedLabel(n); label != "" {
+		return label
+	}
+	if label := strings.TrimSpace(n.GetAttribute("title")); label != "" {
+		return label
+	}
+	return strings.TrimSpace(n.GetAttribute("placeholder"))
 }
 
 func (b *axBuilder) associatedLabel(n *dom.Node) string {

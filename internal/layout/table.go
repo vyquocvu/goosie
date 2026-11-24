@@ -67,14 +67,41 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	if s.BorderCollapse {
 		available = contentW
 	}
-	colMin, colMax := columnExtents(a, cells, colCount, spacingH, s.BorderCollapse, containingW)
-	colMin, colMax, colCount = floorColWidths(a, id, colMin, colMax, colCount, containingW)
-	if resolvePctLength(s.Width, containingW) < 0 {
+	autoWidth := resolvePctLength(s.Width, containingW) < 0
+	intrinsicContainingW := containingW
+	if autoWidth {
+		intrinsicContainingW = 0
+	}
+	colMin, colMax := columnExtents(a, cells, colCount, spacingH, s.BorderCollapse, intrinsicContainingW)
+	colMin, colMax, colCount = floorColWidths(a, id, colMin, colMax, colCount, intrinsicContainingW)
+	if autoWidth {
+		percent := tableColumnPercents(a, cells, colCount)
+		percentSum := float32(0)
+		for _, p := range percent {
+			percentSum += p
+		}
 		natural := sumOf(colMax)
+		if percentSum > 0 && percentSum < 1 {
+			fixed := float32(0)
+			for i := range colMax {
+				if percent[i] <= 0 {
+					fixed += colMax[i]
+				}
+			}
+			natural = fixed / (1 - percentSum)
+		}
 		if natural > available {
 			natural = available
 		}
 		available = natural
+		for i := range colMax {
+			if percent[i] > 0 {
+				colMax[i] = percent[i] * available
+				if colMax[i] < colMin[i] {
+					colMax[i] = colMin[i]
+				}
+			}
+		}
 		if min := sumOf(colMin); min > available {
 			available = min
 		}
@@ -104,6 +131,22 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 			obj = a.Get(id)
 			obj.X += obj.MarginLeft
 			contentX = obj.X + obj.BorderLeft + obj.PaddingLeft
+		}
+	}
+	if autoWidth {
+		centered := false
+		for pid := obj.Parent; pid != 0; pid = a.Get(pid).Parent {
+			if p := a.Get(pid); p.Node != nil && p.Node.Data == "center" {
+				centered = true
+				break
+			}
+		}
+		if centered && !s.MarginLeftAuto && !s.MarginRightAuto && obj.MarginLeft == 0 && obj.MarginRight == 0 {
+			boxW := available + gaps + obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
+			if lead := (containingW - boxW) / 2; lead > 0 {
+				obj.X += lead
+				contentX += lead
+			}
 		}
 	}
 	colX := make([]float32, colCount)
@@ -433,6 +476,25 @@ func floorColWidths(a *Arena, id ObjectID, colMin, colMax []float32, colCount in
 	return colMin, colMax, colCount
 }
 
+func tableColumnPercents(a *Arena, cells []tableCell, colCount int) []float32 {
+	percent := make([]float32, colCount)
+	for i := range cells {
+		c := &cells[i]
+		if c.colSpan != 1 || c.col < 0 || c.col >= colCount {
+			continue
+		}
+		s := a.Get(c.id).Style
+		if s == nil || !isPctLength(s.Width) {
+			continue
+		}
+		p := float32(-2-s.Width) / 100
+		if p > percent[c.col] {
+			percent[c.col] = p
+		}
+	}
+	return percent
+}
+
 func columnExtents(a *Arena, cells []tableCell, colCount int, spacingH float32, collapse bool, containingW float32) ([]float32, []float32) {
 	colMin := make([]float32, colCount)
 	colMax := make([]float32, colCount)
@@ -642,6 +704,10 @@ func measureInlineContent(a *Arena, id ObjectID) (minW, maxW float32) {
 				cur += pending + w
 				pending = 0
 			}
+			continue
+		}
+		if k.Node != nil && k.Node.Element() && k.Node.Data == "br" {
+			flush()
 			continue
 		}
 		subMin, subMax := measureInlineContent(a, kid)
