@@ -83,6 +83,66 @@ html,body{margin:0}
 	}
 }
 
+// qc:BR-071
+func TestZIndexParentBackgroundDoesNotCoverNestedStackingContext(t *testing.T) {
+	sess := newPaintSession(t, `<!doctype html><html><body style="margin:0">
+<div style="position:fixed;left:0;top:0;width:120px;height:80px;z-index:100;background:rgb(255,0,0)">
+<div style="position:absolute;left:10px;top:10px;width:40px;height:40px;z-index:4;background:rgb(0,0,255)"></div>
+</div>
+</body></html>`)
+
+	red := frame.RGB(255, 0, 0)
+	blue := frame.RGB(0, 0, 255)
+	redAt, blueAt := -1, -1
+	for i, cmd := range paintList(t, sess).All() {
+		if cmd.Kind != paint.CmdFill {
+			continue
+		}
+		switch cmd.Color {
+		case red:
+			redAt = i
+		case blue:
+			blueAt = i
+		}
+	}
+	if redAt < 0 || blueAt < 0 {
+		t.Fatalf("missing nested fills: red=%d blue=%d", redAt, blueAt)
+	}
+	if blueAt < redAt {
+		t.Errorf("blue nested z-index:4 fill painted at %d before red parent z-index:100 background at %d; the parent background must stay beneath its stacking context", blueAt, redAt)
+	}
+}
+
+// qc:BR-071
+func TestEqualZIndexSiblingsKeepTheirSubtreeOrder(t *testing.T) {
+	sess := newPaintSession(t, `<!doctype html><html><body style="margin:0">
+<div style="position:absolute;left:0;top:0;width:120px;height:80px;z-index:100;background:rgb(0,128,0)">
+<div style="position:absolute;left:10px;top:10px;width:40px;height:40px;z-index:4;background:rgb(0,0,255)"></div>
+</div>
+<div style="position:absolute;left:0;top:0;width:120px;height:80px;z-index:100;background:rgb(255,0,0)"></div>
+</body></html>`)
+
+	blue, red := frame.RGB(0, 0, 255), frame.RGB(255, 0, 0)
+	blueAt, redAt := -1, -1
+	for i, cmd := range paintList(t, sess).All() {
+		if cmd.Kind != paint.CmdFill {
+			continue
+		}
+		switch cmd.Color {
+		case blue:
+			blueAt = i
+		case red:
+			redAt = i
+		}
+	}
+	if blueAt < 0 || redAt < 0 {
+		t.Fatalf("missing sibling fills: blue=%d red=%d", blueAt, redAt)
+	}
+	if redAt < blueAt {
+		t.Errorf("second z-index:100 background painted at %d before the first sibling's nested z-index:4 fill at %d; equal layers keep subtree order", redAt, blueAt)
+	}
+}
+
 // qc:BR-072
 func TestOverflowHiddenClipsEveryCommandInTheSubtree(t *testing.T) {
 	sess := newPaintSession(t, `<!doctype html><html><body style="margin:0">

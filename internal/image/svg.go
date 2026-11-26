@@ -264,7 +264,12 @@ func svgViewport(el xml.StartElement) (int, int, error) {
 					} else if (!hOk || h <= 0) && wOk && w > 0 {
 						h = w * vh / vw
 					} else if (!wOk || w <= 0) && (!hOk || h <= 0) {
-						w, h = vw, vh
+						if svgAttr(el, "width") == "" && svgAttr(el, "height") == "" {
+							w = defaultSVGSize
+							h = math.Round(w * vh / vw)
+						} else {
+							w, h = vw, vh
+						}
 					}
 				}
 			}

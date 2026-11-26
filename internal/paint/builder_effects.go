@@ -9,12 +9,24 @@ import (
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
-func (b *Builder) paintBoxShadow(obj *layout.Object, rect frame.Rect, radius frame.Corners, opacity float32) {
+func (b *Builder) paintBoxShadow(obj *layout.Object, paint boxPaintContext) {
 	s := obj.Style
+	floored := frame.Rect{
+		X0: int32(math.Floor(float64(paint.x0 * b.scale))),
+		Y0: int32(math.Floor(float64(paint.y0 * b.scale))),
+		X1: int32(math.Floor(float64(paint.x1 * b.scale))),
+		Y1: int32(math.Floor(float64(paint.y1 * b.scale))),
+	}
+	radius := paint.radius
+	opacity := paint.opacity
 	for i := len(s.BoxShadow) - 1; i >= 0; i-- {
 		sh := s.BoxShadow[i]
 		if sh.Inset {
 			continue
+		}
+		rect := paint.rect
+		if sh.OffsetX != 0 || sh.OffsetY != 0 {
+			rect = floored
 		}
 		dx := int32(sh.OffsetX * b.scale)
 		dy := int32(sh.OffsetY * b.scale)

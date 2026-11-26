@@ -248,7 +248,16 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					extra := k.PaddingLeft + k.PaddingRight + k.BorderLeft + k.BorderRight
 					if resolveBoxWidth(a, k.Style, contentW) < 0 {
 						blockInto(a, kid, contentW)
+						k = a.Get(kid)
+						if k.W <= 0 {
+							k.W = maxFlexMeasureWidth - k.PaddingLeft - k.PaddingRight - k.BorderLeft - k.BorderRight
+							if k.W < 0 {
+								k.W = 0
+							}
+							k = a.Get(kid)
+						}
 						if !blockifiesChildren(a.Get(kid).Style) {
+							clearInlineLaidOut(a, kid)
 							inlineInto(a, kid)
 						}
 						k = a.Get(kid)
@@ -471,7 +480,11 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 					}
 				}
 				y = (k.Y - contentY) + k.BorderH()
-				prevBottomMargin = carryBottom(a, kid)
+				if selfCollapsingBox(a, kid) {
+					prevBottomMargin = 0
+				} else {
+					prevBottomMargin = carryBottom(a, kid)
+				}
 			}
 		}
 		closeRow()
@@ -486,7 +499,7 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 	if !collapsesThroughBottom(a, obj) {
 		y += prevBottomMargin
 	}
-	if obj.Style != nil && pctLenV(a, obj.Style.Height, parentH) < 0 {
+	if obj.Style != nil && definiteH(a, id) < 0 {
 		if obj.Style.AspectRatio > 0 && obj.W > 0 {
 			obj.H = obj.W / obj.Style.AspectRatio
 		} else {
@@ -495,7 +508,8 @@ func blockIntoInner(a *Arena, id ObjectID, containingW float32, resolve bool) fl
 		if replacedH > obj.H {
 			obj.H = replacedH
 		}
-		if obj.H == 0 && obj.Node != nil && obj.Node.Text() {
+		if obj.H == 0 && obj.Node != nil && obj.Node.Text() &&
+			strings.TrimSpace(obj.Node.DataContent) != "" && !isTableStructure(obj.Style) {
 			lineH, _ := runHeights(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot(), obj.Style.LineHeight)
 			obj.H = lineH
 		}
@@ -702,7 +716,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 	lineOpen := false
 	for i := range items {
 		m := a.Get(items[i].id).Style
-		outer := items[i].basis + flexMargin(m.MarginLeft) + flexMargin(m.MarginRight)
+		outer := items[i].basis + flexMarginLeft(m) + flexMarginRight(m)
 		if lineOpen {
 			if used+gap+outer > contentW && wrap != style.FlexNowrap {
 				lineCount++
@@ -727,7 +741,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 			}
 			m := a.Get(items[i].id).Style
 			lineBasis += items[i].basis
-			lineMargins += flexMargin(m.MarginLeft) + flexMargin(m.MarginRight)
+			lineMargins += flexMarginLeft(m) + flexMarginRight(m)
 			growSum += items[i].grow
 			shrinkWeight += items[i].basis * m.FlexShrink
 			count++
@@ -838,11 +852,14 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 				continue
 			}
 			it := a.Get(items[i].id)
-			h := flexMargin(it.Style.MarginTop) + flexMargin(it.Style.MarginBottom) + it.BorderH()
+			h := flexMarginTop(it.Style) + flexMarginBottom(it.Style) + it.BorderH()
 			if h > lineCross[l] {
 				lineCross[l] = h
 			}
 		}
+	}
+	if !definiteCross && lineCount == 1 && contentH > lineCross[0] {
+		lineCross[0] = contentH
 	}
 	if lineCount > 1 && definiteCross {
 		if ac := normalizeAxis(obj.Style.AlignContent); ac == "" {
@@ -895,7 +912,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		remaining := contentW - gap*float32(len(line)-1)
 		for _, i := range line {
 			m := a.Get(items[i].id).Style
-			remaining -= items[i].basis + flexMargin(m.MarginLeft) + flexMargin(m.MarginRight)
+			remaining -= items[i].basis + flexMarginLeft(m) + flexMarginRight(m)
 		}
 		if remaining < 0 {
 			remaining = 0
@@ -905,8 +922,8 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 		cursor := contentX + lead
 		for _, i := range line {
 			it := a.Get(items[i].id)
-			mTop := flexMargin(it.Style.MarginTop)
-			finalX := cursor + flexMargin(it.Style.MarginLeft)
+			mTop := flexMarginTop(it.Style)
+			finalX := cursor + flexMarginLeft(it.Style)
 			prevX, prevY := it.X, it.Y
 			if it.Style.Height < 0 {
 				align := it.Style.AlignSelf
@@ -917,7 +934,7 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 					align = "stretch"
 				}
 				if normalizeAxis(align) == "stretch" {
-					pb := it.PaddingTop + it.PaddingBottom + it.BorderTop + it.BorderBottom + mTop + flexMargin(it.Style.MarginBottom)
+					pb := it.PaddingTop + it.PaddingBottom + it.BorderTop + it.BorderBottom + mTop + flexMarginBottom(it.Style)
 					h := lineCross[l] - pb
 					if h < 0 {
 						h = 0
@@ -1017,14 +1034,14 @@ func layoutFlexRow(a *Arena, id ObjectID, containingW float32) float32 {
 					it = a.Get(items[i].id)
 				}
 			}
-			cursor += flexMargin(it.Style.MarginLeft) + items[i].basis + flexMargin(it.Style.MarginRight) + trackGap
+			cursor += flexMarginLeft(it.Style) + items[i].basis + flexMarginRight(it.Style) + trackGap
 		}
 
 		cross := lineCross[l]
 		for _, i := range line {
 			it := a.Get(items[i].id)
-			mTop := flexMargin(it.Style.MarginTop)
-			mBottom := flexMargin(it.Style.MarginBottom)
+			mTop := flexMarginTop(it.Style)
+			mBottom := flexMarginBottom(it.Style)
 			align := it.Style.AlignSelf
 			if align == "" {
 				align = alignItems
@@ -1100,8 +1117,9 @@ func flexDefiniteCross(a *Arena, obj *Object, contentH float32) bool {
 	if minH <= 0 {
 		return false
 	}
-	if obj.Style.BoxSizing == style.BoxSizingBorderBox {
-		minH -= obj.PaddingTop + obj.PaddingBottom + obj.BorderTop + obj.BorderBottom
+	if obj.Style.BoxSizing == style.BoxSizingBorderBox &&
+		obj.PaddingTop+obj.PaddingBottom+obj.BorderTop+obj.BorderBottom > 0 {
+		return false
 	}
 	return contentH <= minH+0.5
 }
@@ -1130,10 +1148,38 @@ func isCollapsedFlexText(k *Object) bool {
 }
 
 func flexMargin(v float32) float32 {
-	if v == style.MarginAuto || v < 0 {
+	if v == style.MarginAuto {
 		return 0
 	}
 	return v
+}
+
+func flexMarginTop(s *style.ComputedStyle) float32 {
+	if s.MarginTopAuto {
+		return 0
+	}
+	return s.MarginTop
+}
+
+func flexMarginBottom(s *style.ComputedStyle) float32 {
+	if s.MarginBottomAuto {
+		return 0
+	}
+	return s.MarginBottom
+}
+
+func flexMarginLeft(s *style.ComputedStyle) float32 {
+	if s.MarginLeftAuto {
+		return 0
+	}
+	return s.MarginLeft
+}
+
+func flexMarginRight(s *style.ComputedStyle) float32 {
+	if s.MarginRightAuto {
+		return 0
+	}
+	return s.MarginRight
 }
 
 func distributeFlex(justify string, reverse bool, remaining, gap float32, n int) (lead, trackGap float32) {
@@ -1222,10 +1268,10 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 		it := item{
 			id:         kid,
 			grow:       s.FlexGrow,
-			mTop:       flexMargin(s.MarginTop),
-			mBottom:    flexMargin(s.MarginBottom),
-			mLeft:      flexMargin(s.MarginLeft),
-			mRight:     flexMargin(s.MarginRight),
+			mTop:       flexMarginTop(s),
+			mBottom:    flexMarginBottom(s),
+			mLeft:      flexMarginLeft(s),
+			mRight:     flexMarginRight(s),
 			autoTop:    s.MarginTop == style.MarginAuto,
 			autoBottom: s.MarginBottom == style.MarginAuto,
 			order:      s.Order,
@@ -1240,6 +1286,16 @@ func layoutFlexColumn(a *Arena, id ObjectID, containingW float32) float32 {
 			declared = s.Height
 		case isPctLength(s.Height):
 			declared = pctLenV(a, s.Height, containerH)
+		case s.HeightCalc.Set:
+			declared = resolveBoxHeight(a, s, containerH)
+		}
+		if declared >= 0 && s.HeightCalc.Set {
+			if maxH := resolveBoxMaxHeight(a, s, containerH); maxH >= 0 && declared > maxH {
+				declared = maxH
+			}
+			if minH := resolveBoxMinHeight(a, s, containerH); minH >= 0 && declared < minH {
+				declared = minH
+			}
 		}
 		if declared >= 0 {
 			it.basis = declared
@@ -1632,6 +1688,24 @@ func itemMaxContentW(a *Arena, id ObjectID) float32 {
 	return maxContentW(a, id, true)
 }
 
+func intrinsicFitContentWidth(a *Arena, obj *Object) float32 {
+	if obj.Style == nil {
+		return 0
+	}
+	for i := range a.Objects {
+		if &a.Objects[i] == obj {
+			id := ObjectID(i)
+			style := a.Get(id).Style
+			fit := style.WidthFitContent
+			style.WidthFitContent = false
+			width := itemMaxContentW(a, id)
+			a.Get(id).Style.WidthFitContent = fit
+			return width
+		}
+	}
+	return 0
+}
+
 func isReplacedElement(obj *Object) bool {
 	if obj == nil || obj.Node == nil || !obj.Node.Element() {
 		return false
@@ -1641,6 +1715,11 @@ func isReplacedElement(obj *Object) bool {
 		return true
 	}
 	return false
+}
+
+func childlessAnonymous(k *Object) bool {
+	return k != nil && k.flags&flagAnonymous != 0 && k.FirstKid == 0 &&
+		(k.Node == nil || !k.Node.Text())
 }
 
 func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
@@ -1662,14 +1741,31 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 	var walk func(ObjectID, float32) float32
 	walk = func(cid ObjectID, trail float32) float32 {
 		run := float32(0)
+		floatRun := float32(0)
+		for child := a.Get(cid).FirstKid; child != 0; child = a.Get(child).NextSibling {
+			c := a.Get(child)
+			if c.Style == nil || c.Style.Display == style.DisplayNone || isOutOfFlow(c.Style) || c.Style.Float == style.FloatNone {
+				continue
+			}
+			floatRun += floatedOuterW(a, child)
+		}
+		if floatRun > 0 {
+			if w := origin + trail + floatRun; w > right {
+				right = w
+			}
+		}
 		for kid := a.Get(cid).FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 			k := a.Get(kid)
-			if k.Style == nil || k.Style.Display == style.DisplayNone || isOutOfFlow(k.Style) {
+			if k.Style == nil || k.Style.Display == style.DisplayNone || isOutOfFlow(k.Style) || childlessAnonymous(k) {
 				continue
 			}
 			lead, trailBox := intrinsicHorizontalEdges(a, k)
 			if k.Node != nil && k.Node.Text() {
-				run += k.W
+				wordW := k.W
+				if wordW <= 0 {
+					wordW = measureWord(k.Node.DataContent, k.Style.FontSize, a.Metrics, k.Style.FontSlot(), k.Style.LetterSpacing)
+				}
+				run += wordW
 				if w := origin + trail + run; w > right {
 					right = w
 				}
@@ -1751,14 +1847,28 @@ func maxContentW(a *Arena, id ObjectID, probed bool) float32 {
 	return clampIntrinsicContentWidth(a, obj, w)
 }
 
+func floatedOuterW(a *Arena, id ObjectID) float32 {
+	obj := a.Get(id)
+	lead, trail := intrinsicHorizontalEdges(a, obj)
+	w := obj.W
+	if w <= 0 {
+		if own := declaredOuterW(obj.Style); own >= 0 {
+			w = own
+		} else {
+			w = maxContentW(a, id, true)
+		}
+	}
+	return lead + w + trail
+}
+
 func intrinsicHorizontalEdges(a *Arena, obj *Object) (lead, trail float32) {
 	s := obj.Style
 	if s == nil {
 		return 0, 0
 	}
 	borders := s.UsedBorderWidths()
-	lead = flexMargin(s.MarginLeft) + borders[3] + pctLen(a, s.PaddingLeft, a.ViewportW)
-	trail = flexMargin(s.MarginRight) + borders[1] + pctLen(a, s.PaddingRight, a.ViewportW)
+	lead = flexMarginLeft(s) + borders[3] + pctLen(a, s.PaddingLeft, a.ViewportW)
+	trail = flexMarginRight(s) + borders[1] + pctLen(a, s.PaddingRight, a.ViewportW)
 	return lead, trail
 }
 
@@ -1812,7 +1922,7 @@ func rowFlexMaxContent(a *Arena, id ObjectID) float32 {
 	n := 0
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		k := a.Get(kid)
-		if k.Style == nil || k.Style.Display == style.DisplayNone || isOutOfFlow(k.Style) {
+		if k.Style == nil || k.Style.Display == style.DisplayNone || isOutOfFlow(k.Style) || childlessAnonymous(k) {
 			continue
 		}
 		var inner float32
@@ -1820,7 +1930,7 @@ func rowFlexMaxContent(a *Arena, id ObjectID) float32 {
 			if isSpaceWord(k.Node.DataContent) {
 				continue
 			}
-			inner = k.W
+			inner = measureWord(k.Node.DataContent, k.Style.FontSize, a.Metrics, k.Style.FontSlot(), k.Style.LetterSpacing)
 		} else {
 			inner = maxContentW(a, kid, true)
 			if own := declaredOuterW(k.Style); own > inner {
@@ -2430,6 +2540,9 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 
 	var explicitW float32 = -1
 	widthVal := resolveBoxWidth(a, s, containingW)
+	if widthVal < 0 && s.WidthFitContent {
+		widthVal = intrinsicFitContentWidth(a, obj)
+	}
 	if widthVal >= 0 {
 		if s.BoxSizing == style.BoxSizingBorderBox {
 			explicitW = widthVal - innerExtra
@@ -2454,8 +2567,8 @@ func resolveBoxSizes(a *Arena, obj *Object, containingW, containingH float32) {
 	} else {
 		obj.MarginRight = s.MarginRight
 	}
-	obj.MarginTop = flexMargin(s.MarginTop)
-	obj.MarginBottom = flexMargin(s.MarginBottom)
+	obj.MarginTop = flexMarginTop(s)
+	obj.MarginBottom = flexMarginBottom(s)
 
 	if explicitW >= 0 {
 		obj.W = explicitW
@@ -2678,7 +2791,7 @@ func startsNewFC(a *Arena, obj *Object) bool {
 	default:
 		return true
 	}
-	if s.FlowRoot {
+	if s.FlowRoot || isFlowFloat(s) {
 		return true
 	}
 	if s.Overflow != style.OverflowVisible || s.OverflowX != style.OverflowVisible || s.OverflowY != style.OverflowVisible {
@@ -2719,6 +2832,39 @@ func collapsesThroughBottom(a *Arena, obj *Object) bool {
 	}
 	return obj.Style.Height < 0 &&
 		!edgeDeclared(obj.Style.BorderBottomWidth) && !edgeDeclared(obj.Style.PaddingBottom)
+}
+
+func selfCollapsingBox(a *Arena, id ObjectID) bool {
+	obj := a.Get(id)
+	if obj == nil || obj.Style == nil || obj.BorderH() > 0 {
+		return false
+	}
+	if obj.Node != nil && obj.Node.Text() && strings.TrimSpace(obj.Node.DataContent) != "" {
+		return false
+	}
+	s := obj.Style
+	if isOutOfFlow(s) || s.Float != style.FloatNone {
+		return false
+	}
+	if resolveBoxHeight(a, s, definiteH(a, obj.Parent)) >= 0 || s.AspectRatio > 0 {
+		return false
+	}
+	if !collapsesThroughTop(a, obj) || !collapsesThroughBottom(a, obj) {
+		return false
+	}
+	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
+		k := a.Get(kid)
+		if outOfFlowForCollapse(k) || isWhitespaceText(k) {
+			continue
+		}
+		if !isFlowBlock(k) && !(k.Style != nil && k.Style.Display == style.DisplayInline && holdsBlockContent(a, kid)) {
+			return false
+		}
+		if !selfCollapsingBox(a, kid) {
+			return false
+		}
+	}
+	return true
 }
 
 func firstCollapsingChild(a *Arena, obj *Object) ObjectID {
@@ -2770,6 +2916,13 @@ func carryTop(a *Arena, id ObjectID) float32 {
 		return 0
 	}
 	m := carryMargin(obj.Style.MarginTop)
+	if selfCollapsingBox(a, id) {
+		m = collapseMargin(m, carryMargin(obj.Style.MarginBottom))
+		if kid := firstCollapsingChild(a, obj); kid != 0 {
+			m = collapseMargin(m, carryTop(a, kid))
+		}
+		return m
+	}
 	if !collapsesThroughTop(a, obj) {
 		return m
 	}
@@ -2782,6 +2935,9 @@ func carryTop(a *Arena, id ObjectID) float32 {
 func carryBottom(a *Arena, id ObjectID) float32 {
 	obj := a.Get(id)
 	if obj.Style == nil {
+		return 0
+	}
+	if selfCollapsingBox(a, id) {
 		return 0
 	}
 	m := carryMargin(obj.Style.MarginBottom)
@@ -2856,7 +3012,11 @@ func restorePctBase(a *Arena, state pctBaseState) {
 }
 
 func blockIntoMeasure(a *Arena, id ObjectID, measureW, pctW float32) float32 {
-	state := setPctBase(a, pctW, -1)
+	return blockIntoMeasureHV(a, id, measureW, pctW, -1)
+}
+
+func blockIntoMeasureHV(a *Arena, id ObjectID, measureW, pctW, pctH float32) float32 {
+	state := setPctBase(a, pctW, pctH)
 	h := blockInto(a, id, measureW)
 	restorePctBase(a, state)
 	return h

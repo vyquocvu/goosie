@@ -731,7 +731,7 @@ func (r *Runtime) setupWindow() {
 	_ = win.Set("self", win)
 	_ = win.Set("globalThis", win)
 	nav := r.vm.NewObject()
-	_ = nav.Set("userAgent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Goosie/2.0")
+	_ = nav.Set("userAgent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Goosie/2.0")
 	_ = nav.Set("platform", "MacIntel")
 	_ = nav.Set("language", "en-US")
 	_ = nav.Set("languages", r.vm.ToValue([]string{"en-US", "en"}))

@@ -917,7 +917,9 @@
     ],
     "status": "PASS",
     "tests": [
-      "test/paint/qa_overflow_zindex_test.go:TestZIndexOrdersPositionedSiblingsByTheirDeclaredLayer"
+      "test/paint/qa_overflow_zindex_test.go:TestEqualZIndexSiblingsKeepTheirSubtreeOrder",
+      "test/paint/qa_overflow_zindex_test.go:TestZIndexOrdersPositionedSiblingsByTheirDeclaredLayer",
+      "test/paint/qa_overflow_zindex_test.go:TestZIndexParentBackgroundDoesNotCoverNestedStackingContext"
     ],
     "enforced": false
   },
@@ -1279,7 +1281,7 @@
     "status": "PASS",
     "tests": [
       "test/style/opacity_visibility_computed_test.go:TestOpacityClampsToUnitRange",
-      "test/style/opacity_visibility_computed_test.go:TestVisibilityInheritsAndRestores"
+      "test/style/opacity_visibility_computed_test.go:TestVisibilityInheritKeywordComputesParentValue"
     ],
     "enforced": false
   },
@@ -1419,6 +1421,8 @@
     ],
     "status": "PASS",
     "tests": [
+      "test/layout/float_inline_width_test.go:TestAutoWidthFloatWithTextAndIconUsesInlineExtent",
+      "test/layout/float_shrink_wrap_test.go:TestFloatContainerShrinkToFitIncludesAllFloatedChildren",
       "test/layout/float_test.go:TestFullWidthFloatsStackInsteadOfWalkingOffTheEdge"
     ],
     "enforced": false
@@ -1854,6 +1858,73 @@
       "test/css/at_rule_prelude_test.go:TestUnknownAtRuleWithAMinifiedPreludeIsStillSkipped",
       "test/layout/grid_minified_at_rule_test.go:TestMinifiedAtRulePreludeReachesGridGeometry",
       "test/layout/grid_minified_at_rule_test.go:TestMinifiedMediaBranchesAreSelectedByWidthNotIgnored"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-328",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/supports_test.go:TestSupportsColorLightDark",
+      "test/layout/google_jumplinks_test.go:TestContentBoxHeightKeepsItsPadding",
+      "test/layout/google_jumplinks_test.go:TestFitContentWidthUsesIntrinsicContent",
+      "test/layout/google_jumplinks_test.go:TestGoogleJumpLinksFixturePaintsBanner",
+      "test/layout/google_jumplinks_test.go:TestOutOfFlowInlineDoesNotCreateAnAnonymousLineBox",
+      "test/layout/google_jumplinks_test.go:TestStickyTopDoesNotMoveAnElementBelowItsThreshold",
+      "test/style/mdn_cascade_test.go:TestCustomPropertyInitialUsesVarFallback",
+      "test/style/mdn_cascade_test.go:TestNestedHeadingUsesScopedUserAgentMargin"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-329",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/css/transform_test.go:TestParseTransformTranslatePercent",
+      "test/engine/transform_percent_test.go:TestPercentTranslateMovesTheWholeSubtree"
+    ],
+    "enforced": false
+  },
+  {
+    "id": "BR-330",
+    "priority": "P2",
+    "methods": [
+      "INT",
+      "PARITY"
+    ],
+    "status": "PASS",
+    "tests": [
+      "test/image/svg_probe_test.go:TestExplicitSVGSizeStillWinsOverViewBox",
+      "test/image/svg_probe_test.go:TestUnsizedSVGProbeUsesDefaultWidthAndViewBoxRatio",
+      "test/js/async_generator_syntax_test.go:TestAsyncGeneratorSyntaxIsAccepted",
+      "test/js/navigator_useragent_test.go:TestNavigatorUserAgentMatchesNetworkCompatibilityUA",
+      "test/layout/calc_height_flex_test.go:TestCalcHeightInFlexColumnHonorsMaxHeight",
+      "test/layout/grid_area_numeric_test.go:TestGridAreaNumericShorthandOverlapsItems",
+      "test/layout/grid_fr_align_test.go:TestGridFrRowHonorsAlignItemsCenter",
+      "test/layout/grid_item_percent_height_test.go:TestGridItemPercentHeightUsesGridContentBox",
+      "test/layout/wikipedia_header_test.go:TestEmptyBlockCollapsesItsOwnMargins",
+      "test/layout/wikipedia_header_test.go:TestEmptyBlockMarginCollapsesThroughItsParent",
+      "test/layout/wikipedia_header_test.go:TestEmptyBlockMarginCollapsesThroughNestedEmptyParents",
+      "test/layout/wikipedia_header_test.go:TestFlexAutoMarginIsNotTreatedAsNegative",
+      "test/layout/wikipedia_header_test.go:TestFlexBorderBoxMinHeightAddsPadding",
+      "test/layout/wikipedia_header_test.go:TestFlexBorderBoxMinHeightDoesNotShrinkTallerContent",
+      "test/layout/wikipedia_header_test.go:TestFlexPreservesNegativeMargins",
+      "test/layout/wikipedia_header_test.go:TestRelativeEmptyBlockMarginCollapsesThroughParent",
+      "test/net/http_test.go:TestRequestsUseCompatibleUserAgent",
+      "test/paint/box_shadow_snap_test.go:TestOuterBoxShadowUsesFloorSnappedBorderBox",
+      "test/style/margin_auto_flags_test.go:TestNegativeShorthandMarginIsNotAuto",
+      "test/style/margin_auto_flags_test.go:TestThreeValueMarginShorthandTracksBlockAuto",
+      "test/style/opacity_visibility_computed_test.go:TestVisibilityInheritKeywordComputesParentValue"
     ],
     "enforced": false
   },

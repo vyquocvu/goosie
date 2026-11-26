@@ -393,6 +393,20 @@ func waitForCommitted(t *testing.T, loop *surface.Loop, n int64) {
 	waitFor(t, "the loop counters to catch up", func() bool { return loop.Stats().Frames >= n })
 }
 
+func waitForPresentColor(t *testing.T, w *fakeWindow, want frame.Color) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		before := w.count()
+		w.vsync(t)
+		waitFor(t, "a present after the late tiles reported", func() bool { return w.count() > before })
+		if w.last(t).color == want {
+			return
+		}
+	}
+	t.Fatalf("presented pixel = %v, want %v", w.last(t).color, want)
+}
+
 func newComposerFor(vp frame.Viewport) *surface.Composer {
 	return surface.NewComposer(vp.Size, frame.NewBitmapPool(vp.Size, 4))
 }
@@ -583,10 +597,7 @@ func TestLateTileNeverBlocksPresent(t *testing.T) {
 
 	close(gate)
 	wantFresh := tileColor(at, 2)
-	for i := 0; i < 20; i++ {
-		w.vsync(t)
-	}
-	waitFor(t, "the fresh tile content", func() bool { return w.last(t).color == wantFresh })
+	waitForPresentColor(t, w, wantFresh)
 	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -847,21 +858,24 @@ func TestFrameMarkRecordsFiveTimestamps(t *testing.T) {
 	loop := surface.NewLoop(w, s, newComposerFor(vp), rec)
 	stop := start(t, loop)
 
-	const ticks = 8
-	for i := 0; i < ticks; i++ {
+	cold := 0
+	for cold < 8 || loop.Stats().Rasterize < 4 {
+		if cold >= 64 {
+			t.Fatalf("rasterize = %d after %d frames, want 4", loop.Stats().Rasterize, cold)
+		}
 		w.vsync(t)
-		waitFor(t, "a present", func() bool { return w.count() == i+1 })
+		cold++
+		waitFor(t, "a present", func() bool { return w.count() == cold })
 	}
-	waitFor(t, "the four tiles to be accepted", func() bool { return loop.Stats().Rasterize == 4 })
 	w.vsync(t)
-	waitFor(t, "the warm frame", func() bool { return w.count() == ticks+1 })
+	waitFor(t, "the warm frame", func() bool { return w.count() == cold+1 })
 	if err := stop(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
 	marks := rec.Marks()
-	if len(marks) != ticks+1 {
-		t.Fatalf("recorder holds %d marks, want %d", len(marks), ticks+1)
+	if len(marks) != cold+1 {
+		t.Fatalf("recorder holds %d marks, want %d", len(marks), cold+1)
 	}
 	for i, m := range marks {
 		if m.VsyncAt.IsZero() {

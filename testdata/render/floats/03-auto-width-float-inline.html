@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Auto-width floated boxes with inline content</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f2f2f2; font: 16px Arial, sans-serif; }
+  .label { background: #dfe6ec; color: #111; padding: 6px 10px; }
+  .bar { overflow: hidden; background: #fff; padding: 8px; }
+  nav { float: left; }
+  a {
+    float: left;
+    display: block;
+    height: 40px;
+    padding: 8px 16px;
+    background: #2980b9;
+    color: #fff;
+    text-decoration: none;
+  }
+  a + a { background: #8e44ad; }
+  i { display: inline-block; width: 8px; height: 10px; background: #f1c40f; }
+  .after { clear: both; height: 140px; margin: 4px 8px; background: #34495e; color: #fff; padding: 8px; }
+</style>
+</head>
+<body>
+  <div class="label">floated links size from text and inline icon, then share one row</div>
+  <div class="bar">
+    <nav>
+      <a href="#">Tut<i></i></a>
+      <a href="#">Ref<i></i></a>
+      <a href="#">Ex<i></i></a>
+      <a href="#">Cert<i></i></a>
+    </nav>
+  </div>
+  <div class="after">content after the floated navigation</div>
+</body>
+</html>

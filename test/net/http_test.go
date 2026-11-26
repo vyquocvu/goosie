@@ -45,6 +45,53 @@ func TestGetFinalResponseURL(t *testing.T) {
 	}
 }
 
+// qc:BR-330
+func TestRequestsUseCompatibleUserAgent(t *testing.T) {
+	const want = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Goosie/2.0"
+	for _, path := range []string{"get", "stream"} {
+		t.Run(path, func(t *testing.T) {
+			seen := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen <- r.Header.Get("User-Agent")
+				_, _ = w.Write([]byte("ok"))
+			}))
+			defer server.Close()
+			client := transport.DefaultClient()
+			defer client.Close()
+			switch path {
+			case "get":
+				resp, err := client.Get(context.Background(), server.URL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(resp.Body) != "ok" {
+					t.Fatalf("body = %q", resp.Body)
+				}
+			case "stream":
+				streamer, ok := client.(transport.StreamingHTTP)
+				if !ok {
+					t.Fatal("default client does not implement StreamingHTTP")
+				}
+				resp, err := streamer.GetStream(context.Background(), server.URL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Close()
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(body) != "ok" {
+					t.Fatalf("body = %q", body)
+				}
+			}
+			if got := <-seen; got != want {
+				t.Fatalf("User-Agent = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestGetRejectsOversizedBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(bytes.Repeat([]byte("x"), (16<<20)+1))

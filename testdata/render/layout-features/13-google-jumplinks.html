@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Google jump links</title>
+<style>
+  html { font-family: Arial, Helvetica, sans-serif; }
+  body { margin: 0; }
+  .banner {
+    box-sizing: content-box;
+    height: 48px;
+    left: 50%;
+    position: absolute;
+    top: 448px;
+    transform: translateX(-50%);
+    width: 100%;
+    padding: 36px 0;
+  }
+  .hero { height: 448px; background: #f8f9fa; }
+  .pill {
+    display: flex;
+    flex-direction: row;
+    margin: 16px auto;
+    position: sticky;
+    top: 16px;
+    max-width: calc(100% - 48px);
+    width: fit-content;
+    background: #fff;
+    border-radius: 120px;
+    box-shadow: 0 1px 3px 1px rgba(60,64,67,.15);
+  }
+  .list { display: flex; width: 100%; white-space: nowrap; }
+  a { font: 500 16px/20px Arial, sans-serif; padding: 7px 8px; border: 2px solid transparent; }
+</style>
+</head>
+<body>
+  <svg style="position:absolute;width:0;height:0;overflow:hidden;"></svg>
+  <div class="hero"></div>
+  <div class="banner">
+    <nav class="pill">
+      <div class="list">
+        <a href="#">Search in new ways</a>
+        <a href="#">Chat with Gemini</a>
+        <a href="#">Try AI tools</a>
+        <a href="#">Explore more products</a>
+      </div>
+    </nav>
+  </div>
+</body>
+</html>

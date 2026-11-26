@@ -13,6 +13,7 @@ type gridTrack struct {
 	max        float32
 	fr         float32
 	content    bool
+	fill       bool
 	autoRepeat bool
 	fit        bool
 }
@@ -56,7 +57,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	container := obj.Style
 	gapX, gapY := container.ColumnGap, container.RowGap
 	contentH := float32(0)
-	if container.Height >= 0 {
+	if definiteH(a, id) >= 0 {
 		contentH = obj.H
 	}
 
@@ -77,7 +78,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			}
 			parentCols := pObj.GridCols
 			if len(parentCols) == 0 && pObj.Style != nil && pObj.Style.GridTemplateColumns != "" && !isSubgrid(pObj.Style.GridTemplateColumns) {
-				pColTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateColumns, pObj.Style.FontSize, contentW)
+				pColTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateColumns, pObj.Style.FontSize, contentW, a.ViewportW, a.ViewportH)
 				for _, tc := range pColTracks {
 					w := tc.max
 					if w <= 0 {
@@ -102,7 +103,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 	if len(cols) == 0 && !isSubgrid(container.GridTemplateColumns) {
-		cols, colLines = parseGridTracksAndLines(container.GridTemplateColumns, container.FontSize, contentW)
+		cols, colLines = parseGridTracksAndLines(container.GridTemplateColumns, container.FontSize, contentW, a.ViewportW, a.ViewportH)
 	}
 
 	if isSubgrid(container.GridTemplateRows) {
@@ -116,7 +117,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			}
 			parentRows := pObj.GridRows
 			if len(parentRows) == 0 && pObj.Style != nil && pObj.Style.GridTemplateRows != "" && !isSubgrid(pObj.Style.GridTemplateRows) {
-				pRowTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateRows, pObj.Style.FontSize, contentH)
+				pRowTracks, _ := parseGridTracksAndLines(pObj.Style.GridTemplateRows, pObj.Style.FontSize, contentH, a.ViewportW, a.ViewportH)
 				for _, tr := range pRowTracks {
 					h := tr.max
 					if h <= 0 {
@@ -141,7 +142,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		}
 	}
 	if len(rowSpecs) == 0 && !isSubgrid(container.GridTemplateRows) {
-		rowSpecs, rowLines = parseGridTracksAndLines(container.GridTemplateRows, container.FontSize, contentH)
+		rowSpecs, rowLines = parseGridTracksAndLines(container.GridTemplateRows, container.FontSize, contentH, a.ViewportW, a.ViewportH)
 	}
 
 	switch {
@@ -195,7 +196,10 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 			initRows[r] = tr.min
 		}
 	}
-	a.Get(id).GridRows = initRows
+	rowH := make([]float32, len(rowSpecs))
+	copy(rowH, initRows)
+	sizeGridTracks(rowSpecs, rowH, contentH, gapY, normalizeAxis(container.AlignContent) == "", nil)
+	a.Get(id).GridRows = rowH
 
 	for i := range items {
 		p := &items[i]
@@ -212,7 +216,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		it.X = xs[p.col]
 		it.Y = contentY
 		if p.justify != "" && it.Style.Width < 0 {
-			blockIntoMeasure(a, p.id, maxFlexMeasureWidth, pctBase(a, colRect))
+			blockIntoMeasureHV(a, p.id, maxFlexMeasureWidth, pctBase(a, colRect), pctBaseV(a, contentH))
 			it = a.Get(p.id)
 			inlineInto(a, p.id)
 			it = a.Get(p.id)
@@ -244,11 +248,8 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 	for len(rowSpecs) < nRows {
 		rowSpecs = append(rowSpecs, gridTrack{min: -1, max: -1})
 	}
-	rowH := make([]float32, nRows)
-	for i, tr := range rowSpecs {
-		if tr.min > 0 {
-			rowH[i] = tr.min
-		}
+	for len(rowH) < nRows {
+		rowH = append(rowH, 0)
 	}
 	for i := range items {
 		p := &items[i]
@@ -316,12 +317,22 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		rowRect := ys[rowLast] + rowH[rowLast] - ys[p.row]
 		it := a.Get(p.id)
 
+		colFree := colRect - p.borderW - p.mLeft - p.mRight
 		finalX := xs[p.col] + p.mLeft
-		switch p.justify {
-		case "center":
-			finalX = xs[p.col] + (colRect-p.borderW)/2
-		case "flex-end":
-			finalX = xs[p.col] + colRect - p.borderW - p.mRight
+		switch {
+		case it.Style.MarginLeftAuto && it.Style.MarginRightAuto:
+			finalX = xs[p.col] + p.mLeft + colFree/2
+		case it.Style.MarginLeftAuto:
+			finalX = xs[p.col] + p.mLeft + colFree
+		case it.Style.MarginRightAuto:
+			finalX = xs[p.col] + p.mLeft
+		default:
+			switch p.justify {
+			case "center":
+				finalX = xs[p.col] + p.mLeft + colFree/2
+			case "flex-end":
+				finalX = xs[p.col] + colRect - p.borderW - p.mRight
+			}
 		}
 		if p.align == "" && it.Style.Height < 0 {
 			inner := rowRect - p.mTop - p.mBottom -
@@ -331,12 +342,22 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 				p.borderH = it.BorderH()
 			}
 		}
+		rowFree := rowRect - p.borderH - p.mTop - p.mBottom
 		finalY := ys[p.row] + p.mTop
-		switch p.align {
-		case "center":
-			finalY = ys[p.row] + (rowRect-p.borderH)/2
-		case "flex-end":
-			finalY = ys[p.row] + rowRect - p.borderH - p.mBottom
+		switch {
+		case it.Style.MarginTopAuto && it.Style.MarginBottomAuto:
+			finalY = ys[p.row] + p.mTop + rowFree/2
+		case it.Style.MarginTopAuto:
+			finalY = ys[p.row] + p.mTop + rowFree
+		case it.Style.MarginBottomAuto:
+			finalY = ys[p.row] + p.mTop
+		default:
+			switch p.align {
+			case "center":
+				finalY = ys[p.row] + p.mTop + rowFree/2
+			case "flex-end":
+				finalY = ys[p.row] + rowRect - p.borderH - p.mBottom
+			}
 		}
 
 		dx := finalX - it.X
@@ -373,13 +394,16 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 func shiftBlockKids(a *Arena, id ObjectID, dx, dy float32) {
 	obj := a.Get(id)
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
-		if isBlock(a.Get(kid)) {
+		k := a.Get(kid)
+		if isBlock(k) && !atomicInlineLevel(k.Style) {
 			shiftSubtree(a, kid, dx, dy)
 		}
 	}
 }
 
 func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, container *style.ComputedStyle, areas map[string]gridArea, colLines, rowLines map[string][]int, nCols, nRows int) []gridItem {
+	colLines = mergeGridAreaLines(colLines, areas, false)
+	rowLines = mergeGridAreaLines(rowLines, areas, true)
 	obj := a.Get(id)
 	var out []gridItem
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
@@ -412,10 +436,10 @@ func collectGridItems(a *Arena, id ObjectID, contentX, contentY float32, contain
 			name:    k.Style.GridArea,
 			colSpan: k.Style.GridColumnSpan,
 			rowSpan: k.Style.GridRowSpan,
-			mLeft:   flexMargin(k.Style.MarginLeft),
-			mRight:  flexMargin(k.Style.MarginRight),
-			mTop:    flexMargin(k.Style.MarginTop),
-			mBottom: flexMargin(k.Style.MarginBottom),
+			mLeft:   flexMarginLeft(k.Style),
+			mRight:  flexMarginRight(k.Style),
+			mTop:    flexMarginTop(k.Style),
+			mBottom: flexMarginBottom(k.Style),
 			justify: justify,
 			align:   align,
 		}
@@ -542,12 +566,12 @@ func autoPlaceGridItems(items []gridItem, k int) int {
 	return lowest - 1
 }
 
-func parseGridTracks(v string, fontSize, inlineSize float32) []gridTrack {
-	tracks, _ := parseGridTracksAndLines(v, fontSize, inlineSize)
+func parseGridTracks(v string, fontSize, inlineSize, viewportW, viewportH float32) []gridTrack {
+	tracks, _ := parseGridTracksAndLines(v, fontSize, inlineSize, viewportW, viewportH)
 	return tracks
 }
 
-func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrack, map[string][]int) {
+func parseGridTracksAndLines(v string, fontSize, inlineSize, viewportW, viewportH float32) ([]gridTrack, map[string][]int) {
 	v = strings.TrimSpace(strings.ToLower(v))
 	lines := map[string][]int{}
 	if v == "" || v == "none" {
@@ -567,7 +591,7 @@ func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrac
 			continue
 		}
 		if !strings.HasPrefix(tok, "repeat(") {
-			out = append(out, parseGridTrack(tok, fontSize, inlineSize))
+			out = append(out, parseGridTrack(tok, fontSize, inlineSize, viewportW, viewportH))
 			line++
 			continue
 		}
@@ -578,7 +602,7 @@ func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrac
 		}
 		head, body := parts[0], strings.Join(parts[1:], " ")
 		if head == "auto-fill" || head == "auto-fit" {
-			for _, t := range parseGridTracks(body, fontSize, inlineSize) {
+			for _, t := range parseGridTracks(body, fontSize, inlineSize, viewportW, viewportH) {
 				t.autoRepeat = true
 				t.fit = head == "auto-fit"
 				out = append(out, t)
@@ -590,7 +614,7 @@ func parseGridTracksAndLines(v string, fontSize, inlineSize float32) ([]gridTrac
 		if err != nil || n <= 0 {
 			continue
 		}
-		subTracks, subLines := parseGridTracksAndLines(body, fontSize, inlineSize)
+		subTracks, subLines := parseGridTracksAndLines(body, fontSize, inlineSize, viewportW, viewportH)
 		for i := 0; i < n; i++ {
 			for name, ls := range subLines {
 				for _, l := range ls {
@@ -625,7 +649,7 @@ func countTopTracks(body string) int {
 	return n
 }
 
-func resolveGridLine(side string, lines map[string][]int, nTracks int) (int, bool) {
+func resolveGridLine(side string, lines map[string][]int, nTracks int, end bool) (int, bool) {
 	side = strings.TrimSpace(side)
 	if side == "" || side == "auto" {
 		return 0, false
@@ -642,10 +666,44 @@ func resolveGridLine(side string, lines map[string][]int, nTracks int) (int, boo
 		}
 		return 0, false
 	}
-	if ls, ok := lines[side]; ok && len(ls) > 0 {
-		return ls[0], true
+	if line, ok := namedGridLine(lines, side, end); ok {
+		return line, true
 	}
-	return 0, false
+	suffix := "-start"
+	if end {
+		suffix = "-end"
+	}
+	return namedGridLine(lines, side+suffix, end)
+}
+
+func namedGridLine(lines map[string][]int, name string, end bool) (int, bool) {
+	ls := lines[name]
+	if len(ls) == 0 {
+		return 0, false
+	}
+	if end {
+		return ls[len(ls)-1], true
+	}
+	return ls[0], true
+}
+
+func mergeGridAreaLines(lines map[string][]int, areas map[string]gridArea, rows bool) map[string][]int {
+	if len(areas) == 0 {
+		return lines
+	}
+	merged := make(map[string][]int, len(lines)+2*len(areas))
+	for name, ls := range lines {
+		merged[name] = append([]int(nil), ls...)
+	}
+	for name, area := range areas {
+		start, span := area.col, area.colSpan
+		if rows {
+			start, span = area.row, area.rowSpan
+		}
+		merged[name+"-start"] = append(merged[name+"-start"], start+1)
+		merged[name+"-end"] = append(merged[name+"-end"], start+span+1)
+	}
+	return merged
 }
 
 func parseGridSpanValue(s string) int {
@@ -673,7 +731,7 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 
 		if strings.HasPrefix(left, "span") {
 			sp := parseGridSpanValue(left)
-			e, eOk := resolveGridLine(right, lines, nTracks)
+			e, eOk := resolveGridLine(right, lines, nTracks, true)
 			if !eOk {
 				return 0, sp, false
 			}
@@ -697,7 +755,7 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 		}
 
 		if strings.HasPrefix(right, "span") {
-			s, sOk := resolveGridLine(left, lines, nTracks)
+			s, sOk := resolveGridLine(left, lines, nTracks, false)
 			if !sOk {
 				return 0, 0, false
 			}
@@ -716,8 +774,8 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 			return s - 1, sp, true
 		}
 
-		s, sOk := resolveGridLine(left, lines, nTracks)
-		e, eOk := resolveGridLine(right, lines, nTracks)
+		s, sOk := resolveGridLine(left, lines, nTracks, false)
+		e, eOk := resolveGridLine(right, lines, nTracks, true)
 		if !sOk || !eOk || e <= s {
 			return 0, 0, false
 		}
@@ -731,7 +789,7 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 		}
 		return s - 1, e - s, true
 	}
-	s, sOk := resolveGridLine(raw, lines, nTracks)
+	s, sOk := resolveGridLine(raw, lines, nTracks, false)
 	if !sOk {
 		return 0, 0, false
 	}
@@ -741,25 +799,27 @@ func resolveGridPlacement(raw string, lines map[string][]int, nTracks int) (star
 	return s - 1, 1, true
 }
 
-func parseGridTrack(tok string, fontSize, inlineSize float32) gridTrack {
+func parseGridTrack(tok string, fontSize, inlineSize, viewportW, viewportH float32) gridTrack {
 	tok = strings.TrimSpace(tok)
 	if strings.HasPrefix(tok, "minmax(") {
 		inner := strings.TrimSuffix(strings.TrimPrefix(tok, "minmax("), ")")
-		if parts := strings.Split(inner, ","); len(parts) == 2 {
-			lo, hi := parseGridTrack(strings.TrimSpace(parts[0]), fontSize, inlineSize), parseGridTrack(strings.TrimSpace(parts[1]), fontSize, inlineSize)
+		if parts := splitTopLevel(inner); len(parts) == 2 {
+			lo := parseGridTrack(strings.TrimSpace(parts[0]), fontSize, inlineSize, viewportW, viewportH)
+			hi := parseGridTrack(strings.TrimSpace(parts[1]), fontSize, inlineSize, viewportW, viewportH)
 			t := gridTrack{min: lo.min, max: -1}
 			if hi.fr > 0 {
 				t.fr = hi.fr
 			} else if hi.min >= 0 {
 				t.max = hi.min
 				t.content = true
+				t.fill = !hi.content
 			}
 			return t
 		}
 	}
 	if strings.HasPrefix(tok, "fit-content(") {
 		inner := strings.TrimSuffix(strings.TrimPrefix(tok, "fit-content("), ")")
-		if maxLen, ok := gridLen(inner, fontSize, inlineSize); ok {
+		if maxLen, ok := gridLen(inner, fontSize, inlineSize, viewportW, viewportH); ok {
 			return gridTrack{min: -1, max: maxLen, content: true}
 		}
 	}
@@ -772,46 +832,14 @@ func parseGridTrack(tok string, fontSize, inlineSize float32) gridTrack {
 		}
 		return gridTrack{min: -1, max: -1}
 	}
-	if f, ok := gridLen(tok, fontSize, inlineSize); ok {
+	if f, ok := gridLen(tok, fontSize, inlineSize, viewportW, viewportH); ok {
 		return gridTrack{min: f, max: -1}
 	}
 	return gridTrack{min: -1, max: -1}
 }
 
-func gridLen(s string, fontSize, inlineSize float32) (float32, bool) {
-	s = strings.TrimSpace(s)
-	if strings.HasSuffix(s, "%") {
-		if inlineSize <= 0 {
-			return 0, false
-		}
-		f, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 32)
-		if err != nil {
-			return 0, false
-		}
-		return float32(f) * inlineSize / 100, true
-	}
-	for _, u := range []struct {
-		suffix string
-		scale  float32
-	}{
-		{"px", 1},
-		{"rem", 16},
-		{"em", fontSize},
-		{"ex", fontSize},
-	} {
-		if !strings.HasSuffix(s, u.suffix) || u.scale <= 0 {
-			continue
-		}
-		f, err := strconv.ParseFloat(strings.TrimSuffix(s, u.suffix), 32)
-		if err != nil {
-			return 0, false
-		}
-		return float32(f) * u.scale, true
-	}
-	if s == "0" {
-		return 0, true
-	}
-	return 0, false
+func gridLen(s string, fontSize, inlineSize, viewportW, viewportH float32) (float32, bool) {
+	return style.ResolveGridTrackLength(s, fontSize, inlineSize, viewportW, viewportH)
 }
 
 func splitGridTracks(v string) []string {
@@ -939,7 +967,7 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 			hasAuto = true
 		}
 	}
-	if !hasContent && (frs == 0 || !hasAuto) {
+	if !hasAuto && !hasContent && frs == 0 {
 		return nil
 	}
 	out := make([]float32, len(cols))
@@ -955,7 +983,7 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 		if c.fr > 0 || (c.min > 0 && !c.content) {
 			continue
 		}
-		if !c.content && frs == 0 {
+		if !c.content && c.min >= 0 && frs == 0 {
 			continue
 		}
 
@@ -1023,7 +1051,9 @@ func sizeGridTracks(tracks []gridTrack, sizes []float32, avail, gap float32, str
 		}
 		if t.content {
 			s := float32(0)
-			if i < len(content) && content[i] > 0 {
+			if t.fill && t.max >= 0 {
+				s = t.max
+			} else if i < len(content) && content[i] > 0 {
 				s = content[i]
 			} else if t.min > 0 {
 				s = t.min
@@ -1038,38 +1068,41 @@ func sizeGridTracks(tracks []gridTrack, sizes []float32, avail, gap float32, str
 			used += s
 			continue
 		}
+		if t.min < 0 && !t.content && i < len(content) && content[i] > 0 {
+			sizes[i] = content[i]
+			used += content[i]
+			continue
+		}
 		if t.min > 0 {
 			sizes[i] = t.min
 			used += t.min
 		}
 	}
-	leftover := avail - gapsOf(gap, n) - used
+	room := avail - gapsOf(gap, n)
+	if room < 0 {
+		room = 0
+	}
+	if used > room {
+		autoSum := float32(0)
+		for i, t := range tracks {
+			if t.min < 0 && !t.content && sizes[i] > 0 {
+				autoSum += sizes[i]
+			}
+		}
+		if autoSum > room {
+			for i, t := range tracks {
+				if t.min < 0 && !t.content && sizes[i] > 0 {
+					sizes[i] *= room / autoSum
+				}
+			}
+			used -= autoSum - room
+		}
+	}
+	leftover := room - used
 	if leftover < 0 {
 		leftover = 0
 	}
 	if sumFr > 0 {
-		autoSum := float32(0)
-		for i, t := range tracks {
-			if t.fr <= 0 && !t.content && t.min < 0 && i < len(content) && content[i] > 0 {
-				sizes[i] = content[i]
-				autoSum += content[i]
-			}
-		}
-		if room := avail - gapsOf(gap, n) - used; autoSum > room {
-			if room <= 0 {
-				room = 0
-			}
-			for i, t := range tracks {
-				if t.fr <= 0 && !t.content && t.min < 0 && sizes[i] > 0 {
-					sizes[i] *= room / autoSum
-				}
-			}
-			autoSum = room
-		}
-		leftover = avail - gapsOf(gap, n) - used - autoSum
-		if leftover < 0 {
-			leftover = 0
-		}
 		freeze := make([]bool, n)
 		for {
 			weight := float32(0)
@@ -1115,7 +1148,7 @@ func sizeGridTracks(tracks []gridTrack, sizes []float32, avail, gap float32, str
 		if auto > 0 {
 			for i, t := range tracks {
 				if t.fr <= 0 && !t.content && t.min < 0 {
-					sizes[i] = leftover / float32(auto)
+					sizes[i] += leftover / float32(auto)
 				}
 			}
 		}

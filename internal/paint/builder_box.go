@@ -65,15 +65,28 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 
 	visibilityHidden := obj.Style != nil && obj.Style.Visibility != "visible"
 
-	childClip := inheritedClip
 	commandStart := b.list.Len()
+	savedZBase := b.zBase
+	savedZPath := b.list.ZPath()
+	if z, ok := zIndexOf(obj.Style); ok {
+		b.zBase = appendZKey(b.zBase, z, uint32(commandStart))
+		b.list.SetZPath(b.zBase)
+	}
+	defer func() {
+		b.zBase = savedZBase
+		b.list.SetZPath(savedZPath)
+	}()
+
+	childClip := inheritedClip
 	headConflict := len(b.groupHeadStack) > 0 && b.groupHeadStack[len(b.groupHeadStack)-1] == int32(commandStart)
 	recordThis := groupOpacity > 0 && !headConflict
 	if groupOpacity > 0 && headConflict {
 		effective *= groupOpacity
 	}
-	if obj.Style != nil {
-		box := b.paintContextFor(obj, effective)
+	var box boxPaintContext
+	hasBox := obj.Style != nil
+	if hasBox {
+		box = b.paintContextFor(obj, effective)
 		start := b.list.Len()
 		if !box.hidden && !visibilityHidden {
 			b.paintBoxDecoration(obj, box, ordinal)
@@ -93,14 +106,22 @@ func (b *Builder) paintBox(id layout.ObjectID, inheritedClip *frame.Rect, ordina
 		b.groupHeadStack = b.groupHeadStack[:len(b.groupHeadStack)-1]
 		b.list.AddGroup(groupOpacity, b.list.Len()-commandStart)
 	}
-	if z, ok := zIndexOf(obj.Style); ok {
-		commands := b.list.All()
-		for i := commandStart; i < len(commands); i++ {
-			if commands[i].Z == 0 {
-				commands[i].Z = z
-			}
-		}
+	if hasBox {
+		b.applyTransform(obj, commandStart, box.x0, box.y0, box.x1, box.y1)
 	}
+}
+
+func appendZKey(path string, z, order uint32) string {
+	var part [8]byte
+	part[0] = byte(z >> 24)
+	part[1] = byte(z >> 16)
+	part[2] = byte(z >> 8)
+	part[3] = byte(z)
+	part[4] = byte(order >> 24)
+	part[5] = byte(order >> 16)
+	part[6] = byte(order >> 8)
+	part[7] = byte(order)
+	return path + string(part[:])
 }
 
 func zIndexOf(s *style.ComputedStyle) (uint32, bool) {
@@ -163,7 +184,7 @@ func (b *Builder) paintBoxDecoration(obj *layout.Object, paint boxPaintContext, 
 	if paintsInlineFragments {
 		owns := b.fragmentOwnsDecorations(obj)
 		if owns && len(computed.BoxShadow) > 0 {
-			b.paintBoxShadow(obj, paint.rect, paint.radius, paint.opacity)
+			b.paintBoxShadow(obj, paint)
 		}
 		if owns {
 			b.paintBoxBackground(obj, paint)
@@ -273,9 +294,6 @@ func (b *Builder) paintProgressMeter(obj *layout.Object, rect frame.Rect, opacit
 }
 
 func (b *Builder) applyBoxEffects(obj *layout.Object, box boxPaintContext, commandStart int) {
-	if len(obj.Style.Transform) > 0 {
-		b.applyTransform(obj, commandStart, box.x0, box.y0, box.x1, box.y1)
-	}
 	hasFilter := len(obj.Style.Filter) > 0
 	hasBackdropFilter := len(obj.Style.BackdropFilter) > 0
 	if !hasFilter && !hasBackdropFilter {

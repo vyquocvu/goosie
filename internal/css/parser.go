@@ -693,6 +693,10 @@ func supportsFeatureTrue(test string) bool {
 	}
 	prop := strings.TrimSpace(inner[:colon])
 	value := strings.TrimSpace(inner[colon+1:])
+	if prop == "color" {
+		_, ok := ParseColor(value)
+		return ok
+	}
 	if prop != "display" {
 		return false
 	}

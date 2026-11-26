@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Visibility inherit keyword</title>
+<style>
+  body { margin: 0; font: 16px Arial, Helvetica, sans-serif; }
+  .hidden { visibility: hidden; }
+  .inherit { visibility: inherit; }
+  .unset { visibility: unset; }
+  .initial { visibility: initial; }
+  .row { height: 40px; }
+  .box { width: 120px; height: 24px; background: #1a73e8; }
+</style>
+</head>
+<body>
+  <div class="row"><div class="box"></div></div>
+  <div class="row hidden"><div id="a" class="box inherit"></div></div>
+  <div class="row hidden"><div id="b" class="box unset"></div></div>
+  <div class="row hidden"><div id="c" class="box initial"></div></div>
+</body>
+</html>
