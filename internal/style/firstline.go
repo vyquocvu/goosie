@@ -197,6 +197,7 @@ func filterFirstLineProperties(cs *ComputedStyle) {
 	cs.BorderImage = css.BorderImage{}
 
 	cs.Width = 0
+	cs.WidthFitContent = false
 	cs.Height = 0
 	cs.MinWidth = 0
 	cs.MinHeight = 0

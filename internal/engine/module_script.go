@@ -785,15 +785,36 @@ func tokenIndex(tokens []moduleToken, target moduleToken) int {
 	return -1
 }
 
+func moduleDepthDelta(token moduleToken) int {
+	if token.kind != moduleTokenPunct {
+		return 0
+	}
+	switch token.value {
+	case "{", "${", "(", "[":
+		return 1
+	case "}", ")", "]":
+		return -1
+	}
+	return 0
+}
+
+func moduleBraceDelta(token moduleToken) int {
+	if token.kind != moduleTokenPunct {
+		return 0
+	}
+	switch token.value {
+	case "{", "${":
+		return 1
+	case "}":
+		return -1
+	}
+	return 0
+}
+
 func moduleTopLevelAt(tokens []moduleToken, index int) bool {
 	depth := 0
 	for i := 0; i < index; i++ {
-		switch tokens[i].value {
-		case "{", "${", "(", "[":
-			depth++
-		case "}", ")", "]":
-			depth--
-		}
+		depth += moduleDepthDelta(tokens[i])
 	}
 	return depth == 0
 }
@@ -1121,7 +1142,11 @@ func functionOrClassEnd(tokens []moduleToken, start int) (int, error) {
 	}
 	parenDepth := 0
 	for ; i < len(tokens); i++ {
-		switch tokens[i].value {
+		token := tokens[i]
+		if token.kind != moduleTokenPunct {
+			continue
+		}
+		switch token.value {
 		case "(":
 			parenDepth++
 		case ")":
@@ -1138,10 +1163,10 @@ func functionOrClassEnd(tokens []moduleToken, start int) (int, error) {
 func matchingBraceEnd(tokens []moduleToken, start int) int {
 	depth := 0
 	for i := start; i < len(tokens); i++ {
-		switch tokens[i].value {
-		case "{", "${":
+		delta := moduleBraceDelta(tokens[i])
+		if delta > 0 {
 			depth++
-		case "}":
+		} else if delta < 0 {
 			depth--
 			if depth == 0 {
 				return i + 1
@@ -1158,19 +1183,18 @@ func moduleExpressionEnd(tokens []moduleToken, start int) (int, error) {
 	depth := 0
 	last := start
 	for i := start; i < len(tokens); i++ {
-		value := tokens[i].value
-		switch value {
-		case "(", "[", "{", "${":
+		token := tokens[i]
+		delta := moduleDepthDelta(token)
+		if delta > 0 {
 			depth++
-		case ")", "]", "}":
+		} else if delta < 0 {
 			if depth == 0 {
 				return i, nil
 			}
 			depth--
-		case ";":
-			if depth == 0 {
-				return i, nil
-			}
+		}
+		if token.kind == moduleTokenPunct && token.value == ";" && depth == 0 {
+			return i, nil
 		}
 		if depth == 0 && i > start && tokens[i].line > tokens[i-1].line && !moduleExpressionContinues(tokens[i]) {
 			return i, nil
@@ -1207,12 +1231,7 @@ func parseVariableDeclaration(tokens []moduleToken, start int) ([]string, int, e
 			if depth == 0 && i > next && tokens[i].line > tokens[i-1].line && moduleStatementStarts(tokens[i]) {
 				return names, i, nil
 			}
-			switch value {
-			case "(", "[", "{", "${":
-				depth++
-			case ")", "]", "}":
-				depth--
-			}
+			depth += moduleDepthDelta(tokens[i])
 			i++
 		}
 		if i >= len(tokens) {
@@ -1301,6 +1320,18 @@ func skipModuleExpression(tokens []moduleToken, start int, stop string) int {
 	return len(tokens)
 }
 
+func moduleDeclarationStartAt(tokens []moduleToken, index int) bool {
+	if index == 0 {
+		return true
+	}
+	previous := tokens[index-1]
+	switch previous.value {
+	case ";", "{", "}", "export":
+		return true
+	}
+	return tokens[index].line > previous.line
+}
+
 func moduleStatementStarts(token moduleToken) bool {
 	if token.kind != moduleTokenIdentifier {
 		return false
@@ -1315,7 +1346,7 @@ func moduleStatementStarts(token moduleToken) bool {
 func collectModuleLocals(record *moduleRecord) error {
 	tokens := record.tokens
 	for i := 0; i < len(tokens); i++ {
-		if !moduleTopLevelAt(tokens, i) || tokens[i].kind != moduleTokenIdentifier {
+		if !moduleTopLevelAt(tokens, i) || tokens[i].kind != moduleTokenIdentifier || !moduleDeclarationStartAt(tokens, i) {
 			continue
 		}
 		switch tokens[i].value {

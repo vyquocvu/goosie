@@ -25,6 +25,25 @@ func TestParseTransformTranslate(t *testing.T) {
 	}
 }
 
+// qc:BR-329
+func TestParseTransformTranslatePercent(t *testing.T) {
+	funcs := css.ParseTransform("translate(-50%, 25%)")
+	if len(funcs) != 1 {
+		t.Fatalf("got %d functions, want 1", len(funcs))
+	}
+	fn := funcs[0]
+	if fn.Name != "translate" || !fn.PctX || !fn.PctY {
+		t.Fatalf("got %+v, want translate with both axes marked as percentages", fn)
+	}
+	if fn.Args[0] != -0.5 || fn.Args[1] != 0.25 {
+		t.Errorf("Args = %v, want [-0.5 0.25]", fn.Args)
+	}
+	x := css.ParseTransform("translateX(-50%)")
+	if len(x) != 1 || !x[0].PctX || x[0].PctY || x[0].Args[0] != -0.5 {
+		t.Errorf("translateX(-50%%) = %+v, want PctX with -0.5", x)
+	}
+}
+
 func TestParseTransformTranslateX(t *testing.T) {
 	funcs := css.ParseTransform("translateX(5px)")
 	if len(funcs) != 1 {

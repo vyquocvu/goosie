@@ -71,6 +71,9 @@ func runGeneratesContent(a *Arena, kids []ObjectID) bool {
 			continue
 		}
 		if !k.Node.Text() {
+			if k.Style != nil && isOutOfFlow(k.Style) {
+				continue
+			}
 			return true
 		}
 		if strings.TrimSpace(k.Node.DataContent) != "" {

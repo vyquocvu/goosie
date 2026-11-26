@@ -68,9 +68,15 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 			}
 			dy := float32(0)
 			if s.HasTop {
-				dy = pctLenV(a, s.Top, rel.h)
+				dy = icb.y0 + pctLenV(a, s.Top, rel.h) - obj.Y
+				if dy < 0 {
+					dy = 0
+				}
 			} else if s.HasBottom {
-				dy = -pctLenV(a, s.Bottom, rel.h)
+				dy = icb.y0 + icb.h - pctLenV(a, s.Bottom, rel.h) - (obj.Y + obj.H)
+				if dy > 0 {
+					dy = 0
+				}
 			}
 			if parentObj != nil && parentObj.Style != nil {
 				_, py0, _, py1 := parentObj.ContentRect()

@@ -15,7 +15,7 @@ func ResolveTransform(funcs []css.TransformFunc, origin css.TransformOrigin, ele
 	result := frame.MatrixTranslate(ox, oy)
 
 	for _, fn := range funcs {
-		m := resolveOneFunc(fn)
+		m := resolveOneFunc(fn, elementWidth, elementHeight)
 		result = result.Multiply(m)
 	}
 
@@ -24,10 +24,17 @@ func ResolveTransform(funcs []css.TransformFunc, origin css.TransformOrigin, ele
 	return result
 }
 
-func resolveOneFunc(fn css.TransformFunc) frame.Matrix3x2 {
+func resolveOneFunc(fn css.TransformFunc, elementWidth, elementHeight float32) frame.Matrix3x2 {
 	switch fn.Name {
 	case "translate":
-		return frame.MatrixTranslate(fn.Args[0], fn.Args[1])
+		tx, ty := fn.Args[0], fn.Args[1]
+		if fn.PctX {
+			tx *= elementWidth
+		}
+		if fn.PctY {
+			ty *= elementHeight
+		}
+		return frame.MatrixTranslate(tx, ty)
 	case "rotate":
 		return frame.MatrixRotate(fn.Args[0])
 	case "scale":

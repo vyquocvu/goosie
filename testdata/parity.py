@@ -194,7 +194,24 @@ PASS_AT = 90.0
 # image's percentage height and the unsized-SVG fallback height, pushing replaced boxes far past the
 # card. The image must take its height from the 320px card and its width from the 160x240 ratio, and
 # the spinner must stay 65x65 even when the flex cross axis stretches.
-MIN_SCORED_FIXTURES = 123
+# 124: grid/04-viewport-math-named-lines.html (MDN grid-parity pass) - viewport-relative
+# math in grid track lengths, minmax()'s explicit maximum, and named lines from both
+# grid-template-columns and grid-template-areas. Scored 99.343% PASS with worst band
+# IoU 1.0 and no blank bands on the fixed tree, versus 86.897% FAIL on the HEAD
+# binary that preceded the fix.
+# 125: layout-features/12-empty-table-pseudo-clearfix.html - empty display:table
+# pseudo boxes and whitespace-only text between block children must not become a
+# line box that shifts floats and grows the container. Scored 99.222% PASS with
+# worst band IoU 1.0 and no blank bands on the fixed tree, versus 40.679% FAIL on
+# the pre-fix binary.
+# 126: positioning/04-hierarchical-z-index.html - a nested z-index:4 child paints
+# above its z-index:100 parent's background, and equal-z siblings keep their
+# subtree order. Scored 99.477% PASS with worst band IoU 1.0 and no blank bands,
+# versus 46.914% FAIL on the pre-fix binary.
+# 127: floats/03-auto-width-float-inline.html - an auto-width float containing
+# floated links sizes from the full run of children, establishes a BFC from the
+# float itself, and includes their height so following content clears them.
+MIN_SCORED_FIXTURES = 127
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

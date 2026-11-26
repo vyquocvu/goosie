@@ -118,7 +118,8 @@ type DisplayCmd struct {
 
 	Clip frame.Rect
 
-	Z uint32
+	Z    uint32
+	ZKey string
 
 	Seq int32
 }

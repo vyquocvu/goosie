@@ -1747,9 +1747,6 @@ func (c *compiler) compileFunctionLiteral(v *ast.FunctionLiteral, isExpr bool) *
 		c.checkIdentifierName(v.Name.Name, int(v.Name.Idx)-1)
 		c.checkIdentifierLName(v.Name.Name, int(v.Name.Idx)-1)
 	}
-	if v.Async && v.Generator {
-		c.throwSyntaxError(int(v.Function)-1, "Async generators are not supported yet")
-	}
 	r := &compiledFunctionLiteral{
 		name:            v.Name,
 		parameterList:   v.ParameterList,

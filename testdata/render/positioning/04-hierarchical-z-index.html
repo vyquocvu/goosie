@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Hierarchical z-index stacking</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f2f2f2; font: 14px Arial, sans-serif; }
+  .label { background: #dfe6ec; color: #111; padding: 6px 10px; }
+  .stage { position: relative; width: 780px; margin: 8px 10px; background: #d5dce2; }
+  .nested-stage { height: 400px; }
+  .sibling-stage { height: 110px; }
+  .outer { position: absolute; left: 10px; top: 10px; z-index: 100; }
+  .red { background: #c0392b; }
+  .green { background: #27ae60; }
+  .wide { width: 760px; height: 380px; }
+  .small { width: 240px; height: 90px; }
+  .inner { position: absolute; left: 20px; top: 20px; z-index: 4; background: #2980b9; }
+  .wide .inner { width: 720px; height: 340px; }
+  .small .inner { width: 150px; height: 50px; }
+  .second { left: 260px; }
+</style>
+</head>
+<body>
+  <div class="label">nested z-index stays above its stacking parent background</div>
+  <div class="stage nested-stage">
+    <div class="outer wide red"><div class="inner"></div></div>
+  </div>
+  <div class="label">equal z-index siblings keep subtree order</div>
+  <div class="stage sibling-stage">
+    <div class="outer small green"><div class="inner"></div></div>
+    <div class="outer small second red"></div>
+  </div>
+</body>
+</html>

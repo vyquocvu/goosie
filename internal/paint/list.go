@@ -12,6 +12,7 @@ type List struct {
 	cmds    []DisplayCmd
 	bounds  frame.Rect
 	pending []pendingGroup
+	zPath   string
 }
 
 type Group struct {
@@ -44,6 +45,7 @@ func (l *List) Reset() {
 
 func (l *List) Append(c DisplayCmd) {
 	c.Seq = int32(len(l.cmds))
+	c.ZKey = l.zPath
 	l.cmds = append(l.cmds, c)
 	if b, ok := c.Bounds(); ok {
 		if len(l.cmds) == 1 || l.bounds.Empty() {
@@ -64,6 +66,10 @@ func (l *List) AddGroup(own float32, count int) {
 
 func (l *List) Len() int { return len(l.cmds) }
 
+func (l *List) SetZPath(path string) { l.zPath = path }
+
+func (l *List) ZPath() string { return l.zPath }
+
 func (l *List) At(i int) DisplayCmd { return l.cmds[i] }
 
 func (l *List) All() []DisplayCmd { return l.cmds }
@@ -72,6 +78,15 @@ func (l *List) Bounds() frame.Rect { return l.bounds }
 
 func (l *List) SortStable() {
 	slices.SortStableFunc(l.cmds, func(a, b DisplayCmd) int {
+		if a.ZKey != "" || b.ZKey != "" {
+			switch {
+			case a.ZKey < b.ZKey:
+				return -1
+			case a.ZKey > b.ZKey:
+				return 1
+			}
+			return 0
+		}
 		switch {
 		case a.Z < b.Z:
 			return -1
@@ -262,7 +277,7 @@ func groupDamage(a, b *LayerDL) frame.Rect {
 func sameCommand(a, b DisplayCmd) bool {
 	return a.Kind == b.Kind && a.Rect == b.Rect && a.Color == b.Color &&
 		a.Border == b.Border && a.Radius == b.Radius && a.Opacity == b.Opacity &&
-		a.Clip == b.Clip && a.Z == b.Z && a.Filter == b.Filter && a.BackdropFilter == b.BackdropFilter &&
+		a.Clip == b.Clip && a.Z == b.Z && a.ZKey == b.ZKey && a.Filter == b.Filter && a.BackdropFilter == b.BackdropFilter &&
 		a.Text.Color == b.Text.Color && slices.Equal(a.Text.Glyphs, b.Text.Glyphs) &&
 		a.Image.SrcBox == b.Image.SrcBox && sameImage(a.Image.Src, b.Image.Src) && sameImage(a.Mask, b.Mask) &&
 		a.Gradient.Angle == b.Gradient.Angle && slices.Equal(a.Gradient.Stops, b.Gradient.Stops) &&

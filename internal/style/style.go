@@ -282,6 +282,8 @@ type ComputedStyle struct {
 	MaxWidth  float32
 	MaxHeight float32
 
+	WidthFitContent bool
+
 	MinWidthAuto bool
 
 	WidthCalc     DeferredLength
@@ -291,12 +293,14 @@ type ComputedStyle struct {
 	MaxWidthCalc  DeferredLength
 	MaxHeightCalc DeferredLength
 
-	MarginTop       float32
-	MarginRight     float32
-	MarginBottom    float32
-	MarginLeft      float32
-	MarginLeftAuto  bool
-	MarginRightAuto bool
+	MarginTop        float32
+	MarginRight      float32
+	MarginBottom     float32
+	MarginLeft       float32
+	MarginTopAuto    bool
+	MarginRightAuto  bool
+	MarginBottomAuto bool
+	MarginLeftAuto   bool
 
 	PaddingTop    float32
 	PaddingRight  float32
@@ -661,6 +665,7 @@ center { display: block; text-align: center; }
 span { display: inline; }
 p { display: block; margin-top: 1em; margin-bottom: 1em; }
 h1 { display: block; font-size: 2em; font-weight: 700; margin-top: 0.67em; margin-bottom: 0.67em; }
+article h1, aside h1, nav h1, section h1 { font-size: 1.5em; margin-top: 0.83em; margin-bottom: 0.83em; }
 h2 { display: block; font-size: 1.5em; font-weight: 700; margin-top: 0.83em; margin-bottom: 0.83em; }
 h3 { display: block; font-size: 1.17em; font-weight: 700; margin-top: 1em; margin-bottom: 1em; }
 h4 { display: block; font-weight: 700; margin-top: 1.33em; margin-bottom: 1.33em; }
@@ -2531,6 +2536,10 @@ func (e *varExpander) resolve(name string) (string, bool) {
 		}
 		return "", false
 	}
+	if strings.TrimSpace(raw) == "initial" {
+		e.done[name] = varInvalid
+		return "", false
+	}
 	if e.visiting[name] {
 		e.done[name] = varInvalid
 		return "", false
@@ -2827,9 +2836,21 @@ func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Va
 	case "box-sizing":
 		if value == "border-box" {
 			cs.BoxSizing = BoxSizingBorderBox
+		} else if value == "content-box" {
+			cs.BoxSizing = BoxSizingContentBox
 		}
 	case "visibility":
-		cs.Visibility = value
+		v := strings.ToLower(strings.TrimSpace(value))
+		switch v {
+		case "inherit", "unset":
+			if cs.Visibility == "" {
+				cs.Visibility = "visible"
+			}
+		case "initial":
+			cs.Visibility = "visible"
+		default:
+			cs.Visibility = v
+		}
 	case "content-visibility":
 		val := strings.ToLower(strings.TrimSpace(value))
 		if val == "hidden" || val == "auto" || val == "visible" {
@@ -2980,7 +3001,7 @@ func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Va
 	case "scroll-padding-left":
 		cs.ScrollPaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 	case "scroll-margin":
-		t, r, b, l, _, _ := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
+		t, r, b, l, _, _, _, _ := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.ScrollMarginTop = t
 		cs.ScrollMarginRight = r
 		cs.ScrollMarginBottom = b
@@ -3130,11 +3151,20 @@ func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Va
 	case "width", "inline-size":
 		if isAnchorSizeFunc(value) {
 			cs.WidthAnchor = extractAnchorArgs(value)
+			cs.WidthFitContent = false
 		} else if d, ok := deferPercentFunc(parsed, cs.FontSize, cs.rootFontSize); ok {
 			cs.WidthCalc, cs.Width = d, -1
+			cs.WidthFitContent = false
 		} else {
 			cs.WidthCalc = DeferredLength{}
-			cs.Width = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "fit-content", "-moz-fit-content", "max-content":
+				cs.Width = -1
+				cs.WidthFitContent = true
+			default:
+				cs.Width = resolveLengthEm(parsed, -1, cs.FontSize, cs.rootFontSize)
+				cs.WidthFitContent = false
+			}
 		}
 	case "height", "block-size":
 		if isAnchorSizeFunc(value) {
@@ -3188,19 +3218,23 @@ func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Va
 		if hasMixedCSSWideKeyword(parsed) {
 			break
 		}
-		t, r, b, l, lAuto, rAuto := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
+		t, r, b, l, tAuto, rAuto, bAuto, lAuto := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop = t
 		cs.MarginRight = r
 		cs.MarginBottom = b
 		cs.MarginLeft = l
-		cs.MarginLeftAuto = lAuto
+		cs.MarginTopAuto = tAuto
 		cs.MarginRightAuto = rAuto
+		cs.MarginBottomAuto = bAuto
+		cs.MarginLeftAuto = lAuto
 	case "margin-top":
+		cs.MarginTopAuto = valueIsAuto(parsed)
 		cs.MarginTop = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-right":
 		cs.MarginRightAuto = valueIsAuto(parsed)
 		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-bottom":
+		cs.MarginBottomAuto = valueIsAuto(parsed)
 		cs.MarginBottom = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-left":
 		cs.MarginLeftAuto = valueIsAuto(parsed)
@@ -3235,6 +3269,12 @@ func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Va
 	case "margin-block":
 		a, b := logicalPair(value, MarginAuto, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop, cs.MarginBottom = a, b
+		parts := splitTopLevelSpace(value)
+		if len(parts) == 1 {
+			cs.MarginTopAuto, cs.MarginBottomAuto = strIsAuto(parts[0]), strIsAuto(parts[0])
+		} else if len(parts) >= 2 {
+			cs.MarginTopAuto, cs.MarginBottomAuto = strIsAuto(parts[0]), strIsAuto(parts[1])
+		}
 	case "margin-inline":
 		a, b := logicalPair(value, MarginAuto, cs.FontSize, cs.rootFontSize)
 		cs.MarginLeft, cs.MarginRight = a, b
@@ -3245,8 +3285,10 @@ func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Va
 			cs.MarginLeftAuto, cs.MarginRightAuto = strIsAuto(parts[0]), strIsAuto(parts[1])
 		}
 	case "margin-block-start":
+		cs.MarginTopAuto = valueIsAuto(parsed)
 		cs.MarginTop = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-block-end":
+		cs.MarginBottomAuto = valueIsAuto(parsed)
 		cs.MarginBottom = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-inline-start":
 		if cs.Direction == "rtl" {
@@ -3986,7 +4028,7 @@ func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Va
 	case "grid-template":
 		parseGridTemplateShorthand(cs, value)
 	case "grid-area":
-		cs.GridArea = strings.TrimSpace(value)
+		parseGridAreaShorthand(cs, value)
 	case "grid-column":
 		cs.GridColumn = strings.TrimSpace(value)
 		cs.GridColumnSpan = parseGridSpan(cs.GridColumn)
@@ -4180,8 +4222,9 @@ func parseQuotes(value string) []string {
 const MarginAuto float32 = -1
 
 type marginGroup struct {
-	Top, Right, Bottom, Left float32
-	LeftAuto, RightAuto      bool
+	Top, Right, Bottom, Left       float32
+	TopAuto, RightAuto, BottomAuto bool
+	LeftAuto                       bool
 }
 
 type paddingGroup struct {
@@ -4195,12 +4238,17 @@ type insetGroup struct {
 }
 
 func readMarginGroup(cs *ComputedStyle) marginGroup {
-	return marginGroup{cs.MarginTop, cs.MarginRight, cs.MarginBottom, cs.MarginLeft, cs.MarginLeftAuto, cs.MarginRightAuto}
+	return marginGroup{
+		Top: cs.MarginTop, Right: cs.MarginRight, Bottom: cs.MarginBottom, Left: cs.MarginLeft,
+		TopAuto: cs.MarginTopAuto, RightAuto: cs.MarginRightAuto,
+		BottomAuto: cs.MarginBottomAuto, LeftAuto: cs.MarginLeftAuto,
+	}
 }
 
 func (cs *ComputedStyle) writeMarginGroup(g marginGroup) {
 	cs.MarginTop, cs.MarginRight, cs.MarginBottom, cs.MarginLeft = g.Top, g.Right, g.Bottom, g.Left
-	cs.MarginLeftAuto, cs.MarginRightAuto = g.LeftAuto, g.RightAuto
+	cs.MarginTopAuto, cs.MarginRightAuto = g.TopAuto, g.RightAuto
+	cs.MarginBottomAuto, cs.MarginLeftAuto = g.BottomAuto, g.LeftAuto
 }
 
 func readPaddingGroup(cs *ComputedStyle) paddingGroup {
@@ -5430,30 +5478,31 @@ func parseBgLen(cs *ComputedStyle, tok string) (float32, bool, bool) {
 	return 0, false, false
 }
 
-func parseMarginShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32, leftAuto, rightAuto bool) {
+func parseMarginShorthand(v string, fontSize float32, rootFontSize ...float32) (top, right, bottom, left float32, topAuto, rightAuto, bottomAuto, leftAuto bool) {
 	parts := splitTopLevelSpace(v)
 	switch len(parts) {
 	case 1:
 		auto := strIsAuto(parts[0])
 		val := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize, rootFontSize...)
-		return val, val, val, val, auto, auto
+		return val, val, val, val, auto, auto, auto, auto
 	case 2:
-		tb := resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		tb := resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize, rootFontSize...)
 		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
-		auto := strIsAuto(parts[1])
-		return tb, rl, tb, rl, auto, auto
+		tbAuto := strIsAuto(parts[0])
+		rlAuto := strIsAuto(parts[1])
+		return tb, rl, tb, rl, tbAuto, rlAuto, tbAuto, rlAuto
 	case 3:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		top = resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize, rootFontSize...)
 		rl := resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
-		auto := strIsAuto(parts[1])
-		return top, rl, bottom, rl, auto, auto
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), MarginAuto, fontSize, rootFontSize...)
+		rlAuto := strIsAuto(parts[1])
+		return top, rl, bottom, rl, strIsAuto(parts[0]), rlAuto, strIsAuto(parts[2]), rlAuto
 	case 4:
-		top = resolveLengthEm(css.ParseValue(parts[0]), 0, fontSize, rootFontSize...)
+		top = resolveLengthEm(css.ParseValue(parts[0]), MarginAuto, fontSize, rootFontSize...)
 		right = resolveLengthEm(css.ParseValue(parts[1]), MarginAuto, fontSize, rootFontSize...)
-		bottom = resolveLengthEm(css.ParseValue(parts[2]), 0, fontSize, rootFontSize...)
+		bottom = resolveLengthEm(css.ParseValue(parts[2]), MarginAuto, fontSize, rootFontSize...)
 		left = resolveLengthEm(css.ParseValue(parts[3]), MarginAuto, fontSize, rootFontSize...)
-		return top, right, bottom, left, strIsAuto(parts[3]), strIsAuto(parts[1])
+		return top, right, bottom, left, strIsAuto(parts[0]), strIsAuto(parts[1]), strIsAuto(parts[2]), strIsAuto(parts[3])
 	}
 	return
 }
@@ -5907,6 +5956,33 @@ func parseGridTemplateShorthand(cs *ComputedStyle, v string) {
 	}
 	cs.GridTemplateRows = rows
 	cs.GridTemplateColumns = cols
+}
+
+func parseGridAreaShorthand(cs *ComputedStyle, value string) {
+	cs.GridArea = strings.TrimSpace(value)
+	parts := strings.Split(cs.GridArea, "/")
+	if len(parts) != 2 && len(parts) != 4 {
+		return
+	}
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	var rowStart, rowEnd, colStart, colEnd string
+	if len(parts) == 2 {
+		rowStart, colStart = parts[0], parts[1]
+	} else {
+		rowStart, rowEnd, colStart, colEnd = parts[0], parts[1], parts[2], parts[3]
+	}
+	setGridPlacement := func(target *string, span *int, start, end string) {
+		if end == "" || strings.EqualFold(end, "auto") {
+			*target = start
+		} else {
+			*target = buildGridPlacement(start, end)
+		}
+		*span = parseGridSpan(*target)
+	}
+	setGridPlacement(&cs.GridRow, &cs.GridRowSpan, rowStart, rowEnd)
+	setGridPlacement(&cs.GridColumn, &cs.GridColumnSpan, colStart, colEnd)
 }
 
 func parseGridSpan(v string) int {

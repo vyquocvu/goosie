@@ -8,6 +8,8 @@ import (
 type TransformFunc struct {
 	Name string
 	Args []float32
+	PctX bool
+	PctY bool
 }
 
 type TransformOrigin struct {
@@ -81,15 +83,15 @@ func parseOneTransformFunc(name, argsStr string) TransformFunc {
 
 	switch name {
 	case "translate":
-		tx := parseTransformLength(args, 0)
-		ty := parseTransformLength(args, 1)
-		return TransformFunc{Name: "translate", Args: []float32{tx, ty}}
+		tx, px := parseTransformLength(args, 0)
+		ty, py := parseTransformLength(args, 1)
+		return TransformFunc{Name: "translate", Args: []float32{tx, ty}, PctX: px, PctY: py}
 	case "translatex":
-		tx := parseTransformLength(args, 0)
-		return TransformFunc{Name: "translate", Args: []float32{tx, 0}}
+		tx, px := parseTransformLength(args, 0)
+		return TransformFunc{Name: "translate", Args: []float32{tx, 0}, PctX: px}
 	case "translatey":
-		ty := parseTransformLength(args, 0)
-		return TransformFunc{Name: "translate", Args: []float32{0, ty}}
+		ty, py := parseTransformLength(args, 0)
+		return TransformFunc{Name: "translate", Args: []float32{0, ty}, PctY: py}
 	case "rotate":
 		angle := parseTransformAngle(args, 0)
 		return TransformFunc{Name: "rotate", Args: []float32{angle}}
@@ -152,15 +154,18 @@ func splitTransformArgs(s string) []string {
 	return parts
 }
 
-func parseTransformLength(args []string, idx int) float32 {
+func parseTransformLength(args []string, idx int) (float32, bool) {
 	if idx >= len(args) {
-		return 0
+		return 0, false
 	}
 	s := strings.TrimSpace(args[idx])
 	if s == "" {
-		return 0
+		return 0, false
 	}
-	return parseTransformLengthValue(s)
+	if strings.HasSuffix(strings.ToLower(s), "%") {
+		return parseTransformLengthValue(s), true
+	}
+	return parseTransformLengthValue(s), false
 }
 
 func parseTransformLengthValue(s string) float32 {

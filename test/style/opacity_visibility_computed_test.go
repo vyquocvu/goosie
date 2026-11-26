@@ -50,6 +50,51 @@ func TestOpacityClampsToUnitRange(t *testing.T) {
 }
 
 // qc:BR-197
+// qc:BR-330
+func TestVisibilityInheritKeywordComputesParentValue(t *testing.T) {
+	html := `<!DOCTYPE html><html><head><style>
+		.hidden{visibility:hidden}
+		.inherit{visibility:inherit}
+		.unset{visibility:unset}
+		.initial{visibility:initial}
+	</style></head><body>
+		<div id="shown"><div id="from-shown" class="inherit"></div></div>
+		<div id="hidden" class="hidden">
+			<div id="from-hidden" class="inherit"></div>
+			<div id="unset" class="unset"></div>
+			<div id="initial" class="initial"></div>
+		</div>
+	</body></html>`
+	doc := domtest.Parse(html)
+	var sheets []*css.Stylesheet
+	for _, node := range doc.ElementsByTagName("style") {
+		sheets = append(sheets, css.Parse(node.TextContent()))
+	}
+	styles := style.ResolveViewport(doc, sheets, style.Viewport{}, nil)
+	cases := []struct {
+		id   string
+		want string
+	}{
+		{"from-shown", "visible"},
+		{"from-hidden", "hidden"},
+		{"unset", "hidden"},
+		{"initial", "visible"},
+	}
+	for _, tc := range cases {
+		el := doc.ElementByID(tc.id)
+		if el == nil {
+			t.Fatalf("missing element %q", tc.id)
+		}
+		cs := styles[el.ID]
+		if cs == nil {
+			t.Fatalf("no computed style for %q", tc.id)
+		}
+		if cs.Visibility != tc.want {
+			t.Errorf("computed visibility for #%s = %q, want %q", tc.id, cs.Visibility, tc.want)
+		}
+	}
+}
+
 func TestVisibilityInheritsAndRestores(t *testing.T) {
 	html := `<!DOCTYPE html><html><head><style>
 		.parent{visibility:hidden}

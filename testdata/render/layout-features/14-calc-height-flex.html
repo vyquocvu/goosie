@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html style="height: 100%">
+<head>
+<title>Calc height in flex column</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { font: 16px Arial, Helvetica, sans-serif; }
+  .col { display: flex; flex-direction: column; height: 100%; }
+  .logo { min-height: 150px; height: calc(100% - 560px); max-height: 290px; background: #e8f0fe; }
+  .mark { width: 272px; height: 92px; margin: auto; background: #1a73e8; }
+  .search { height: 140px; background: #fff; }
+  .pill { box-sizing: border-box; width: 688px; height: 52px; margin: 6px auto; border: 1px solid #dadce0; border-radius: 26px; }
+  .buttons { display: flex; justify-content: center; gap: 8px; padding-top: 18px; }
+  .button { box-sizing: border-box; height: 36px; padding: 0 16px; background: #f8f9fa; border: 1px solid #dadce0; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="logo"><div class="mark"></div></div>
+    <div class="search">
+      <div class="pill"></div>
+      <div class="buttons"><div class="button">Google Search</div><div class="button">I'm Feeling Lucky</div></div>
+    </div>
+  </div>
+</body>
+</html>

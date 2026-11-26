@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Grid viewport math and named lines</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f2f2f2; font: 14px Arial, sans-serif; }
+  .label { background: #dfe6ec; color: #111; padding: 6px 10px; }
+  .grid {
+    display: grid;
+    width: 800px;
+    height: 150px;
+    background: #c9d3dc;
+    grid-template-columns:
+      [extended-full-start] max(1rem, calc(50vw - 400px + 1rem))
+      [full-start] 1fr
+      [content-start] minmax(0, 48rem)
+      [content-end] 1fr
+      [full-end] max(1rem, calc(50vw - 400px + 1rem))
+      [extended-full-end];
+  }
+  .edge { background: #c0392b; }
+  .main { grid-column: content-start / extended-full-end; background: #2c3e50; color: #fff; padding: 8px; }
+  .spacer { height: 4px; background: #eef2f5; }
+  .areas {
+    display: grid;
+    width: 800px;
+    height: 150px;
+    background: #c9d3dc;
+    grid-template-columns: 120px 1fr 120px;
+    grid-template-rows: 40px 1fr 40px;
+    grid-template-areas: "head head head" "left body right" "foot foot foot";
+  }
+  .head { grid-area: head; background: #34495e; color: #fff; padding: 8px; }
+  .left { grid-area: left; background: #16a085; }
+  .body { grid-area: body; background: #2980b9; color: #fff; padding: 8px; }
+  .right { grid-area: right; background: #d35400; }
+  .foot { grid-area: foot; background: #7f8c8d; color: #fff; padding: 8px; }
+</style>
+</head>
+<body>
+  <div class="label">viewport math with named lines</div>
+  <div class="grid">
+    <div class="edge"></div>
+    <div class="main">content-start through extended-full-end</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="label">template areas resolve implicit named lines</div>
+  <div class="areas">
+    <div class="head">head</div>
+    <div class="left">L</div>
+    <div class="body">body</div>
+    <div class="right">R</div>
+    <div class="foot">foot</div>
+  </div>
+</body>
+</html>

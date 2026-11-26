@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Empty table pseudo clearfix</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f2f2f2; font: 14px Arial, sans-serif; }
+  .label { background: #dfe6ec; color: #111; padding: 6px 10px; }
+  .case {
+    width: 760px;
+    margin: 4px 10px 0;
+    background: #fff;
+    border: 1px solid #555;
+  }
+  .case::before { content: ""; display: table; }
+  .case::after { content: ""; display: table; clear: both; }
+  .float {
+    float: left;
+    width: 120px;
+    height: 36px;
+    line-height: 36px;
+    margin: 0 4px;
+    background: #2980b9;
+    color: #fff;
+    text-align: center;
+  }
+  .band {
+    width: 760px;
+    height: 180px;
+    margin: 6px 10px;
+    padding: 8px;
+    background: #8e44ad;
+    color: #fff;
+  }
+  .plain {
+    width: 760px;
+    height: 60px;
+    margin: 6px 10px;
+    background: #fff;
+    border: 1px solid #555;
+  }
+  .plain > div { float: left; width: 370px; height: 58px; padding: 8px; background: #27ae60; color: #fff; }
+</style>
+</head>
+<body>
+  <div class="label">empty table pseudo boxes must not add a line box</div>
+  <div class="case"><div class="float">A</div><div class="float">B</div></div>
+  <div class="case"><div class="float">C</div><div class="float">D</div></div>
+  <div class="case"><div class="float">E</div><div class="float">F</div></div>
+  <div class="case"><div class="float">G</div><div class="float">H</div></div>
+  <div class="case"><div class="float">I</div><div class="float">J</div></div>
+  <div class="band">content after the clearfix cases</div>
+  <div class="plain"><div>plain sized block A</div><div>plain sized block B</div></div>
+</body>
+</html>

@@ -25,6 +25,19 @@ func TestSupportsGateOnFeature(t *testing.T) {
 	}
 }
 
+// qc:BR-328
+func TestSupportsColorLightDark(t *testing.T) {
+	got := rulesText(t, `
+		@supports (color: light-dark(red, blue)) { .modern{} }
+		@supports not (color: light-dark(tan, tan)) { .fallback{} }
+		@supports (color: definitely-not-a-color) { .invalid{} }
+	`)
+	want := []string{".modern"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("got rules %v, want %v", got, want)
+	}
+}
+
 func TestSupportsOrderPreserved(t *testing.T) {
 	got := rulesText(t, `.before{} @supports (display: grid) { .mid{} } .after{}`)
 	if len(got) != 3 || got[0] != ".before" || got[1] != ".mid" || got[2] != ".after" {

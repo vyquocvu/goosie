@@ -17,6 +17,7 @@ type Builder struct {
 	inspect        *InspectHighlight
 	scrollOffset   func(obj *layout.Object, prop string) float64
 	groupHeadStack []int32
+	zBase          string
 }
 
 type focusState struct {

@@ -343,12 +343,15 @@ def measure_site(entry: dict, renderers, artifacts: Path, tag: str) -> dict:
 class LiveRenderers:
     """Real captures: Playwright for the reference, the goosie binary for the run."""
 
-    def __init__(self, binary: str):
+    def __init__(self, binary: str, chromium_user_agent: str = ""):
         from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(args=["--force-device-scale-factor=1"])
-        self._page = self._browser.new_page(viewport={"width": VIEWPORT_W, "height": VIEWPORT_H},
-                                            device_scale_factor=DPR)
+        context_args = {"viewport": {"width": VIEWPORT_W, "height": VIEWPORT_H},
+                        "device_scale_factor": DPR}
+        if chromium_user_agent:
+            context_args["user_agent"] = chromium_user_agent
+        self._page = self._browser.new_page(**context_args)
         self.binary = binary
         self.last_chromium_secs = 0.0
         # When a site answers with a download (target.com did on sweep 10; a
@@ -555,7 +558,7 @@ def noise_floor(rows: list[dict], seconds: list[dict]) -> dict:
 
 def write_reports(rows: list[dict], counts: dict, scored: int, run_id: str,
                   floor: dict, out_dir: Path, corpus_name: str,
-                  build: dict | None = None) -> tuple[Path, Path]:
+                  build: dict | None = None, chromium_user_agent: str = "") -> tuple[Path, Path]:
     floor = floor or {"sites": 0, "comparable": 0, "max_abs_delta_pct": None,
                       "max_abs_delta_coverage": None, "labels_that_flipped": 0,
                       "detail": []}
@@ -575,7 +578,8 @@ def write_reports(rows: list[dict], counts: dict, scored: int, run_id: str,
         "contract": {
             "viewport": [VIEWPORT_W, VIEWPORT_H], "dpr": DPR,
             "chromium": {"wait_until": "load", "timeout_ms": CHROMIUM_TIMEOUT_MS,
-                         "animations": "disabled", "full_page": False},
+                         "animations": "disabled", "full_page": False,
+                         "user_agent": chromium_user_agent},
             "goosie": {"screenshot_floor_frames": 8,
                        "deadline_seconds_hardcoded": SCREENSHOT_DEADLINE_S,
                        "structure_mode": ["-gate", "-frames", str(GATE_FRAMES)],
@@ -663,6 +667,15 @@ def render_markdown(payload: dict) -> str:
         f"(floor {payload['thresholds']['min_scored']}"
         f", {'met' if payload['floor_met'] else 'NOT met — the run is broken'}).",
         "",
+    ]
+    ua = (payload.get("contract", {}).get("chromium") or {}).get("user_agent") or ""
+    if ua:
+        lines += [
+            f"Chromium reference UA: `{ua}` — set explicitly so UA-negotiated sites "
+            "serve the same bytes to both renderers.",
+            "",
+        ]
+    lines += [
         "Viewport-only on both sides; Goosie's screenshot driver never scrolls. "
         "This is a report, not a gate — see docs/tasks/TASK-038-LIVE-WBSITE-PARITY.md.",
         "",
@@ -1071,6 +1084,18 @@ def selftest() -> int:
         check("artifact dirs are not the report's addressable output",
               j1.parent != j2.parent and j1.name == j2.name)
 
+        ua_dir = tmp / "ua"
+        ua_dir.mkdir()
+        ua = "Mozilla/5.0 Goosie/2.0 selftest"
+        ua_json, ua_md = write_reports(r1, c1, scored, "SELFTEST-R", {}, ua_dir,
+                                       "selftest.json", build, ua)
+        ua_payload = json.loads(ua_json.read_text())
+        check("an explicit Chromium reference UA is recorded in the contract and "
+              "named in the report, so UA-negotiated bytes are attributable",
+              ua_payload["contract"]["chromium"]["user_agent"] == ua
+              and "Chromium reference UA" in ua_md.read_text(),
+              ua_md.read_text()[:300])
+
         print("build identity: the report says which pixels it measured (GOOSIE-LIVE-008)")
         check("the JSON names the source SHA, the binary path and the binary SHA-256",
               a.get("build", {}).get("source_sha") == build["source_sha"]
@@ -1226,6 +1251,9 @@ def main() -> int:
     ap.add_argument("--only-category", default="", help="restrict the sweep to one category")
     ap.add_argument("--only", action="append", default=[], metavar="SUBSTRING",
                     help="measure only URLs containing this substring (repeatable)")
+    ap.add_argument("--chromium-user-agent", default="", metavar="UA",
+                    help="UA for the Chromium reference, for sites that negotiate "
+                         "markup or CSS from the request header")
     ap.add_argument("--selftest", action="store_true",
                     help="drive the classifier with stub renderers; needs no network")
     args = ap.parse_args()
@@ -1261,7 +1289,7 @@ def main() -> int:
     artifacts = Path(args.artifacts or tempfile.mkdtemp(prefix="goosie-live-"))
     artifacts.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(HERE))
-    renderers = LiveRenderers(args.binary)
+    renderers = LiveRenderers(args.binary, args.chromium_user_agent)
     try:
         rows, noise_rows = run_sweep(sites, renderers, artifacts)
     finally:
@@ -1277,7 +1305,7 @@ def main() -> int:
     json_path, md_path = write_reports(rows, counts, scored, run_id,
                                        noise_floor(rows, noise_rows),
                                        Path(args.out_dir), Path(args.corpus).name,
-                                       build)
+                                       build, args.chromium_user_agent)
 
     print(f"\nscored {scored}/{len(rows)} pages (floor {MIN_SCORED})")
     for label in LADDER:

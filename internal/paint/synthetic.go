@@ -281,6 +281,10 @@ func SceneHash(d *LayerDL) uint64 {
 	for _, c := range d.All() {
 		add(uint64(c.Kind))
 		add(uint64(c.Z))
+		add(uint64(len(c.ZKey)))
+		for i := 0; i < len(c.ZKey); i++ {
+			add(uint64(c.ZKey[i]))
+		}
 		add(uint64(math.Float32bits(c.Opacity)))
 		add(uint64(c.Rect.X0))
 		add(uint64(c.Rect.Y0))
