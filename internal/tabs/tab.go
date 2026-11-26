@@ -23,6 +23,7 @@ type Tab struct {
 	id              uint64
 	url             string
 	title           string
+	name            string
 	history         *toolbar.History
 	scrollY         int32
 	layer           *frame.Layer
@@ -92,6 +93,18 @@ func (t *Tab) SetIncognito(incognito bool) {
 }
 
 func (t *Tab) ID() uint64 { return t.id }
+
+func (t *Tab) Name() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.name
+}
+
+func (t *Tab) SetName(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.name = name
+}
 
 func (t *Tab) URL() string {
 	t.mu.RLock()

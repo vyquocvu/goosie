@@ -25,6 +25,7 @@ func (r *Runtime) linkedCSSProvider() LinkedCSSFunc {
 }
 
 func (r *Runtime) setupStyleSheetInterfaces() {
+	state := r.cssomState()
 	r.cssomCollectionProto("StyleSheetList")
 	r.cssomCollectionProto("CSSRuleList")
 	r.cssomCollectionProto("MediaList")
@@ -42,17 +43,31 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 		return r.vm.ToValue(1)
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = r.cssRuleProto.DefineAccessorProperty("cssText", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(cssRuleStyleText(r.requireCSSRuleInfo(call.This).rule))
+		info := r.requireCSSRuleInfo(call.This)
+		rule, ok := info.rule()
+		if !ok {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(cssRuleStyleText(rule))
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = r.cssRuleProto.DefineAccessorProperty("parentStyleSheet", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		return r.wrapCSSStyleSheet(r.requireCSSRuleInfo(call.This).owner)
+		info := r.requireCSSRuleInfo(call.This)
+		if object := info.sheetObject(); object != nil {
+			return object
+		}
+		return r.wrapCSSStyleSheet(info.owner)
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = r.cssRuleProto.DefineAccessorProperty("parentRule", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		r.requireCSSRuleInfo(call.This)
 		return goja.Null()
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = r.cssStyleRuleProto.DefineAccessorProperty("selectorText", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(cssRuleSelectorText(r.requireCSSRuleInfo(call.This).rule))
+		info := r.requireCSSRuleInfo(call.This)
+		rule, ok := info.rule()
+		if !ok {
+			return r.vm.ToValue("")
+		}
+		return r.vm.ToValue(cssRuleSelectorText(rule))
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	r.cssStyleDeclarationProto = r.vm.NewObject()
 	r.defineInterfaceToStringTag("CSSStyleDeclaration", r.cssStyleDeclarationProto)
@@ -90,11 +105,14 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 	r.defineInterfaceToStringTag("CSSRule", r.cssRuleProto)
 	r.defineInterfaceToStringTag("CSSStyleRule", r.cssStyleRuleProto)
 	r.cssStyleSheetProto = r.vm.NewObject()
+	if state != nil {
+		_ = r.cssStyleSheetProto.DefineDataProperty(cssomStateKey, r.vm.NewDynamicObject(&cssomStateObject{state: state}), goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_FALSE)
+	}
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("cssRules", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		return r.cssRuleListForSheet(r.sheetOwner(call.This))
+		return r.cssRuleListForSheetValue(call.This)
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("rules", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		return r.cssRuleListForSheet(r.sheetOwner(call.This))
+		return r.cssRuleListForSheetValue(call.This)
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("ownerNode", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 		return r.wrapNode(r.sheetOwner(call.This))
@@ -116,89 +134,87 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 		return r.vm.ToValue(owner.GetAttribute("title"))
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("disabled", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		return r.vm.ToValue(r.sheetDisabled[r.sheetOwner(call.This)])
-	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		if view := r.constructedSheetView(call.This); view != nil {
+			return r.vm.ToValue(view.disabled)
+		}
 		owner := r.sheetOwner(call.This)
-		if owner == nil {
+		return r.vm.ToValue(r.sheetDisabled[owner] || r.sheetRuleView(owner).disabled)
+	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+		view := r.constructedSheetView(call.This)
+		owner := r.sheetOwner(call.This)
+		if view == nil && owner == nil {
+			return goja.Undefined()
+		}
+		disabled := call.Argument(0).ToBoolean()
+		if view != nil {
+			if view.disabled != disabled {
+				view.disabled = disabled
+				r.notifyCSSOMChange(view)
+			}
 			return goja.Undefined()
 		}
 		if r.sheetDisabled == nil {
 			r.sheetDisabled = make(map[*dom.Node]bool)
 		}
-		r.sheetDisabled[owner] = call.Argument(0).ToBoolean()
+		if r.sheetDisabled[owner] != disabled {
+			r.sheetDisabled[owner] = disabled
+			r.markCSSOMDirty()
+			r.notifyMutation()
+		}
 		return goja.Undefined()
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	_ = r.cssStyleSheetProto.DefineAccessorProperty("type", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue("text/css")
 	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	_ = r.cssStyleSheetProto.Set("replaceSync", func(call goja.FunctionCall) goja.Value {
-		sheet, ok := call.This.(*goja.Object)
-		if !ok {
-			panic(r.vm.NewTypeError("Illegal invocation"))
-		}
+		view := r.requireSheetView(call.This)
 		text := ""
 		if len(call.Arguments) > 0 {
 			text = call.Arguments[0].String()
 		}
-		_ = sheet.Set("__constructedCSS", text)
+		r.admitCSSOMText(text)
+		r.resetSheetRuleView(view, text)
+		r.notifyCSSOMChange(view)
 		return goja.Undefined()
 	})
 	_ = r.cssStyleSheetProto.Set("insertRule", r.cssomMethod("insertRule", true, func(call goja.FunctionCall) goja.Value {
-		owner := r.requireOwnedSheetRules(call.This)
+		view := r.requireSheetView(call.This)
 		if len(call.Arguments) < 1 {
 			panic(r.vm.NewTypeError("Failed to execute 'insertRule' on 'CSSStyleSheet': 1 argument required, but only 0 present."))
 		}
 		source := r.cssomRuleArgument(call.Argument(0))
-		parsed := css.Parse(source)
-		if len(parsed.Rules) != 1 {
-			panic(r.domError("SyntaxError", "Failed to execute 'insertRule' on 'CSSStyleSheet': Failed to parse the rule '"+source+"'."))
-		}
 		index := uint32(0)
 		if len(call.Arguments) >= 2 {
 			index = r.cssomUnsignedLong(call.Argument(1))
 		}
-		view := r.sheetRuleView(owner)
-		max := uint32(len(view.rules))
-		if index > max {
-			panic(r.domError("IndexSizeError", "Failed to execute 'insertRule' on 'CSSStyleSheet': The index provided ("+strconv.FormatUint(uint64(index), 10)+") is larger than the maximum index ("+strconv.FormatUint(uint64(max), 10)+")."))
-		}
-		rule := r.wrapCSSStyleRule(owner, parsed.Rules[0])
-		out := make([]*goja.Object, 0, len(view.rules)+1)
-		out = append(out, view.rules[:index]...)
-		out = append(out, rule)
-		out = append(out, view.rules[index:]...)
-		view.rules = out
+		r.insertSheetRule(view, source, index)
 		return r.vm.ToValue(index)
 	}))
 	_ = r.cssStyleSheetProto.Set("deleteRule", r.cssomMethod("deleteRule", true, func(call goja.FunctionCall) goja.Value {
-		owner := r.requireOwnedSheetRules(call.This)
+		view := r.requireSheetView(call.This)
 		if len(call.Arguments) < 1 {
 			panic(r.vm.NewTypeError("Failed to execute 'deleteRule' on 'CSSStyleSheet': 1 argument required, but only 0 present."))
 		}
-		index := r.cssomUnsignedLong(call.Argument(0))
-		view := r.sheetRuleView(owner)
-		max := int64(len(view.rules)) - 1
-		if int64(index) > max {
-			panic(r.domError("IndexSizeError", "Failed to execute 'deleteRule' on 'CSSStyleSheet': The index provided ("+strconv.FormatUint(uint64(index), 10)+") is larger than the maximum index ("+strconv.FormatInt(max, 10)+")."))
-		}
-		out := make([]*goja.Object, 0, len(view.rules)-1)
-		out = append(out, view.rules[:index]...)
-		out = append(out, view.rules[index+1:]...)
-		view.rules = out
+		r.deleteSheetRule(view, r.cssomUnsignedLong(call.Argument(0)))
 		return goja.Undefined()
 	}))
 
 	r.defineInterfaceToStringTag("CSSStyleSheet", r.cssStyleSheetProto)
 	_ = r.vm.Set("__cssSheetProto__", r.cssStyleSheetProto)
-	ctorValue, ctorErr := r.vm.RunString(`(function(proto) {
+	_ = r.vm.Set("__cssSheetNativeCtor__", r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
+		return r.newConstructedStyleSheet(call.NewTarget)
+	}))
+	ctorValue, ctorErr := r.vm.RunString(`(function(proto, native) {
 		var C = function CSSStyleSheet() {
 			if (!new.target) throw new TypeError("Failed to construct 'CSSStyleSheet': Please use the 'new' operator, this DOM object constructor cannot be called as a function.");
+			return Reflect.construct(native, [], new.target);
 		};
 		Object.defineProperty(C, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
 		Object.defineProperty(proto, 'constructor', { value: C, writable: true, enumerable: false, configurable: true });
 		return C;
-	})(__cssSheetProto__)`)
+	})(__cssSheetProto__, __cssSheetNativeCtor__)`)
 	_ = r.vm.Set("__cssSheetProto__", nil)
+	_ = r.vm.Set("__cssSheetNativeCtor__", nil)
 	if ctorErr == nil && ctorValue != nil {
 		_ = r.vm.Set("CSSStyleSheet", ctorValue)
 	}
@@ -215,6 +231,62 @@ func (r *Runtime) setupStyleSheetInterfaces() {
 			}
 			return r.newStyleSheetList(node.Doc)
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+		_ = r.documentProto.DefineAccessorProperty("adoptedStyleSheets", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			node := r.getNode(call.This)
+			if node == nil || node.Doc == nil {
+				return r.vm.NewArray()
+			}
+			state := r.cssomState()
+			state.mu.Lock()
+			values := append([]goja.Value(nil), state.documentDeps[node.Doc]...)
+			state.mu.Unlock()
+			items := make([]interface{}, len(values))
+			for i, value := range values {
+				items[i] = value
+			}
+			return r.vm.NewArray(items...)
+		}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			node := r.getNode(call.This)
+			if node == nil || node.Doc == nil {
+				return goja.Undefined()
+			}
+			var values []goja.Value
+			if len(call.Arguments) > 0 && !goja.IsNull(call.Arguments[0]) && !goja.IsUndefined(call.Arguments[0]) {
+				array, ok := call.Arguments[0].(*goja.Object)
+				if !ok {
+					panic(r.vm.NewTypeError("adoptedStyleSheets must be a sequence"))
+				}
+				length := array.Get("length").ToInteger()
+				for i := int64(0); i < length; i++ {
+					value := array.Get(strconv.FormatInt(i, 10))
+					if r.constructedSheetView(value) == nil {
+						panic(r.vm.NewTypeError("adoptedStyleSheets entries must be CSSStyleSheet objects"))
+					}
+					values = append(values, value)
+				}
+			}
+			state := r.cssomState()
+			state.mu.Lock()
+			previous := state.documentDeps[node.Doc]
+			changed := len(previous) != len(values)
+			if !changed {
+				for i := range values {
+					if previous[i] != values[i] {
+						changed = true
+						break
+					}
+				}
+			}
+			if changed {
+				state.documentDeps[node.Doc] = append([]goja.Value(nil), values...)
+				state.revision++
+			}
+			state.mu.Unlock()
+			if changed {
+				r.notifyMutation()
+			}
+			return goja.Undefined()
+		}), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
 }
 
@@ -387,23 +459,38 @@ func (r *Runtime) sheetCSSText(owner *dom.Node) string {
 }
 
 type cachedCSSRules struct {
-	text  string
-	rules []*goja.Object
+	text        string
+	sourceNode  *dom.Node
+	effective   string
+	parsed      []css.Rule
+	rules       []*goja.Object
+	owner       *dom.Node
+	object      *goja.Object
+	constructed bool
+	disabled    bool
+	list        goja.Value
 }
 
 func (r *Runtime) sheetRuleView(owner *dom.Node) *cachedCSSRules {
 	text := r.sheetCSSText(owner)
 	if owner == nil {
-		return &cachedCSSRules{text: text, rules: r.wrapCSSRules(owner, css.Parse(text).Rules)}
+		parsed := css.Parse(text).Rules
+		return &cachedCSSRules{text: text, effective: text, parsed: parsed, rules: r.wrapCSSRules(nil, parsed)}
 	}
-	if view, ok := r.cssRuleLists[owner]; ok && view.text == text {
+	view, ok := r.cssRuleLists[owner]
+	sourceNode := (*dom.Node)(nil)
+	if owner.Element() && owner.Data == "style" {
+		sourceNode = owner.FirstChild
+	}
+	if ok && view.text == text && view.sourceNode == sourceNode {
 		return view
 	}
-	view := &cachedCSSRules{text: text, rules: r.wrapCSSRules(owner, css.Parse(text).Rules)}
+	view = &cachedCSSRules{owner: owner, object: r.wrapCSSStyleSheet(owner), text: text, sourceNode: sourceNode}
 	if r.cssRuleLists == nil {
 		r.cssRuleLists = make(map[*dom.Node]*cachedCSSRules)
 	}
 	r.cssRuleLists[owner] = view
+	r.resetSheetRuleView(view, text)
 	return view
 }
 
@@ -411,10 +498,10 @@ func (r *Runtime) sheetRuleObjects(owner *dom.Node) []*goja.Object {
 	return r.sheetRuleView(owner).rules
 }
 
-func (r *Runtime) wrapCSSRules(owner *dom.Node, parsed []css.Rule) []*goja.Object {
+func (r *Runtime) wrapCSSRules(view *cachedCSSRules, parsed []css.Rule) []*goja.Object {
 	rules := make([]*goja.Object, len(parsed))
-	for i, rule := range parsed {
-		rules[i] = r.wrapCSSStyleRule(owner, rule)
+	for i := range parsed {
+		rules[i] = r.wrapCSSStyleRule(view, i)
 	}
 	return rules
 }
@@ -620,23 +707,38 @@ func (st *mediaListState) deleteMedium(medium string) bool {
 	return false
 }
 
-func (r *Runtime) cssRuleListForSheet(owner *dom.Node) goja.Value {
-	return r.cssRuleList(owner)
-}
-
-func (r *Runtime) wrapCSSStyleRule(owner *dom.Node, rule css.Rule) *goja.Object {
+func (r *Runtime) wrapCSSStyleRule(view *cachedCSSRules, index int) *goja.Object {
 	obj := r.vm.NewObject()
 	_ = obj.SetPrototype(r.cssStyleRuleProto)
 	if r.cssRuleWrappers == nil {
 		r.cssRuleWrappers = make(map[*goja.Object]cssRuleInfo)
 	}
-	r.cssRuleWrappers[obj] = cssRuleInfo{owner: owner, rule: rule}
+	info := cssRuleInfo{view: view, index: index}
+	if view != nil {
+		info.owner = view.owner
+	}
+	r.cssRuleWrappers[obj] = info
 	return obj
 }
 
 type cssRuleInfo struct {
 	owner *dom.Node
-	rule  css.Rule
+	view  *cachedCSSRules
+	index int
+}
+
+func (i cssRuleInfo) rule() (css.Rule, bool) {
+	if i.view == nil || i.index < 0 || i.index >= len(i.view.parsed) {
+		return css.Rule{}, false
+	}
+	return i.view.parsed[i.index], true
+}
+
+func (i cssRuleInfo) sheetObject() *goja.Object {
+	if i.view == nil {
+		return nil
+	}
+	return i.view.object
 }
 
 func (r *Runtime) cssRuleInfoOf(value goja.Value) (cssRuleInfo, bool) {
@@ -654,18 +756,6 @@ func (r *Runtime) requireCSSRuleInfo(value goja.Value) cssRuleInfo {
 		panic(r.vm.NewTypeError("Illegal invocation"))
 	}
 	return info
-}
-
-func (r *Runtime) requireOwnedSheetRules(value goja.Value) *dom.Node {
-	obj, ok := value.(*goja.Object)
-	if !ok {
-		panic(r.vm.NewTypeError("Illegal invocation"))
-	}
-	owner, registered := r.cssSheetOwners[obj]
-	if !registered || owner == nil {
-		panic(r.vm.NewTypeError("Illegal invocation"))
-	}
-	return owner
 }
 
 func (r *Runtime) cssomRuleArgument(value goja.Value) string {

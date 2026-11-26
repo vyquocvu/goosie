@@ -67,7 +67,7 @@ func layoutTable(a *Arena, id ObjectID, containingW float32) float32 {
 	if s.BorderCollapse {
 		available = contentW
 	}
-	autoWidth := resolvePctLength(s.Width, containingW) < 0
+	autoWidth := pctLen(a, s.Width, containingW) < 0
 	intrinsicContainingW := containingW
 	if autoWidth {
 		intrinsicContainingW = 0
@@ -590,10 +590,10 @@ func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool, contain
 	}
 	s := obj.Style
 	ubw := s.UsedBorderWidths()
-	chrome := resolvePctLength(s.PaddingLeft, obj.W) + resolvePctLength(s.PaddingRight, obj.W) +
+	chrome := pctLen(a, s.PaddingLeft, obj.W) + pctLen(a, s.PaddingRight, obj.W) +
 		ubw[3] + ubw[1]
 	if collapse {
-		chrome = resolvePctLength(s.PaddingLeft, obj.W) + resolvePctLength(s.PaddingRight, obj.W) + ubw[3]
+		chrome = pctLen(a, s.PaddingLeft, obj.W) + pctLen(a, s.PaddingRight, obj.W) + ubw[3]
 	} else {
 		chrome += spacingH
 	}
@@ -611,12 +611,12 @@ func cellExtents(a *Arena, id ObjectID, spacingH float32, collapse bool, contain
 
 func cellSpecifiedWidth(a *Arena, s *style.ComputedStyle, containingW float32) float32 {
 	if s.WidthCalc.Set {
-		if v, ok := s.WidthCalc.Resolve(containingW, a.ViewportW, a.ViewportH); ok && v >= 0 {
+		if v, ok := s.WidthCalc.Resolve(pctBase(a, containingW), a.ViewportW, a.ViewportH); ok && v >= 0 {
 			return v
 		}
 		return -1
 	}
-	return resolvePctLength(s.Width, containingW)
+	return pctLen(a, s.Width, containingW)
 }
 
 func outerBorder(a *Arena, id ObjectID, cells []tableCell, colCount int) (float32, *style.ComputedStyle) {

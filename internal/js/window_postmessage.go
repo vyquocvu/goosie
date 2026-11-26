@@ -70,6 +70,9 @@ func (r *Runtime) postMessageAcross(call goja.FunctionCall, target *Runtime, sou
 		panic(r.vm.NewTypeError("Failed to execute 'postMessage': 1 argument required"))
 	}
 	targetOrigin, transfer := postMessageOptions(r.vm, call)
+	if !ValidTargetOrigin(targetOrigin) {
+		panic(r.syntaxError("Failed to execute 'postMessage': invalid targetOrigin"))
+	}
 	cloned, err := cloneMessageValue(r, target, call.Arguments[0])
 	if err != nil {
 		panic(r.dataCloneError(err.Error()))
@@ -79,7 +82,7 @@ func (r *Runtime) postMessageAcross(call goja.FunctionCall, target *Runtime, sou
 		panic(r.dataCloneError(err.Error()))
 	}
 	origin := r.windowOrigin()
-	if !r.targetOriginMatches(targetOrigin, target.windowOrigin()) {
+	if !r.targetOriginAllows(target, targetOrigin) {
 		return goja.Undefined()
 	}
 	dispatch := target.vm.ToValue(func(goja.FunctionCall) goja.Value {
@@ -212,6 +215,15 @@ func postMessageOptions(vm *goja.Runtime, call goja.FunctionCall) (string, goja.
 		transfer = call.Arguments[2]
 	}
 	return targetOrigin, transfer
+}
+
+func (r *Runtime) syntaxError(message string) goja.Value {
+	if constructor, ok := goja.AssertConstructor(r.vm.Get("SyntaxError")); ok {
+		if exception, err := constructor(nil, r.vm.ToValue(message)); err == nil {
+			return exception
+		}
+	}
+	return r.vm.NewGoError(errors.New(message))
 }
 
 func (r *Runtime) dataCloneError(message string) *goja.Object {
@@ -704,29 +716,86 @@ func hasOwnPropertyName(object *goja.Object, name string) bool {
 }
 
 func (r *Runtime) windowOrigin() string {
+	if r.windowOriginOverride != "" {
+		return r.windowOriginOverride
+	}
 	u, err := url.Parse(r.opts.URL)
 	if err != nil || u.Host == "" {
 		return "null"
 	}
-	switch strings.ToLower(u.Scheme) {
+	return normalizedOrigin(strings.ToLower(u.Scheme), u.Host)
+}
+
+func normalizedOrigin(scheme, host string) string {
+	switch scheme {
 	case "http", "https", "ws", "wss":
-		return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
 	default:
 		return "null"
 	}
+	hostname := strings.ToLower(host)
+	port := ""
+	if parsed, err := url.Parse("//" + host); err == nil {
+		hostname = strings.ToLower(parsed.Hostname())
+		port = parsed.Port()
+	}
+	if (scheme == "http" || scheme == "ws") && port == "80" {
+		port = ""
+	}
+	if (scheme == "https" || scheme == "wss") && port == "443" {
+		port = ""
+	}
+	if port != "" {
+		hostname += ":" + port
+	}
+	return scheme + "://" + hostname
+}
+
+func ValidTargetOrigin(targetOrigin string) bool {
+	if targetOrigin == "*" || targetOrigin == "/" {
+		return true
+	}
+	u, err := url.Parse(targetOrigin)
+	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil {
+		return false
+	}
+	if u.Path != "" && u.Path != "/" {
+		return false
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	return normalizedOrigin(strings.ToLower(u.Scheme), u.Host) != "null"
 }
 
 func (r *Runtime) targetOriginMatches(targetOrigin, origin string) bool {
+	return TargetOriginAllows(targetOrigin, origin, r.windowOrigin())
+}
+
+func (r *Runtime) targetOriginAllows(target *Runtime, targetOrigin string) bool {
+	if !ValidTargetOrigin(targetOrigin) {
+		return false
+	}
+	if targetOrigin == "/" && (r.windowOrigin() == "null" || target.windowOrigin() == "null") {
+		if r.windowOpaqueID != "" && target.windowOpaqueID != "" {
+			return r.windowOpaqueID == target.windowOpaqueID
+		}
+	}
+	return r.targetOriginMatches(targetOrigin, target.windowOrigin())
+}
+
+func TargetOriginAllows(targetOrigin, recipientOrigin, senderOrigin string) bool {
+	if !ValidTargetOrigin(targetOrigin) {
+		return false
+	}
 	if targetOrigin == "*" {
 		return true
 	}
 	if targetOrigin == "/" {
-		return r.windowOrigin() == origin
+		return recipientOrigin == senderOrigin
 	}
 	u, err := url.Parse(targetOrigin)
-	if err != nil || u.Scheme == "" || u.Host == "" {
+	if err != nil {
 		return false
 	}
-	target := strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host)
-	return target == origin
+	return normalizedOrigin(strings.ToLower(u.Scheme), u.Host) == recipientOrigin
 }

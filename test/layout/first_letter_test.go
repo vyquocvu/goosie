@@ -269,6 +269,44 @@ func TestFirstLetterIncremental(t *testing.T) {
 		t.Fatal("elements not found")
 	}
 
+	assertFirstLetter := func(wantFontSize float32) {
+		t.Helper()
+		key := style.PseudoKey{NodeID: target.ID, Pseudo: "first-letter"}
+		flStyle := sess.PseudoStyles[key]
+		if flStyle == nil {
+			t.Fatalf("incremental ::first-letter style missing, want font-size %v", wantFontSize)
+		}
+		if flStyle.FontSize != wantFontSize {
+			t.Fatalf("incremental ::first-letter font-size = %v, want %v", flStyle.FontSize, wantFontSize)
+		}
+		pObjID, ok := sess.Arena.ForNode(target.ID)
+		if !ok {
+			t.Fatal("target layout object not found")
+		}
+		pObj := sess.Arena.Get(pObjID)
+		var letterObj, remainderObj *layout.Object
+		for kid := pObj.FirstKid; kid != 0; kid = sess.Arena.Get(kid).NextSibling {
+			k := sess.Arena.Get(kid)
+			if k.Node == nil || !k.Node.Text() {
+				continue
+			}
+			switch k.Node.DataContent {
+			case "H":
+				letterObj = k
+			case "ello":
+				remainderObj = k
+			}
+		}
+		if letterObj == nil || remainderObj == nil {
+			t.Fatalf("generated ::first-letter boxes missing: letter=%v remainder=%v", letterObj != nil, remainderObj != nil)
+		}
+		if letterObj.Style == nil || letterObj.Style.FontSize != wantFontSize {
+			t.Fatalf("generated ::first-letter box font-size = %v, want %v", letterObj.Style, wantFontSize)
+		}
+	}
+
+	assertFirstLetter(32)
+
 	before := sess.WorkCounts()
 	for current := unrelated; current != nil && current.Element(); current = current.Parent {
 		css.SetHover(current, true)
@@ -295,4 +333,11 @@ func TestFirstLetterIncremental(t *testing.T) {
 	if sess.WorkCounts().LayoutBuilds != before.LayoutBuilds+1 {
 		t.Fatalf("first-letter style change did not rebuild layout: work %+v, before %+v", sess.WorkCounts(), before)
 	}
+	assertFirstLetter(64)
+
+	css.ClearInteractiveState()
+	if err := sess.RestyleAndReflow(800); err != nil {
+		t.Fatal(err)
+	}
+	assertFirstLetter(32)
 }

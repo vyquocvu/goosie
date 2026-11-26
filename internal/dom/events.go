@@ -246,6 +246,21 @@ type HashChangeEvent struct {
 	NewURL string
 }
 
+type PopStateEvent struct {
+	Event
+	State any
+}
+
+func NewTrustedPopStateEvent(typ string, state any) *PopStateEvent {
+	e := &PopStateEvent{
+		Event: *NewTrustedEvent(typ, false, false),
+		State: state,
+	}
+	e.Event.interfaceName = "PopStateEvent"
+	e.Event.payload = e
+	return e
+}
+
 type SubmitEvent struct {
 	Event
 	Submitter *Node
@@ -611,6 +626,11 @@ func (e *Event) AsError() *ErrorEvent {
 func (e *Event) AsHashChange() *HashChangeEvent {
 	he, _ := e.payload.(*HashChangeEvent)
 	return he
+}
+
+func (e *Event) AsPopState() *PopStateEvent {
+	pe, _ := e.payload.(*PopStateEvent)
+	return pe
 }
 
 func (e *Event) AsSubmit() *SubmitEvent {

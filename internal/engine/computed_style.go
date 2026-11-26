@@ -1,12 +1,15 @@
 package engine
 
 import (
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
+	"github.com/vyquocvu/goosie/internal/js"
 	"github.com/vyquocvu/goosie/internal/style"
 )
 
@@ -19,6 +22,12 @@ func (s *Session) computedStyleValues(n *dom.Node) map[string]string {
 	hasBox := false
 	if n.Doc == s.Doc {
 		s.refreshStylesForCSSOMRead()
+		s.opMu.Lock()
+		layoutPending := s.Arena != nil && s.layoutDirty.Load()
+		s.opMu.Unlock()
+		if layoutPending {
+			s.refreshLayoutForCSSOMRead()
+		}
 		s.opMu.Lock()
 		cs = s.Styles[n.ID]
 		if s.Arena != nil && cs != nil {
@@ -211,7 +220,13 @@ func (s *Session) resolveContentURLRef(ref string) string {
 }
 
 func (s *Session) refreshStylesForCSSOMRead() {
-	if s == nil || !s.styleDirty.Swap(false) {
+	if s == nil {
+		return
+	}
+	if err := s.flushCSSOMStyles(false); err != nil {
+		return
+	}
+	if !s.styleDirty.Swap(false) {
 		return
 	}
 	s.opMu.Lock()
@@ -224,6 +239,248 @@ func (s *Session) refreshStylesForCSSOMRead() {
 	s.workCounts.styleResolves.Add(1)
 	s.workCounts.styleNodeVisits.Add(uint64(len(styles)))
 	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(s.Doc, styles, s.customFonts)
+}
+
+func (s *Session) cssomOverlaySnapshot() js.CSSOMOverlay {
+	if s == nil {
+		return js.CSSOMOverlay{}
+	}
+	if s.cssomOverlay != nil {
+		return s.cssomOverlay()
+	}
+	if s.jsRT == nil {
+		return js.CSSOMOverlay{}
+	}
+	return s.jsRT.CSSOMOverlaySnapshot()
+}
+
+func (s *Session) cssomMutationChanged() {
+	_ = s.flushCSSOMStyles(true)
+}
+
+func (s *Session) flushCSSOMStyles(relayout bool) error {
+	if s == nil || s.jsRT == nil || s.Doc == nil {
+		return nil
+	}
+	overlay := s.cssomOverlaySnapshot()
+	if !s.opMu.TryLock() {
+		s.styleDirty.Store(true)
+		s.layoutDirty.Store(true)
+		return nil
+	}
+	if overlay.Revision == s.cssomRevision {
+		s.opMu.Unlock()
+		return nil
+	}
+	sheets, err := s.collectCSSOMSheets(overlay)
+	if err != nil {
+		s.opMu.Unlock()
+		s.recordScriptError(err)
+		return err
+	}
+	resolver := style.NewResolver(sheets)
+	styles := resolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+	pseudoStyles := resolver.ResolvePseudoElements(s.Doc, styles, s.customFonts)
+	s.sheets = sheets
+	s.styleResolver = resolver
+	s.Styles = styles
+	s.PseudoStyles = pseudoStyles
+	s.cssomRevision = overlay.Revision
+	s.workCounts.styleResolves.Add(1)
+	s.workCounts.styleNodeVisits.Add(uint64(len(styles)))
+	s.styleDirty.Store(false)
+	s.layoutDirty.Store(true)
+	layoutPending := relayout && s.Arena != nil
+	viewportW := s.viewportW
+	previousFonts := s.customFonts
+	s.opMu.Unlock()
+	s.loadFonts(sheets)
+	s.opMu.Lock()
+	if s.customFonts != previousFonts {
+		s.Styles = resolver.ResolveViewport(s.Doc, s.styleViewport(), s.customFonts)
+		s.PseudoStyles = resolver.ResolvePseudoElements(s.Doc, s.Styles, s.customFonts)
+		s.workCounts.styleResolves.Add(1)
+		s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
+	}
+	s.opMu.Unlock()
+	s.loadImages()
+	if layoutPending {
+		return s.Reflow(viewportW)
+	}
+	return nil
+}
+
+func (s *Session) admitCSSOMText(text string) error {
+	budget := &cssBudget{}
+	if err := budget.check(text, false); err != nil {
+		return err
+	}
+	sheet := css.ParseWithOptions(text, s.mediaOptions())
+	selectors, declarations := 0, 0
+	for _, rule := range sheet.Rules {
+		selectors += len(rule.Selectors)
+		declarations += len(rule.Declarations)
+	}
+	if selectors > MaxCSSSelectors {
+		return fmt.Errorf("CSS selector count limit exceeded (%d)", MaxCSSSelectors)
+	}
+	if declarations > MaxCSSDeclarations {
+		return fmt.Errorf("CSS declaration limit exceeded (%d)", MaxCSSDeclarations)
+	}
+	stats, err := walkDocument(s.Doc, nil)
+	if err != nil {
+		return err
+	}
+	work := int64(0)
+	for _, rule := range sheet.Rules {
+		for _, declaration := range rule.Declarations {
+			work += int64(1 + len(declaration.Property) + len(declaration.Value))
+		}
+		for _, selector := range rule.Selectors {
+			cost, err := selectorCost(selector, stats.depth, stats.siblings)
+			if err != nil {
+				return err
+			}
+			work += cost * selectorFanOut(selector, stats)
+		}
+	}
+	if work > MaxStyleWork {
+		return fmt.Errorf("CSS style work limit exceeded (%d)", MaxStyleWork)
+	}
+	return nil
+}
+
+func (s *Session) collectCSSOMSheets(overlay js.CSSOMOverlay) ([]*css.Stylesheet, error) {
+	budget := &cssBudget{}
+	stats, err := walkDocument(s.Doc, func(n *dom.Node) error {
+		for _, attribute := range n.Attr {
+			if strings.EqualFold(attribute.Name, "style") {
+				if err := budget.check(attribute.Value, true); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	all := make([]cssSource, 0, len(s.authorCSS)+len(overlay.Sheets)+8)
+	for _, source := range s.authorCSS {
+		all = append(all, cssSource{text: source})
+	}
+	seen := make(map[string]bool)
+	deadline := time.Now().Add(CSSFetchBudget)
+	linker := s.cssomCSSLinker(deadline)
+	for _, sheet := range overlay.Sheets {
+		if !sheet.Apply || sheet.Disabled || !css.MatchMediaWithOptions(sheet.Media, s.mediaOptions()) {
+			continue
+		}
+		base := strings.TrimSpace(sheet.BaseURL)
+		if base == "" {
+			base = s.linkBase
+		}
+		if sheet.Linked {
+			abs, resolved := resolveSubresourceURL(s.linkBase, base)
+			if !resolved {
+				if bad, mixed := mixedContentURL(s.linkBase, base); mixed {
+					s.reportMixed(MixedContentStylesheet, bad)
+				}
+				continue
+			}
+			if !seen[abs] {
+				seen[abs] = true
+			}
+			text := sheet.Text
+			if !sheet.Overlay {
+				var ok bool
+				text, ok = cssSheetText(linker, s.linkBase, abs, s.sub, s.cssText)
+				if !ok {
+					continue
+				}
+			}
+			text = absolutizeCSSURLs(text, abs)
+			text = expandCSSImports(linker, abs, text, seen, s.sub, s.cssText, 1, s.reportMixed)
+			all = append(all, cssSource{text: text, remote: true})
+			continue
+		}
+		text := absolutizeCSSURLs(sheet.Text, base)
+		text = expandCSSImports(linker, base, text, seen, s.sub, s.cssText, 1, s.reportMixed)
+		all = append(all, cssSource{text: text})
+	}
+	sheets := make([]*css.Stylesheet, 0, len(all))
+	work := int64(0)
+	declarations := 0
+	for _, source := range all {
+		if err := budget.check(source.text, false); err != nil {
+			if source.remote {
+				continue
+			}
+			return nil, err
+		}
+		sheet := css.ParseWithOptions(source.text, s.mediaOptions())
+		kept := sheet.Rules[:0]
+		reject := false
+		for _, rule := range sheet.Rules {
+			if reject {
+				break
+			}
+			budget.selectors += len(rule.Selectors)
+			declarations += len(rule.Declarations)
+			if budget.selectors > MaxCSSSelectors || declarations > MaxCSSDeclarations {
+				if source.remote {
+					reject = true
+					continue
+				}
+				if budget.selectors > MaxCSSSelectors {
+					return nil, fmt.Errorf("CSS selector count limit exceeded (%d)", MaxCSSSelectors)
+				}
+				return nil, fmt.Errorf("CSS declaration limit exceeded (%d)", MaxCSSDeclarations)
+			}
+			declarationCost := int64(0)
+			for _, declaration := range rule.Declarations {
+				declarationCost += int64(1 + len(declaration.Property) + len(declaration.Value))
+			}
+			work += declarationCost
+			bad := false
+			for _, selector := range rule.Selectors {
+				cost, err := selectorCost(selector, stats.depth, stats.siblings)
+				if err != nil {
+					if source.remote {
+						bad = true
+						break
+					}
+					return nil, err
+				}
+				work += cost * selectorFanOut(selector, stats)
+			}
+			if bad {
+				continue
+			}
+			if work > MaxStyleWork {
+				break
+			}
+			kept = append(kept, rule)
+		}
+		if reject {
+			continue
+		}
+		sheet.Rules = kept
+		sheets = append(sheets, sheet)
+	}
+	return sheets, nil
+}
+
+func (s *Session) cssomCSSLinker(deadline time.Time) CSSLinker {
+	return func(base, href string) (string, error) {
+		if s.linker == nil || time.Now().After(deadline) {
+			return "", fmt.Errorf("CSS stylesheet fetch unavailable")
+		}
+		if s.jsRT != nil && !s.jsRT.AllowsStyleSheetURL(href) {
+			return "", fmt.Errorf("CSS stylesheet blocked by CSP")
+		}
+		return s.linker(base, href)
+	}
 }
 
 func px(v float32) string {

@@ -4179,7 +4179,7 @@ func (r *Runtime) installInputInterface(p *goja.Object) {
 		}
 		raw := call.Argument(0).String()
 		r.setReflectedAttribute(node, "src", raw, true)
-		if inputType(node) == "image" {
+		if dom.IsImageInput(node) {
 			r.startImageLoad(node, raw)
 		}
 		return goja.Undefined()
@@ -4188,7 +4188,7 @@ func (r *Runtime) installInputInterface(p *goja.Object) {
 		dim := dim
 		_ = p.DefineAccessorProperty(dim, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
 			node := r.getNode(call.This)
-			if node == nil || inputType(node) != "image" {
+			if node == nil || !dom.IsImageInput(node) {
 				return r.vm.ToValue(0)
 			}
 			return r.vm.ToValue(r.inputImageDimension(node, dim))
@@ -4430,7 +4430,7 @@ func (r *Runtime) inputImageDimension(node *dom.Node, dim string) int64 {
 }
 
 func (r *Runtime) maybeLoadImageInput(node *dom.Node, force bool) {
-	if node == nil || node.Data != "input" || inputType(node) != "image" || !node.HasAttribute("src") {
+	if !dom.IsImageInput(node) || !node.HasAttribute("src") {
 		return
 	}
 	if !force {

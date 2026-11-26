@@ -43,13 +43,13 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 				x0, y0, x1, y1 := parent.ContentRect()
 				rel = containingBlock{x0, y0, x1 - x0, y1 - y0}
 			}
-			dx := -resolvePctLength(s.Right, rel.w)
+			dx := -pctLen(a, s.Right, rel.w)
 			if s.HasLeft {
-				dx = resolvePctLength(s.Left, rel.w)
+				dx = pctLen(a, s.Left, rel.w)
 			}
-			dy := -resolvePctLength(s.Bottom, rel.h)
+			dy := -pctLenV(a, s.Bottom, rel.h)
 			if s.HasTop {
-				dy = resolvePctLength(s.Top, rel.h)
+				dy = pctLenV(a, s.Top, rel.h)
 			}
 			shiftSubtree(a, id, dx, dy)
 			obj = a.Get(id)
@@ -62,15 +62,15 @@ func positionSubtree(a *Arena, id ObjectID, cb, icb containingBlock, anchors map
 			}
 			dx := float32(0)
 			if s.HasLeft {
-				dx = resolvePctLength(s.Left, rel.w)
+				dx = pctLen(a, s.Left, rel.w)
 			} else if s.HasRight {
-				dx = -resolvePctLength(s.Right, rel.w)
+				dx = -pctLen(a, s.Right, rel.w)
 			}
 			dy := float32(0)
 			if s.HasTop {
-				dy = resolvePctLength(s.Top, rel.h)
+				dy = pctLenV(a, s.Top, rel.h)
 			} else if s.HasBottom {
-				dy = -resolvePctLength(s.Bottom, rel.h)
+				dy = -pctLenV(a, s.Bottom, rel.h)
 			}
 			if parentObj != nil && parentObj.Style != nil {
 				_, py0, _, py1 := parentObj.ContentRect()
@@ -132,14 +132,14 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 	obj = a.Get(id)
 	extra := obj.PaddingLeft + obj.PaddingRight + obj.BorderLeft + obj.BorderRight
 	vExtra := obj.PaddingTop + obj.PaddingBottom + obj.BorderTop + obj.BorderBottom
-	insetL := resolvePctLength(s.Left, cb.w)
-	insetR := resolvePctLength(s.Right, cb.w)
-	insetT := resolvePctLength(s.Top, cb.h)
-	insetB := resolvePctLength(s.Bottom, cb.h)
+	insetL := pctLen(a, s.Left, cb.w)
+	insetR := pctLen(a, s.Right, cb.w)
+	insetT := pctLenV(a, s.Top, cb.h)
+	insetB := pctLenV(a, s.Bottom, cb.h)
 
 	x := obj.StaticX
 	w := obj.W
-	shrinkW := resolvePctLength(s.Width, cb.w) < 0
+	shrinkW := pctLen(a, s.Width, cb.w) < 0
 	centerX := normalizeAxis(s.JustifySelf) == "center" && s.HasLeft && s.HasRight
 	stretched := false
 	if !shrinkW {
@@ -165,7 +165,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 
 	y := obj.StaticY
 	h := obj.H
-	explicitH := resolvePctLength(s.Height, sizeH) >= 0
+	explicitH := pctLenV(a, s.Height, sizeH) >= 0
 	centerY := normalizeAxis(s.AlignSelf) == "center" && s.HasTop && s.HasBottom
 	if explicitH {
 		switch {
@@ -254,7 +254,13 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 			measureW = cb.w
 		}
 	}
-	blockInto(a, id, measureW)
+	if shrinkW {
+		state := setPctBase(a, pctBase(a, cb.w), cb.h)
+		blockInto(a, id, measureW)
+		restorePctBase(a, state)
+	} else {
+		blockInto(a, id, measureW)
+	}
 	obj = a.Get(id)
 	inlineInto(a, id)
 	obj = a.Get(id)
@@ -293,7 +299,7 @@ func placeOutOfFlow(a *Arena, id ObjectID, cb containingBlock, anchors map[strin
 			if bw > avail {
 				bw = avail
 			}
-			obj.W = clampFlexBasis(obj, bw, cb.w)
+			obj.W = clampFlexBasis(a, obj, bw, cb.w)
 			if s.HasRight && !s.HasLeft {
 				obj.X = cb.x0 + cb.w - obj.MarginRight - insetR - (obj.W + extra)
 			}

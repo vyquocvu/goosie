@@ -29,6 +29,21 @@ import (
 	"github.com/vyquocvu/goosie/internal/viewsource"
 )
 
+type historySeed struct {
+	URLs         []string
+	States       [][]byte
+	SameDocument []bool
+	Index        int
+	Window       windowSeed
+}
+
+func documentDeviceViewport(viewportW, viewportH int, scale float32) frame.Size {
+	return frame.Size{
+		W: int32(float64(viewportW)*float64(scale) + 0.5),
+		H: int32(float64(viewportH)*float64(scale) + 0.5),
+	}
+}
+
 func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawURL string, viewportW, viewportH int, scale float32, downloadDir string, deferImages, deferFonts bool, extra ...any) (*frame.Layer, paint.SceneSpec, frame.Color, *engine.Session, string, error) {
 	if err := engine.ValidateViewport(viewportW, viewportH, float64(scale)); err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: viewport: %w", err)
@@ -53,6 +68,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	var savePathPicker platform.SavePathPicker
 	var policy scriptPolicy
 	var request navRequest
+	var seed historySeed
+	var window windowSeed
+	var contexts *browsingContextRegistry
 	for _, ex := range extra {
 		switch v := ex.(type) {
 		case *download.Manager:
@@ -79,20 +97,36 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			policy = v
 		case navRequest:
 			request = v
+		case historySeed:
+			seed = v
+			window = v.Window
+		case windowSeed:
+			window = v
+		case *browsingContextRegistry:
+			contexts = v
 		}
 	}
+	if window.OpaqueID == "" && contexts != nil {
+		window.OpaqueID = contexts.newOpaqueID()
+	}
+	if permsMgr != nil {
+		ctx = net.WithCookiePolicy(ctx, func(u *url.URL) bool {
+			return permsMgr.IsAllowed(perms.NormalizeOrigin(u.String()), perms.PermissionCookies)
+		})
+	}
+	fetchCtx := subresourceCtx(ctx, fetchURL)
 	var resp *net.Response
 	var stream *net.StreamResponse
 	var err error
 	if strings.EqualFold(request.Method, "POST") {
-		resp, err = client.Post(ctx, fetchURL, request.ContentType, strings.NewReader(request.Body))
+		resp, err = client.Post(fetchCtx, fetchURL, request.ContentType, strings.NewReader(request.Body))
 	} else if streamer, ok := client.(net.StreamingHTTP); ok && isHTTPURL(fetchURL) {
-		stream, err = streamer.GetStream(ctx, fetchURL)
+		stream, err = streamer.GetStream(fetchCtx, fetchURL)
 		if err == nil {
-			resp = &net.Response{StatusCode: stream.StatusCode, Headers: stream.Headers, URL: stream.URL}
+			resp = &net.Response{StatusCode: stream.StatusCode, Headers: stream.Headers, HeaderValues: stream.HeaderValues, URL: stream.URL}
 		}
 	} else {
-		resp, err = client.Get(ctx, fetchURL)
+		resp, err = client.Get(fetchCtx, fetchURL)
 	}
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: fetch %s: %w", net.RedactURL(fetchURL), err)
@@ -126,7 +160,10 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint view-source document: %w", err)
 		}
 		dl := list.Build(1)
-		extent := dl.Extent()
+		extent, err := sess.DocumentLayerBounds(dl.Extent(), scale, documentDeviceViewport(viewportW, viewportH, scale))
+		if err != nil {
+			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size view-source document bounds: %w", err)
+		}
 		budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 		if err != nil {
 			return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size view-source tile cache: %w", err)
@@ -199,7 +236,10 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint pdf document: %w", err)
 			}
 			dl := list.Build(1)
-			extent := dl.Extent()
+			extent, err := sess.DocumentLayerBounds(dl.Extent(), scale, documentDeviceViewport(viewportW, viewportH, scale))
+			if err != nil {
+				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size pdf document bounds: %w", err)
+			}
 			budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 			if err != nil {
 				return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size pdf tile cache: %w", err)
@@ -320,6 +360,7 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		}
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", downloadDone{path: savedPath, url: resp.URL, contentType: contentType, contentDisposition: contentDisposition}
 	}
+	csp := documentCSP(resp)
 	cssCtx, cssCancel := context.WithTimeout(ctx, engine.CSSFetchBudget)
 	defer cssCancel()
 	imgCtx := ctx
@@ -345,15 +386,23 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		if !jsAllowed {
 			return nil, fmt.Errorf("goosie: scripts blocked by site permissions")
 		}
-		resp, err := client.Get(subresourceCtx(scriptCtx, base), url)
+		resolvedURL := resolveHref(base, url)
+		if !csp.AllowsScript(resolvedURL, resp.URL) {
+			return nil, fmt.Errorf("goosie: script blocked by Content-Security-Policy")
+		}
+		resp, err := client.Get(subresourceCtx(scriptCtx, base), resolvedURL)
 		if err != nil {
 			return nil, err
 		}
 		return resp.Body, nil
 	}
-	jsFetch := jsTransport{client: client, ctx: subresourceCtx(ctx, resp.URL)}
+	jsFetch := jsTransport{client: client, ctx: subresourceCtx(ctx, resp.URL), csp: csp, documentURL: resp.URL}
 	linker := func(base, href string) (string, error) {
-		resp, err := client.Get(subresourceCtx(cssCtx, base), href)
+		resolvedURL := resolveHref(base, href)
+		if !csp.AllowsStyle(resolvedURL, resp.URL) {
+			return "", fmt.Errorf("goosie: stylesheet blocked by Content-Security-Policy")
+		}
+		resp, err := client.Get(subresourceCtx(cssCtx, base), resolvedURL)
 		if err != nil {
 			return "", err
 		}
@@ -366,7 +415,11 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		if !imgAllowed {
 			return nil, fmt.Errorf("goosie: image loading blocked by site permissions")
 		}
-		resp, err := client.Get(subresourceCtx(imgCtx, base), url)
+		resolvedURL := resolveHref(base, url)
+		if !csp.AllowsImage(resolvedURL, resp.URL) {
+			return nil, fmt.Errorf("goosie: image loading blocked by Content-Security-Policy")
+		}
+		resp, err := client.Get(subresourceCtx(imgCtx, base), resolvedURL)
 		if err != nil {
 			return nil, err
 		}
@@ -387,6 +440,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		frameURL := baseURL.ResolveReference(reference)
 		if frameURL.Scheme != "http" && frameURL.Scheme != "https" {
 			return nil, fmt.Errorf("iframe source must use HTTP(S)")
+		}
+		if !csp.AllowsFrame(frameURL.String(), resp.URL) {
+			return nil, fmt.Errorf("goosie: iframe blocked by Content-Security-Policy")
 		}
 		if perms.NormalizeOrigin(frameURL.String()) != perms.NormalizeOrigin(base) {
 			return nil, fmt.Errorf("goosie: cross-origin iframe document access is not available")
@@ -436,6 +492,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		if (formURL.Scheme != "http" && formURL.Scheme != "https") || perms.NormalizeOrigin(formURL.String()) != perms.NormalizeOrigin(base) {
 			return nil, fmt.Errorf("goosie: cross-origin iframe form submission is not available")
 		}
+		if !csp.AllowsFrame(formURL.String(), resp.URL) {
+			return nil, fmt.Errorf("goosie: iframe form blocked by Content-Security-Policy")
+		}
 		formResponse, err := client.Post(subresourceCtx(ctx, base), formURL.String(), contentType, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -475,7 +534,11 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		return frameDoc, nil
 	}
 	fontFetcher := func(base, url string) (engine.FontResult, error) {
-		resp, err := client.Get(subresourceCtx(fontCtx, base), url)
+		resolvedURL := resolveHref(base, url)
+		if !csp.AllowsFont(resolvedURL, resp.URL) {
+			return engine.FontResult{}, fmt.Errorf("goosie: font blocked by Content-Security-Policy")
+		}
+		resp, err := client.Get(subresourceCtx(fontCtx, base), resolvedURL)
 		if err != nil {
 			return engine.FontResult{}, err
 		}
@@ -516,6 +579,9 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		var rtErr error
 		rt, rtErr = js.New(js.Options{
 			URL:                      resp.URL,
+			HistoryURLs:              seed.URLs,
+			HistoryStates:            seed.States,
+			HistoryIndex:             seed.Index,
 			BroadcastHub:             broadcastHub,
 			HTTPClient:               jsFetch,
 			Cookies:                  cookieStore,
@@ -523,10 +589,22 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			ClipboardProvider:        clipboardProvider,
 			ClipboardPermissionState: clipboardPermissionState,
 			SessionID:                sessionID,
+			WindowHandle:             window.Handle,
+			WindowName:               window.Name,
+			WindowOrigin:             window.Origin,
+			WindowOpaqueID:           window.OpaqueID,
+			OpenerHandle:             window.OpenerHandle,
+			OpenerName:               window.OpenerName,
 			DarkMode:                 appMode.dark,
 			HighContrast:             appMode.highContrast,
 			Timeout:                  policy.timeout,
+			CSP:                      csp,
 		})
+		if contexts != nil {
+			rt.SetWindowMessageSink(contexts.deliver)
+			rt.SetWindowClosed(contexts.closed)
+			rt.SetWindowNameSink(contexts.rename)
+		}
 		if rtErr != nil {
 			fmt.Fprintf(os.Stderr, "goosie: js runtime: %v\n", rtErr)
 			rt = nil
@@ -561,8 +639,16 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 			sessOpts = append(sessOpts, engine.WithUserScripts(matched))
 		}
 	}
-	if opt := mediaOption(mediaBackend, client, resp.URL); opt != nil {
-		sessOpts = append(sessOpts, opt)
+	if mediaBackend != nil && client != nil {
+		fetchMedia := mediaFetcher(client, resp.URL)
+		guardedMedia := engine.MediaFetcher(func(ctx context.Context, source string) (engine.MediaResponse, error) {
+			resolvedURL := resolveHref(resp.URL, source)
+			if !csp.AllowsMedia(resolvedURL, resp.URL) {
+				return engine.MediaResponse{}, fmt.Errorf("goosie: media blocked by Content-Security-Policy")
+			}
+			return fetchMedia(ctx, resolvedURL)
+		})
+		sessOpts = append(sessOpts, engine.WithMedia(mediaBackend, guardedMedia, resp.URL))
 	}
 	documentText, documentEncoding, _ := resp.TextWithEncoding()
 	sessOpts = append(sessOpts, engine.WithDocumentEncoding(documentEncoding))
@@ -575,7 +661,10 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: paint document: %w", err)
 	}
 	dl := list.Build(1)
-	extent := dl.Extent()
+	extent, err := sess.DocumentLayerBounds(dl.Extent(), scale, documentDeviceViewport(viewportW, viewportH, scale))
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size document bounds: %w", err)
+	}
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size document cache: %w", err)
@@ -589,6 +678,33 @@ func loadURLCtx(ctx context.Context, client net.HTTP, fonts *raster.Fonts, rawUR
 	}
 	reportScriptErrors(os.Stderr, resp.URL, sess)
 	return layer, paint.SceneSpec{DocHeight: extent.H()}, sess.BackgroundColor(), sess, resp.URL, nil
+}
+
+func documentCSP(resp *net.Response) *js.CSPPolicy {
+	if resp == nil {
+		return nil
+	}
+	var policies []*js.CSPPolicy
+	for _, header := range responseHeaderValues(resp, "Content-Security-Policy") {
+		if strings.TrimSpace(header) != "" {
+			policies = append(policies, js.ParseCSP(header))
+		}
+	}
+	return js.ComposeCSP(policies...)
+}
+
+func responseHeaderValues(resp *net.Response, name string) []string {
+	for key, values := range resp.HeaderValues {
+		if strings.EqualFold(key, name) {
+			return values
+		}
+	}
+	for key, value := range resp.Headers {
+		if strings.EqualFold(key, name) && value != "" {
+			return []string{value}
+		}
+	}
+	return nil
 }
 
 func makeTextDocument(text string) *dom.Document {

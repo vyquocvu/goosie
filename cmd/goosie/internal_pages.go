@@ -582,40 +582,69 @@ func buildHistoryPageHTML(f *framePath, rawURL string) (string, string) {
 	return "Browsing History", internalPageTemplate("history", "Browsing History", b.String())
 }
 
-func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
-	if u, err := url.Parse(rawURL); err == nil {
-		action := u.Query().Get("action")
-		switch action {
-		case "reveal":
-			p := u.Query().Get("path")
-			if p != "" {
-				_ = download.ShowInFolder(p)
+func (f *framePath) runDownloadPageAction(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	action := u.Query().Get("action")
+	switch action {
+	case "open", "reveal":
+		path := u.Query().Get("path")
+		if id := u.Query().Get("id"); id != "" {
+			if f.downloads == nil {
+				return mgmtNoticeHTML("err", "Download action rejected: download storage is unavailable.")
 			}
-		case "open":
-			p := u.Query().Get("path")
-			if p != "" {
-				_ = download.OpenFile(p)
+			item := f.downloads.Get(id)
+			if item == nil || item.Status != download.StatusCompleted || item.LocalPath == "" {
+				return mgmtNoticeHTML("err", "Download action rejected: the completed download was not found.")
 			}
-		case "clear":
-			if f.downloads != nil {
-				f.downloads.ClearCompleted()
-			}
-		case "cancel":
-			id := u.Query().Get("id")
-			if f.downloads != nil && id != "" {
-				f.downloads.Cancel(id)
-			}
-		case "pause":
-			id := u.Query().Get("id")
-			if f.downloads != nil && id != "" {
-				f.downloads.Pause(id)
-			}
-		case "resume":
-			id := u.Query().Get("id")
-			if f.downloads != nil && id != "" {
-				f.downloads.Resume(id)
-			}
+			path = item.LocalPath
 		}
+		if f.downloads == nil {
+			return mgmtNoticeHTML("err", "Download action rejected: download storage is unavailable.")
+		}
+		if path == "" {
+			return mgmtNoticeHTML("err", "Download action rejected: no file path was provided.")
+		}
+		var err error
+		message := "Downloaded file opened."
+		if action == "open" {
+			err = f.downloads.OpenFile(path)
+		} else {
+			err = f.downloads.ShowInFolder(path)
+			message = "Downloaded file revealed."
+		}
+		if err != nil {
+			return mgmtNoticeHTML("err", "Download action rejected: "+err.Error()+".")
+		}
+		return mgmtNoticeHTML("ok", message)
+	case "clear":
+		if f.downloads != nil {
+			f.downloads.ClearCompleted()
+		}
+	case "cancel":
+		id := u.Query().Get("id")
+		if f.downloads != nil && id != "" {
+			f.downloads.Cancel(id)
+		}
+	case "pause":
+		id := u.Query().Get("id")
+		if f.downloads != nil && id != "" {
+			f.downloads.Pause(id)
+		}
+	case "resume":
+		id := u.Query().Get("id")
+		if f.downloads != nil && id != "" {
+			f.downloads.Resume(id)
+		}
+	}
+	return ""
+}
+
+func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
+	notice := ""
+	if u, err := url.Parse(rawURL); err == nil {
+		notice = f.runDownloadPageAction(u)
 	}
 
 	var b strings.Builder
@@ -626,8 +655,12 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
         <a class="btn-action secondary" href="goosie://downloads?action=clear">Clear Finished</a>
       </div>
     </div>`)
+	b.WriteString(notice)
 
 	dir := f.downloadDirectory()
+	if f.downloads != nil && f.downloads.Dir() != "" {
+		dir = f.downloads.Dir()
+	}
 	if dir == "" {
 		dir = "~/Downloads"
 	}
@@ -676,8 +709,8 @@ func buildDownloadsPageHTML(f *framePath, rawURL string) (string, string) {
 				}
 				b.WriteString(fmt.Sprintf(`<a class="btn-action danger" href="goosie://downloads?action=cancel&id=%s">Cancel</a>`, html.EscapeString(it.ID)))
 			} else if it.Status == download.StatusCompleted && it.LocalPath != "" {
-				b.WriteString(fmt.Sprintf(`<a class="btn-action" href="goosie://downloads?action=open&path=%s">Open</a>`, url.QueryEscape(it.LocalPath)))
-				b.WriteString(fmt.Sprintf(`<a class="btn-action secondary" href="goosie://downloads?action=reveal&path=%s">Show in Finder</a>`, url.QueryEscape(it.LocalPath)))
+				b.WriteString(fmt.Sprintf(`<a class="btn-action" href="goosie://downloads?action=open&id=%s">Open</a>`, url.QueryEscape(it.ID)))
+				b.WriteString(fmt.Sprintf(`<a class="btn-action secondary" href="goosie://downloads?action=reveal&id=%s">Show in Finder</a>`, url.QueryEscape(it.ID)))
 			}
 			b.WriteString(`</div></div>`)
 
@@ -1866,7 +1899,10 @@ func (f *framePath) renderInternalPage(ctx context.Context, rawURL string, viewp
 	}
 
 	dl := list.Build(1)
-	extent := dl.Extent()
+	extent, err := sess.DocumentLayerBounds(dl.Extent(), scale, documentDeviceViewport(viewportW, viewportH, scale))
+	if err != nil {
+		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size internal document bounds: %w", err)
+	}
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
 		return nil, paint.SceneSpec{}, frame.Color(0), nil, "", fmt.Errorf("goosie: size internal cache: %w", err)

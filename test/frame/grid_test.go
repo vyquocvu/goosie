@@ -161,6 +161,52 @@ func TestInvalidateMarksOnlyIntersectingTiles(t *testing.T) {
 	}
 }
 
+func TestBackgroundInvalidationRejectsInFlightResult(t *testing.T) {
+	g := frame.NewGrid(frame.Rect4(0, 0, 2*frame.TileSize, frame.TileSize), frame.TileSize, 2*frame.TileSizeBytes(), tilePool())
+	validCoord := frame.TileCoord{}
+	validPixels, ok := g.Acquire(validCoord)
+	if !ok || !g.MarkValid(validCoord, 1, validPixels) {
+		t.Fatal("setup: the cached tile did not become valid")
+	}
+	c := frame.TileCoord{Col: 1}
+	pixels, ok := g.Acquire(c)
+	if !ok {
+		t.Fatal("Acquire refused the in-flight tile")
+	}
+	before := g.BackgroundVersion()
+	if n := g.InvalidateBackground(); n != 1 {
+		t.Fatalf("InvalidateBackground marked %d cached tiles, want 1", n)
+	}
+	if got := g.BackgroundVersion(); got <= before {
+		t.Fatalf("background version = %d, want a generation past %d", got, before)
+	}
+	if !g.Needs(validCoord, 1) {
+		t.Fatal("the cached tile survived a background change")
+	}
+	if !g.InFlight(c) {
+		t.Fatal("background invalidation dropped the in-flight buffer before its worker returned")
+	}
+	if g.MarkValid(c, 1, pixels) {
+		t.Fatal("a tile rasterized before the background change became valid")
+	}
+	if !g.InFlight(c) || !g.Release(c, pixels) {
+		t.Fatal("the refused in-flight buffer was not returned to the pool")
+	}
+	if !g.Needs(c, 1) {
+		t.Fatal("the tile did not requeue after its old-background result was refused")
+	}
+	pixels, ok = g.Acquire(c)
+	if !ok {
+		t.Fatal("Acquire refused the requeued tile")
+	}
+	if !g.MarkValid(c, 1, pixels) || g.Needs(c, 1) {
+		t.Fatal("a tile rasterized after the background change did not become valid")
+	}
+	if !g.Needs(validCoord, 1) {
+		t.Fatal("the cached old-background tile became valid again")
+	}
+}
+
 func TestBudgetEvictsLeastRecentlyUsedAndPlateaus(t *testing.T) {
 	one := frame.TileSizeBytes()
 	g := frame.NewGrid(frame.Rect4(0, 0, 1024, 8192), frame.TileSize, 4*one, tilePool())

@@ -736,6 +736,13 @@ func (n *Node) TextareaRows() int {
 	return parseTextareaPositiveAttribute(n.GetAttribute("rows"), 2, 4096)
 }
 
+func (n *Node) InputSize() int {
+	if n == nil || !n.Element() || n.Namespace != NSHTML || n.Data != "input" {
+		return 20
+	}
+	return parseTextareaPositiveAttribute(n.GetAttribute("size"), 20, 4096)
+}
+
 func parseTextareaPositiveAttribute(attribute string, fallback, ceiling int) int {
 	input := strings.TrimLeft(attribute, " \t\n\r\f")
 	if input == "" {
@@ -1502,6 +1509,11 @@ func (n *Node) RemoveAttribute(name string) {
 			return
 		}
 	}
+}
+
+func IsImageInput(n *Node) bool {
+	return n != nil && n.Element() && n.Namespace == NSHTML && n.Data == "input" &&
+		strings.EqualFold(strings.TrimSpace(n.GetAttribute("type")), "image")
 }
 
 func IsDraggable(n *Node) bool {

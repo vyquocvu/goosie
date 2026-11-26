@@ -15,7 +15,7 @@ func TestDuplicateTab(t *testing.T) {
 	t1.SetScrollY(150)
 	h := toolbar.NewHistory()
 	h.Push("https://example.com/start")
-	h.Push("https://example.com/one")
+	h.PushState("https://example.com/one", toolbar.Request{}, []byte(`{"page":1}`), 150, true)
 	t1.SetHistory(h)
 
 	t2 := mgr.NewTab()
@@ -55,6 +55,12 @@ func TestDuplicateTab(t *testing.T) {
 	entries, idx := dup.History().Entries()
 	if len(entries) != 2 || idx != 1 {
 		t.Errorf("unexpected history entries length %d, idx %d", len(entries), idx)
+	}
+	if state, ok := dup.History().CurrentState(); !ok || string(state) != `{"page":1}` {
+		t.Errorf("duplicated history state = %q, %t", state, ok)
+	}
+	if !dup.History().SameDocumentTraversal(-1) {
+		t.Error("duplicated history lost its same-document metadata")
 	}
 
 	if _, ok := mgr.DuplicateTab(99999); ok {

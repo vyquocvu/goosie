@@ -96,6 +96,30 @@ func TestGetBoundingClientRectEdges(t *testing.T) {
 	}
 }
 
+func TestClientRectsSubtractWindowScrollWithoutChangingOffsetGeometry(t *testing.T) {
+	rt := layoutRuntime(t, layoutDoc, layoutGeometry)
+	rt.SetWindowScrollX(7)
+	rt.SetWindowScrollY(100)
+	result, err := rt.Evaluate(`
+		var el = document.getElementById('box');
+		var rect = el.getBoundingClientRect();
+		var clientRect = el.getClientRects()[0];
+		[
+			rect.x, rect.y, rect.width, rect.height,
+			clientRect.x, clientRect.y,
+			el.offsetLeft, el.offsetTop, el.offsetWidth, el.offsetHeight,
+			el.clientLeft, el.clientTop, el.clientWidth, el.clientHeight,
+			scrollX, scrollY
+		].join(',');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "3,-80,100,50,3,-80,10,20,100,50,1,1,98,48,7,100"; result != want {
+		t.Fatalf("scrolled client/offset geometry = %q, want %q", result, want)
+	}
+}
+
 func TestGetBoundingClientRectNoLayout(t *testing.T) {
 	doc := domtest.Parse(layoutDoc)
 	rt := newRuntime(t, js.Options{URL: "https://example.test/page", DOM: doc})

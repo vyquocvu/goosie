@@ -88,6 +88,8 @@ func TestLocationCoercesToHref(t *testing.T) {
 // qc:BR-207
 func TestDocumentLocationIsTheSameObjectAsWindowLocation(t *testing.T) {
 	rt := locationRuntime(t, "https://vietnamnet.vn/vn/thoi-su?a=1")
+	var requests []js.NavigationRequest
+	rt.SetNavigationSink(func(request js.NavigationRequest) { requests = append(requests, request) })
 	if err := rt.Run(`
 		var same = String(document.location === window.location);
 		// The library's own line, with the URL it is reading from.
@@ -104,8 +106,11 @@ func TestDocumentLocationIsTheSameObjectAsWindowLocation(t *testing.T) {
 	if got := evalString(t, rt, `gaSrc`); got != "https://ssl.google-analytics.com/ga.js" {
 		t.Fatalf("analytics snippet built %q, want the https branch", got)
 	}
-	if got := evalString(t, rt, `stillSame`); got != "true,vietnamnet.vn" {
-		t.Fatalf("after a document.location write = %q, want the object kept", got)
+	if got := evalString(t, rt, `stillSame`); got != "true,other.test" {
+		t.Fatalf("after a document.location write = %q, want the object kept and URL updated", got)
+	}
+	if len(requests) != 1 || requests[0].Kind != js.NavigationAssign || requests[0].URL != "https://other.test/" {
+		t.Fatalf("document.location navigation requests = %+v, want one assign to https://other.test/", requests)
 	}
 }
 
@@ -115,7 +120,7 @@ func TestLocationPartsFollowHistory(t *testing.T) {
 	if err := rt.Run(`
 	history.pushState({n: 1}, "", "/route/2?step=3#deep");
 	var pushed = [location.href, location.pathname, location.search, location.hash].join("|");
-	history.replaceState({n: 2}, "", "https://m.example.test/final");
+	history.replaceState({n: 2}, "", "https://example.test/final?x=1");
 	var replaced = [location.host, location.hostname, location.pathname, location.search].join("|");
 	history.back();
 	var back = [location.href, location.pathname].join("|");`, "inline"); err != nil {
@@ -124,7 +129,7 @@ func TestLocationPartsFollowHistory(t *testing.T) {
 	if got := evalString(t, rt, `pushed`); got != "https://example.test/route/2?step=3#deep|/route/2|?step=3|#deep" {
 		t.Fatalf("after pushState = %q", got)
 	}
-	if got := evalString(t, rt, `replaced`); got != "m.example.test|m.example.test|/final|" {
+	if got := evalString(t, rt, `replaced`); got != "example.test|example.test|/final|?x=1" {
 		t.Fatalf("after replaceState = %q", got)
 	}
 	if got := evalString(t, rt, `back`); got != "https://example.test/start?old=1|/start" {
@@ -135,11 +140,12 @@ func TestLocationPartsFollowHistory(t *testing.T) {
 // qc:BR-207
 func TestLocationHashWriteUpdatesSameDocumentURL(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/page?a=1")
+	requests := 0
+	rt.SetNavigationSink(func(js.NavigationRequest) { requests++ })
 	if err := rt.Run(`
 		var before = location.href;
-		location.href = "https://other.test/elsewhere";
+		var sameDocument = String(document.querySelector("body") === document.body);
 		location.hash = "#fragment";
-		location.pathname = "/else";
 		var after = location.href;
 		var parts = [location.hash, location.pathname].join("|");
 		var stayed = String(before === after);`, "inline"); err != nil {
@@ -148,32 +154,47 @@ func TestLocationHashWriteUpdatesSameDocumentURL(t *testing.T) {
 	if got := evalString(t, rt, `stayed`); got != "false" {
 		t.Fatalf("location.hash did not update the URL: %q", got)
 	}
+	if got := evalString(t, rt, `sameDocument`); got != "true" {
+		t.Fatalf("location.hash replaced the document: %q", got)
+	}
 	if got := evalString(t, rt, `parts`); got != "#fragment|/page" {
-		t.Fatalf("parts after writes = %q, want hash update and unchanged pathname", got)
+		t.Fatalf("parts after hash write = %q, want hash update and unchanged pathname", got)
 	}
 	if got := evalString(t, rt, `String(location)`); got != "https://example.test/page?a=1#fragment" {
-		t.Fatalf("href after writes = %q", got)
+		t.Fatalf("href after hash write = %q", got)
+	}
+	if requests != 0 {
+		t.Fatalf("hash write queued %d navigations, want same-document update", requests)
 	}
 }
 
 // qc:BR-207
 func TestLocationNavigationMembersAreAbsent(t *testing.T) {
 	rt := locationRuntime(t, "https://example.test/page")
+	var requests []js.NavigationRequest
+	rt.SetNavigationSink(func(request js.NavigationRequest) { requests = append(requests, request) })
 	if err := rt.Run(`
 		var out = [
 			typeof location.assign, typeof location.replace, typeof location.reload,
 			typeof location.searchParams, typeof location.ancestorOrigins
 		].join("|");
-		var reloadError = "no-error";
-		try { location.reload(); } catch (e) { reloadError = e.name + ":" + e.message; }`, "inline"); err != nil {
+		var reloadResult = "no-error";
+		try { reloadResult = String(location.reload(true)); } catch (e) { reloadResult = e.name + ":" + e.message; }
+		var assignError = "no-error";
+		try { location.assign(); } catch (e) { assignError = e.name; }`, "inline"); err != nil {
 		t.Fatal(err)
 	}
-	if got := evalString(t, rt, `out`); got != "undefined|undefined|undefined|undefined|undefined" {
-		t.Fatalf("navigation members = %q, want all undefined", got)
+	if got := evalString(t, rt, `out`); got != "function|function|function|undefined|undefined" {
+		t.Fatalf("navigation members = %q, want Chromium's Location API", got)
 	}
-	got := evalString(t, rt, `reloadError`)
-	if !strings.Contains(got, "TypeError") || !strings.Contains(got, "reload") {
-		t.Fatalf("location.reload() failed with %q, want a TypeError naming reload", got)
+	if got := evalString(t, rt, `reloadResult`); got != "undefined" {
+		t.Fatalf("location.reload(true) = %q, want undefined", got)
+	}
+	if got := evalString(t, rt, `assignError`); got != "TypeError" {
+		t.Fatalf("location.assign() error = %q, want TypeError", got)
+	}
+	if len(requests) != 1 || requests[0].Kind != js.NavigationReload || requests[0].URL != "https://example.test/page" {
+		t.Fatalf("reload requests = %+v, want one reload of the current URL", requests)
 	}
 }
 

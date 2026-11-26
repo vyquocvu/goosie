@@ -212,7 +212,7 @@ func layoutGrid(a *Arena, id ObjectID, containingW float32) float32 {
 		it.X = xs[p.col]
 		it.Y = contentY
 		if p.justify != "" && it.Style.Width < 0 {
-			blockInto(a, p.id, maxFlexMeasureWidth)
+			blockIntoMeasure(a, p.id, maxFlexMeasureWidth, pctBase(a, colRect))
 			it = a.Get(p.id)
 			inlineInto(a, p.id)
 			it = a.Get(p.id)
@@ -972,6 +972,8 @@ func measureAutoCols(a *Arena, items []gridItem, cols []gridTrack) []float32 {
 }
 
 func gridItemMaxContentW(a *Arena, id ObjectID) float32 {
+	state := setPctBase(a, -1, -1)
+	defer restorePctBase(a, state)
 	it := a.Get(id)
 	blockInto(a, id, maxFlexMeasureWidth)
 	it = a.Get(id)

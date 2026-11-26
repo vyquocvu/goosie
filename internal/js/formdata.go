@@ -441,7 +441,7 @@ func (r *Runtime) formDataEntries(form, submitter *dom.Node) []formDataEntry {
 		isCharset := control.Data == "input" && typ == "hidden" && asciiEqualFold(name, "_charset_")
 		entries = append(entries, formDataEntry{name: name, value: value.String(), charset: isCharset})
 	}
-	if submitter != nil && submitter.Data == "input" && strings.EqualFold(submitter.GetAttribute("type"), "image") && r.formOwner(submitter) == form {
+	if submitter != nil && dom.IsImageInput(submitter) && r.formOwner(submitter) == form {
 		name := submitter.GetAttribute("name")
 		entries = append(entries,
 			formDataEntry{name: name + ".x", value: "0"},

@@ -37,6 +37,40 @@ window.moduleResult = moduleOnly;
 	}
 }
 
+func TestNamespaceReExportImportKeepsNamespaceFlag(t *testing.T) {
+	const pageURL = "https://example.test/index.html"
+	rt, err := js.New(js.Options{URL: pageURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modules := map[string]string{
+		"https://example.test/named.js":    `export const named = "named";`,
+		"https://example.test/reexport.js": `export * as bag from "./named.js";`,
+	}
+	fetch := func(base, target string) (ModuleFetchResult, error) {
+		body, ok := modules[target]
+		if !ok {
+			t.Fatalf("unexpected module fetch base=%q url=%q", base, target)
+		}
+		return ModuleFetchResult{
+			Body:       []byte(body),
+			Headers:    map[string]string{"Content-Type": "text/javascript"},
+			StatusCode: 200,
+		}, nil
+	}
+	s, err := NewSession(`<!doctype html><script type="module">
+import { bag } from "./reexport.js";
+window.moduleBag = bag.named;
+</script>`, nil, 320, WithJS(rt), WithScripts(pageURL, nil), WithModuleFetcher(fetch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if got, err := rt.Evaluate(`window.moduleBag`); err != nil || got != "named" {
+		t.Fatalf("namespace re-export import = %q, err = %v; want %q", got, err, "named")
+	}
+}
+
 func TestDynamicImportIsRejectedBeforeParsing(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
@@ -51,15 +85,25 @@ func TestDynamicImportIsRejectedBeforeParsing(t *testing.T) {
 	}
 }
 
-func TestModuleScriptRejectsUnsupportedExportSyntax(t *testing.T) {
+func TestModuleScriptSupportsNamedExportSyntax(t *testing.T) {
 	rt, err := js.New(js.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rt.Close()
-	s := &Session{jsRT: rt, scriptFetch: func(string, string) ([]byte, error) { return nil, nil }}
+	s := &Session{jsRT: rt, scriptFetch: func(base, target string) ([]byte, error) {
+		if target != "https://example.test/a.js" {
+			t.Fatalf("unexpected module fetch %q", target)
+		}
+		return []byte(`export const answer = 42;`), nil
+	}}
 	graphBytes, moduleCount := 0, 0
-	if err := s.executeDefaultImportModule(rt, `export const answer = 42;`, "https://example.test/a.js", "a.js", time.Now().Add(time.Second), &graphBytes, &moduleCount); err == nil {
-		t.Fatal("unsupported named export was accepted as a module")
+	deadline := time.Now().Add(time.Second)
+	if err := s.executeDefaultImportModule(rt, `import { answer } from "./a.js"; window.moduleAnswer = answer;`, "https://example.test/main.js", "main.js", deadline, &graphBytes, &moduleCount); err != nil {
+		t.Fatalf("named export was refused: %v", err)
+	}
+	got, err := rt.Evaluate(`window.moduleAnswer`)
+	if err != nil || got != "42" {
+		t.Fatalf("named import result = %q, err = %v", got, err)
 	}
 }

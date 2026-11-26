@@ -246,6 +246,10 @@ func (b *Builder) paintReplacedElement(obj *layout.Object, opacity float32, clip
 	if obj.Node == nil {
 		return
 	}
+	if obj.IsImageInput() {
+		b.paintImageInput(obj, opacity, clip)
+		return
+	}
 	switch obj.Node.Data {
 	case "img", "canvas":
 		b.paintImage(obj, opacity, clip)

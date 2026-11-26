@@ -8,6 +8,24 @@ import (
 type CSPPolicy struct {
 	Directives map[string][]string
 	ReportOnly bool
+	Policies   []*CSPPolicy
+}
+
+func ComposeCSP(policies ...*CSPPolicy) *CSPPolicy {
+	enforcing := make([]*CSPPolicy, 0, len(policies))
+	for _, policy := range policies {
+		if policy != nil && !policy.ReportOnly {
+			enforcing = append(enforcing, policy)
+		}
+	}
+	switch len(enforcing) {
+	case 0:
+		return nil
+	case 1:
+		return enforcing[0]
+	default:
+		return &CSPPolicy{Policies: enforcing}
+	}
 }
 
 func ParseCSP(header string) *CSPPolicy {
@@ -35,124 +53,116 @@ func ParseCSP(header string) *CSPPolicy {
 }
 
 func (p *CSPPolicy) AllowsScript(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("script-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("script-src", src, documentURL)
+	})
 }
 
 func (r *Runtime) AllowsScriptURL(src, documentURL string) bool {
 	return r != nil && r.opts.CSP.AllowsScript(src, documentURL)
 }
 
+func (r *Runtime) AllowsInlineScriptWithNonce(nonce string) bool {
+	return r != nil && r.opts.CSP.AllowsInlineScriptWithNonce(nonce)
+}
+
 func (p *CSPPolicy) AllowsScriptWithNonce(src, nonce, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	if nonce != "" && p.hasNonce("script-src", nonce) {
-		return true
-	}
-	return p.AllowsScript(src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return nonce != "" && policy.hasNonce("script-src", nonce) || policy.allows("script-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsStyle(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("style-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("style-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsStyleWithNonce(src, nonce, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	if nonce != "" && p.hasNonce("style-src", nonce) {
-		return true
-	}
-	return p.AllowsStyle(src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return nonce != "" && policy.hasNonce("style-src", nonce) || policy.allows("style-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsImage(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("img-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("img-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsConnect(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("connect-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("connect-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsFont(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("font-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("font-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsMedia(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("media-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("media-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsFrame(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("frame-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("frame-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsWorker(src string, documentURL string) bool {
-	if p == nil {
-		return true
-	}
-	return p.allows("worker-src", src, documentURL)
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allows("worker-src", src, documentURL)
+	})
 }
 
 func (p *CSPPolicy) AllowsInlineScript() bool {
-	if p == nil {
-		return true
-	}
-	return p.allowsInline("script-src")
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allowsInline("script-src")
+	})
 }
 
 func (p *CSPPolicy) AllowsInlineScriptWithNonce(nonce string) bool {
-	if p == nil {
-		return true
-	}
-	if nonce != "" && p.hasNonce("script-src", nonce) {
-		return true
-	}
-	return p.AllowsInlineScript()
+	return p.all(func(policy *CSPPolicy) bool {
+		return nonce != "" && policy.hasNonce("script-src", nonce) || policy.allowsInline("script-src")
+	})
 }
 
 func (p *CSPPolicy) AllowsInlineStyle() bool {
-	if p == nil {
-		return true
-	}
-	return p.allowsInline("style-src")
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.allowsInline("style-src")
+	})
 }
 
 func (p *CSPPolicy) AllowsInlineStyleWithNonce(nonce string) bool {
-	if p == nil {
-		return true
-	}
-	if nonce != "" && p.hasNonce("style-src", nonce) {
-		return true
-	}
-	return p.AllowsInlineStyle()
+	return p.all(func(policy *CSPPolicy) bool {
+		return nonce != "" && policy.hasNonce("style-src", nonce) || policy.allowsInline("style-src")
+	})
 }
 
 func (p *CSPPolicy) AllowsEval() bool {
-	if p == nil {
+	return p.all(func(policy *CSPPolicy) bool {
+		return policy.hasSource("script-src", "'unsafe-eval'")
+	})
+}
+
+func (p *CSPPolicy) all(allowed func(*CSPPolicy) bool) bool {
+	if p == nil || p.ReportOnly {
 		return true
 	}
-	return p.hasSource("script-src", "'unsafe-eval'")
+	if len(p.Policies) == 0 {
+		return allowed(p)
+	}
+	for _, policy := range p.Policies {
+		if !policy.all(allowed) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *CSPPolicy) hasNonce(directive, nonce string) bool {
@@ -246,13 +256,16 @@ func (p *CSPPolicy) getSources(directive string) []string {
 }
 
 func isSameOrigin(url1, url2 string) bool {
+	u2, err := url.Parse(url2)
+	if err != nil {
+		return false
+	}
 	u1, err := url.Parse(url1)
 	if err != nil {
 		return false
 	}
-	u2, err := url.Parse(url2)
-	if err != nil {
-		return false
+	if !u1.IsAbs() {
+		u1 = u2.ResolveReference(u1)
 	}
 	return u1.Scheme == u2.Scheme && u1.Host == u2.Host
 }

@@ -37,6 +37,7 @@ type chromeWindow struct {
 	onResize          func(contentW, contentH int)
 	onZoom            func(delta float64)
 	onLinkClick       func(href string)
+	onLinkClickInfo   func(linkActivation)
 	onBookmark        func()
 	onInspect         func()
 	onViewSource      func()
@@ -50,6 +51,7 @@ type chromeWindow struct {
 	onIME             func(ev surface.Event) bool
 	onCopy            func() bool
 	hitTestLink       func(contentX, contentY int32) string
+	hitTestLinkInfo   func(contentX, contentY int32) linkActivation
 	onHoverCursor     func(contentX, contentY int32) surface.Cursor
 	onContentHover    func(contentX, contentY int32)
 	onContentActive   func(contentX, contentY int32, pressed bool) bool
@@ -781,7 +783,15 @@ func (cw *chromeWindow) intercept(ev surface.Event) bool {
 				}
 				return true
 			}
-			if cw.hitTestLink != nil {
+			if cw.hitTestLinkInfo != nil && cw.onLinkClickInfo != nil {
+				if info := cw.hitTestLinkInfo(contentX, contentY); info.href != "" {
+					if activeChanged && cw.onActiveStyle != nil {
+						cw.onActiveStyle()
+					}
+					cw.onLinkClickInfo(info)
+					return true
+				}
+			} else if cw.hitTestLink != nil {
 				if href := cw.hitTestLink(contentX, contentY); href != "" {
 					if activeChanged && cw.onActiveStyle != nil {
 						cw.onActiveStyle()

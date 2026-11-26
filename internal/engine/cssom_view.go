@@ -73,6 +73,14 @@ func (s *Session) layoutBoxInfo(n *dom.Node) (js.LayoutBoxInfo, bool) {
 }
 
 func scrollableOverflow(arena *layout.Arena, root *layout.Object) (float64, float64) {
+	return scrollableOverflowMode(arena, root, false)
+}
+
+func documentScrollableOverflow(arena *layout.Arena, root *layout.Object) (float64, float64) {
+	return scrollableOverflowMode(arena, root, true)
+}
+
+func scrollableOverflowMode(arena *layout.Arena, root *layout.Object, document bool) (float64, float64) {
 	contentX, contentY, contentX1, contentY1 := root.ContentRect()
 	extentX, extentY := contentX1-contentX, contentY1-contentY
 	var walk func(layout.ObjectID)
@@ -88,11 +96,15 @@ func scrollableOverflow(arena *layout.Arena, root *layout.Object) (float64, floa
 				continue
 			}
 			_, _, x1, y1 := obj.BorderRect()
-			if x1+obj.MarginRight-contentX > extentX {
-				extentX = x1 + obj.MarginRight - contentX
+			marginRight, marginBottom := obj.MarginRight, obj.MarginBottom
+			if document {
+				marginRight, marginBottom = scrollableTrailingMargins(obj)
 			}
-			if y1+obj.MarginBottom-contentY > extentY {
-				extentY = y1 + obj.MarginBottom - contentY
+			if x1+marginRight-contentX > extentX {
+				extentX = x1 + marginRight - contentX
+			}
+			if y1+marginBottom-contentY > extentY {
+				extentY = y1 + marginBottom - contentY
 			}
 			if obj.Style == nil || (obj.Style.OverflowX == style.OverflowVisible && obj.Style.OverflowY == style.OverflowVisible) {
 				walk(obj.FirstKid)
@@ -108,6 +120,25 @@ func scrollableOverflow(arena *layout.Arena, root *layout.Object) (float64, floa
 		extentY = 0
 	}
 	return math.Ceil(float64(extentX + root.PaddingRight)), math.Ceil(float64(extentY + root.PaddingBottom))
+}
+
+func scrollableTrailingMargins(obj *layout.Object) (right, bottom float32) {
+	if obj.Style == nil {
+		return obj.MarginRight, obj.MarginBottom
+	}
+	switch obj.Style.Position {
+	case style.PositionAbsolute, style.PositionFixed:
+		return 0, 0
+	}
+	if obj.Style.Float != style.FloatNone {
+		return 0, obj.MarginBottom
+	}
+	switch obj.Style.Display {
+	case style.DisplayInline, style.DisplayInlineBlock, style.DisplayInlineFlex, style.DisplayInlineGrid, style.DisplayInlineTable:
+		return obj.MarginRight, obj.MarginBottom
+	default:
+		return 0, obj.MarginBottom
+	}
 }
 
 func hasRenderedText(root *dom.Node) bool {

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>flex replaced percentage height and SVG px presentation hints (GOOSIE-SCROLLRANGE-001)</title>
+<style>
+    body { margin: 16px; font: 13px sans-serif; color: #111; background: #fff; }
+    .card { display: flex; width: 380px; height: 320px; border: 1px solid #222; background: #eef3f8; }
+    .media { display: flex; position: relative; width: 200px; height: 320px; overflow: hidden;
+             align-items: center; justify-content: center; background: #dce9f7; }
+    .media img { height: 100%; width: auto; max-width: none; box-sizing: border-box;
+                 border: 2px solid #2166ac; }
+    .spinner { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+               display: flex; align-items: center; justify-content: center; }
+    .spinner svg { background: #f6b73c; stroke: #8a3b12; stroke-width: 4; }
+    .text { padding: 18px; width: 180px; }
+    .text h2 { margin: 0 0 10px; font-size: 18px; }
+    .text p { margin: 0 0 8px; line-height: 1.35; }
+    .band { width: 380px; height: 8px; background: #238b45; }
+</style>
+</head>
+<body>
+    <div class="card">
+        <div class="media">
+            <picture><img width="160" height="240" alt="blue panel"
+                src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='240'%3E%3Crect width='160' height='240' fill='%232b6a99'/%3E%3C/svg%3E"></picture>
+            <div class="spinner"><svg width="65px" height="65px" viewBox="0 0 66 66"><circle cx="33" cy="33" r="25" fill="none"/></svg></div>
+        </div>
+        <div class="text">
+            <h2>Card</h2>
+            <p>The image follows the media height, not the 10000px flex probe width.</p>
+            <p>The spinner keeps its px presentation hints under stretch.</p>
+        </div>
+    </div>
+    <div class="band"></div>
+</body>
+</html>

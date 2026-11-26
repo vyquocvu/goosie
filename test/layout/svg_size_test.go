@@ -38,3 +38,33 @@ func TestSizedSVGKeepsAttributes(t *testing.T) {
 		t.Errorf("svg size = %vx%v, want 24x24", svg.W, svg.H)
 	}
 }
+
+func TestSizedSVGKeepsPxAttributes(t *testing.T) {
+	arena := session(t, `<html><body style="margin:0">
+<div style="width: 340px; height: 606px"><svg width="65px" height="65px" viewbox="0 0 66 66"></svg></div>
+</body></html>`, 1280)
+	layout.Inline(arena, layout.ObjectID(1))
+
+	svg := findByTag(arena, "svg")
+	if svg == nil {
+		t.Fatal("svg not found")
+	}
+	if !almostEqual(svg.W, 65) || !almostEqual(svg.H, 65) {
+		t.Errorf("svg size = %vx%v, want 65x65", svg.W, svg.H)
+	}
+}
+
+func TestSizedSVGKeepsPxAttributesUnderStretch(t *testing.T) {
+	arena := sessionH(t, `<html><body style="margin:0">
+<div style="display:flex;width:200px;height:200px"><svg width="65px" height="65px" viewbox="0 0 66 66"></svg></div>
+</body></html>`, 400, 400)
+	layout.Inline(arena, layout.ObjectID(1))
+
+	svg := findByTag(arena, "svg")
+	if svg == nil {
+		t.Fatal("svg not found")
+	}
+	if !almostEqual(svg.W, 65) || !almostEqual(svg.H, 65) {
+		t.Errorf("svg size = %vx%v, want 65x65", svg.W, svg.H)
+	}
+}

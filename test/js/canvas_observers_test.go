@@ -139,8 +139,10 @@ func TestCanvasText(t *testing.T) {
 	err = r.Run(`
 		var ctx = new CanvasRenderingContext2D();
 		ctx.font = '20px Arial';
-		ctx.fillText('Hello', 10, 50);
-		ctx.strokeText('World', 10, 80);
+		try { ctx.fillText('Hello', 10, 50); throw new Error('fillText should throw'); }
+		catch (e) { if (e.name !== 'NotSupportedError') throw e; }
+		try { ctx.strokeText('World', 10, 80); throw new Error('strokeText should throw'); }
+		catch (e) { if (e.name !== 'NotSupportedError') throw e; }
 	`, "test.js")
 	if err != nil {
 		t.Fatalf("Run: %v", err)

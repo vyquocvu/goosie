@@ -161,7 +161,10 @@ func (f *framePath) buildErrorPage(rawURL string, err error) (*frame.Layer, *eng
 		return nil, nil, frame.RGB(255, 255, 255)
 	}
 	dl := list.Build(1)
-	extent := dl.Extent()
+	extent, boundsErr := sess.DocumentLayerBounds(dl.Extent(), scale, f.documentViewport())
+	if boundsErr != nil {
+		return nil, nil, frame.RGB(255, 255, 255)
+	}
 	budgetTiles, budgetBytes, budgetErr := engine.TileCacheBudget(extent)
 	if budgetErr != nil {
 		return nil, nil, frame.RGB(255, 255, 255)

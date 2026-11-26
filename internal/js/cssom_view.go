@@ -54,12 +54,13 @@ func (r *Runtime) SetWindowScrollX(x float64) {
 	r.scrollMu.Lock()
 	oldX := r.windowScrollX
 	r.windowScrollX = x
+	y := r.windowScrollY
 	moved := x != oldX
 	r.scrollMu.Unlock()
 	if moved {
 		r.QueueViewportScroll()
 		if r.opts.OnViewportScroll != nil {
-			r.opts.OnViewportScroll(x, r.windowScrollY)
+			r.opts.OnViewportScroll(x, y)
 		}
 	}
 }
@@ -74,12 +75,13 @@ func (r *Runtime) SetWindowScrollY(y float64) {
 	r.scrollMu.Lock()
 	oldY := r.windowScrollY
 	r.windowScrollY = y
+	x := r.windowScrollX
 	moved := y != oldY
 	r.scrollMu.Unlock()
 	if moved {
 		r.QueueViewportScroll()
 		if r.opts.OnViewportScroll != nil {
-			r.opts.OnViewportScroll(r.windowScrollX, y)
+			r.opts.OnViewportScroll(x, y)
 		}
 	}
 }
@@ -89,8 +91,9 @@ func (r *Runtime) QueueViewportScroll() {
 		return
 	}
 	r.scrollMu.Lock()
-	defer r.scrollMu.Unlock()
 	r.queueScrollTarget(&r.domDoc.Node)
+	r.scrollMu.Unlock()
+	r.scheduleIntersectionCheck()
 }
 
 func (r *Runtime) queueScrollTarget(node *dom.Node) {
@@ -157,6 +160,34 @@ func (r *Runtime) ancestorScrollOffset(node *dom.Node) (float64, float64) {
 		dy += r.ElementScrollOffset(parent, "scrollTop")
 	}
 	return dx, dy
+}
+
+func (r *Runtime) clientRectFromInfo(info LayoutBoxInfo) [4]float64 {
+	r.scrollMu.Lock()
+	x, y := r.windowScrollX, r.windowScrollY
+	r.scrollMu.Unlock()
+	return [4]float64{info.X - x, info.Y - y, info.Width, info.Height}
+}
+
+func (r *Runtime) clientRectFromNodeInfo(node *dom.Node, info LayoutBoxInfo) [4]float64 {
+	rect := r.clientRectFromInfo(info)
+	if node == nil {
+		return rect
+	}
+	if styleFn := r.computedStyleProvider(); styleFn != nil {
+		if style := styleFn(node); style != nil && style["position"] == "fixed" {
+			r.scrollMu.Lock()
+			x, y := r.windowScrollX, r.windowScrollY
+			r.scrollMu.Unlock()
+			rect[0] += x
+			rect[1] += y
+			return rect
+		}
+	}
+	adjX, adjY := r.ancestorScrollOffset(node)
+	rect[0] -= adjX
+	rect[1] -= adjY
+	return rect
 }
 
 func (r *Runtime) layoutGeometryProvider() LayoutGeometryProvider {
@@ -240,8 +271,8 @@ func (r *Runtime) installElementGeometryMethods() {
 		if !ok {
 			return r.newDOMRect(0, 0, 0, 0)
 		}
-		adjX, adjY := r.ancestorScrollOffset(node)
-		return r.newDOMRect(info.X-adjX, info.Y-adjY, info.Width, info.Height)
+		rect := r.clientRectFromNodeInfo(node, info)
+		return r.newDOMRect(rect[0], rect[1], rect[2], rect[3])
 	})
 
 	_ = p.Set("getClientRects", func(call goja.FunctionCall) goja.Value {
@@ -257,9 +288,8 @@ func (r *Runtime) installElementGeometryMethods() {
 		if !ok {
 			return r.newDOMRectList(nil)
 		}
-		adjX, adjY := r.ancestorScrollOffset(node)
-		rect := r.newDOMRect(info.X-adjX, info.Y-adjY, info.Width, info.Height)
-		return r.newDOMRectList([]*goja.Object{rect})
+		rect := r.clientRectFromNodeInfo(node, info)
+		return r.newDOMRectList([]*goja.Object{r.newDOMRect(rect[0], rect[1], rect[2], rect[3])})
 	})
 
 	_ = r.htmlElementProto.DefineAccessorProperty("offsetParent", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -331,6 +361,31 @@ func (r *Runtime) installElementGeometryMethods() {
 				return r.vm.ToValue(info.Width)
 			}
 			return r.vm.ToValue(info.Height)
+		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	}
+
+	for _, prop := range []struct {
+		name  string
+		value func(LayoutBoxInfo) float64
+	}{
+		{"clientLeft", func(info LayoutBoxInfo) float64 { return info.BorderLeft }},
+		{"clientTop", func(info LayoutBoxInfo) float64 { return info.BorderTop }},
+	} {
+		prop := prop
+		_ = r.htmlElementProto.DefineAccessorProperty(prop.name, r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			node := r.getNode(call.This)
+			if node == nil {
+				return r.vm.ToValue(0)
+			}
+			provider := r.layoutGeometryProvider()
+			if provider == nil {
+				return r.vm.ToValue(0)
+			}
+			info, ok := provider(node)
+			if !ok {
+				return r.vm.ToValue(0)
+			}
+			return r.vm.ToValue(prop.value(info))
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 }
@@ -765,6 +820,7 @@ func (r *Runtime) SetDevicePixelRatio(dpr float64) {
 	r.dprMu.Lock()
 	r.devicePixelRatio = dpr
 	r.dprMu.Unlock()
+	r.refreshMediaQueries()
 }
 
 func (r *Runtime) handleWindowScroll(method string, call goja.FunctionCall) {

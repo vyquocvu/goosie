@@ -19,7 +19,7 @@ import (
 
 const seqStaticPage = `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">` +
 	`<div style="width:400px;height:300px;margin:20px;background:rgb(200,0,0)"></div>` +
-	`<div style="width:400px;height:60px;margin:20px;background:rgb(0,0,200)"></div>` +
+	`<div style="width:400px;height:60px;margin:20px 20px 0 20px;background:rgb(0,0,200)"></div>` +
 	`</body></html>`
 
 const seqAnimPage = `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">` +

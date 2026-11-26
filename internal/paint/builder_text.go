@@ -1,6 +1,7 @@
 package paint
 
 import (
+	"math"
 	"unicode/utf16"
 
 	"github.com/vyquocvu/goosie/internal/frame"
@@ -151,7 +152,7 @@ func (b *Builder) appendRunGlyphs(text string, rect frame.Rect, s *style.Compute
 		Opacity: opacity,
 	})
 	if decorate {
-		b.appendUnderline(text, rect, s, baseline, color, opacity, nil)
+		b.appendTextDecoration(text, rect, s, baseline, color, opacity, nil)
 	}
 }
 
@@ -164,39 +165,183 @@ func (b *Builder) runBaseline(rect frame.Rect, s *style.ComputedStyle) int32 {
 	return rect.Y0 + int32(s.FontSize*b.scale*0.8)
 }
 
-func (b *Builder) appendUnderline(text string, rect frame.Rect, s *style.ComputedStyle, baseline int32, color frame.Color, opacity float32, clip *frame.Rect) {
-	if s.TextDecoration&style.TextDecorationUnderline == 0 || isBlankText(text) {
+func (b *Builder) appendTextDecoration(text string, rect frame.Rect, s *style.ComputedStyle, baseline int32, color frame.Color, opacity float32, clip *frame.Rect) {
+	if s == nil || s.TextDecoration == style.TextDecorationNone || isBlankText(text) || b.scale <= 0 {
 		return
 	}
-	thick := (s.FontSize * b.scale) / 16
-	if s.TextDecorationThickness > 0 {
-		thick = s.TextDecorationThickness * b.scale
+	fontSize := int32(s.FontSize * b.scale)
+	if fontSize <= 0 {
+		return
 	}
-	if thick < 1 {
-		thick = 1
+	explicitThickness := s.TextDecorationThickness > 0
+	thicknessCSS := s.FontSize / 16
+	if explicitThickness {
+		thicknessCSS = s.TextDecorationThickness
 	}
-	offset := float32(thick)
-	if s.TextUnderlineOffset != 0 {
-		offset = s.TextUnderlineOffset * b.scale
+	thickness := int32(thicknessCSS * b.scale)
+	if thickness < 1 {
+		thickness = 1
 	}
-	y0 := baseline + int32(offset)
+	height := thickness
+	barThickness := thickness
+	gap := int32(0)
+	switch s.TextDecorationStyle {
+	case style.TextDecorationStyleDouble:
+		if !explicitThickness {
+			barThickness = int32(b.scale)
+			if barThickness < 1 {
+				barThickness = 1
+			}
+			gap = barThickness
+			height = barThickness*2 + gap
+		} else if thickness >= 3 {
+			barThickness = thickness / 3
+			if barThickness < 1 {
+				barThickness = 1
+			}
+			gap = thickness - barThickness*2
+			if gap < 1 {
+				barThickness = (thickness - 1) / 2
+				gap = 1
+			}
+			height = thickness
+		}
+	case style.TextDecorationStyleDotted, style.TextDecorationStyleDashed:
+		if !explicitThickness {
+			thickness = int32(2 * b.scale)
+			if thickness < 1 {
+				thickness = 1
+			}
+			height = thickness
+		}
+	case style.TextDecorationStyleWavy:
+		waveHeight := int32(4 * b.scale)
+		if waveHeight < 4 {
+			waveHeight = 4
+		}
+		if height < waveHeight {
+			height = waveHeight
+		}
+	}
 	deco := color
 	if s.TextDecorationColor.A > 0 {
 		deco = convertColor(s.TextDecorationColor)
 	}
-	bar := frame.Rect4(rect.X0, y0, rect.X1, y0+int32(thick))
-	if clip != nil {
-		bar = bar.Intersection(*clip)
+	appendLine := func(top, doubleHeight, doubleGap int32) {
+		switch s.TextDecorationStyle {
+		case style.TextDecorationStyleDouble:
+			if doubleGap == 0 {
+				b.appendDecorationBar(frame.Rect4(rect.X0, top, rect.X1, top+doubleHeight), deco, opacity, clip)
+				return
+			}
+			b.appendDecorationBar(frame.Rect4(rect.X0, top, rect.X1, top+barThickness), deco, opacity, clip)
+			b.appendDecorationBar(frame.Rect4(rect.X0, top+barThickness+doubleGap, rect.X1, top+doubleHeight), deco, opacity, clip)
+		case style.TextDecorationStyleDotted:
+			b.appendDecorationPattern(rect.X0, rect.X1, top, height, thickness, thickness, deco, opacity, clip)
+		case style.TextDecorationStyleDashed:
+			b.appendDecorationPattern(rect.X0, rect.X1, top, height, int32(6*b.scale), int32(4*b.scale), deco, opacity, clip)
+		case style.TextDecorationStyleWavy:
+			b.appendDecorationWave(rect.X0, rect.X1, top, height, deco, opacity, clip)
+		default:
+			b.appendDecorationBar(frame.Rect4(rect.X0, top, rect.X1, top+height), deco, opacity, clip)
+		}
 	}
-	if bar.Empty() {
+	doubleHeight, doubleGap := height, gap
+	if !explicitThickness && s.TextDecorationStyle == style.TextDecorationStyleDouble {
+		doubleHeight = barThickness * 4
+		doubleGap = barThickness * 2
+	}
+	if s.TextDecoration&style.TextDecorationUnderline != 0 {
+		offset := int32(0)
+		if s.TextUnderlineOffset != 0 {
+			offset = int32(s.TextUnderlineOffset * b.scale)
+		} else if explicitThickness {
+			offset = int32(math.Ceil(float64(thicknessCSS)/2) * float64(b.scale))
+		} else {
+			switch s.TextDecorationStyle {
+			case style.TextDecorationStyleDotted, style.TextDecorationStyleDashed:
+				offset = 0
+			case style.TextDecorationStyleDouble:
+				offset = int32(b.scale)
+			case style.TextDecorationStyleWavy:
+				offset = int32(2 * b.scale)
+			default:
+				offset = int32(math.Ceil(float64(thicknessCSS)/2) * float64(b.scale))
+			}
+		}
+		appendLine(baseline+offset, doubleHeight, doubleGap)
+	}
+	if s.TextDecoration&style.TextDecorationOverline != 0 {
+		appendLine(rect.Y0-doubleHeight, doubleHeight, doubleGap)
+	}
+	if s.TextDecoration&style.TextDecorationLineThrough != 0 {
+		center := baseline - int32(s.FontSize*b.scale*5/16)
+		top := center - height/2
+		if s.TextDecorationStyle == style.TextDecorationStyleDouble {
+			top = center
+		}
+		appendLine(top, height, gap)
+	}
+}
+
+func (b *Builder) appendDecorationBar(rect frame.Rect, color frame.Color, opacity float32, clip *frame.Rect) {
+	if clip != nil {
+		rect = rect.Intersection(*clip)
+	}
+	if rect.Empty() {
 		return
 	}
-	b.list.Append(DisplayCmd{
-		Kind:    CmdFill,
-		Rect:    bar,
-		Color:   deco,
-		Opacity: opacity,
-	})
+	b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: color, Opacity: opacity})
+}
+
+func (b *Builder) appendDecorationPattern(x0, x1, y0, height, on, off int32, color frame.Color, opacity float32, clip *frame.Rect) {
+	if on < 1 {
+		on = 1
+	}
+	if off < 1 {
+		off = 1
+	}
+	for x := x0; x < x1; x += on + off {
+		end := x + on
+		if end > x1 {
+			end = x1
+		}
+		b.appendDecorationBar(frame.Rect4(x, y0, end, y0+height), color, opacity, clip)
+	}
+}
+
+func (b *Builder) appendDecorationWave(x0, x1, y0, height int32, color frame.Color, opacity float32, clip *frame.Rect) {
+	if height <= 1 || x1 <= x0 {
+		b.appendDecorationBar(frame.Rect4(x0, y0, x1, y0+height), color, opacity, clip)
+		return
+	}
+	period := int32(10 * b.scale)
+	if period < 10 {
+		period = 10
+	}
+	profile := [...]int32{3, 3, 3, 2, 1, 0, 0, 1, 2, 3}
+	starts := make([]int32, height)
+	for i := range starts {
+		starts[i] = -1
+	}
+	for x := x0; x < x1; x++ {
+		phase := (x - x0) % period
+		row := profile[phase*10/period] * (height - 1) / 3
+		for other, start := range starts {
+			if start >= 0 && int32(other) != row {
+				b.appendDecorationBar(frame.Rect4(start, y0+int32(other), x, y0+int32(other)+1), color, opacity, clip)
+				starts[other] = -1
+			}
+		}
+		if starts[row] < 0 {
+			starts[row] = x
+		}
+	}
+	for row, start := range starts {
+		if start >= 0 {
+			b.appendDecorationBar(frame.Rect4(start, y0+int32(row), x1, y0+int32(row)+1), color, opacity, clip)
+		}
+	}
 }
 
 func isBlankText(text string) bool {
@@ -239,6 +384,6 @@ func (b *Builder) paintTextShadow(text string, rect frame.Rect, s *style.Compute
 		if sh.ColorIsCurrent {
 			color = convertColor(s.Color)
 		}
-		b.appendRunOrdered(text, shadowRect, s, color, opacity, order, levels)
+		b.appendRunGlyphs(text, shadowRect, s, color, opacity, order, levels, false)
 	}
 }

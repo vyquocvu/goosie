@@ -53,10 +53,11 @@ func TestCanvasGradients(t *testing.T) {
 
 		// Ensure setting as fillStyle does not throw
 		ctx.fillStyle = radGrad;
-		ctx.fillRect(0, 0, 100, 100);
+		var gradientError = "";
+		try { ctx.fillRect(0, 0, 100, 100); } catch (e) { gradientError = e.name; }
 
 		ctx.fillStyle = conGrad;
-		ctx.fillRect(100, 0, 100, 100);
+		try { ctx.fillRect(100, 0, 100, 100); } catch (e) { gradientError = e.name; }
 	`
 
 	if err := r.Run(script, "test.js"); err != nil {
@@ -66,5 +67,8 @@ func TestCanvasGradients(t *testing.T) {
 	ops := r.CanvasOps(int(canvas.ID))
 	if len(ops) < 2 {
 		t.Fatalf("expected at least 2 canvas ops, got %d", len(ops))
+	}
+	if value, ok := r.Global("gradientError"); !ok || value.Str != "NotSupportedError" {
+		t.Errorf("gradientError = %v, want NotSupportedError", value)
 	}
 }

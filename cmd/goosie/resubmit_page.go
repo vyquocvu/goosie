@@ -103,7 +103,11 @@ func (f *framePath) buildResubmitPage(target string, req toolbar.Request) (*fram
 		return nil, nil, frame.RGB(255, 255, 255)
 	}
 	dl := list.Build(1)
-	extent := dl.Extent()
+	extent, boundsErr := sess.DocumentLayerBounds(dl.Extent(), scale, f.documentViewport())
+	if boundsErr != nil {
+		sess.Close()
+		return nil, nil, frame.RGB(255, 255, 255)
+	}
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
 		sess.Close()

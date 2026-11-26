@@ -195,7 +195,7 @@ func (r *Runtime) runWrittenParserScripts(scripts []*dom.Node, state *documentWr
 			continue
 		}
 		state.executedScripts[i] = true
-		if err := r.RunParserScript(node.TextContent(), "document.write"); err != nil {
+		if err := r.RunParserScriptForNode(node.TextContent(), "document.write", node); err != nil {
 			continue
 		}
 	}
@@ -368,13 +368,17 @@ func (r *Runtime) flushCompleteParserWrite() bool {
 }
 
 func (r *Runtime) RunParserScript(src, sourceURL string) error {
+	return r.RunParserScriptForNode(src, sourceURL, nil)
+}
+
+func (r *Runtime) RunParserScriptForNode(src, sourceURL string, node *dom.Node) error {
 	if r.scriptExecutionDepth == 0 {
 		if err := r.drainMicrotasks(); err != nil {
 			return err
 		}
 	}
 	r.parserWriteDepth++
-	err := r.Run(stripHTMLScriptComments(src), sourceURL)
+	err := r.runClassicScript(stripHTMLScriptComments(src), sourceURL, node)
 	r.parserWriteDepth--
 	if r.parserWriteDepth == 0 && r.parserWriteBuffer.Len() != 0 {
 		written := r.parserWriteBuffer.String()
@@ -411,10 +415,14 @@ func stripHTMLScriptComments(src string) string {
 }
 
 func (r *Runtime) RunParserDeferScript(src, sourceURL string) error {
+	return r.RunParserDeferScriptForNode(src, sourceURL, nil)
+}
+
+func (r *Runtime) RunParserDeferScriptForNode(src, sourceURL string, node *dom.Node) error {
 	previous := r.inDeferScript
 	r.inDeferScript = true
 	defer func() { r.inDeferScript = previous }()
-	return r.RunParserScript(src, sourceURL)
+	return r.RunParserScriptForNode(src, sourceURL, node)
 }
 
 func (r *Runtime) ensureDocumentStructure() {

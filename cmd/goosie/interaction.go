@@ -48,8 +48,7 @@ func (f *framePath) focusClick(contentX, contentY int32) bool {
 		if f.serviceFilePicker(tab) {
 			return true
 		}
-		if sub, ok := tab.Session().PopSubmittedForm(); ok {
-			f.handleFormSubmission(tab, sub)
+		if f.drainSessionNavigation(tab) {
 			return true
 		}
 		f.reflowAfterControlChange(tab)
@@ -146,8 +145,8 @@ func (f *framePath) pointerDrag(action surface.PointerAction, contentX, contentY
 		}
 		releaseX, releaseY := f.docPoint(contentX, contentY)
 		if sess.DraggableElementAt(releaseX, releaseY) == g.source {
-			if href := f.hitTestLink(g.startX, g.startY); href != "" {
-				f.handleLinkClick(href)
+			if info := f.hitTestLinkInfo(g.startX, g.startY); info.href != "" {
+				f.handleLinkActivation(info)
 			} else {
 				f.focusClick(g.startX, g.startY)
 			}
@@ -565,8 +564,7 @@ func (f *framePath) contentKey(key rune, mods surface.KeyMod) bool {
 	}
 
 	changed := tab.Session().EditWithShift(action, key, mods&surface.ModShift != 0)
-	if sub, ok := tab.Session().PopSubmittedForm(); ok {
-		f.handleFormSubmission(tab, sub)
+	if f.drainSessionNavigation(tab) {
 		return true
 	}
 	if changed {
@@ -631,8 +629,7 @@ func (f *framePath) finishKeyActivation(tab *tabs.Tab, focused *dom.Node, enter 
 	if f.serviceFilePicker(tab) {
 		return true
 	}
-	if sub, ok := sess.PopSubmittedForm(); ok {
-		f.handleFormSubmission(tab, sub)
+	if f.drainSessionNavigation(tab) {
 		return true
 	}
 	f.reflowAfterControlChange(tab)
@@ -697,6 +694,29 @@ func (f *framePath) scrollContentTo(tab *tabs.Tab, vp frame.Viewport, y int32) b
 	return true
 }
 
+func (f *framePath) drainSessionNavigation(tab *tabs.Tab) bool {
+	if tab == nil || tab.Session() == nil {
+		return false
+	}
+	handled := false
+	if sub, ok := tab.Session().PopSubmittedForm(); ok {
+		f.handleFormSubmission(tab, sub)
+		handled = true
+		if f.tabMgr.Active() != tab {
+			return true
+		}
+	}
+	for {
+		request, ok := tab.Session().PopNavigation()
+		if !ok {
+			break
+		}
+		f.handleScriptNavigation(tab, request)
+		handled = true
+	}
+	return handled
+}
+
 func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmission) {
 	if tab == nil || sub == nil {
 		return
@@ -706,8 +726,25 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 		targetURL = tab.URL()
 	}
 	method := strings.ToUpper(sub.Method)
-	if strings.EqualFold(strings.TrimSpace(sub.Target), "_blank") {
-		f.newTab()
+	source := tab
+	target := strings.TrimSpace(sub.Target)
+	if target != "" && !strings.EqualFold(target, "_self") && !strings.EqualFold(target, "_parent") && !strings.EqualFold(target, "_top") {
+		name := target
+		if strings.EqualFold(name, "_blank") {
+			name = ""
+		}
+		if existing := f.findNamedTab(name); existing != nil {
+			f.switchTab(existing.ID())
+			tab = existing
+		} else {
+			f.newTab()
+			next := f.tabMgr.Active()
+			if next == nil || next == tab {
+				return
+			}
+			next.SetName(name)
+			tab = next
+		}
 	}
 	if method == "" || method == "GET" {
 		if sub.Encoded != "" {
@@ -717,17 +754,17 @@ func (f *framePath) handleFormSubmission(tab *tabs.Tab, sub *engine.FormSubmissi
 				targetURL = targetURL + "?" + sub.Encoded
 			}
 		}
-		f.navigateTabTransition(targetURL, history.TransitionLink)
+		f.navigateTabTransitionWithTrust(targetURL, history.TransitionLink, f.navigationTrustForTarget(source, targetURL))
 	} else if method == "POST" {
 		contentType := sub.Enctype
 		if contentType == "" {
 			contentType = "application/x-www-form-urlencoded"
 		}
-		f.navigateTabRequest(targetURL, history.TransitionLink, navRequest{
+		f.navigateTabRequestWithTrust(targetURL, history.TransitionLink, navRequest{
 			Method:      "POST",
 			ContentType: contentType,
 			Body:        sub.Encoded,
-		})
+		}, f.navigationTrustForTarget(source, targetURL))
 	}
 }
 
@@ -773,18 +810,26 @@ func (f *framePath) handleContextMenu(contentX, contentY, winX, winY int32) {
 func (f *framePath) handleContextMenuAction(action, data string) {
 	switch action {
 	case "open_new_tab":
+		trust := untrustedNavigation
+		if tab := f.tabMgr.Active(); tab != nil {
+			trust = f.navigationTrustForTarget(tab, data)
+		}
 		f.newTab()
 		if data != "" {
-			f.navigateTab(data)
+			f.navigateTabTransitionWithTrust(data, history.TransitionTyped, trust)
 		}
 	case "copy_link", "copy_image":
 		if cb := platform.NewClipboard(); cb != nil {
 			cb.Write(data)
 		}
 	case "open_image_tab":
+		trust := untrustedNavigation
+		if tab := f.tabMgr.Active(); tab != nil {
+			trust = f.navigationTrustForTarget(tab, data)
+		}
 		f.newTab()
 		if data != "" {
-			f.navigateTab(data)
+			f.navigateTabTransitionWithTrust(data, history.TransitionTyped, trust)
 		}
 	case "copy":
 		if data != "" {
@@ -924,12 +969,89 @@ func (f *framePath) handleZoom(delta float64) {
 	f.handleResize(f.contentWidth(), f.contentHeight())
 }
 
-func (f *framePath) handleLinkClick(href string) {
+type linkActivation struct {
+	href   string
+	target string
+	rel    string
+}
+
+func (f *framePath) hitTestLinkInfo(contentX, contentY int32) linkActivation {
+	tab := f.tabMgr.Active()
+	if tab == nil || tab.Session() == nil {
+		return linkActivation{}
+	}
+	docX, docY := f.docPoint(contentX, contentY)
+	info := tab.Session().HitTestLinkInfo(docX, docY)
+	return linkActivation{href: info.Href, target: info.Target, rel: info.Rel}
+}
+
+func (f *framePath) handleLinkActivation(activation linkActivation) {
+	if activation.href == "" {
+		return
+	}
 	tab := f.tabMgr.Active()
 	if tab == nil {
 		return
 	}
-	f.navigateTabTransition(resolveHref(tab.URL(), href), history.TransitionLink)
+	targetURL := resolveHref(tab.URL(), activation.href)
+	if targetURL == "" {
+		return
+	}
+	if strings.EqualFold(activation.target, "_blank") || (activation.target != "" && !strings.HasPrefix(activation.target, "_")) {
+		name := activation.target
+		if strings.EqualFold(name, "_blank") || noOpenerRel(activation.rel) {
+			name = ""
+		}
+		f.openLinkInNewTab(tab, targetURL, name)
+		return
+	}
+	if activation.target == "" || strings.EqualFold(activation.target, "_self") ||
+		strings.EqualFold(activation.target, "_parent") || strings.EqualFold(activation.target, "_top") {
+		f.navigateTabTransitionWithTrust(targetURL, history.TransitionLink, f.navigationTrustForTarget(tab, targetURL))
+	}
+}
+
+func noOpenerRel(rel string) bool {
+	for _, token := range strings.Fields(strings.ToLower(rel)) {
+		if token == "noopener" || token == "noreferrer" {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *framePath) findNamedTab(name string) *tabs.Tab {
+	if name == "" || f.tabMgr == nil {
+		return nil
+	}
+	for _, tab := range f.tabMgr.Tabs() {
+		if tab.Name() == name {
+			return tab
+		}
+	}
+	return nil
+}
+
+func (f *framePath) openLinkInNewTab(source *tabs.Tab, targetURL, name string) {
+	if f.tabMgr == nil {
+		return
+	}
+	if existing := f.findNamedTab(name); existing != nil {
+		f.switchTab(existing.ID())
+		f.navigateTabTransitionWithTrust(targetURL, history.TransitionLink, f.navigationTrustForTarget(existing, targetURL))
+		return
+	}
+	f.newTab()
+	active := f.tabMgr.Active()
+	if active == nil || active == source {
+		return
+	}
+	active.SetName(name)
+	f.navigateTabTransitionWithTrust(targetURL, history.TransitionLink, f.navigationTrustForTarget(source, targetURL))
+}
+
+func (f *framePath) handleLinkClick(href string) {
+	f.handleLinkActivation(linkActivation{href: href})
 }
 
 func (f *framePath) hitTestLink(contentX, contentY int32) string {
@@ -1136,14 +1258,23 @@ func (f *framePath) clearFindHighlights() {
 func (f *framePath) switchTab(id uint64) {
 	f.closeFind()
 	f.setWindowIME(false)
+	f.scrollMu.Lock()
 	cur := f.tabMgr.Active()
-	if cur != nil {
-		vp := f.sched.Viewport()
-		cur.SetScrollY(vp.Offset.Y)
-		f.pauseMedia(cur)
+	if cur != nil && f.sched != nil {
+		cur.SetScrollY(f.sched.ScrollOffset().Y)
 	}
 	f.tabMgr.SwitchTo(id)
 	newTab := f.tabMgr.Active()
+	if newTab != nil && f.sched != nil {
+		f.sched.SetViewport(frame.Viewport{
+			Offset: frame.Point{Y: newTab.ScrollY()},
+			Size:   f.devSize(),
+		})
+	}
+	f.scrollMu.Unlock()
+	if cur != nil {
+		f.pauseMedia(cur)
+	}
 	if newTab == nil {
 		return
 	}
@@ -1156,10 +1287,6 @@ func (f *framePath) switchTab(id uint64) {
 			Background: newTab.BGColor(),
 		})
 	}
-	f.sched.SetViewport(frame.Viewport{
-		Offset: frame.Point{Y: newTab.ScrollY()},
-		Size:   f.devSize(),
-	})
 	f.publishAccessibility()
 }
 
@@ -1170,8 +1297,7 @@ func (f *framePath) newTab() {
 	f.closeFind()
 	cur := f.tabMgr.Active()
 	if cur != nil {
-		vp := f.sched.Viewport()
-		cur.SetScrollY(vp.Offset.Y)
+		cur.SetScrollY(f.sched.ScrollOffset().Y)
 	}
 	tab := f.tabMgr.NewTab()
 	f.tabMgr.SwitchTo(tab.ID())
@@ -1223,10 +1349,14 @@ func (f *framePath) closeTab(id uint64) {
 	}
 	f.closeFind()
 	if tab := f.tabMgr.TabByID(id); tab != nil {
+		f.clearTrustedNavigationPrompt(id)
 		f.dropResubmit(tab.ID())
 		releaseTabState(tab)
 	}
 	f.tabMgr.CloseTab(id)
+	if f.windowContexts != nil {
+		f.windowContexts.removeTab(id)
+	}
 	f.showActiveTabAfterBatch()
 }
 
@@ -1239,10 +1369,22 @@ func (f *framePath) closeOtherTabs(keepID uint64) {
 		if tab.ID() == keepID || tab.Pinned() {
 			continue
 		}
+		f.clearTrustedNavigationPrompt(tab.ID())
 		f.dropResubmit(tab.ID())
 		releaseTabState(tab)
 	}
+	removed := make([]uint64, 0, len(f.tabMgr.Tabs()))
+	for _, tab := range f.tabMgr.Tabs() {
+		if tab.ID() != keepID {
+			removed = append(removed, tab.ID())
+		}
+	}
 	f.tabMgr.CloseOtherTabs(keepID)
+	if f.windowContexts != nil {
+		for _, id := range removed {
+			f.windowContexts.removeTab(id)
+		}
+	}
 	f.showActiveTabAfterBatch()
 }
 
@@ -1266,10 +1408,22 @@ func (f *framePath) closeTabsToRight(fromID uint64) {
 		if tab.Pinned() {
 			continue
 		}
+		f.clearTrustedNavigationPrompt(tab.ID())
 		f.dropResubmit(tab.ID())
 		releaseTabState(tab)
 	}
+	removed := make([]uint64, 0, len(tabList))
+	for _, tab := range tabList[fromIdx+1:] {
+		if !tab.Pinned() {
+			removed = append(removed, tab.ID())
+		}
+	}
 	f.tabMgr.CloseTabsToRight(fromID)
+	if f.windowContexts != nil {
+		for _, id := range removed {
+			f.windowContexts.removeTab(id)
+		}
+	}
 	f.showActiveTabAfterBatch()
 }
 
@@ -1348,8 +1502,7 @@ func (f *framePath) reopenTab() {
 	f.closeFind()
 	cur := f.tabMgr.Active()
 	if cur != nil {
-		vp := f.sched.Viewport()
-		cur.SetScrollY(vp.Offset.Y)
+		cur.SetScrollY(f.sched.ScrollOffset().Y)
 	}
 	tab, ok := f.tabMgr.ReopenTab()
 	if !ok || tab == nil {
@@ -1384,8 +1537,7 @@ func (f *framePath) duplicateTab() {
 	if active == nil {
 		return
 	}
-	vp := f.sched.Viewport()
-	active.SetScrollY(vp.Offset.Y)
+	active.SetScrollY(f.sched.ScrollOffset().Y)
 
 	tab, ok := f.tabMgr.DuplicateTab(active.ID())
 	if !ok || tab == nil {

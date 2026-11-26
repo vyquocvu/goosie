@@ -93,6 +93,7 @@ type framePath struct {
 	started               time.Time
 	navResults            chan navResult
 	imgResults            chan imgResult
+	windowContexts        *browsingContextRegistry
 	drainWG               sync.WaitGroup
 	zoom                  float64
 	runCtx                context.Context
@@ -117,6 +118,8 @@ type framePath struct {
 	restoredActiveURL     string
 	restoredScrollTabID   uint64
 	restoredScrollY       int32
+	lastSyncedScrollY     int32
+	scrollMu              sync.Mutex
 	storage               *js.OriginStorageRegistry
 	incognitoStorage      *js.OriginStorageRegistry
 	broadcastHub          *js.BroadcastHub
@@ -203,6 +206,7 @@ func buildWindow(c config, p *profile) (*framePath, error) {
 		downloads:             p.downloads,
 		navResults:            make(chan navResult, 16),
 		imgResults:            make(chan imgResult, 16),
+		windowContexts:        newBrowsingContextRegistry(),
 		zoom:                  1.0,
 		storage:               p.storage,
 		incognitoStorage:      p.incognitoStorage,
@@ -213,6 +217,16 @@ func buildWindow(c config, p *profile) (*framePath, error) {
 		flags:                 p.flags,
 		perms:                 p.perms,
 		preferences:           p.preferences,
+	}
+	if f.windowContexts != nil {
+		f.windowContexts.nameSink = func(handle js.WindowHandle, name string) {
+			if f.tabMgr == nil {
+				return
+			}
+			if tab := f.tabMgr.TabByID(f.windowContexts.tabIDForHandle(handle)); tab != nil {
+				tab.SetName(name)
+			}
+		}
 	}
 	if !c.paced() {
 		f.drainWG.Add(2)
@@ -404,6 +418,63 @@ func (f *framePath) downloadDirectory() string {
 
 func shouldRestoreSession(private bool, startupMode string) bool {
 	return !private && startupMode != preferences.StartupNewTab
+}
+
+func sessionWindowStates(st session.State) []session.WindowState {
+	if len(st.Windows) > 0 {
+		return st.Windows
+	}
+	if len(st.Tabs) == 0 {
+		return nil
+	}
+	return []session.WindowState{{Tabs: st.Tabs, Active: st.Active}}
+}
+
+func currentWindowSessionState(f *framePath) session.State {
+	st := sessionState(f)
+	if f == nil || f.tabMgr == nil || f.sched == nil {
+		return st
+	}
+	active := f.tabMgr.Active()
+	if active == nil || active.Incognito() {
+		return st
+	}
+	offset := f.sched.Viewport().Offset
+	savedIndex := 0
+	for _, tab := range f.tabMgr.Tabs() {
+		if tab.Incognito() {
+			continue
+		}
+		if tab == active {
+			if savedIndex < len(st.Tabs) {
+				st.Tabs[savedIndex].ScrollX = int(offset.X)
+				st.Tabs[savedIndex].ScrollY = int(offset.Y)
+				st.Active = savedIndex
+			}
+			break
+		}
+		savedIndex++
+	}
+	return st
+}
+
+func navigateRestoredWindow(f *framePath) {
+	if f == nil || f.restoredActiveURL == "" {
+		return
+	}
+	tab := f.tabMgr.Active()
+	var scrollY int32
+	if tab != nil {
+		scrollY = tab.ScrollY()
+	}
+	f.navigateTabNoHistory(f.restoredActiveURL)
+	if f.sched != nil {
+		vp := f.sched.Viewport()
+		vp.Offset.Y = scrollY
+		f.sched.SetViewport(vp)
+	}
+	f.restoredScrollTabID = 0
+	f.restoredScrollY = 0
 }
 
 func (f *framePath) querySuggestions(query string) []toolbar.Suggestion {
@@ -598,6 +669,8 @@ func (f *framePath) openWindow() error {
 			f.fonts,
 			int32(f.config.dpr+0.5),
 		)
+		cw.hitTestLinkInfo = f.hitTestLinkInfo
+		cw.onLinkClickInfo = f.handleLinkActivation
 		cw.onContentDrag = f.pointerDrag
 		cw.onCancelDrag = f.cancelPointerDrag
 		f.window = cw

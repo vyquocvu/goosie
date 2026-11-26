@@ -40,17 +40,23 @@ type Session struct {
 
 	scriptBase       string
 	scriptFetch      ScriptFetcher
+	moduleFetch      ModuleFetcher
 	contentLanguage  string
 	documentEncoding string
 	iframeLoader     IFrameDocumentLoader
 	iframeFormSubmit IFrameFormSubmitter
 
 	sheets        []*css.Stylesheet
+	authorCSS     []string
 	styleResolver *style.Resolver
+	cssomRevision uint64
+	cssomOverlay  js.CSSOMOverlayFunc
 
 	imgBase                 string
 	imgFetch                ImageFetcher
 	natural                 map[dom.NodeID]layout.NaturalSize
+	decodedNatural          map[dom.NodeID]layout.NaturalSize
+	sourceNatural           map[dom.NodeID]layout.NaturalSize
 	images                  map[dom.NodeID]stdimage.Image
 	scriptImgs              map[dom.NodeID]scriptImagePixels
 	pendingScriptImgs       map[dom.NodeID]scriptImagePixels
@@ -108,6 +114,10 @@ type Session struct {
 	focusUserChanged       bool
 	focusStylePending      bool
 	submittedForm          *FormSubmission
+	navigationMu           sync.Mutex
+	pendingNavigations     []js.NavigationRequest
+	pendingNavigationBytes int
+	navigationClosed       bool
 	rangePointerNode       *dom.Node
 	rangePointerMoved      bool
 	press                  pressSequence
@@ -169,6 +179,7 @@ type Session struct {
 
 	lifecycleMu    sync.RWMutex
 	opMu           sync.Mutex
+	jsMu           sync.Mutex
 	deferredActive int32
 }
 
@@ -357,6 +368,10 @@ func WithScripts(base string, fetch ScriptFetcher) Option {
 	}
 }
 
+func WithModuleFetcher(fetch ModuleFetcher) Option {
+	return func(s *Session) { s.moduleFetch = fetch }
+}
+
 func WithIFrameDocumentLoader(loader IFrameDocumentLoader) Option {
 	return func(s *Session) {
 		if loader == nil {
@@ -493,6 +508,7 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	}
 	s.Doc = doc
 	doc.ContentLanguage = s.contentLanguage
+	s.authorCSS = append([]string(nil), authorCSS...)
 	s.bindJSRuntime(doc)
 	s.initImageMaps()
 	preScriptSheets, err := s.collectSheets(doc, authorCSS)
@@ -522,6 +538,9 @@ func NewSession(html string, authorCSS []string, viewportW float32, opts ...Opti
 	s.workCounts.styleNodeVisits.Add(uint64(len(s.Styles)))
 	s.PseudoStyles = s.styleResolver.ResolvePseudoElements(doc, s.Styles, s.customFonts)
 	s.styleDirty.Store(false)
+	if s.jsRT != nil {
+		s.cssomRevision = s.cssomOverlaySnapshot().Revision
+	}
 	s.startAnimations()
 	s.loadImages()
 	if err := s.Reflow(viewportW); err != nil {
@@ -590,6 +609,7 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 	}
 	firstBind := !s.runtimeBound
 	if firstBind {
+		s.jsRT.SetNavigationSink(s.queueScriptNavigation)
 		if s.iframeLoader != nil {
 			s.jsRT.SetIFrameLoaderWithBase(s.iframeLoader)
 		}
@@ -620,6 +640,8 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 		s.jsRT.SetComputedStyleProvider(s.computedStyleValues)
 		s.jsRT.SetPseudoStyleProvider(s.pseudoStyleValues)
 		s.jsRT.SetLinkedCSSProvider(s.StyleSheetText)
+		s.cssomOverlay = s.jsRT.CSSOMOverlayProvider()
+		s.jsRT.SetCSSOMAdmissionProvider(s.admitCSSOMText)
 		s.installLayoutProviders()
 		s.jsRT.SetSubresourceBudget(s.sub)
 		s.jsRT.SetImageLoader(s)
@@ -720,9 +742,13 @@ func (s *Session) bindJSRuntime(doc *dom.Document) {
 			s.styleDirty.Store(true)
 			s.layoutDirty.Store(true)
 		})
+		s.jsRT.ChainOnMutation(s.cssomMutationChanged)
 		s.jsRT.ChainOnViewportScroll(func(x, y float64) {
-			if s.onViewportScroll != nil {
-				s.onViewportScroll(x, y)
+			s.opMu.Lock()
+			fn := s.onViewportScroll
+			s.opMu.Unlock()
+			if fn != nil {
+				fn(x, y)
 			}
 		})
 	}
@@ -811,7 +837,7 @@ func (s *Session) runParserScript(doc *dom.Document, node *dom.Node, authorCSS [
 			s.styleInstalled = sig
 		}
 	}
-	if err := s.jsRT.RunParserScript(source, name); err != nil {
+	if err := s.jsRT.RunParserScriptForNode(source, name, node); err != nil {
 		s.recordScriptError(err)
 	}
 }
@@ -972,6 +998,15 @@ const maxLoadedImages = 256
 
 type ScriptFetcher func(base, url string) ([]byte, error)
 
+type ModuleFetchResult struct {
+	Body       []byte
+	Headers    map[string]string
+	URL        string
+	StatusCode int
+}
+
+type ModuleFetcher func(base, url string) (ModuleFetchResult, error)
+
 const maxExternalScripts = 32
 
 const ScriptFetchBudget = 6 * time.Second
@@ -1033,6 +1068,8 @@ func (s *Session) initImageMaps() {
 		return
 	}
 	s.natural = make(map[dom.NodeID]layout.NaturalSize)
+	s.decodedNatural = make(map[dom.NodeID]layout.NaturalSize)
+	s.sourceNatural = make(map[dom.NodeID]layout.NaturalSize)
 	s.images = make(map[dom.NodeID]stdimage.Image)
 	s.scriptImgs = make(map[dom.NodeID]scriptImagePixels)
 	s.pendingScriptImgs = make(map[dom.NodeID]scriptImagePixels)
@@ -1073,6 +1110,7 @@ func (s *Session) LoadDeferredImages(onReady func(loaded int)) {
 }
 
 func (s *Session) collectImageRefs() []imgRef {
+	s.updateImgSourceSizes()
 	var refs []imgRef
 	var uniq []string
 	seen := make(map[string]bool)
@@ -1080,8 +1118,9 @@ func (s *Session) collectImageRefs() []imgRef {
 		if !n.Element() {
 			return nil
 		}
-		if n.Data == "img" {
-			if src := strings.TrimSpace(resolveImgSource(n, s.viewportW)); src != "" {
+		if n.Data == "img" || dom.IsImageInput(n) {
+			candidate := resolveImgSource(n, s.viewportW)
+			if src := strings.TrimSpace(candidate.Src); src != "" {
 				if strings.HasPrefix(src, "data:") {
 					refs = append(refs, imgRef{id: n.ID, abs: src})
 					if !seen[src] {
@@ -1319,7 +1358,8 @@ func (s *Session) applyImages(refs []imgRef, byURL map[string]stdimage.Image) {
 			continue
 		}
 		if b := img.Bounds(); b.Dx() > 0 && b.Dy() > 0 {
-			s.natural[r.id] = layout.NaturalSize{W: float32(b.Dx()), H: float32(b.Dy())}
+			s.decodedNatural[r.id] = layout.NaturalSize{W: float32(b.Dx()), H: float32(b.Dy())}
+			s.syncNaturalSizeLocked(r.id)
 			s.images[r.id] = img
 		}
 	}
@@ -1437,6 +1477,7 @@ func (s *Session) Reflow(viewportW float32) error {
 	if err := s.validateLayoutInput(); err != nil {
 		return err
 	}
+	s.updateImgSourceSizesLocked()
 	s.workCounts.layoutBuilds.Add(1)
 	candidate := layout.Build(s.Doc, s.Styles, s.PseudoStyles)
 	candidate.Metrics = s.metrics
@@ -1580,6 +1621,58 @@ func (s *Session) HitTestLink(x, y float32) string {
 	return ""
 }
 
+type LinkInfo struct {
+	Href   string
+	Target string
+	Rel    string
+}
+
+func (s *Session) HitTestLinkInfo(x, y float32) LinkInfo {
+	if s.Arena == nil {
+		return LinkInfo{}
+	}
+	objs := s.Arena.Objects
+	for i := len(objs) - 1; i >= 1; i-- {
+		obj := &objs[i]
+		if obj.Style != nil && obj.Style.PointerEvents == "none" {
+			continue
+		}
+		adjX, adjY := s.ancestorScrollOffset(obj)
+		tx, ty := x+adjX, y+adjY
+		if !hitBoxContains(obj, tx, ty) {
+			continue
+		}
+		for cur := &objs[i]; cur != nil; cur = parentObj(objs, cur) {
+			if cur.Style != nil && cur.Style.PointerEvents == "none" {
+				break
+			}
+			if cur.Node == nil || cur.Node.DataAtom != dom.AtomA {
+				continue
+			}
+			href := cur.Node.GetAttribute("href")
+			if href == "" {
+				continue
+			}
+			info := LinkInfo{
+				Href:   href,
+				Target: strings.TrimSpace(cur.Node.GetAttribute("target")),
+				Rel:    cur.Node.GetAttribute("rel"),
+			}
+			if info.Target == "" && cur.Node.Doc != nil {
+				cur.Node.Doc.Node.Walk(func(candidate *dom.Node) bool {
+					if candidate.Element() && candidate.Namespace == dom.NSHTML && candidate.Data == "base" && candidate.HasAttribute("target") {
+						info.Target = strings.TrimSpace(candidate.GetAttribute("target"))
+						return false
+					}
+					return true
+				})
+			}
+			return info
+		}
+	}
+	return LinkInfo{}
+}
+
 func (s *Session) HitTestImage(x, y float32) string {
 	if s.Arena == nil {
 		return ""
@@ -1596,7 +1689,7 @@ func (s *Session) HitTestImage(x, y float32) string {
 			continue
 		}
 		if obj.Node != nil && obj.Node.DataAtom == dom.AtomImg {
-			if src := resolveImgSource(obj.Node, s.viewportW); src != "" {
+			if src := resolveImgSource(obj.Node, s.viewportW).Src; src != "" {
 				return src
 			}
 		}
@@ -1604,39 +1697,46 @@ func (s *Session) HitTestImage(x, y float32) string {
 	return ""
 }
 
-func resolveImgSource(n *dom.Node, viewportW float32) string {
-	if n.Parent != nil && n.Parent.Data == "picture" {
-		for c := n.Parent.FirstChild; c != nil; c = c.NextSibling {
-			if c == n {
-				break
-			}
-			if c.Element() && c.Data == "source" {
-				if typ := c.GetAttribute("type"); typ != "" && !isSupportedImageType(typ) {
-					continue
-				}
-				if media := c.GetAttribute("media"); media != "" {
-					if !css.MatchMedia(media, viewportW) {
-						continue
-					}
-				}
-				if srcset := strings.TrimSpace(c.GetAttribute("srcset")); srcset != "" {
-					fields := strings.Fields(srcset)
-					if len(fields) > 0 {
-						return fields[0]
-					}
-				}
-			}
-		}
-	}
-	return n.GetAttribute("src")
+func resolveImgSource(n *dom.Node, viewportW float32) style.ImageSource {
+	return style.SelectedImageSource(n, viewportW)
 }
 
-func isSupportedImageType(typ string) bool {
-	switch strings.ToLower(strings.TrimSpace(typ)) {
-	case "image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/svg+xml", "image/bmp":
-		return true
+func (s *Session) updateImgSourceSizes() {
+	s.imgMu.Lock()
+	defer s.imgMu.Unlock()
+	s.updateImgSourceSizesLocked()
+}
+
+func (s *Session) updateImgSourceSizesLocked() {
+	if s.Doc == nil || s.natural == nil || s.decodedNatural == nil || s.sourceNatural == nil {
+		return
 	}
-	return false
+	clear(s.sourceNatural)
+	_, _ = walkDocument(s.Doc, func(n *dom.Node) error {
+		if n.Element() && (n.Data == "img" || dom.IsImageInput(n)) {
+			candidate := resolveImgSource(n, s.viewportW)
+			if candidate.W > 0 && candidate.H > 0 {
+				s.sourceNatural[n.ID] = layout.NaturalSize{W: candidate.W, H: candidate.H, FromSource: true}
+			}
+			s.syncNaturalSizeLocked(n.ID)
+		}
+		return nil
+	})
+}
+
+func (s *Session) syncNaturalSizeLocked(id dom.NodeID) {
+	if s.natural == nil {
+		return
+	}
+	if size, ok := s.sourceNatural[id]; ok {
+		s.natural[id] = size
+		return
+	}
+	if size, ok := s.decodedNatural[id]; ok {
+		s.natural[id] = size
+		return
+	}
+	delete(s.natural, id)
 }
 
 func (s *Session) ClickAt(x, y float32) bool {
@@ -2512,9 +2612,9 @@ func (s *Session) runScripts() {
 			}
 			var err error
 			if it.deferScript {
-				err = s.jsRT.RunParserDeferScript(it.text, it.name)
+				err = s.jsRT.RunParserDeferScriptForNode(it.text, it.name, it.node)
 			} else {
-				err = s.jsRT.RunParserScript(it.text, it.name)
+				err = s.jsRT.RunParserScriptForNode(it.text, it.name, it.node)
 			}
 			if err != nil {
 				s.recordScriptError(err)
@@ -2653,6 +2753,7 @@ func (s *Session) Close() {
 	if s.jsRT != nil {
 		_ = s.jsRT.Close()
 	}
+	s.closeScriptNavigations()
 }
 
 func (s *Session) PumpMedia() []frame.RectF {
@@ -2700,6 +2801,8 @@ func (s *Session) PumpJS(viewportW float32) bool {
 	}
 	s.lifecycleMu.RLock()
 	defer s.lifecycleMu.RUnlock()
+	s.jsMu.Lock()
+	defer s.jsMu.Unlock()
 	canvasBefore := s.jsRT.CanvasVisualStamp()
 	s.jsRT.FlushScrollEvents()
 	s.jsRT.Tick()
@@ -2972,6 +3075,10 @@ func (s *Session) DOMStats() (nodeCount int, maxDepth int) {
 }
 
 func (s *Session) EvaluateJS(expr string) (string, error) {
+	s.lifecycleMu.RLock()
+	defer s.lifecycleMu.RUnlock()
+	s.jsMu.Lock()
+	defer s.jsMu.Unlock()
 	s.opMu.Lock()
 	rt := s.jsRT
 	s.opMu.Unlock()
@@ -3012,6 +3119,10 @@ func (s *Session) SetViewportScrollCallback(fn func(x, y float64)) {
 }
 
 func (s *Session) SyncViewportScroll(x, y float64) {
+	s.lifecycleMu.RLock()
+	defer s.lifecycleMu.RUnlock()
+	s.jsMu.Lock()
+	defer s.jsMu.Unlock()
 	if s.jsRT == nil {
 		return
 	}

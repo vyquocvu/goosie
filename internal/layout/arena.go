@@ -25,6 +25,7 @@ type Object struct {
 	NextSibling, PrevSibling ObjectID
 
 	X, Y, W, H                                           float32
+	DefiniteH                                            float32
 	MarginTop, MarginRight, MarginBottom, MarginLeft     float32
 	PaddingTop, PaddingRight, PaddingBottom, PaddingLeft float32
 	BorderTop, BorderRight, BorderBottom, BorderLeft     float32
@@ -78,6 +79,10 @@ const (
 	flagAnonymous
 	flagMinHeightClamped
 )
+
+func (o *Object) IsImageInput() bool {
+	return o != nil && dom.IsImageInput(o.Node)
+}
 
 func (o *Object) ContentRect() (x0, y0, x1, y1 float32) {
 	x0 = o.X + o.BorderLeft + o.PaddingLeft
@@ -140,11 +145,17 @@ type Arena struct {
 
 	Metrics Metrics
 
+	QuirksMode bool
+
 	NaturalSizes map[dom.NodeID]NaturalSize
 
 	ViewportH float32
 
 	ViewportW float32
+
+	MeasurePctSet bool
+	MeasurePctW   float32
+	MeasurePctH   float32
 
 	QuoteDepth int
 
@@ -155,7 +166,10 @@ type Arena struct {
 	inlineFragLines map[ObjectID]map[int]frame.RectF
 }
 
-type NaturalSize struct{ W, H float32 }
+type NaturalSize struct {
+	W, H       float32
+	FromSource bool
+}
 
 func NewArena() *Arena {
 	a := &Arena{
@@ -163,13 +177,13 @@ func NewArena() *Arena {
 		byNode:  make(map[dom.NodeID]ObjectID),
 		byKey:   make(map[BoxKey]ObjectID),
 	}
-	a.Objects = append(a.Objects, Object{})
+	a.Objects = append(a.Objects, Object{DefiniteH: -1})
 	return a
 }
 
 func (a *Arena) Alloc() (ObjectID, *Object) {
 	id := ObjectID(len(a.Objects))
-	a.Objects = append(a.Objects, Object{})
+	a.Objects = append(a.Objects, Object{DefiniteH: -1})
 	return id, &a.Objects[id]
 }
 
@@ -276,6 +290,7 @@ func (a *Arena) Link(parent, kid ObjectID) {
 func Build(doc *dom.Document, styles map[dom.NodeID]*style.ComputedStyle, pseudoStyles map[style.PseudoKey]*style.ComputedStyle) *Arena {
 	a := NewArena()
 	if doc != nil {
+		a.QuirksMode = doc.QuirksMode
 		if n := countLayoutNodes(&doc.Node); n > 0 {
 			need := n + 2*len(pseudoStyles) + 2
 			if need > cap(a.Objects) {
@@ -417,39 +432,37 @@ func buildSubtreeWithHost(a *Arena, n *dom.Node, shadowHost *dom.Node, doc *dom.
 	var flTextNode *dom.Node
 	var flRemNode *dom.Node
 	if n.Element() && pseudoStyles != nil {
-		if flStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "first-letter"}]; ok {
-			if flStyle.Content != "" && flStyle.Content != "none" {
-				for c := childHead; c != nil; c = c.NextSibling {
-					if !c.Element() && c.Type != dom.NodeText {
-						continue
-					}
-					if c.Element() {
+		if flStyle, ok := pseudoStyles[style.PseudoKey{NodeID: n.ID, Pseudo: "first-letter"}]; ok && style.PseudoStyleApplies("first-letter", flStyle) {
+			for c := childHead; c != nil; c = c.NextSibling {
+				if !c.Element() && c.Type != dom.NodeText {
+					continue
+				}
+				if c.Element() {
+					break
+				}
+				if c.Type == dom.NodeText {
+					if strings.TrimSpace(c.DataContent) != "" {
+						flTextNode = c
 						break
 					}
-					if c.Type == dom.NodeText {
-						if strings.TrimSpace(c.DataContent) != "" {
-							flTextNode = c
-							break
-						}
+				}
+			}
+			if flTextNode != nil {
+				runes := []rune(flTextNode.DataContent)
+				firstIdx := -1
+				for i, r := range runes {
+					if !unicode.IsSpace(r) {
+						firstIdx = i
+						break
 					}
 				}
-				if flTextNode != nil {
-					runes := []rune(flTextNode.DataContent)
-					firstIdx := -1
-					for i, r := range runes {
-						if !unicode.IsSpace(r) {
-							firstIdx = i
-							break
-						}
-					}
-					if firstIdx >= 0 {
-						letter := string(runes[firstIdx])
-						remCopy := *flTextNode
-						remCopy.DataContent = string(runes[firstIdx+1:])
-						flRemNode = &remCopy
-						flID := buildFirstLetterPseudoElement(a, doc, n.ID, letter, flStyle)
-						a.Link(id, flID)
-					}
+				if firstIdx >= 0 {
+					letter := string(runes[firstIdx])
+					remCopy := *flTextNode
+					remCopy.DataContent = string(runes[firstIdx+1:])
+					flRemNode = &remCopy
+					flID := buildFirstLetterPseudoElement(a, doc, n.ID, letter, flStyle)
+					a.Link(id, flID)
 				}
 			}
 		}

@@ -1,9 +1,7 @@
 package js
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -89,11 +87,17 @@ type thenableObj struct {
 }
 
 type fetchState struct {
-	client    HTTPFetcher
-	ctx       context.Context
-	mu        sync.Mutex
-	active    int
-	callbacks []fetchCallback
+	client         HTTPFetcher
+	ctx            context.Context
+	mu             sync.Mutex
+	active         int
+	callbacks      []fetchCallback
+	headers        map[*goja.Object]*fetchHeadersState
+	requests       map[*goja.Object]*fetchRequestState
+	responses      map[*FetchResponse]*goja.Object
+	responseBodies map[*goja.Object]*fetchResponseState
+	headersProto   *goja.Object
+	requestProto   *goja.Object
 }
 
 type fetchAbort struct {
@@ -176,8 +180,7 @@ func (r *Runtime) installFetchWrapper() {
 	`)
 }
 
-func (r *Runtime) parseFetchOpts(val goja.Value) (FetchOptions, error) {
-	var opts FetchOptions
+func (r *Runtime) applyFetchInit(opts FetchOptions, val goja.Value) (FetchOptions, error) {
 	if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
 		return opts, nil
 	}
@@ -187,46 +190,75 @@ func (r *Runtime) parseFetchOpts(val goja.Value) (FetchOptions, error) {
 	}
 	if v := obj.Get("method"); v != nil && !goja.IsUndefined(v) {
 		opts.Method = strings.ToUpper(v.String())
-	}
-	if opts.Method == "" {
-		opts.Method = "GET"
-	}
-	if v := obj.Get("body"); v != nil && !goja.IsUndefined(v) {
-		if body, ok := v.(*goja.Object); ok {
-			if list := r.formDataValues[body]; list != nil {
-				boundary, data, err := r.encodeMultipartFormData(list, "UTF-8")
-				if err != nil {
-					return opts, err
-				}
-				opts.BodyBytes, opts.HasBodyBytes = data, true
-				if opts.Headers == nil {
-					opts.Headers = make(map[string]string)
-				}
-				if GetHeader(opts.Headers, "Content-Type") == "" {
-					opts.Headers["Content-Type"] = "multipart/form-data; boundary=" + boundary
-				}
-			} else {
-				opts.Body = v.String()
-			}
-		} else {
-			opts.Body = v.String()
+		if opts.Method == "" {
+			opts.Method = "GET"
 		}
 	}
 	if v := obj.Get("credentials"); v != nil && !goja.IsUndefined(v) {
 		opts.Credentials = strings.ToLower(v.String())
 	}
 	if v := obj.Get("headers"); v != nil && !goja.IsUndefined(v) {
-		if hObj, ok := v.(*goja.Object); ok {
-			opts.Headers = make(map[string]string)
-			for _, key := range hObj.Keys() {
-				hv := hObj.Get(key)
-				if hv != nil && !goja.IsUndefined(hv) {
-					opts.Headers[key] = hv.String()
+		headers, err := r.parseFetchHeaders(v)
+		if err != nil {
+			return opts, err
+		}
+		opts.Headers = headers
+	}
+	if v := obj.Get("body"); v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
+		data, mime, present, err := r.fetchBodyBytes(v)
+		if err != nil {
+			return opts, err
+		}
+		if present {
+			opts.Body = ""
+			opts.BodyBytes = data
+			opts.HasBodyBytes = true
+			if mime != "" {
+				if opts.Headers == nil {
+					opts.Headers = make(map[string]string)
+				}
+				if GetHeader(opts.Headers, "Content-Type") == "" {
+					opts.Headers["Content-Type"] = mime
 				}
 			}
 		}
 	}
 	return opts, nil
+}
+
+func (r *Runtime) parseFetchHeaders(value goja.Value) (map[string]string, error) {
+	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
+		return nil, nil
+	}
+	if state := r.headersReceiver(value); state != nil {
+		return state.headerMap(), nil
+	}
+	obj, ok := value.(*goja.Object)
+	if !ok {
+		return nil, errors.New("HeadersInit must be an object")
+	}
+	if obj.ClassName() == "Array" {
+		headers, err := r.headersFromInit(value, "request")
+		if err != nil {
+			return nil, err
+		}
+		return r.headersReceiver(headers).headerMap(), nil
+	}
+	headers := make(map[string]string)
+	for _, key := range obj.Keys() {
+		if isForbiddenRequestHeader(key) {
+			continue
+		}
+		if !isFetchHeaderName(key) {
+			return nil, errors.New("Invalid header name")
+		}
+		headerValue := strings.Trim(obj.Get(key).String(), " \t")
+		if !isFetchHeaderValue(headerValue) {
+			return nil, errors.New("Invalid header value")
+		}
+		headers[key] = headerValue
+	}
+	return headers, nil
 }
 
 func (r *Runtime) resolveFetchURL(raw string) string {
@@ -247,45 +279,6 @@ func (r *Runtime) resolveFetchURL(raw string) string {
 
 const fetchSignalInvalidMessage = "Failed to execute 'fetch' on 'Window': Failed to read the 'signal' property from 'RequestInit': Failed to convert value to 'AbortSignal'."
 
-func (r *Runtime) followFetchSignal(init goja.Value) (*fetchAbort, goja.Value) {
-	if init == nil || goja.IsUndefined(init) || goja.IsNull(init) {
-		return nil, nil
-	}
-	initObj, ok := init.(*goja.Object)
-	if !ok {
-		return nil, nil
-	}
-	val := initObj.Get("signal")
-	if val == nil || goja.IsUndefined(val) || goja.IsNull(val) {
-		return nil, nil
-	}
-	signal, ok := val.(*goja.Object)
-	if !ok {
-		return nil, r.invalidFetchSignalError()
-	}
-	register, ok := goja.AssertFunction(signal.Get("__registerAbortAlgorithm__"))
-	if !ok {
-		return nil, r.invalidFetchSignalError()
-	}
-
-	control := newFetchAbort()
-	reason := func() goja.Value {
-		if v := signal.Get("reason"); v != nil {
-			return v
-		}
-		return r.newAbortErrorDOMException()
-	}
-	if aborted := signal.Get("aborted"); aborted != nil && aborted.ToBoolean() {
-		control.fire(reason())
-		return control, nil
-	}
-	_, _ = register(signal, r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-		control.fire(reason())
-		return goja.Undefined()
-	}))
-	return control, nil
-}
-
 func (r *Runtime) invalidFetchSignalError() goja.Value {
 	if ctor, ok := goja.AssertConstructor(r.vm.Get("TypeError")); ok {
 		if err, newErr := ctor(nil, r.vm.ToValue(fetchSignalInvalidMessage)); newErr == nil {
@@ -304,23 +297,61 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	if len(call.Arguments) < 1 {
 		return r.makeRejectThenable("fetch requires a URL argument")
 	}
-	rawURL := call.Arguments[0].String()
+	input := call.Argument(0)
+	rawURL := input.String()
+	opts := FetchOptions{Method: "GET", Credentials: "same-origin"}
+	var request *fetchRequestState
+	if candidate := r.requestReceiver(input); candidate != nil {
+		request = candidate
+		if request.body != nil && request.body.present && (request.body.used || request.body.streamLocked) {
+			return r.rejectThenableWithValue(r.vm.NewTypeError("Cannot fetch a Request object that has already been used"))
+		}
+		rawURL = request.url
+		opts = FetchOptions{
+			Method:       request.method,
+			Headers:      request.headers.headerMap(),
+			Credentials:  request.credentials,
+			HasBodyBytes: request.body != nil && request.body.present,
+		}
+		if request.body != nil && request.body.present {
+			opts.BodyBytes = request.body.data
+		}
+	}
 
-	resolvedURL := r.resolveFetchURL(rawURL)
-
-	opts := FetchOptions{Method: "GET"}
-	var abort *fetchAbort
+	var init goja.Value
+	usingRequestBody := request != nil && request.body != nil && request.body.present
 	if len(call.Arguments) >= 2 {
+		init = call.Argument(1)
+		if initObj, ok := init.(*goja.Object); ok {
+			if value := initObj.Get("body"); value != nil && !goja.IsUndefined(value) && !goja.IsNull(value) {
+				usingRequestBody = false
+			}
+		}
 		var err error
-		opts, err = r.parseFetchOpts(call.Arguments[1])
+		opts, err = r.applyFetchInit(opts, init)
 		if err != nil {
 			return r.makeRejectThenable(err.Error())
 		}
-		var invalid goja.Value
-		abort, invalid = r.followFetchSignal(call.Arguments[1])
-		if invalid != nil {
-			return r.rejectThenableWithValue(invalid)
+	}
+
+	resolvedURL := r.resolveFetchURL(rawURL)
+
+	var signalValue goja.Value
+	hasSignalOverride := false
+	if init != nil && !goja.IsUndefined(init) && !goja.IsNull(init) {
+		if initObj, ok := init.(*goja.Object); ok {
+			if value := initObj.Get("signal"); value != nil && !goja.IsUndefined(value) {
+				signalValue = value
+				hasSignalOverride = true
+			}
 		}
+	}
+	if !hasSignalOverride && request != nil {
+		signalValue = request.signal
+	}
+	abort, invalid := r.followFetchSignalValue(signalValue)
+	if invalid != nil {
+		return r.rejectThenableWithValue(invalid)
 	}
 
 	bodyLen := len(opts.Body)
@@ -329,6 +360,9 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	}
 	if bodyLen > MaxFetchBodyBytes {
 		return r.makeRejectThenable("request body exceeds limit")
+	}
+	if opts.HasBodyBytes && (opts.Method == "GET" || opts.Method == "HEAD") {
+		return r.rejectThenableWithValue(r.vm.NewTypeError("Request with GET/HEAD method cannot have body"))
 	}
 
 	if abort != nil {
@@ -344,6 +378,11 @@ func (r *Runtime) doFetch(call goja.FunctionCall) goja.Value {
 	}
 	fs.active++
 	fs.mu.Unlock()
+
+	if request != nil && usingRequestBody {
+		request.body.used = true
+		request.body.streamLocked = true
+	}
 
 	budget := r.subresourceBudget()
 
@@ -470,11 +509,12 @@ func (fs *fetchState) rejectFetch(t *thenableObj, msg interface{}) {
 }
 
 func (fs *fetchState) resolveFetch(t *thenableObj, resp *FetchResponse) {
-	t.settleFetch(resp, nil, false)
+	owned := *resp
+	t.settleFetch(&owned, nil, false)
 	fs.mu.Lock()
 	fs.callbacks = append(fs.callbacks, fetchCallback{
 		isReject: false,
-		arg:      resp,
+		arg:      &owned,
 		chain:    t,
 	})
 	fs.mu.Unlock()
@@ -619,188 +659,13 @@ func (t *thenableObj) reject(val goja.Value) {
 }
 
 func (r *Runtime) makeResponseObject(resp *FetchResponse) *goja.Object {
-	obj := r.vm.NewObject()
-	if r.responseProto != nil {
-		_ = obj.SetPrototype(r.responseProto)
-	}
-
-	_ = obj.Set("status", resp.Status)
-	_ = obj.Set("statusText", resp.StatusText)
-	_ = obj.Set("ok", resp.OK)
-	_ = obj.Set("url", resp.URL)
-	bodyStr := string(resp.Body)
-
-	headersObj := r.vm.NewObject()
-	if resp.Headers != nil {
-		for k, v := range resp.Headers {
-			_ = headersObj.Set(strings.ToLower(k), v)
-		}
-	}
-	_ = headersObj.Set("get", func(call goja.FunctionCall) goja.Value {
-		if len(call.Arguments) < 1 {
-			return goja.Undefined()
-		}
-		key := strings.ToLower(call.Arguments[0].String())
-		v := headersObj.Get(key)
-		if v == nil || goja.IsUndefined(v) {
-			return goja.Null()
-		}
-		return v
-	})
-	_ = obj.Set("headers", headersObj)
-
-	_ = obj.Set("text", func(call goja.FunctionCall) goja.Value {
-		t := r.newThenable()
-		t.resolve(r.vm.ToValue(bodyStr))
-		return t.obj
-	})
-
-	_ = obj.Set("json", func(call goja.FunctionCall) goja.Value {
-		t := r.newThenable()
-		var parsed interface{}
-		if err := json.Unmarshal([]byte(bodyStr), &parsed); err != nil {
-			t.reject(r.vm.ToValue("JSON parse error: " + err.Error()))
-		} else {
-			t.resolve(r.vm.ToValue(parsed))
-		}
-		return t.obj
-	})
-
-	return obj
-}
-
-func (r *Runtime) setupResponse() {
-	prototype := r.vm.NewObject()
-	ctor, ok := r.vm.ToValue(func(call goja.ConstructorCall) *goja.Object {
-		var body goja.Value = goja.Undefined()
-		if len(call.Arguments) > 0 {
-			body = call.Argument(0)
-		}
-		bodyBytes, mime, err := r.responseBodyInit(body)
-		if err != nil {
-			panic(r.vm.NewTypeError(err.Error()))
-		}
-		status, statusText := 200, "OK"
-		if len(call.Arguments) > 1 && !goja.IsNull(call.Argument(1)) && !goja.IsUndefined(call.Argument(1)) {
-			init := call.Argument(1).ToObject(r.vm)
-			if value := init.Get("status"); value != nil && !goja.IsUndefined(value) {
-				status = int(value.ToInteger())
-			}
-			if value := init.Get("statusText"); value != nil && !goja.IsUndefined(value) {
-				statusText = value.String()
-			}
-		}
-		obj := call.This
-		var used bool
-		_ = obj.DefineAccessorProperty("bodyUsed", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-			return r.vm.ToValue(used)
-		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-		_ = obj.DefineAccessorProperty("status", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-			return r.vm.ToValue(status)
-		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-		_ = obj.DefineAccessorProperty("statusText", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-			return r.vm.ToValue(statusText)
-		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-		_ = obj.DefineAccessorProperty("ok", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-			return r.vm.ToValue(status >= 200 && status <= 299)
-		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-		_ = obj.DefineAccessorProperty("type", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-			return r.vm.ToValue("default")
-		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-		_ = obj.DefineAccessorProperty("url", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
-			return r.vm.ToValue("")
-		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
-		headers := r.vm.NewObject()
-		_ = headers.Set("get", func(call goja.FunctionCall) goja.Value {
-			if len(call.Arguments) == 0 {
-				return goja.Null()
-			}
-			if strings.EqualFold(call.Argument(0).String(), "content-type") && mime != "" {
-				return r.vm.ToValue(mime)
-			}
-			return goja.Null()
-		})
-		_ = obj.Set("headers", headers)
-		consume := func() {
-			if used {
-				panic(r.vm.NewTypeError("Response body has already been consumed"))
-			}
-			used = true
-		}
-		_ = obj.Set("arrayBuffer", func(goja.FunctionCall) goja.Value {
-			consume()
-			thenable := r.newThenable()
-			thenable.resolve(r.vm.ToValue(r.vm.NewArrayBuffer(bytes.Clone(bodyBytes))))
-			return thenable.obj
-		})
-		_ = obj.Set("blob", func(goja.FunctionCall) goja.Value {
-			consume()
-			thenable := r.newThenable()
-			thenable.resolve(r.vm.ToValue(r.makeBlob(nil, bytes.Clone(bodyBytes), mime, false, "", 0)))
-			return thenable.obj
-		})
-		_ = obj.Set("text", func(goja.FunctionCall) goja.Value {
-			consume()
-			thenable := r.newThenable()
-			thenable.resolve(r.vm.ToValue(decodeBlobText(bodyBytes)))
-			return thenable.obj
-		})
-		_ = obj.Set("json", func(goja.FunctionCall) goja.Value {
-			consume()
-			thenable := r.newThenable()
-			var parsed any
-			if err := json.Unmarshal(bodyBytes, &parsed); err != nil {
-				thenable.reject(r.vm.ToValue("JSON parse error: " + err.Error()))
-			} else {
-				thenable.resolve(r.vm.ToValue(parsed))
-			}
-			return thenable.obj
-		})
+	fs := r.ensureFetchObjectState()
+	if obj := fs.responses[resp]; obj != nil {
 		return obj
-	}).(*goja.Object)
-	if !ok {
-		return
 	}
-	r.responseProto = prototype
-	_ = ctor.Set("prototype", prototype)
-	_ = prototype.Set("constructor", ctor)
-	r.defineInterfaceToStringTag("Response", prototype)
-	_ = r.vm.Set("Response", ctor)
-	if win, ok := r.vm.Get("window").(*goja.Object); ok {
-		_ = win.Set("Response", ctor)
-	}
-}
-
-func (r *Runtime) responseBodyInit(value goja.Value) ([]byte, string, error) {
-	if value == nil || goja.IsUndefined(value) || goja.IsNull(value) {
-		return nil, "", nil
-	}
-	if object, ok := value.(*goja.Object); ok {
-		if blob := r.fileValues[object]; blob != nil {
-			return bytes.Clone(blob.data), blob.typeValue, nil
-		}
-		if buffer, ok := object.Export().(goja.ArrayBuffer); ok {
-			if buffer.Detached() {
-				return nil, "", errors.New("Response body buffer is detached")
-			}
-			return bytes.Clone(buffer.Bytes()), "", nil
-		}
-		if bufferValue := object.Get("buffer"); bufferValue != nil && !goja.IsUndefined(bufferValue) {
-			if buffer, ok := bufferValue.Export().(goja.ArrayBuffer); ok {
-				if buffer.Detached() {
-					return nil, "", errors.New("Response body buffer is detached")
-				}
-				offset := int(object.Get("byteOffset").ToInteger())
-				length := int(object.Get("byteLength").ToInteger())
-				data := buffer.Bytes()
-				if offset < 0 || length < 0 || offset > len(data) || length > len(data)-offset {
-					return nil, "", errors.New("Response body view is out of bounds")
-				}
-				return bytes.Clone(data[offset : offset+length]), "", nil
-			}
-		}
-	}
-	return []byte(value.String()), "", nil
+	obj := r.newResponseObject(resp.Status, resp.StatusText, resp.URL, resp.Headers, resp.Body, resp.Body != nil)
+	fs.responses[resp] = obj
+	return obj
 }
 
 func (r *Runtime) makeRejectThenable(msg string) goja.Value {
@@ -811,21 +676,6 @@ func (r *Runtime) rejectThenableWithValue(val goja.Value) goja.Value {
 	t := r.newThenable()
 	t.rejected = true
 	t.result = val
-
-	fs := fetchOf(r)
-	if fs == nil {
-		return t.obj
-	}
-
-	fs.mu.Lock()
-	fs.callbacks = append(fs.callbacks, fetchCallback{
-		fn:       t.catchCB,
-		isReject: true,
-		arg:      val,
-		chain:    t,
-	})
-	fs.mu.Unlock()
-
 	return t.obj
 }
 

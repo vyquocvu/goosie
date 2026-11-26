@@ -162,15 +162,17 @@ func run(args []string) error {
 		return fmt.Errorf("paint document: %w", err)
 	}
 	dl := list.Build(1)
-	extent := dl.Extent()
+	extent, err := sess.DocumentLayerBounds(dl.Extent(), scale, dev)
+	if err != nil {
+		return fmt.Errorf("document bounds: %w", err)
+	}
 
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
 		return fmt.Errorf("size document cache: %w", err)
 	}
 	bitmapPool := frame.NewBitmapPool(frame.Size{W: frame.TileSize, H: frame.TileSize}, budgetTiles)
-	layerBounds := frame.Rect{X0: 0, Y0: 0, X1: extent.X1, Y1: extent.Y1}
-	layer := frame.NewLayer(1, layerBounds, budgetBytes, bitmapPool)
+	layer := frame.NewLayer(1, extent, budgetBytes, bitmapPool)
 	layer.SetContent(dl)
 
 	wp := raster.New(raster.DefaultWorkers(), rasterQueue, raster.DefaultRaster(fonts, raster.NewGlyphAtlas(glyphAtlasBudget, fonts)))

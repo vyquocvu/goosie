@@ -48,6 +48,7 @@ type layoutStyleKey struct {
 	FontSlot                                      frame.FontSlot
 	FontSize, LineHeight                          float32
 	LineHeightRatio, LineHeightEm                 float32
+	FirstLineSpecified                            uint8
 	Direction                                     string
 	TextAlign                                     style.TextAlign
 	TextIndent                                    float32
@@ -122,7 +123,7 @@ func makeLayoutStyleKey(s *style.ComputedStyle) layoutStyleKey {
 		Top: s.Top, Right: s.Right, Bottom: s.Bottom, Left: s.Left,
 		HasTop: s.HasTop, HasRight: s.HasRight, HasBottom: s.HasBottom, HasLeft: s.HasLeft,
 		FontSlot: s.FontSlot(), FontSize: s.FontSize, LineHeight: s.LineHeight,
-		LineHeightRatio: s.LineHeightRatio, LineHeightEm: s.LineHeightEm, Direction: s.Direction,
+		LineHeightRatio: s.LineHeightRatio, LineHeightEm: s.LineHeightEm, FirstLineSpecified: s.FirstLineSpecified(), Direction: s.Direction,
 		TextAlign: s.TextAlign, TextIndent: s.TextIndent, TextTransform: s.TextTransform, VerticalAlign: s.VerticalAlign,
 		WhiteSpace: s.WhiteSpace, WordSpacing: s.WordSpacing, LetterSpacing: s.LetterSpacing,
 		WordBreak: s.WordBreak, Hyphens: s.Hyphens, TabSize: s.TabSize,
@@ -183,7 +184,7 @@ func interactiveLayoutChanged(resolution style.InteractiveResolution, current ma
 		}
 	}
 	for _, id := range resolution.Nodes {
-		for _, pseudo := range []string{"before", "after", "first-letter"} {
+		for _, pseudo := range []string{"before", "after", "first-letter", "first-line"} {
 			key := style.PseudoKey{NodeID: id, Pseudo: pseudo}
 			before, hadBefore := resolution.PreviousPseudo[key]
 			after, hasAfter := pseudos[key]

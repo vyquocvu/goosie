@@ -21,13 +21,15 @@ type floatIntrusion struct {
 }
 
 type breakCtx struct {
-	contentW float32
-	x0       float32
-	strut    float32
-	in       []floatIntrusion
-	yTop     float32
-	xoff     float32
-	avail    float32
+	contentW      float32
+	x0            float32
+	strut         float32
+	in            []floatIntrusion
+	yTop          float32
+	xoff          float32
+	avail         float32
+	firstLine     *style.ComputedStyle
+	firstLineOpen bool
 }
 
 func collectFloatIntrusions(a *Arena, id ObjectID) []floatIntrusion {
@@ -322,10 +324,10 @@ func resolveInlineEdges(a *Arena, id ObjectID, containingW float32) {
 	if obj.Style != nil && obj.Style.Display == style.DisplayInline && obj.Node != nil && obj.Node.Element() {
 		ubw := obj.Style.UsedBorderWidths()
 		obj.BorderTop, obj.BorderRight, obj.BorderBottom, obj.BorderLeft = ubw[0], ubw[1], ubw[2], ubw[3]
-		obj.PaddingTop = resolvePctLength(obj.Style.PaddingTop, cw)
-		obj.PaddingRight = resolvePctLength(obj.Style.PaddingRight, cw)
-		obj.PaddingBottom = resolvePctLength(obj.Style.PaddingBottom, cw)
-		obj.PaddingLeft = resolvePctLength(obj.Style.PaddingLeft, cw)
+		obj.PaddingTop = pctLen(a, obj.Style.PaddingTop, cw)
+		obj.PaddingRight = pctLen(a, obj.Style.PaddingRight, cw)
+		obj.PaddingBottom = pctLen(a, obj.Style.PaddingBottom, cw)
+		obj.PaddingLeft = pctLen(a, obj.Style.PaddingLeft, cw)
 	}
 	for kid := obj.FirstKid; kid != 0; kid = a.Get(kid).NextSibling {
 		resolveInlineEdges(a, kid, cw)
@@ -424,6 +426,27 @@ func (a *Arena) finalizeInlineFragments(id ObjectID) {
 	a.inlineFragLines[id] = expanded
 }
 
+func (a *Arena) firstLineStyle(id ObjectID) *style.ComputedStyle {
+	obj := a.Get(id)
+	if obj.Node != nil && obj.Node.Element() {
+		return a.FirstLineStyles[obj.Node.ID]
+	}
+	if obj.flags&flagAnonymous == 0 {
+		return nil
+	}
+	for parent := obj.Parent; parent != 0; {
+		p := a.Get(parent)
+		if p.flags&flagAnonymous == 0 {
+			if p.Node != nil && p.Node.Element() {
+				return a.FirstLineStyles[p.Node.ID]
+			}
+			return nil
+		}
+		parent = p.Parent
+	}
+	return nil
+}
+
 func inlineInto(a *Arena, id ObjectID) {
 	obj := a.Get(id)
 	if obj.Style != nil && obj.Style.Display == style.DisplayNone {
@@ -445,11 +468,18 @@ func inlineInto(a *Arena, id ObjectID) {
 		sm = ofStrut(asc, desc, strutLine,
 			faceXHeight(a.Metrics, obj.Style.FontSize, obj.Style.FontSlot()), obj.Style.FontSize)
 	}
+	flStyle := a.firstLineStyle(id)
+	var firstLine *style.ComputedStyle
+	if obj.Style != nil && obj.Style.TextWrap != "balance" && flStyle != nil && flStyle.FirstLineSpecified() != 0 {
+		firstLine = flStyle
+	}
 	bc := &breakCtx{
-		contentW: contentW,
-		x0:       obj.X + obj.PaddingLeft + obj.BorderLeft,
-		strut:    strut,
-		in:       collectFloatIntrusions(a, id),
+		contentW:      contentW,
+		x0:            obj.X + obj.PaddingLeft + obj.BorderLeft,
+		strut:         strut,
+		in:            collectFloatIntrusions(a, id),
+		firstLine:     firstLine,
+		firstLineOpen: firstLine != nil,
 	}
 	bc.startLine(obj.Y+obj.PaddingTop+obj.BorderTop, strut)
 	var lines []lineBox
@@ -469,6 +499,7 @@ func inlineInto(a *Arena, id ObjectID) {
 				atomicInlineBlock(a, kid, &lines, &current, bc)
 				continue
 			}
+			bc.firstLineOpen = false
 			if len(current.runs) > 0 {
 				trimTrailingSpaces(a, &current)
 				if len(current.runs) > 0 {
@@ -485,6 +516,7 @@ func inlineInto(a *Arena, id ObjectID) {
 			continue
 		}
 		if k.Node != nil && k.Node.Data == "br" {
+			bc.firstLineOpen = false
 			if len(current.runs) > 0 {
 				trimTrailingSpaces(a, &current)
 				if len(current.runs) > 0 {
@@ -492,14 +524,20 @@ func inlineInto(a *Arena, id ObjectID) {
 					bc.nextLine(current.h)
 				}
 			} else {
-				s := a.Get(id).Style
+				s := k.Style
+				if s == nil {
+					s = a.Get(id).Style
+				}
+				if bc.firstLine != nil {
+					s = style.FirstLineMetrics(s, bc.firstLine)
+				}
 				size, lineHeight := float32(16), float32(0)
 				var slot frame.FontSlot
 				if s != nil {
 					size, lineHeight, slot = s.FontSize, s.LineHeight, s.FontSlot()
 				}
 				h, _ := runHeights(a.Metrics, size, slot, lineHeight)
-				lines = append(lines, lineBox{h: h})
+				lines = append(lines, lineBox{h: h, emptyH: h})
 				bc.nextLine(h)
 			}
 			current = lineBox{}
@@ -527,10 +565,8 @@ func inlineInto(a *Arena, id ObjectID) {
 		}
 		lines = lines[:clamp]
 	}
-	if obj.Node != nil && obj.Node.Element() && len(lines) > 0 {
-		if flStyle, ok := a.FirstLineStyles[obj.Node.ID]; ok && flStyle != nil {
-			applyFirstLineRuns(a, &lines[0], flStyle, obj.Style)
-		}
+	if flStyle != nil && len(lines) > 0 {
+		applyFirstLineRuns(a, &lines[0], flStyle, obj.Style)
 	}
 	applyTakenSoftHyphens(a, lines)
 	obj = a.Get(id)
@@ -540,8 +576,11 @@ func inlineInto(a *Arena, id ObjectID) {
 	justifyExtra := float32(0)
 	for li, line := range lines {
 		demands := runDemands(a, line.runs, sm)
-		fr := lineExtent(sm, demands)
+		fr := lineExtent(sm, demands, a.lineUsesStrut(demands))
 		line.h = fr.height
+		if len(line.runs) == 0 && line.emptyH > line.h {
+			line.h = line.emptyH
+		}
 		justifyExtra = 0
 		lxoff, lavail := bc.spanAt(y, line.h)
 		if lavail <= 0 {
@@ -666,11 +705,9 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 			k.Node = nil
 			return
 		}
-		fontSize := k.Style.FontSize
-		slot := k.Style.FontSlot()
-		lineH, contentH := runHeights(a.Metrics, fontSize, slot, k.Style.LineHeight)
-		letterSpacing := k.Style.LetterSpacing
-		wordSpacing := k.Style.WordSpacing
+		baseMetrics := textMetricsForStyle(a, k.Style)
+		fontSize, slot := baseMetrics.size, baseMetrics.slot
+		letterSpacing := baseMetrics.letterSpacing
 		nowrap := k.Style.WhiteSpace == style.WhiteSpaceNowrap ||
 			k.Style.WhiteSpace == style.WhiteSpacePre ||
 			k.Style.WhiteSpace == style.WhiteSpacePrewrite ||
@@ -681,6 +718,13 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 		} else {
 			words = splitWords(text)
 		}
+		measureFirstLine := bc.firstLineOpen && bc.firstLine != nil &&
+			firstLineBreakingEligible(k.Style, words, fontSize, a, slot, letterSpacing)
+		firstLineStyle := k.Style
+		if measureFirstLine {
+			firstLineStyle = style.FirstLineMetrics(k.Style, bc.firstLine)
+		}
+		firstLineMetrics := textMetricsForStyle(a, firstLineStyle)
 		if !nowrap {
 			if k.Style.WordBreak == "break-all" {
 				var charWords []string
@@ -710,6 +754,8 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 		}
 		for _, word := range words {
 			if word == "\n" {
+				bc.firstLineOpen = false
+				measureFirstLine = false
 				if current.w > 0 || len(current.runs) > 0 {
 					trimTrailingSpaces(a, current)
 					if len(current.runs) > 0 {
@@ -720,13 +766,13 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 				}
 				continue
 			}
-			wordW := measureWord(word, fontSize, a.Metrics, slot, letterSpacing)
-			if word == " " {
-				wordW += wordSpacing
-			} else if word == "\t" {
-				singleSpaceW := measureWord(" ", fontSize, a.Metrics, slot, letterSpacing) + wordSpacing
-				wordW = float32(tabSpaces) * singleSpaceW
+			wordStyle := k.Style
+			metrics := baseMetrics
+			if measureFirstLine {
+				wordStyle = firstLineStyle
+				metrics = firstLineMetrics
 			}
+			wordW := metrics.measure(word, a, tabSpaces)
 			if word == " " && len(current.runs) == 0 {
 				continue
 			}
@@ -737,6 +783,11 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 					bc.nextLine(current.h)
 				}
 				*current = lineBox{}
+				bc.firstLineOpen = false
+				measureFirstLine = false
+				wordStyle = k.Style
+				metrics = baseMetrics
+				wordW = metrics.measure(word, a, tabSpaces)
 			}
 			wordID, wordObj := a.Alloc()
 			nodeCopy := *k.Node
@@ -746,7 +797,7 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 				a.setKey(wordID, NewBoxKey(uint32(nodeCopy.ID), BoxKindWord, a.wordSeq))
 				a.wordSeq++
 			}
-			wordObj.Style = k.Style
+			wordObj.Style = wordStyle
 			wordObj.Parent = a.Get(nodeID).Parent
 			if lastWordID == 0 {
 				firstWordID = wordID
@@ -757,15 +808,15 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 			lastWordID = wordID
 			current.runs = append(current.runs, textRun{
 				text:     word,
-				size:     fontSize,
-				lineH:    lineH,
-				contentH: contentH,
+				size:     metrics.size,
+				lineH:    metrics.lineH,
+				contentH: metrics.contentH,
 				obj:      wordID,
-				slot:     slot,
+				slot:     metrics.slot,
 				w:        wordW,
 			})
 			current.w += wordW
-			current.h = maxF(current.h, lineH)
+			current.h = maxF(current.h, metrics.lineH)
 		}
 		if lastWordID != 0 {
 			k = a.Get(nodeID)
@@ -789,7 +840,7 @@ func collectInline(a *Arena, nodeID ObjectID, lines *[]lineBox, current *lineBox
 		return
 	}
 	k = a.Get(nodeID)
-	if k.Node != nil && k.Node.Element() && k.Node.Data == "img" {
+	if k.Node != nil && k.Node.Element() && (k.Node.Data == "img" || k.IsImageInput()) {
 		atomicInlineReplaced(a, nodeID, lines, current, bc)
 		return
 	}
@@ -803,6 +854,51 @@ type lineBox struct {
 	runs     []textRun
 	trailing []textRun
 	w, h     float32
+	emptyH   float32
+}
+
+type textRunMetrics struct {
+	size          float32
+	slot          frame.FontSlot
+	lineH         float32
+	contentH      float32
+	letterSpacing float32
+	wordSpacing   float32
+}
+
+func textMetricsForStyle(a *Arena, s *style.ComputedStyle) textRunMetrics {
+	m := textRunMetrics{}
+	if s != nil {
+		m.size, m.slot = s.FontSize, s.FontSlot()
+		m.lineH, m.contentH = runHeights(a.Metrics, m.size, m.slot, s.LineHeight)
+		m.letterSpacing, m.wordSpacing = s.LetterSpacing, s.WordSpacing
+	}
+	return m
+}
+
+func (m textRunMetrics) measure(word string, a *Arena, tabSpaces int) float32 {
+	width := measureWord(word, m.size, a.Metrics, m.slot, m.letterSpacing)
+	if word == " " {
+		width += m.wordSpacing
+	} else if word == "\t" {
+		width = float32(tabSpaces) * (measureWord(" ", m.size, a.Metrics, m.slot, m.letterSpacing) + m.wordSpacing)
+	}
+	return width
+}
+
+func firstLineBreakingEligible(s *style.ComputedStyle, words []string, fontSize float32, a *Arena, slot frame.FontSlot, letterSpacing float32) bool {
+	if s == nil || s.WordBreak == "break-all" {
+		return false
+	}
+	for _, word := range words {
+		if strings.ContainsFunc(word, cjkBreakRune) || strings.ContainsFunc(word, softBreakRune) {
+			return false
+		}
+		if word != " " && word != "\n" && measureWord(word, fontSize, a.Metrics, slot, letterSpacing) > maxWordFragment {
+			return false
+		}
+	}
+	return true
 }
 
 func trimTrailingSpaces(a *Arena, lb *lineBox) {
@@ -984,7 +1080,7 @@ func isFormControl(k *Object) bool {
 	case "select":
 		return true
 	case "input":
-		return strings.ToLower(k.Node.GetAttribute("type")) != "image"
+		return !k.IsImageInput()
 	}
 	return false
 }
@@ -1105,6 +1201,7 @@ func demandOfRun(a *Arena, r textRun, sm strutMetrics) runDemand {
 	resolveScript(a, k, &b, sm)
 	b.below = lineH - (asc + (lineH-(asc+desc))/2)
 	d := atomicDemand(b, sm)
+	d.atomic = false
 	d.asc, d.half, d.box = asc, (lineH-(asc+desc))/2, b
 	return d
 }
@@ -1129,8 +1226,23 @@ func demandForRun(ds []runDemand, runs []textRun, id ObjectID) runDemand {
 	return runDemand{}
 }
 
-func lineExtent(sm strutMetrics, ds []runDemand) lineFrame {
+func (a *Arena) lineUsesStrut(ds []runDemand) bool {
+	if !a.QuirksMode || len(ds) == 0 {
+		return true
+	}
+	for _, d := range ds {
+		if !d.atomic {
+			return true
+		}
+	}
+	return false
+}
+
+func lineExtent(sm strutMetrics, ds []runDemand, useStrut bool) lineFrame {
 	base, below := sm.above, sm.below
+	if !useStrut {
+		base, below = 0, 0
+	}
 	for _, d := range ds {
 		if d.edge {
 			continue
@@ -1193,8 +1305,8 @@ func atomicInlineBlock(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox
 	blockInto(a, id, bc.contentW)
 	inlineInto(a, id)
 	k := a.Get(id)
-	intrinsicTextarea := k.Node != nil && k.Node.Data == "textarea"
-	if k.Style != nil && !intrinsicTextarea && resolveBoxWidth(a, k.Style, bc.contentW) < 0 {
+	intrinsicControl := isIntrinsicSizedControl(k.Node)
+	if k.Style != nil && !intrinsicControl && resolveBoxWidth(a, k.Style, bc.contentW) < 0 {
 		if w := itemMaxContentW(a, id); w > 0 && w < k.W {
 			k.W = w
 			k = a.Get(id)
@@ -1233,21 +1345,21 @@ func atomicInlineBlock(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox
 func atomicInlineReplaced(a *Arena, id ObjectID, lines *[]lineBox, current *lineBox, bc *breakCtx) {
 	k := a.Get(id)
 	if s := k.Style; s != nil {
-		k.PaddingTop = resolvePctLength(s.PaddingTop, bc.contentW)
-		k.PaddingRight = resolvePctLength(s.PaddingRight, bc.contentW)
-		k.PaddingBottom = resolvePctLength(s.PaddingBottom, bc.contentW)
-		k.PaddingLeft = resolvePctLength(s.PaddingLeft, bc.contentW)
+		k.PaddingTop = pctLen(a, s.PaddingTop, bc.contentW)
+		k.PaddingRight = pctLen(a, s.PaddingRight, bc.contentW)
+		k.PaddingBottom = pctLen(a, s.PaddingBottom, bc.contentW)
+		k.PaddingLeft = pctLen(a, s.PaddingLeft, bc.contentW)
 		ubw := s.UsedBorderWidths()
 		k.BorderTop, k.BorderRight = ubw[0], ubw[1]
 		k.BorderBottom, k.BorderLeft = ubw[2], ubw[3]
 		margins := [4]float32{s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft}
 		dst := [4]*float32{&k.MarginTop, &k.MarginRight, &k.MarginBottom, &k.MarginLeft}
-		auto := [4]bool{false, s.MarginRightAuto, false, s.MarginLeftAuto}
+		auto := [4]bool{s.MarginTop == style.MarginAuto, s.MarginRightAuto, s.MarginBottom == style.MarginAuto, s.MarginLeftAuto}
 		for i, m := range margins {
 			if auto[i] {
 				*dst[i] = 0
 			} else {
-				*dst[i] = resolvePctLength(m, bc.contentW)
+				*dst[i] = pctLen(a, m, bc.contentW)
 			}
 		}
 		k = a.Get(id)
@@ -1733,79 +1845,16 @@ func applyFirstLineRuns(a *Arena, line *lineBox, flStyle, containerStyle *style.
 	if line == nil || flStyle == nil {
 		return
 	}
-	newW := float32(0)
-	newH := line.h
 	for i := range line.runs {
 		run := &line.runs[i]
-		runObj := a.Get(run.obj)
 		if run.atomic {
-			newW += run.w
 			continue
 		}
+		runObj := a.Get(run.obj)
 		base := runObj.Style
 		if base == nil {
 			base = containerStyle
 		}
-		if base == nil {
-			continue
-		}
-		overridden := *base
-		overridden.FontFamily = flStyle.FontFamily
-		overridden.CustomFamily = flStyle.CustomFamily
-		overridden.CustomFontIdx = flStyle.CustomFontIdx
-		overridden.FontSize = flStyle.FontSize
-		overridden.FontWeight = flStyle.FontWeight
-		overridden.FontStyle = flStyle.FontStyle
-		overridden.Color = flStyle.Color
-		overridden.BackgroundColor = flStyle.BackgroundColor
-		overridden.BackgroundGradient = flStyle.BackgroundGradient
-		overridden.BackgroundRadialGradient = flStyle.BackgroundRadialGradient
-		overridden.BackgroundImage = flStyle.BackgroundImage
-		overridden.BackgroundRepeat = flStyle.BackgroundRepeat
-		overridden.BackgroundRepeatY = flStyle.BackgroundRepeatY
-		overridden.BackgroundSize = flStyle.BackgroundSize
-		overridden.BackgroundOrigin = flStyle.BackgroundOrigin
-		overridden.BackgroundClip = flStyle.BackgroundClip
-		overridden.BgSizeW = flStyle.BgSizeW
-		overridden.BgSizeH = flStyle.BgSizeH
-		overridden.BgSizeWPct = flStyle.BgSizeWPct
-		overridden.BgSizeHPct = flStyle.BgSizeHPct
-		overridden.BackgroundPosXMode = flStyle.BackgroundPosXMode
-		overridden.BackgroundPosYMode = flStyle.BackgroundPosYMode
-		overridden.BackgroundPosX = flStyle.BackgroundPosX
-		overridden.BackgroundPosY = flStyle.BackgroundPosY
-		overridden.BgPosXPct = flStyle.BgPosXPct
-		overridden.BgPosYPct = flStyle.BgPosYPct
-		overridden.TextDecoration = flStyle.TextDecoration
-		overridden.TextTransform = flStyle.TextTransform
-		overridden.LetterSpacing = flStyle.LetterSpacing
-		overridden.WordSpacing = flStyle.WordSpacing
-		if flStyle.LineHeight > 0 {
-			overridden.LineHeight = flStyle.LineHeight
-		}
-		runObj.Style = &overridden
-
-		newSize := overridden.FontSize
-		newSlot := overridden.FontSlot()
-		newLetterSpacing := overridden.LetterSpacing
-		newWordSpacing := overridden.WordSpacing
-		lineH, contentH := runHeights(a.Metrics, newSize, newSlot, overridden.LineHeight)
-		wordW := measureWord(run.text, newSize, a.Metrics, newSlot, newLetterSpacing)
-		if run.text == " " {
-			wordW += newWordSpacing
-		}
-		run.size = newSize
-		run.slot = newSlot
-		run.lineH = lineH
-		run.contentH = contentH
-		run.w = wordW
-		runObj.W = wordW
-		runObj.H = contentH
-		newW += wordW
-		if lineH > newH {
-			newH = lineH
-		}
+		runObj.Style = style.FirstLinePaint(base, flStyle)
 	}
-	line.w = newW
-	line.h = newH
 }

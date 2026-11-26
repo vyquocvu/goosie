@@ -79,16 +79,7 @@ func (r *Runtime) setupOffscreenCanvas() {
 		if d.contextObject != nil {
 			return d.contextObject
 		}
-		ctx := &canvasContext2D{width: d.width, height: d.height, fillStyle: "#000000", strokeStyle: "#000000", lineWidth: 1, font: "10px sans-serif", textAlign: "start", textBaseline: "alphabetic"}
-		o := r.vm.NewObject()
-		_ = o.Set("canvas", c.This)
-		_ = o.Set("fillStyle", ctx.fillStyle)
-		_ = o.Set("strokeStyle", ctx.strokeStyle)
-		_ = o.Set("lineWidth", ctx.lineWidth)
-		_ = o.Set("font", ctx.font)
-		_ = o.Set("textAlign", ctx.textAlign)
-		_ = o.Set("textBaseline", ctx.textBaseline)
-		r.setupCanvasContextMethods(o, ctx)
+		ctx, o := r.newCanvasContextObject(d.width, d.height, c.This)
 		d.context = ctx
 		d.contextObject = o
 		return o
@@ -112,7 +103,9 @@ func (r *Runtime) cloneOffscreenCanvas(dest *Runtime, d *offscreenCanvasData) *g
 			width:                    d.context.width,
 			height:                   d.context.height,
 			fillStyle:                d.context.fillStyle,
+			fillColor:                d.context.fillColor,
 			strokeStyle:              d.context.strokeStyle,
+			strokeColor:              d.context.strokeColor,
 			lineWidth:                d.context.lineWidth,
 			font:                     d.context.font,
 			textAlign:                d.context.textAlign,
@@ -129,24 +122,37 @@ func (r *Runtime) cloneOffscreenCanvas(dest *Runtime, d *offscreenCanvasData) *g
 			lineCap:                  d.context.lineCap,
 			lineJoin:                 d.context.lineJoin,
 			miterLimit:               d.context.miterLimit,
+			matrix:                   d.context.matrix,
+			stateStack:               append([]canvasDrawState(nil), d.context.stateStack...),
+			path:                     cloneCanvasPath(d.context.path),
 			ops:                      append([]canvasDrawOp(nil), d.context.ops...),
 			nodeID:                   d.context.nodeID,
 			bitmap:                   append([]byte(nil), d.context.bitmap...),
 			bitmapW:                  d.context.bitmapW,
 			bitmapH:                  d.context.bitmapH,
 		}
+		if d.context.fillStyleObject != nil {
+			cp.fillStyleObject = nil
+			cp.fillStyle = "#000000"
+		}
+		if d.context.strokeStyleObject != nil {
+			cp.strokeStyleObject = nil
+			cp.strokeStyle = "#000000"
+		}
 		d.context.mu.Unlock()
 		target.context = cp
 		wrapper := dest.vm.NewObject()
-		_ = wrapper.Set("canvas", cloned)
-		_ = wrapper.Set("fillStyle", cp.fillStyle)
-		_ = wrapper.Set("strokeStyle", cp.strokeStyle)
-		_ = wrapper.Set("lineWidth", cp.lineWidth)
-		_ = wrapper.Set("font", cp.font)
-		_ = wrapper.Set("textAlign", cp.textAlign)
-		_ = wrapper.Set("textBaseline", cp.textBaseline)
-		dest.setupCanvasContextMethods(wrapper, cp)
+		cp.obj = wrapper
+		dest.setupCanvasContextObject(wrapper, cp, cloned)
 		target.contextObject = wrapper
 	}
 	return cloned
+}
+
+func cloneCanvasPath(path canvasPath) canvasPath {
+	clone := canvasPath{subpaths: make([]canvasSubpath, len(path.subpaths))}
+	for i, subpath := range path.subpaths {
+		clone.subpaths[i] = canvasSubpath{points: append([]canvasPoint(nil), subpath.points...), closed: subpath.closed}
+	}
+	return clone
 }

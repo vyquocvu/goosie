@@ -48,14 +48,15 @@ func (s TileState) String() string {
 const MaxTileAttempts = 2
 
 type Tile struct {
-	Coord    TileCoord
-	Bounds   Rect
-	Version  uint64
-	LastUsed uint64
-	Pixels   *Bitmap
-	Bytes    int64
-	State    TileState
-	Attempts int
+	Coord             TileCoord
+	Bounds            Rect
+	Version           uint64
+	BackgroundVersion uint64
+	LastUsed          uint64
+	Pixels            *Bitmap
+	Bytes             int64
+	State             TileState
+	Attempts          int
 
 	prev, next *Tile
 

@@ -73,7 +73,7 @@ func (r *Runtime) tickDynamicScripts() bool {
 	}
 	data, err := r.dynamicScriptFetcher(base, src)
 	if err == nil && len(data) <= MaxScriptBytes {
-		err = r.Run(string(data), src)
+		err = r.runClassicScript(string(data), src, node)
 	} else if err == nil {
 		err = ErrTooLarge
 	}

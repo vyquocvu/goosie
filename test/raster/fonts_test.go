@@ -10,6 +10,10 @@ import (
 	"github.com/vyquocvu/goosie/internal/raster"
 )
 
+const hiraginoSansW0Path = "/System/Library/Fonts/ヒラギノ角ゴシック W0.ttc"
+
+const macCJKSymbolsPath = "/System/Library/Fonts/CJKSymbolsFallback.ttc"
+
 var fontSlots = []frame.FontSlot{
 	{},
 	{Bold: true},
@@ -268,7 +272,7 @@ func TestMissingGlyphCounter(t *testing.T) {
 }
 
 func TestMacCJKCollectionFallbackDrawsKana(t *testing.T) {
-	path := "/System/Library/Fonts/CJKSymbolsFallback.ttc"
+	path := macCJKSymbolsPath
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Skip("macOS CJK fallback collection is not installed")
@@ -280,12 +284,205 @@ func TestMacCJKCollectionFallbackDrawsKana(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFonts: %v", err)
 	}
+	f.SetFallbackCandidates([]string{path})
 	glyph := f.Glyph(16, 'か', frame.FontSlot{Family: frame.FontArial})
 	if glyph.Mask == nil || !glyph.Ok || glyph.Missing {
 		t.Fatalf("kana glyph = %+v, want a covered, non-tofu glyph", glyph)
 	}
 	if f.FallbackFontsCount() == 0 || f.FallbackBytes() > raster.MaxFallbackFontBytes {
 		t.Fatalf("fallback count/bytes = %d/%d, want a retained bounded CJK face", f.FallbackFontsCount(), f.FallbackBytes())
+	}
+}
+
+func TestMacHiraginoCJKFallbackCoverageAndResidualGaps(t *testing.T) {
+	t.Setenv("GOOSIE_SYSTEM_FONTS", "on")
+	symbolsInfo, err := os.Stat(macCJKSymbolsPath)
+	if err != nil {
+		t.Skip("macOS CJK symbol fallback is not installed")
+	}
+	if symbolsInfo.Size() <= 0 || symbolsInfo.Size() > raster.MaxFallbackFontBytes {
+		t.Fatalf("CJK symbol fallback size %d is outside admission range (0, %d]", symbolsInfo.Size(), raster.MaxFallbackFontBytes)
+	}
+	info, err := os.Stat(hiraginoSansW0Path)
+	if err != nil {
+		t.Skip("macOS Hiragino Sans W0 is not installed")
+	}
+	if info.Size() <= 0 || info.Size() > raster.MaxFallbackFontBytes {
+		t.Fatalf("Hiragino Sans W0 size %d is outside admission range (0, %d]", info.Size(), raster.MaxFallbackFontBytes)
+	}
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	var hooked []string
+	f.SetFallbackHook(func(path string) {
+		hooked = append(hooked, path)
+	})
+	slot := frame.FontSlot{Family: frame.FontArial}
+
+	f.ResetMissingCount()
+	kana := 'か'
+	g := f.Glyph(16, kana, slot)
+	if !g.Ok || g.Missing || g.Mask == nil {
+		t.Fatalf("Glyph(%c U+%04X) = Ok:%v Missing:%v Mask:%v, want a covered kana glyph", kana, kana, g.Ok, g.Missing, g.Mask)
+	}
+	if adv := f.GlyphAdvanceFixed(16, kana, slot); adv <= 0 {
+		t.Fatalf("GlyphAdvanceFixed(%c U+%04X) = %d, want > 0", kana, kana, adv)
+	}
+	if got := f.MissingCount(); got != 0 {
+		t.Fatalf("MissingCount after kana = %d, want 0", got)
+	}
+	if got := f.FallbackFilesRead(); got != 1 {
+		t.Fatalf("FallbackFilesRead after kana = %d, want 1", got)
+	}
+	if len(hooked) != 1 || hooked[0] != macCJKSymbolsPath {
+		t.Fatalf("fallback hooks after kana = %v, want only %s", hooked, macCJKSymbolsPath)
+	}
+	if got := f.FallbackFontsCount(); got != 1 {
+		t.Fatalf("FallbackFontsCount after kana = %d, want 1", got)
+	}
+	if got := f.FallbackBytes(); got != symbolsInfo.Size() {
+		t.Fatalf("FallbackBytes after kana = %d, want %d", got, symbolsInfo.Size())
+	}
+
+	for _, r := range []rune{'中', '文'} {
+		g := f.Glyph(16, r, slot)
+		if !g.Ok || g.Missing || g.Mask == nil {
+			t.Fatalf("Glyph(%c U+%04X) = Ok:%v Missing:%v Mask:%v, want a covered Han glyph", r, r, g.Ok, g.Missing, g.Mask)
+		}
+		if adv := f.GlyphAdvanceFixed(16, r, slot); adv <= 0 {
+			t.Fatalf("GlyphAdvanceFixed(%c U+%04X) = %d, want > 0", r, r, adv)
+		}
+	}
+	if got := f.MissingCount(); got != 0 {
+		t.Fatalf("MissingCount after Han = %d, want 0", got)
+	}
+	if got := f.FallbackFilesRead(); got != 2 {
+		t.Fatalf("FallbackFilesRead after Han = %d, want 2", got)
+	}
+	if len(hooked) != 2 || hooked[0] != macCJKSymbolsPath || hooked[1] != hiraginoSansW0Path {
+		t.Fatalf("fallback hooks after Han = %v, want [%s %s]", hooked, macCJKSymbolsPath, hiraginoSansW0Path)
+	}
+	wantBytes := symbolsInfo.Size() + info.Size()
+	if got := f.FallbackFontsCount(); got != 2 || got > raster.MaxParsedFallbackFonts {
+		t.Fatalf("FallbackFontsCount = %d, want 2 within limit %d", got, raster.MaxParsedFallbackFonts)
+	}
+	if got := f.FallbackBytes(); got != wantBytes || got > int64(raster.MaxParsedFallbackFonts*raster.MaxFallbackFontBytes) {
+		t.Fatalf("FallbackBytes = %d, want %d within aggregate limit %d", got, wantBytes, raster.MaxParsedFallbackFonts*raster.MaxFallbackFontBytes)
+	}
+	face, ok := f.FaceForRune(16, '中', slot)
+	if !ok || face == nil || !raster.HasGlyph(face, '中') {
+		t.Fatalf("FaceForRune('中') = (%v, %v), want the retained Hiragino face", face, ok)
+	}
+
+	residual := []rune{'觉', '晓', '处', '闻', '鸟', '风', '나', '는', '날', '다', '려'}
+	f.ResetMissingCount()
+	for _, r := range residual {
+		g := f.Glyph(16, r, slot)
+		if !g.Ok || !g.Missing || g.Mask == nil {
+			t.Fatalf("residual Glyph(%c U+%04X) = Ok:%v Missing:%v Mask:%v, want visible tofu", r, r, g.Ok, g.Missing, g.Mask)
+		}
+	}
+	if got := f.MissingCount(); got != int64(len(residual)) {
+		t.Fatalf("MissingCount after residual gaps = %d, want %d", got, len(residual))
+	}
+	f.ResetMissingCount()
+	for _, r := range residual {
+		if adv := f.GlyphAdvanceFixed(16, r, slot); adv <= 0 {
+			t.Fatalf("residual GlyphAdvanceFixed(%c U+%04X) = %d, want > 0", r, r, adv)
+		}
+	}
+	if got := f.MissingCount(); got != int64(len(residual)) {
+		t.Fatalf("MissingCount after residual advance pass = %d, want %d", got, len(residual))
+	}
+	if got := f.FallbackFontsCount(); got != 2 {
+		t.Fatalf("FallbackFontsCount after residual gaps = %d, want 2", got)
+	}
+	if got := f.FallbackBytes(); got != wantBytes {
+		t.Fatalf("FallbackBytes after residual gaps = %d, want %d", got, wantBytes)
+	}
+}
+
+func TestMacHiraginoCJKFallbackDefersNonCJKMisses(t *testing.T) {
+	t.Setenv("GOOSIE_SYSTEM_FONTS", "on")
+	info, err := os.Stat(hiraginoSansW0Path)
+	if err != nil {
+		t.Skip("macOS Hiragino Sans W0 is not installed")
+	}
+	if info.Size() <= 0 || info.Size() > raster.MaxFallbackFontBytes {
+		t.Fatalf("Hiragino Sans W0 size %d is outside admission range (0, %d]", info.Size(), raster.MaxFallbackFontBytes)
+	}
+	f, err := raster.NewFonts()
+	if err != nil {
+		t.Fatalf("NewFonts: %v", err)
+	}
+	var hooked []string
+	f.SetFallbackHook(func(path string) {
+		hooked = append(hooked, path)
+	})
+	slot := frame.FontSlot{Family: frame.FontArial}
+
+	for _, tc := range []struct {
+		name    string
+		r       rune
+		advance bool
+	}{
+		{name: "emoji", r: '😀'},
+		{name: "Latin", r: rune(0x1DF00), advance: true},
+		{name: "Hangul", r: '한'},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f.ResetMissingCount()
+			if tc.advance {
+				if adv := f.GlyphAdvanceFixed(16, tc.r, slot); adv <= 0 {
+					t.Fatalf("GlyphAdvanceFixed(%c U+%04X) = %d, want tofu advance > 0", tc.r, tc.r, adv)
+				}
+			} else if g := f.Glyph(16, tc.r, slot); !g.Ok || !g.Missing {
+				t.Fatalf("Glyph(%c U+%04X) = Ok:%v Missing:%v, want tofu", tc.r, tc.r, g.Ok, g.Missing)
+			}
+			if got := f.MissingCount(); got != 1 {
+				t.Fatalf("MissingCount after %s miss = %d, want 1", tc.name, got)
+			}
+			for _, path := range hooked {
+				if path == hiraginoSansW0Path {
+					t.Fatalf("%s miss inspected %s", tc.name, path)
+				}
+			}
+			if got := f.FallbackFontsCount(); got != 0 {
+				t.Fatalf("FallbackFontsCount after %s miss = %d, want 0", tc.name, got)
+			}
+			if got := f.FallbackBytes(); got != 0 {
+				t.Fatalf("FallbackBytes after %s miss = %d, want 0", tc.name, got)
+			}
+		})
+	}
+	readsBeforeCJK := f.FallbackFilesRead()
+	if readsBeforeCJK == 0 {
+		t.Fatal("non-CJK misses did not exercise the fallback path")
+	}
+
+	g := f.Glyph(16, '中', slot)
+	if !g.Ok || g.Missing || g.Mask == nil {
+		t.Fatalf("Glyph('中') after non-CJK misses = Ok:%v Missing:%v Mask:%v, want a covered glyph", g.Ok, g.Missing, g.Mask)
+	}
+	if got := f.FallbackFilesRead(); got != readsBeforeCJK+1 {
+		t.Fatalf("FallbackFilesRead after deferred Han miss = %d, want %d", got, readsBeforeCJK+1)
+	}
+	foundHiragino := false
+	for _, path := range hooked {
+		if path == hiraginoSansW0Path {
+			foundHiragino = true
+			break
+		}
+	}
+	if !foundHiragino {
+		t.Fatalf("Han miss did not inspect %s", hiraginoSansW0Path)
+	}
+	if got := f.FallbackFontsCount(); got != 1 || got > raster.MaxParsedFallbackFonts {
+		t.Fatalf("FallbackFontsCount after deferred Han miss = %d, want 1 within limit %d", got, raster.MaxParsedFallbackFonts)
+	}
+	if got := f.FallbackBytes(); got != info.Size() || got > int64(raster.MaxParsedFallbackFonts*raster.MaxFallbackFontBytes) {
+		t.Fatalf("FallbackBytes after deferred Han miss = %d, want %d within aggregate limit %d", got, info.Size(), raster.MaxParsedFallbackFonts*raster.MaxFallbackFontBytes)
 	}
 }
 
@@ -601,24 +798,6 @@ func TestPositiveGlyphOracleByScriptGroup(t *testing.T) {
 			}
 		})
 	}
-
-	t.Run("CJK_KnownGap", func(t *testing.T) {
-		f.ResetMissingCount()
-		cjkRunes := []rune{'中', '文'}
-		for _, r := range cjkRunes {
-			g := f.Glyph(16, r, slot)
-			if !g.Ok || !g.Missing {
-				t.Fatalf("CJK rune %c (U+%04X) expected tofu fallback (Ok=true, Missing=true), got Ok=%v, Missing=%v",
-					r, r, g.Ok, g.Missing)
-			}
-			if g.Advance <= 0 {
-				t.Fatalf("CJK rune %c tofu advance %d <= 0", r, g.Advance)
-			}
-		}
-		if got := f.MissingCount(); got != int64(len(cjkRunes)) {
-			t.Errorf("MissingCount after %d CJK runes = %d, want %d", len(cjkRunes), got, len(cjkRunes))
-		}
-	})
 }
 
 func TestMeasureHotPathLatency(t *testing.T) {

@@ -101,10 +101,10 @@ func (m *TabManager) archiveClosedTabLocked(closingTab *Tab) {
 	var histClone *toolbar.History
 	var hasHistory bool
 	if h := closingTab.History(); h != nil {
-		entries, histIdx := h.Entries()
+		entries, _ := h.Entries()
 		if len(entries) > 0 {
 			hasHistory = true
-			histClone = toolbar.RestoreHistory(entries, histIdx)
+			histClone = h.Clone()
 		}
 	}
 	url := closingTab.URL()
@@ -177,8 +177,7 @@ func (m *TabManager) DuplicateTab(id uint64) (*Tab, bool) {
 	dup.SetIncognito(src.Incognito())
 	dup.SetScrollY(src.ScrollY())
 	if h := src.History(); h != nil {
-		entries, histIdx := h.Entries()
-		dup.SetHistory(toolbar.RestoreHistory(entries, histIdx))
+		dup.SetHistory(h.Clone())
 	}
 	newIdx := idx + 1
 	m.tabs = append(m.tabs, nil)
@@ -373,8 +372,7 @@ func (m *TabManager) ReopenTab() (*Tab, bool) {
 		tab.SetTitle(rec.Title)
 	}
 	if rec.History != nil {
-		entries, idx := rec.History.Entries()
-		tab.SetHistory(toolbar.RestoreHistory(entries, idx))
+		tab.SetHistory(rec.History.Clone())
 	}
 	tab.SetScrollY(rec.ScrollY)
 

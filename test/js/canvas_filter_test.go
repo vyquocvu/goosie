@@ -90,7 +90,9 @@ func TestCanvasFilterAndSmoothing(t *testing.T) {
 		}
 
 		ctx.putImageData(gotData, 0, 0);
-		ctx.drawImage({ src: "test.png" }, 0, 0, 50, 50);
+		var drawImageError = "";
+		try { ctx.drawImage({ src: "test.png" }, 0, 0, 50, 50); }
+		catch (e) { drawImageError = e.name; }
 	`
 
 	if err := r.Run(script, "test.js"); err != nil {
@@ -111,7 +113,10 @@ func TestCanvasFilterAndSmoothing(t *testing.T) {
 	if !hasPut {
 		t.Errorf("expected putImageData op recorded")
 	}
-	if !hasDraw {
-		t.Errorf("expected drawImage op recorded")
+	if hasDraw {
+		t.Error("unsupported drawImage recorded a successful draw op")
+	}
+	if value, ok := r.Global("drawImageError"); !ok || value.Str != "NotSupportedError" {
+		t.Errorf("drawImageError = %v, want NotSupportedError", value)
 	}
 }

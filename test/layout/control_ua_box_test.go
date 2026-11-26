@@ -164,12 +164,12 @@ func TestControlsSizeToTheirMeasuredBorderBoxes(t *testing.T) {
 		{"i4", 153, 21, true, "tel"},
 		{"i5", 153, 21, true, "url"},
 		{"i6", 153, 21, true, "email"},
-		{"s7", 154, 19, false, "select: the height is one line of the control font and 4px; the 30px width is the option label, which is GOOSIE-CONTROLWIDTH-001"},
-		{"t8", 182, 36, false, "textarea rows=2: two lines and 6px of chrome; its 176px content is 20 characters of the reference's monospace, GOOSIE-CONTROLWIDTH-001"},
-		{"b9", 33.796875, 21, false, "button: the label plus 16px; the label is measured from glyph advances Goosie's own face differs on"},
-		{"i10", 57.5, 21, false, "submit with a value"},
-		{"i11", 33.796875, 21, false, "input[type=button] answers exactly what the real button does"},
-		{"i12", 50.828125, 21, false, "reset with no value takes the reference's own default label"},
+		{"s7", 30, 19, true, "select: the height is one line of the control font and 4px; the 30px width is the option label plus Chromium's 20px select interior and 2px frame"},
+		{"t8", 182, 36, true, "textarea rows=2: two lines and 6px of chrome; its 176px content is 20 characters plus Chromium's 16px scrollbar allowance"},
+		{"b9", 33.796875, 21, true, "button: the label plus 16px"},
+		{"i10", 57.5, 21, true, "submit with a value"},
+		{"i11", 33.796875, 21, true, "input[type=button] answers exactly what the real button does"},
+		{"i12", 50.828125, 21, true, "reset with no value takes the reference's own default label"},
 		{"i13", 13, 13, true, "checkbox"},
 		{"i14", 13, 13, true, "radio"},
 		{"i15", 129, 16, true, "range"},
@@ -183,8 +183,8 @@ func TestControlsSizeToTheirMeasuredBorderBoxes(t *testing.T) {
 		{"i23", 13, 13, true, "image input sized from its attributes, exactly the 13x13 the <img> beside it answers"},
 		{"m24", 13, 13, true, "the plain image beside it"},
 		{"i25", 163, 33, true, "the same field with the page's 8px padding and 1px border replacing the UA chrome"},
-		{"i26", 153, 34, false, "the same field at an author 24px: the box is one line of it plus 6px; the reference's 258px width is the character metric again"},
-		{"b28", 48.015625, 34, false, "a 24px button answers 34 too"},
+		{"i26", 258, 34, true, "the same field at an author 24px: the box is one line of it plus 6px; the reference's 258px width is the character metric"},
+		{"b28", 48.015625, 34, true, "a 24px button answers 34 too"},
 	} {
 		w, h := controlUABorderBox(t, arena, c.id)
 		if !almostEqual(h, c.h) {
@@ -194,8 +194,8 @@ func TestControlsSizeToTheirMeasuredBorderBoxes(t *testing.T) {
 			t.Errorf("#%s border box W = %v, want %v (%s)", c.id, w, c.w, c.why)
 		}
 	}
-	if w, h := controlUABorderBox(t, arena, "s27"); !almostEqual(h, 32) || !almostEqual(w, 154) {
-		t.Errorf("#s27 border box = %vx%v, want 154x32 (a 24px select: the reference answers 31x36)", w, h)
+	if w, h := controlUABorderBox(t, arena, "s27"); !almostEqual(h, 32) || !almostEqual(w, 36) {
+		t.Errorf("#s27 border box = %vx%v, want 36x32 (a 24px select: the reference answers 36x31)", w, h)
 	}
 }
 

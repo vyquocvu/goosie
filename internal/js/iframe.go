@@ -280,9 +280,17 @@ func (r *Runtime) iframeWindow(frame *dom.Node) goja.Value {
 	_ = location.DefineAccessorProperty("href", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return r.vm.ToValue(locationHref())
 	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		r.navigateIFrameLocation(frame, call.Argument(0).String())
-		return goja.Undefined()
+		return r.iframeLocationNavigate(frame, NavigationAssign, call)
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	_ = location.Set("assign", func(call goja.FunctionCall) goja.Value {
+		return r.iframeLocationNavigate(frame, NavigationAssign, call)
+	})
+	_ = location.Set("replace", func(call goja.FunctionCall) goja.Value {
+		return r.iframeLocationNavigate(frame, NavigationReplace, call)
+	})
+	_ = location.Set("reload", func(call goja.FunctionCall) goja.Value {
+		return r.iframeLocationNavigate(frame, NavigationReload, call)
+	})
 	_ = location.DefineAccessorProperty("search", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		parsed, err := url.Parse(locationHref())
 		if err != nil || parsed.RawQuery == "" {
@@ -694,19 +702,23 @@ func (r *Runtime) iframeCrossOriginLocation(frame *dom.Node) *goja.Object {
 	_ = target.DefineAccessorProperty("href", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		return goja.Undefined()
 	}), r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		r.navigateIFrameLocation(frame, call.Argument(0).String())
-		return goja.Undefined()
+		return r.iframeLocationNavigate(frame, NavigationAssign, call)
 	}), goja.FLAG_TRUE, goja.FLAG_TRUE)
-	_ = target.Set("replace", r.vm.ToValue(func(call goja.FunctionCall) goja.Value {
-		r.navigateIFrameLocation(frame, call.Argument(0).String())
-		return goja.Undefined()
-	}))
+	_ = target.Set("assign", func(call goja.FunctionCall) goja.Value {
+		return r.iframeLocationNavigate(frame, NavigationAssign, call)
+	})
+	_ = target.Set("replace", func(call goja.FunctionCall) goja.Value {
+		return r.iframeLocationNavigate(frame, NavigationReplace, call)
+	})
+	_ = target.Set("reload", func(call goja.FunctionCall) goja.Value {
+		return r.iframeLocationNavigate(frame, NavigationReload, call)
+	})
 	location := r.vm.ToValue(r.vm.NewProxy(target, &goja.ProxyTrapConfig{
 		Get: func(object *goja.Object, property string, _ goja.Value) goja.Value {
 			if property == "href" {
 				panic(r.domError("SecurityError", "Blocked a cross-origin Location href read"))
 			}
-			if property == "replace" {
+			if property == "assign" || property == "replace" || property == "reload" {
 				return object.Get(property)
 			}
 			if property == "then" || property == "Symbol.toStringTag" {
@@ -718,11 +730,11 @@ func (r *Runtime) iframeCrossOriginLocation(frame *dom.Node) *goja.Object {
 			if property != "href" {
 				panic(r.domError("SecurityError", "Blocked a cross-origin Location property assignment"))
 			}
-			r.navigateIFrameLocation(frame, value.String())
+			r.iframeLocationNavigate(frame, NavigationAssign, goja.FunctionCall{Arguments: []goja.Value{value}})
 			return true
 		},
 		Has: func(_ *goja.Object, property string) bool {
-			if property == "href" || property == "replace" || property == "then" {
+			if property == "href" || property == "assign" || property == "replace" || property == "reload" || property == "then" {
 				return true
 			}
 			panic(r.domError("SecurityError", "Blocked a cross-origin Location property check"))
@@ -750,9 +762,9 @@ func (r *Runtime) iframeCrossOriginLocation(frame *dom.Node) *goja.Object {
 					Enumerable:   goja.FLAG_FALSE,
 					Configurable: goja.FLAG_TRUE,
 				}
-			case "replace":
+			case "assign", "replace", "reload":
 				return goja.PropertyDescriptor{
-					Value:        object.Get("replace"),
+					Value:        object.Get(property),
 					Writable:     goja.FLAG_FALSE,
 					Enumerable:   goja.FLAG_FALSE,
 					Configurable: goja.FLAG_TRUE,
@@ -762,7 +774,7 @@ func (r *Runtime) iframeCrossOriginLocation(frame *dom.Node) *goja.Object {
 			}
 		},
 		OwnKeys: func(*goja.Object) *goja.Object {
-			keys := []interface{}{"href", "replace", "then"}
+			keys := []interface{}{"href", "assign", "replace", "reload", "then"}
 			symbol := r.vm.Get("Symbol").ToObject(r.vm)
 			for _, name := range []string{"toStringTag", "hasInstance", "isConcatSpreadable"} {
 				keys = append(keys, symbol.Get(name))
@@ -3257,10 +3269,19 @@ func (r *Runtime) markIFrameSourceLoaded(frame *dom.Node) {
 }
 
 func (r *Runtime) navigateIFrameLocation(frame *dom.Node, reference string) {
+	r.navigateIFrameLocationKind(frame, NavigationAssign, reference)
+}
+
+func (r *Runtime) navigateIFrameLocationKind(frame *dom.Node, kind NavigationKind, reference string) {
 	if frame == nil || !frame.IsConnected() {
 		return
 	}
 	base := r.documentURL()
+	if current := r.iframeLocations[frame]; current != "" && current != "about:blank" && current != "about:srcdoc" {
+		if parsed, err := url.Parse(current); err == nil {
+			base = parsed
+		}
+	}
 	ref, err := url.Parse(reference)
 	if err != nil {
 		return
@@ -3273,11 +3294,24 @@ func (r *Runtime) navigateIFrameLocation(frame *dom.Node, reference string) {
 		return
 	}
 	r.cacheIFrameHistoryDocument(frame)
-	r.recordIFrameHistory(frame, target)
-	r.scheduleIFrameNavigation(frame, target)
+	if child := r.iframeChildRuntimes[frame]; child != nil {
+		child.setLocation(target)
+	}
+	r.recordIFrameHistoryMode(frame, target, kind == NavigationReplace)
+	reload := kind == NavigationReload
+	if reload {
+		if index := r.iframeHistoryIndex[frame]; index >= 0 {
+			delete(r.iframeHistoryDocs[frame], index)
+		}
+	}
+	r.scheduleIFrameNavigationMode(frame, target, reload)
 }
 
 func (r *Runtime) scheduleIFrameNavigation(frame *dom.Node, target string) {
+	r.scheduleIFrameNavigationMode(frame, target, false)
+}
+
+func (r *Runtime) scheduleIFrameNavigationMode(frame *dom.Node, target string, reload bool) {
 	if frame == nil || target == "" {
 		return
 	}
@@ -3309,7 +3343,7 @@ func (r *Runtime) scheduleIFrameNavigation(frame *dom.Node, target string) {
 			child.fireWindowListeners(beforeUnload, true)
 			child.fireWindowListeners(beforeUnload, false)
 		}
-		if index := r.iframeHistoryIndex[frame]; index >= 0 {
+		if index := r.iframeHistoryIndex[frame]; index >= 0 && !reload {
 			if doc := r.iframeHistoryDocs[frame][index]; doc != nil {
 				frame.SetAttribute("src", target)
 				r.setIFrameDocument(frame, doc)
@@ -3326,6 +3360,9 @@ func (r *Runtime) scheduleIFrameNavigation(frame *dom.Node, target string) {
 		if wrapper, ok := r.wrapNode(frame).(*goja.Object); ok {
 			frame.RemoveAttribute("srcdoc")
 			_ = wrapper.Set("src", target)
+			if reload {
+				delete(r.iframeLoadedSources, frame)
+			}
 			r.queueIFrameLoad(frame)
 			r.flushIFrameLoads()
 		}

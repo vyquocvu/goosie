@@ -6,7 +6,7 @@ import (
 	"github.com/vyquocvu/goosie/internal/layout"
 )
 
-const strutHTML = `<html><body style="margin:0;line-height:26px">
+const strutHTML = `<!doctype html><html><body style="margin:0;line-height:26px">
 	<h1 style="font-size:40px;line-height:52px;margin:0"><a href="#" style="line-height:26px">Grid by Example</a></h1>
 	<p style="margin:0">Everything you need</p>
 </body></html>`

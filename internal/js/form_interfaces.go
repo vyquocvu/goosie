@@ -1687,7 +1687,7 @@ func isListedFormElement(node *dom.Node) bool {
 	}
 	switch node.Data {
 	case "button", "fieldset", "input", "object", "output", "select", "textarea":
-		if node.Data == "input" && node.GetAttribute("type") == "image" {
+		if dom.IsImageInput(node) {
 			return false
 		}
 		return true
@@ -1700,7 +1700,7 @@ func isFormAssociatedElement(node *dom.Node) bool {
 	if node == nil || !node.Element() || node.Namespace != dom.NSHTML {
 		return false
 	}
-	if node.Data == "input" && strings.EqualFold(node.GetAttribute("type"), "image") {
+	if dom.IsImageInput(node) {
 		return true
 	}
 	return isListedFormElement(node)

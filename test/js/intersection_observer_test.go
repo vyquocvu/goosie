@@ -86,6 +86,7 @@ func TestIntersectionObserverCheckReturns(t *testing.T) {
 		rt.SetElementRect(int(off.ID), 0, 400, 100, 100)
 		rt.CheckIntersections()
 		rt.CheckIntersections()
+		rt.Tick()
 
 		got, err := rt.Evaluate("JSON.stringify(window.__log)")
 		if err != nil {
@@ -97,7 +98,7 @@ func TestIntersectionObserverCheckReturns(t *testing.T) {
 		return got, nil
 	})
 
-	const want = `[{"count":1,"seen":true,"off":false,"intersecting":true}]`
+	const want = `[{"count":2,"seen":true,"off":false,"intersecting":true}]`
 	if out != want {
 		t.Fatalf("observer log = %s, want %s\n"+
 			"one callback with one entry for the visible element, the entry's target identical to "+
@@ -131,6 +132,7 @@ func TestIntersectionObserverDoesNotFireForOffscreenTarget(t *testing.T) {
 		rt.SetViewportRect(0, 0, 200, 150)
 		rt.SetElementRect(int(off.ID), 0, 400, 100, 100)
 		rt.CheckIntersections()
+		rt.Tick()
 
 		got, err := rt.Evaluate("JSON.stringify(window.__log)")
 		if err != nil {
@@ -142,8 +144,8 @@ func TestIntersectionObserverDoesNotFireForOffscreenTarget(t *testing.T) {
 		return got, nil
 	})
 
-	if want := `[]`; out != want {
-		t.Fatalf("observer log = %s, want %s: an element entirely below the viewport must not intersect", out, want)
+	if want := `[1]`; out != want {
+		t.Fatalf("observer log = %s, want %s: an element entirely below the viewport must receive an initial non-intersecting entry", out, want)
 	}
 }
 
@@ -197,6 +199,7 @@ func TestNewSessionWithIntersectionObserverReturns(t *testing.T) {
 			}
 			return "", fmt.Errorf("NewSession: %w", err)
 		}
+		sess.PumpJS(200)
 		log, err := rt.Evaluate("JSON.stringify(window.__log)")
 		if err != nil {
 			sess.Close()
@@ -211,11 +214,11 @@ func TestNewSessionWithIntersectionObserverReturns(t *testing.T) {
 	if len(y) != 2 {
 		t.Fatalf("load = %q, want a title and a log joined by %q", out, "|")
 	}
-	if want := "io 1"; y[0] != want {
+	if want := "io 2"; y[0] != want {
 		t.Fatalf("document title after load = %q, want %q: the observer callback must have run "+
 			"during the reflow NewSession performs", y[0], want)
 	}
-	if want := `[{"count":1,"seen":true,"off":false,"intersecting":true}]`; y[1] != want {
+	if want := `[{"count":2,"seen":true,"off":false,"intersecting":true}]`; y[1] != want {
 		t.Fatalf("observer log = %s, want %s: the load must deliver one entry for the visible "+
 			"element, carrying the object the page observed", y[1], want)
 	}

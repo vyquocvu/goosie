@@ -146,7 +146,7 @@ func (s *Session) retainScriptImage(node *dom.Node, rawSrc string, pixels any) {
 }
 
 func scriptImageCurrent(node *dom.Node, rawSrc string) bool {
-	return node != nil && node.IsConnected() && node.Data == "img" && node.GetAttribute("src") == rawSrc
+	return node != nil && node.IsConnected() && (node.Data == "img" || dom.IsImageInput(node)) && node.GetAttribute("src") == rawSrc
 }
 
 func (s *Session) drainScriptImages() (layoutPending bool) {
@@ -165,11 +165,15 @@ func (s *Session) drainScriptImages() (layoutPending bool) {
 		if s.natural == nil {
 			s.natural = make(map[dom.NodeID]layout.NaturalSize)
 		}
+		if s.decodedNatural == nil {
+			s.decodedNatural = make(map[dom.NodeID]layout.NaturalSize)
+		}
 		if s.scriptImgs == nil {
 			s.scriptImgs = make(map[dom.NodeID]scriptImagePixels)
 		}
 		s.images[id] = e.image
-		s.natural[id] = layout.NaturalSize{W: float32(e.w), H: float32(e.h)}
+		s.decodedNatural[id] = layout.NaturalSize{W: float32(e.w), H: float32(e.h)}
+		s.syncNaturalSizeLocked(id)
 		s.scriptImgs[id] = e
 		changed = true
 	}
@@ -179,7 +183,8 @@ func (s *Session) drainScriptImages() (layoutPending bool) {
 		}
 		delete(s.scriptImgs, id)
 		delete(s.images, id)
-		delete(s.natural, id)
+		delete(s.decodedNatural, id)
+		s.syncNaturalSizeLocked(id)
 		changed = true
 	}
 	if changed {

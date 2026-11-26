@@ -78,11 +78,26 @@ func TestPublicPageSubresourcesAreAddressGuarded(t *testing.T) {
 		sheet: "body { color: red }",
 	})
 
-	if _, guarded := net.AddressGuardFromContext(c.ctxes[doc]); guarded {
-		t.Error("the document fetch was address-guarded, which would refuse a typed URL that resolves to a LAN address")
+	guard, guarded := net.AddressGuardFromContext(c.ctxes[doc])
+	if !guarded {
+		t.Fatal("the public document fetch was unguarded, so a redirect could reach a loopback, LAN, or metadata address")
+	}
+	if guard.Blocked == nil {
+		t.Fatal("the document guard carries no predicate")
+	}
+	for ip, want := range map[string]bool{
+		"169.254.169.254": true,
+		"127.0.0.1":       true,
+		"10.0.0.5":        true,
+		"93.184.216.34":   false,
+		"8.8.8.8":         false,
+	} {
+		if got := guard.Blocked(stdnet.ParseIP(ip)); got != want {
+			t.Errorf("the document guard.Blocked(%s) = %v, want %v", ip, got, want)
+		}
 	}
 
-	guard, guarded := net.AddressGuardFromContext(c.ctxes[sheet])
+	guard, guarded = net.AddressGuardFromContext(c.ctxes[sheet])
 	if !guarded {
 		t.Fatal("a public page's stylesheet was fetched unguarded, so a rebinding host name in an href reaches the viewer's machine")
 	}

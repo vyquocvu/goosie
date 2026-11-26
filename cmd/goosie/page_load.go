@@ -34,9 +34,23 @@ func fontOption(deferred bool, base string, fetch engine.FontFetcher, reg engine
 	return engine.WithCustomFontLoading(base, fetch, reg)
 }
 
+type jsTransportContext struct {
+	context.Context
+	values context.Context
+}
+
+func (c jsTransportContext) Value(key any) any {
+	if value := c.Context.Value(key); value != nil {
+		return value
+	}
+	return c.values.Value(key)
+}
+
 type jsTransport struct {
-	client net.HTTP
-	ctx    context.Context
+	client      net.HTTP
+	ctx         context.Context
+	csp         *js.CSPPolicy
+	documentURL string
 }
 
 func (t jsTransport) Fetch(ctx context.Context, url, method string, headers map[string]string, body []byte) (*js.FetchResponse, error) {
@@ -45,12 +59,18 @@ func (t jsTransport) Fetch(ctx context.Context, url, method string, headers map[
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	} else if t.ctx != nil {
+		ctx = jsTransportContext{Context: ctx, values: t.ctx}
+	}
+	resolvedURL := resolveHref(t.documentURL, url)
+	if !t.csp.AllowsConnect(resolvedURL, t.documentURL) {
+		return nil, fmt.Errorf("goosie: fetch blocked by Content-Security-Policy")
 	}
 	var resp *net.Response
 	var err error
 	switch method {
 	case "GET", "":
-		resp, err = t.client.Get(ctx, url)
+		resp, err = t.client.Get(ctx, resolvedURL)
 	case "POST":
 		contentType := "text/plain;charset=UTF-8"
 		for k, v := range headers {
@@ -59,7 +79,7 @@ func (t jsTransport) Fetch(ctx context.Context, url, method string, headers map[
 				break
 			}
 		}
-		resp, err = t.client.Post(ctx, url, contentType, bytes.NewReader(body))
+		resp, err = t.client.Post(ctx, resolvedURL, contentType, bytes.NewReader(body))
 	default:
 		return nil, fmt.Errorf("goosie: fetch method %q is not supported", method)
 	}
@@ -78,6 +98,9 @@ func (t jsTransport) Fetch(ctx context.Context, url, method string, headers map[
 }
 
 func subresourceCtx(ctx context.Context, base string) context.Context {
+	if _, guarded := net.AddressGuardFromContext(ctx); guarded {
+		return ctx
+	}
 	if engine.InitiatorIsLocal(base) {
 		return ctx
 	}

@@ -16,6 +16,8 @@ type Grid struct {
 	budget atomic.Int64
 	clock  uint64
 
+	backgroundVersion uint64
+
 	pool *BitmapPool
 
 	evictions   int64
@@ -137,6 +139,7 @@ func (g *Grid) newRecord(c TileCoord) *Tile {
 	t.Coord = c
 	t.Bounds = c.Rect(g.tileSize)
 	t.State = TileEmpty
+	t.BackgroundVersion = 0
 	return t
 }
 
@@ -251,6 +254,24 @@ func (g *Grid) Invalidate(rect Rect) int {
 	return n
 }
 
+func (g *Grid) InvalidateBackground() int {
+	g.backgroundVersion++
+	n := 0
+	for _, t := range g.tiles {
+		switch {
+		case t.State == TileValid || t.State == TileFailed:
+			g.setState(t, TileStale)
+			t.Attempts = 0
+			n++
+		case t.painting != nil:
+			t.Attempts = 0
+		}
+	}
+	return n
+}
+
+func (g *Grid) BackgroundVersion() uint64 { return g.backgroundVersion }
+
 func (g *Grid) Advance(version uint64, dirty Rect) int {
 	staled := 0
 	for c, t := range g.tiles {
@@ -285,7 +306,7 @@ func (g *Grid) Needs(c TileCoord, layerVersion uint64) bool {
 		return false
 	}
 	t := g.tiles[c]
-	return t == nil || !t.ValidAt(layerVersion)
+	return t == nil || !t.ValidAt(layerVersion) || t.BackgroundVersion != g.backgroundVersion
 }
 
 func (g *Grid) Acquire(c TileCoord) (*Bitmap, bool) {
@@ -299,6 +320,7 @@ func (g *Grid) Acquire(c TileCoord) (*Bitmap, bool) {
 	need := int64(g.tileSize) * int64(g.tileSize) * 4
 	g.evictFor(need, c)
 	t.painting = g.pool.Acquire()
+	t.BackgroundVersion = g.backgroundVersion
 	g.used += need
 	g.painting += need
 	if t.State != TileStale {
@@ -335,6 +357,7 @@ func (g *Grid) dropPixels(t *Tile) {
 	t.Bytes = 0
 	t.Pixels = nil
 	t.Version = 0
+	t.BackgroundVersion = 0
 	g.unlink(t)
 	g.setState(t, TileEmpty)
 	g.pool.Release(pixels)
@@ -342,7 +365,7 @@ func (g *Grid) dropPixels(t *Tile) {
 
 func (g *Grid) MarkValid(c TileCoord, version uint64, pixels *Bitmap) bool {
 	t := g.tiles[c]
-	if t == nil || pixels == nil || t.painting != pixels {
+	if t == nil || pixels == nil || t.painting != pixels || t.BackgroundVersion != g.backgroundVersion {
 		g.droppedLate++
 		return false
 	}

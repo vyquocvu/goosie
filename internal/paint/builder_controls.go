@@ -52,9 +52,9 @@ func (b *Builder) paintPlaceholder(obj *layout.Object, opacity float32, clip *fr
 		b.appendPlaceholderBorder(ps, content, borderTop, borderBottom, borderLeft, borderRight, op)
 	}
 	b.appendRunGlyphs(text, ink, s, col, op, nil, nil, false)
-	b.appendUnderline(text, ink, s, b.runBaseline(ink, s), col, op, &content)
+	b.appendTextDecoration(text, ink, s, b.runBaseline(ink, s), col, op, &content)
 	if ps != nil && !decorationMatchesHost(ps, s) {
-		b.appendUnderline(text, ink, ps, b.runBaseline(ink, ps), col, op, &content)
+		b.appendTextDecoration(text, ink, ps, b.runBaseline(ink, ps), col, op, &content)
 	}
 }
 
@@ -111,6 +111,7 @@ func (b *Builder) appendPlaceholderBorder(ps *style.ComputedStyle, content frame
 
 func decorationMatchesHost(pseudo, host *style.ComputedStyle) bool {
 	return pseudo.TextDecoration == host.TextDecoration &&
+		pseudo.TextDecorationStyle == host.TextDecorationStyle &&
 		pseudo.TextDecorationColor == host.TextDecorationColor &&
 		pseudo.TextDecorationThickness == host.TextDecorationThickness &&
 		pseudo.TextUnderlineOffset == host.TextUnderlineOffset

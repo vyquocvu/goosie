@@ -47,6 +47,10 @@ type Scheduler struct {
 	doneScale  float32
 	doneBg     frame.Color
 
+	backgroundSet     bool
+	background        frame.Color
+	backgroundVersion uint64
+
 	reused        int
 	failedVisible int
 	reusedTotal   int64
@@ -158,7 +162,7 @@ func (s *Scheduler) applyPendingUpdate() {
 	}
 	dirty := u.dirty
 	if u.autoDamage {
-		dirty = dirty.Union(paint.ContentDamage(s.layer.Content, u.content))
+		dirty = dirty.Union(paint.ContentDamage(s.layer.ContentSnapshot(), u.content))
 	}
 	if s.grid.InFlightIn(dirty) != 0 {
 		return
@@ -191,6 +195,12 @@ func (s *Scheduler) Viewport() frame.Viewport {
 	s.vpMu.RLock()
 	defer s.vpMu.RUnlock()
 	return s.resolveLocked()
+}
+
+func (s *Scheduler) ScrollOffset() frame.Point {
+	s.vpMu.RLock()
+	defer s.vpMu.RUnlock()
+	return s.scroll
 }
 
 func (s *Scheduler) Stats() Stats {
@@ -249,6 +259,7 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 		s.layer = p.Layers[0]
 		s.grid = s.layer.Grid
 		s.haveDone = false
+		s.backgroundSet = false
 	}
 	vp := s.resolveLocked()
 	s.cur = frame.FramePlan{
@@ -260,6 +271,12 @@ func (s *Scheduler) BeginFrame(ev surface.Event) (*frame.FramePlan, []frame.Tile
 	}
 	if s.grid == nil {
 		return &s.cur, s.need
+	}
+	if !s.backgroundSet || s.background != p.Background {
+		s.layer.InvalidateBackground()
+		s.backgroundVersion = s.layer.BackgroundVersion()
+		s.background = p.Background
+		s.backgroundSet = true
 	}
 	s.applyPendingUpdate()
 	s.reserveScratch(true)
@@ -297,7 +314,7 @@ func (s *Scheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
 	if s.grid == nil || s.pool == nil || s.layer == nil {
 		return w
 	}
-	dl, _ := s.layer.Content.(*paint.LayerDL)
+	dl, _ := s.layer.ContentSnapshot().(*paint.LayerDL)
 	budget := s.grid.Stats().Budget
 	tileBytes := s.tileBytes()
 	ts := s.grid.TileSize()
@@ -319,7 +336,7 @@ func (s *Scheduler) Submit(needed []frame.TileCoord) surface.FrameWork {
 		painting += tileBytes
 		w.Submitted++
 		s.submitted++
-		if err := s.pool.Submit(Job{Layer: s.layer, Coord: c, DL: dl, Bounds: c.Rect(ts), Out: out, Background: s.cur.Background, Scratch: s.groupScratch}); err != nil {
+		if err := s.pool.Submit(Job{Layer: s.layer, Coord: c, DL: dl, Bounds: c.Rect(ts), Out: out, Background: s.cur.Background, BackgroundVersion: s.backgroundVersion, Scratch: s.groupScratch}); err != nil {
 			s.grid.Release(c, out)
 			painting -= tileBytes
 			w.Refused++
@@ -444,6 +461,11 @@ func (s *Scheduler) HandleDone(d Done) error {
 		s.staleNews++
 		return errForeignResult
 	}
+	if d.BackgroundVersion != s.backgroundVersion {
+		s.grid.Release(d.Coord, d.Out)
+		s.staleNews++
+		return nil
+	}
 	if d.Err != nil {
 		s.grid.Release(d.Coord, d.Out)
 		if s.grid.Attempts(d.Coord) >= frame.MaxTileAttempts {
@@ -452,7 +474,7 @@ func (s *Scheduler) HandleDone(d Done) error {
 		}
 		return d.Err
 	}
-	if d.Version < s.layer.ContentVersion {
+	if d.Version < s.layer.VersionSnapshot() {
 		s.grid.Release(d.Coord, d.Out)
 		s.staleNews++
 		return nil

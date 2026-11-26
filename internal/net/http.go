@@ -57,6 +57,7 @@ type CacheClearingHTTP interface {
 type StreamResponse struct {
 	StatusCode    int
 	Headers       map[string]string
+	HeaderValues  map[string][]string
 	URL           string
 	ContentLength int64
 	Body          io.ReadCloser
@@ -154,10 +155,25 @@ func (nl *NetworkLog) Clear() {
 }
 
 type Response struct {
-	StatusCode int
-	Headers    map[string]string
-	Body       []byte
-	URL        string
+	StatusCode   int
+	Headers      map[string]string
+	HeaderValues map[string][]string
+	Body         []byte
+	URL          string
+}
+
+func headerMaps(header http.Header) (map[string]string, map[string][]string) {
+	headers := make(map[string]string, len(header))
+	valuesByKey := make(map[string][]string, len(header))
+	for k, values := range header {
+		valuesByKey[k] = append([]string(nil), values...)
+		if strings.EqualFold(k, "Set-Cookie") {
+			headers[k] = strings.Join(values, "\n")
+		} else {
+			headers[k] = strings.Join(values, ", ")
+		}
+	}
+	return headers, valuesByKey
 }
 
 func StyleSheetRefused(contentType string) bool {
@@ -432,17 +448,21 @@ func (c *httpClient) checkRedirect(req *http.Request, via []*http.Request) error
 	if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme == "http" {
 		return errors.New("net: refusing HTTPS-to-HTTP downgrade redirect")
 	}
-	if req.Response != nil && req.Response.Request != nil && c.jar != nil {
+	if req.Response != nil && req.Response.Request != nil && c.jar != nil && cookiesAllowedForURL(req.Context(), req.Response.Request.URL) {
 		if values := req.Response.Header.Values("Set-Cookie"); len(values) > 0 {
 			c.jar.Store(req.Response.Request.URL, values)
 		}
 	}
-	if c.jar != nil && req.Header != nil {
-		if cookie := c.jar.HeaderFor(req.URL); cookie != "" {
-			req.Header.Set("Cookie", cookie)
-		} else {
-			req.Header.Del("Cookie")
+	if cookiesAllowedForURL(req.Context(), req.URL) {
+		if c.jar != nil && req.Header != nil {
+			if cookie := c.jar.HeaderFor(req.URL); cookie != "" {
+				req.Header.Set("Cookie", cookie)
+			} else {
+				req.Header.Del("Cookie")
+			}
 		}
+	} else if req.Header != nil {
+		req.Header.Del("Cookie")
 	}
 	_, err := NormalizeURL(req.URL.String())
 	return err
@@ -574,7 +594,7 @@ func (c *httpClient) getStream(ctx context.Context, raw string, start int64) (*S
 			return nil, fmt.Errorf("%w: %s (%s)", ErrBlockedByFilter, RedactURL(normalized), reason)
 		}
 	}
-	if start == 0 && c.cache != nil {
+	if start == 0 && c.cache != nil && !hasCookiePolicy(ctx) {
 		if cached, ok := c.cache.get(normalized, time.Now()); ok {
 			if c.netLog != nil {
 				c.netLog.Record(RequestTrace{
@@ -589,6 +609,7 @@ func (c *httpClient) getStream(ctx context.Context, raw string, start int64) (*S
 			return &StreamResponse{
 				StatusCode:    cached.StatusCode,
 				Headers:       cached.Headers,
+				HeaderValues:  cached.HeaderValues,
 				URL:           cached.URL,
 				ContentLength: int64(len(cached.Body)),
 				Body:          io.NopCloser(bytes.NewReader(cached.Body)),
@@ -604,8 +625,10 @@ func (c *httpClient) getStream(ctx context.Context, raw string, start int64) (*S
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	if cookie := c.jar.HeaderFor(u); cookie != "" {
-		req.Header.Set("Cookie", cookie)
+	if cookiesAllowedForURL(ctx, u) {
+		if cookie := c.jar.HeaderFor(u); cookie != "" {
+			req.Header.Set("Cookie", cookie)
+		}
 	}
 	if start > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", start))
@@ -615,13 +638,10 @@ func (c *httpClient) getStream(ctx context.Context, raw string, start int64) (*S
 		cancel()
 		return nil, fmt.Errorf("net: fetch %s: %w", RedactURL(normalized), scrubURLError(err))
 	}
-	headers := make(map[string]string, len(resp.Header))
-	for k, values := range resp.Header {
-		if strings.EqualFold(k, "Set-Cookie") {
-			headers[k] = strings.Join(values, "\n")
+	headers, headerValues := headerMaps(resp.Header)
+	if c.jar != nil && cookiesAllowedForURL(ctx, resp.Request.URL) {
+		if values := resp.Header.Values("Set-Cookie"); len(values) > 0 {
 			c.jar.Store(resp.Request.URL, values)
-		} else {
-			headers[k] = strings.Join(values, ", ")
 		}
 	}
 	body := &streamLogBody{
@@ -639,6 +659,7 @@ func (c *httpClient) getStream(ctx context.Context, raw string, start int64) (*S
 	return &StreamResponse{
 		StatusCode:    resp.StatusCode,
 		Headers:       headers,
+		HeaderValues:  headerValues,
 		URL:           resp.Request.URL.String(),
 		ContentLength: resp.ContentLength,
 		Body:          body,
@@ -730,7 +751,7 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 			return nil, fmt.Errorf("%w: %s (%s)", ErrBlockedByFilter, RedactURL(normalized), reason)
 		}
 	}
-	if method == http.MethodGet && c.cache != nil {
+	if method == http.MethodGet && c.cache != nil && !hasCookiePolicy(ctx) {
 		if resp, ok := c.cache.get(normalized, time.Now()); ok {
 			if c.netLog != nil {
 				c.netLog.Record(RequestTrace{
@@ -753,8 +774,10 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	if cookie := c.jar.HeaderFor(u); cookie != "" {
-		req.Header.Set("Cookie", cookie)
+	if cookiesAllowedForURL(ctx, u) {
+		if cookie := c.jar.HeaderFor(u); cookie != "" {
+			req.Header.Set("Cookie", cookie)
+		}
 	}
 	if method == http.MethodPost {
 		req.Header.Set("Content-Type", contentType)
@@ -771,22 +794,20 @@ func (c *httpClient) request(ctx context.Context, method, raw, contentType strin
 	if err != nil {
 		return nil, fmt.Errorf("net: reading body: %w", err)
 	}
-	headers := make(map[string]string, len(resp.Header))
-	for k, values := range resp.Header {
-		if strings.EqualFold(k, "Set-Cookie") {
-			headers[k] = strings.Join(values, "\n")
+	headers, headerValues := headerMaps(resp.Header)
+	if c.jar != nil && cookiesAllowedForURL(ctx, resp.Request.URL) {
+		if values := resp.Header.Values("Set-Cookie"); len(values) > 0 {
 			c.jar.Store(resp.Request.URL, values)
-		} else {
-			headers[k] = strings.Join(values, ", ")
 		}
 	}
 	out := &Response{
-		StatusCode: resp.StatusCode,
-		Headers:    headers,
-		Body:       data,
-		URL:        resp.Request.URL.String(),
+		StatusCode:   resp.StatusCode,
+		Headers:      headers,
+		HeaderValues: headerValues,
+		Body:         data,
+		URL:          resp.Request.URL.String(),
 	}
-	if method == http.MethodGet && c.cache != nil {
+	if method == http.MethodGet && c.cache != nil && !hasCookiePolicy(ctx) && len(resp.Header.Values("Set-Cookie")) == 0 {
 		c.cache.store(normalized, out, time.Now())
 	}
 	if c.netLog != nil {

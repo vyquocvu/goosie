@@ -49,6 +49,9 @@ func TestLoadLegacyStateWithoutScroll(t *testing.T) {
 	if len(got.Tabs) != 1 {
 		t.Fatalf("tabs = %d, want 1", len(got.Tabs))
 	}
+	if got.Windows != nil {
+		t.Errorf("legacy state gained window grouping: %+v", got.Windows)
+	}
 	if got.Tabs[0].ScrollX != 0 || got.Tabs[0].ScrollY != 0 {
 		t.Errorf("legacy scroll = (%d,%d), want (0,0)", got.Tabs[0].ScrollX, got.Tabs[0].ScrollY)
 	}

@@ -74,6 +74,61 @@ func TestHistoryReplaceKeepsRequestAndClearDropsIt(t *testing.T) {
 	}
 }
 
+func TestHistoryStateSurvivesSnapshotTraversalAndRestore(t *testing.T) {
+	h := toolbar.NewHistory()
+	h.Push("https://example.test/start")
+	h.PushState("https://example.test/one", toolbar.Request{}, []byte(`one`), 120, true)
+	h.PushState("https://example.test/two", toolbar.Request{}, []byte(`two`), 240, true)
+	url, _, scroll, state, sameDocument, base, ok := h.PeekBackEntry()
+	if !ok || url != "https://example.test/one" || string(state) != "one" || scroll != 120 || !sameDocument || base != 2 {
+		t.Fatalf("PeekBackEntry = (%q, %d, %q, %t, %d, %t)", url, scroll, state, sameDocument, base, ok)
+	}
+	urls, states, same, index := h.Snapshot()
+	if len(urls) != 3 || string(states[1]) != "one" || !same[2] || index != 2 {
+		t.Fatalf("Snapshot = (%v, %q, %v, %d)", urls, states, same, index)
+	}
+	states[1][0] = 'X'
+	restored := toolbar.RestoreHistoryWithStates(urls, states, same, index)
+	if _, ok := restored.CurrentState(); !ok {
+		t.Fatal("restored history lost its current state")
+	}
+	if state, ok := restored.CurrentState(); !ok || string(state) != "two" {
+		t.Fatalf("restored state = %q, %t", state, ok)
+	}
+	if !restored.Go(-1, index) {
+		t.Fatal("Go(-1) failed")
+	}
+	if state, ok := restored.CurrentState(); !ok || string(state) != "Xne" {
+		t.Fatalf("traversed state = %q, %t", state, ok)
+	}
+}
+
+func TestHistorySameDocumentTraversalFollowsCrossedEntries(t *testing.T) {
+	h := toolbar.NewHistory()
+	h.Push("https://example.test/a")
+	h.PushState("https://example.test/a2", toolbar.Request{}, []byte(`two`), 0, true)
+	h.PushState("https://example.test/a3", toolbar.Request{}, []byte(`three`), 0, true)
+	h.Push("https://example.test/b")
+	if h.SameDocumentTraversal(-1) || h.SameDocumentTraversal(-3) {
+		t.Fatal("leaving a loaded document was classified as same-document traversal")
+	}
+	if !h.Go(-1, 3) {
+		t.Fatal("Go(-1) failed")
+	}
+	if !h.SameDocumentTraversal(-1) || !h.SameDocumentTraversal(-2) {
+		t.Fatal("backward traversal within the shared document was not recognized")
+	}
+	if h.SameDocumentTraversal(1) {
+		t.Fatal("traversal back to the loaded document was classified as same-document")
+	}
+	if !h.Go(-2, 2) {
+		t.Fatal("Go(-2) failed")
+	}
+	if !h.SameDocumentTraversal(1) || !h.SameDocumentTraversal(2) {
+		t.Fatal("forward traversal within the shared document was not recognized")
+	}
+}
+
 func TestHistoryRestoreStartsEveryEntryAsGET(t *testing.T) {
 	restored := toolbar.RestoreHistory([]string{"https://example.test/a", "https://example.test/b"}, 1)
 	url, req, ok := restored.CurrentRequest()

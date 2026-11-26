@@ -18,35 +18,28 @@ func (b *Builder) paintBorders(obj *layout.Object, rect frame.Rect, radius frame
 	if b.paintBorderImage(obj, rect, opacity) {
 		return
 	}
-	toDevice := func(cssPx float32) int32 {
-		if cssPx <= 0 {
-			return 0
-		}
-		if w := int32(cssPx * b.scale); w > 0 {
-			return w
-		}
-		return 1
-	}
 	border := BorderSpec{}
 	if obj.BorderTop > 0 {
-		border.Top = SideSpec{Width: toDevice(obj.BorderTop), Color: convertColor(s.BorderTopColor)}
+		border.Top = b.borderSide(obj.BorderTop, s.BorderTopColor, s.BorderTopStyle)
 	}
 	if obj.BorderRight > 0 {
-		rightColour := s.BorderRightColor
+		rightColour, rightStyle := s.BorderRightColor, s.BorderRightStyle
 		if obj.CollapsedBorderRight != nil {
 			rightColour = obj.CollapsedBorderRight.BorderRightColor
+			rightStyle = obj.CollapsedBorderRight.BorderRightStyle
 		}
-		border.Right = SideSpec{Width: toDevice(obj.BorderRight), Color: convertColor(rightColour)}
+		border.Right = b.borderSide(obj.BorderRight, rightColour, rightStyle)
 	}
 	if obj.BorderBottom > 0 {
-		bottomColour := s.BorderBottomColor
+		bottomColour, bottomStyle := s.BorderBottomColor, s.BorderBottomStyle
 		if obj.CollapsedBorderBottom != nil {
 			bottomColour = obj.CollapsedBorderBottom.BorderBottomColor
+			bottomStyle = obj.CollapsedBorderBottom.BorderBottomStyle
 		}
-		border.Bottom = SideSpec{Width: toDevice(obj.BorderBottom), Color: convertColor(bottomColour)}
+		border.Bottom = b.borderSide(obj.BorderBottom, bottomColour, bottomStyle)
 	}
 	if obj.BorderLeft > 0 {
-		border.Left = SideSpec{Width: toDevice(obj.BorderLeft), Color: convertColor(s.BorderLeftColor)}
+		border.Left = b.borderSide(obj.BorderLeft, s.BorderLeftColor, s.BorderLeftStyle)
 	}
 	if border.Top.Width > 0 || border.Right.Width > 0 || border.Bottom.Width > 0 || border.Left.Width > 0 {
 		b.list.Append(DisplayCmd{
@@ -74,29 +67,20 @@ func (b *Builder) paintInlineBorderFragments(obj *layout.Object, opacity float32
 
 func (b *Builder) paintBorderFragment(obj *layout.Object, rect frame.Rect, opacity float32, first, last, rtl bool) {
 	s := obj.Style
-	toDevice := func(cssPx float32) int32 {
-		if cssPx <= 0 {
-			return 0
-		}
-		if w := int32(cssPx * b.scale); w > 0 {
-			return w
-		}
-		return 1
-	}
 	drawLeft := (first && !rtl) || (last && rtl)
 	drawRight := (last && !rtl) || (first && rtl)
 	border := BorderSpec{}
 	if obj.BorderTop > 0 {
-		border.Top = SideSpec{Width: toDevice(obj.BorderTop), Color: convertColor(s.BorderTopColor)}
+		border.Top = b.borderSide(obj.BorderTop, s.BorderTopColor, s.BorderTopStyle)
 	}
 	if obj.BorderBottom > 0 {
-		border.Bottom = SideSpec{Width: toDevice(obj.BorderBottom), Color: convertColor(s.BorderBottomColor)}
+		border.Bottom = b.borderSide(obj.BorderBottom, s.BorderBottomColor, s.BorderBottomStyle)
 	}
 	if drawLeft && obj.BorderLeft > 0 {
-		border.Left = SideSpec{Width: toDevice(obj.BorderLeft), Color: convertColor(s.BorderLeftColor)}
+		border.Left = b.borderSide(obj.BorderLeft, s.BorderLeftColor, s.BorderLeftStyle)
 	}
 	if drawRight && obj.BorderRight > 0 {
-		border.Right = SideSpec{Width: toDevice(obj.BorderRight), Color: convertColor(s.BorderRightColor)}
+		border.Right = b.borderSide(obj.BorderRight, s.BorderRightColor, s.BorderRightStyle)
 	}
 	if border.Top.Width > 0 || border.Right.Width > 0 || border.Bottom.Width > 0 || border.Left.Width > 0 {
 		b.list.Append(DisplayCmd{
@@ -105,6 +89,29 @@ func (b *Builder) paintBorderFragment(obj *layout.Object, rect frame.Rect, opaci
 			Border:  border,
 			Opacity: opacity,
 		})
+	}
+}
+
+func (b *Builder) borderSide(width float32, colour css.Color, styleName string) SideSpec {
+	deviceWidth := int32(width * b.scale)
+	if deviceWidth <= 0 {
+		deviceWidth = 1
+	}
+	return SideSpec{Width: deviceWidth, Color: convertColor(colour), Style: borderStyle(styleName)}
+}
+
+func borderStyle(name string) BorderStyle {
+	switch name {
+	case "inset":
+		return BorderStyleInset
+	case "outset":
+		return BorderStyleOutset
+	case "ridge":
+		return BorderStyleRidge
+	case "groove":
+		return BorderStyleGroove
+	default:
+		return BorderStyleSolid
 	}
 }
 

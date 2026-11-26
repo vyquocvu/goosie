@@ -12,6 +12,82 @@ type PseudoKey struct {
 	Pseudo string
 }
 
+func PseudoStyleApplies(pseudo string, cs *ComputedStyle) bool {
+	if cs == nil {
+		return false
+	}
+	switch pseudo {
+	case "first-line", "placeholder":
+		return true
+	case "first-letter":
+		return cs.Content != "" && cs.Content != "none"
+	case "before", "after":
+		return len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none")
+	default:
+		return false
+	}
+}
+
+func storePseudoStyle(result map[PseudoKey]*ComputedStyle, nodeID dom.NodeID, pseudo string, cs *ComputedStyle) {
+	if !PseudoStyleApplies(pseudo, cs) {
+		return
+	}
+	if pseudo == "first-line" {
+		filterFirstLineProperties(cs)
+	}
+	result[PseudoKey{NodeID: nodeID, Pseudo: pseudo}] = cs
+}
+
+const (
+	generatedBefore uint8 = 1 << iota
+	generatedAfter
+	generatedFirstLetter
+	generatedFirstLine
+	generatedPlaceholder
+)
+
+func generatedPseudoMask(candidates []*indexedSelector) uint8 {
+	var mask uint8
+	for _, entry := range candidates {
+		for _, part := range entry.sel.Parts {
+			for _, cond := range part.Conditions {
+				if cond.Type != css.CondPseudoElement {
+					continue
+				}
+				switch cond.Value {
+				case "before":
+					mask |= generatedBefore
+				case "after":
+					mask |= generatedAfter
+				case "first-letter":
+					mask |= generatedFirstLetter
+				case "first-line":
+					mask |= generatedFirstLine
+				case "placeholder":
+					mask |= generatedPlaceholder
+				}
+			}
+		}
+	}
+	return mask
+}
+
+func resolveGeneratedPseudoStyles(n *dom.Node, candidates []*indexedSelector, mask uint8, parent *ComputedStyle, fonts *CustomFonts, six *css.SiblingIndex, result map[PseudoKey]*ComputedStyle) {
+	if mask == 0 {
+		return
+	}
+	names := [...]string{"before", "after", "first-letter", "first-line", "placeholder"}
+	for i, pseudo := range names {
+		if mask&(1<<i) == 0 {
+			continue
+		}
+		cs := computePseudoStyle(n, pseudo, candidates, parent, fonts, six)
+		if cs != nil {
+			storePseudoStyle(result, n.ID, pseudo, cs)
+		}
+	}
+}
+
 func ResolvePseudoElements(doc *dom.Document, sheets []*css.Stylesheet, elementStyles map[dom.NodeID]*ComputedStyle, fonts *CustomFonts) map[PseudoKey]*ComputedStyle {
 	return NewResolver(sheets).ResolvePseudoElements(doc, elementStyles, fonts)
 }
@@ -31,26 +107,8 @@ func resolvePseudoElements(doc *dom.Document, index *ruleIndex, elementStyles ma
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after", "first-letter", "first-line", "placeholder"} {
-					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
-					if cs == nil {
-						continue
-					}
-					if pseudo == "first-line" {
-						filterFirstLineProperties(cs)
-						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-					} else if pseudo == "placeholder" {
-						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-					} else if pseudo == "first-letter" {
-						if cs.Content != "" && cs.Content != "none" {
-							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-						}
-					} else {
-						if len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none") {
-							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-						}
-					}
-				}
+				candidates := index.candidates(n)
+				resolveGeneratedPseudoStyles(n, candidates, generatedPseudoMask(candidates), parentStyle, fonts, six, result)
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -85,26 +143,8 @@ func reResolvePseudoSubtree(roots []*dom.Node, index *ruleIndex, elementStyles m
 				parentStyle = findParentStyle(n, elementStyles)
 			}
 			if parentStyle != nil {
-				for _, pseudo := range []string{"before", "after", "first-letter", "first-line", "placeholder"} {
-					cs := computePseudoStyle(n, pseudo, index, parentStyle, fonts, six)
-					if cs == nil {
-						continue
-					}
-					if pseudo == "first-line" {
-						filterFirstLineProperties(cs)
-						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-					} else if pseudo == "placeholder" {
-						result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-					} else if pseudo == "first-letter" {
-						if cs.Content != "" && cs.Content != "none" {
-							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-						}
-					} else {
-						if len(cs.ContentParts) > 0 || (cs.Content != "normal" && cs.Content != "none") {
-							result[PseudoKey{NodeID: n.ID, Pseudo: pseudo}] = cs
-						}
-					}
-				}
+				candidates := index.candidates(n)
+				resolveGeneratedPseudoStyles(n, candidates, generatedPseudoMask(candidates), parentStyle, fonts, six, result)
 			}
 		}
 		if n.ShadowRoot != nil {
@@ -121,9 +161,9 @@ func reResolvePseudoSubtree(roots []*dom.Node, index *ruleIndex, elementStyles m
 	}
 }
 
-func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *ComputedStyle, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
+func computePseudoStyle(n *dom.Node, pseudo string, candidates []*indexedSelector, parent *ComputedStyle, fonts *CustomFonts, six *css.SiblingIndex) *ComputedStyle {
 	var entries []cascadeEntry
-	for _, entry := range index.candidates(n) {
+	for _, entry := range candidates {
 		if !entry.sel.MatchesPseudoElementIndexed(n, pseudo, six) {
 			continue
 		}
@@ -149,7 +189,7 @@ func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *Co
 
 	for _, e := range entries {
 		decl := e.decl
-		applyProperty(&cs, decl.Property, decl.Value, decl.Parsed, parent.FontSize, fonts)
+		applyPropertySpecified(&cs, decl.Property, decl.Value, decl.Parsed, parent.FontSize, fonts, e.origin > 0)
 		if pseudo == "placeholder" && strings.EqualFold(strings.TrimSpace(decl.Property), "color") &&
 			(strings.EqualFold(strings.TrimSpace(decl.Value), "inherit") || strings.EqualFold(strings.TrimSpace(decl.Value), "unset")) {
 			cs.Color = parent.Color
@@ -157,6 +197,14 @@ func computePseudoStyle(n *dom.Node, pseudo string, index *ruleIndex, parent *Co
 	}
 	resolveBorderColors(&cs, parent, entries, nil, nil)
 	resolveCustomFont(&cs, fonts)
+	if pseudo == "first-line" {
+		if cs.LineHeightRatio > 0 {
+			cs.LineHeight = cs.LineHeightRatio * cs.FontSize
+		}
+		if cs.LineHeightEm > 0 {
+			cs.LineHeight = cs.LineHeightEm * cs.FontSize
+		}
+	}
 
 	return &cs
 }
@@ -184,7 +232,7 @@ func (r *Resolver) PseudoStyleForRead(n *dom.Node, pseudo string, elementStyles 
 	if parent == nil {
 		return nil, false
 	}
-	cs := computePseudoStyle(n, pseudo, r.index, parent, fonts, css.NewSiblingIndex())
+	cs := computePseudoStyle(n, pseudo, r.index.candidates(n), parent, fonts, css.NewSiblingIndex())
 	if cs == nil {
 		defaulted := DefaultStyle()
 		inheritFromParent(&defaulted, parent)

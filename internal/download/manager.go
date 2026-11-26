@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -97,6 +98,11 @@ func FormatSpeed(bytesPerSec float64) string {
 	return FormatBytes(int64(bytesPerSec)) + "/s"
 }
 
+type FileLauncher interface {
+	OpenFile(path string) error
+	ShowInFolder(path string) error
+}
+
 type Manager struct {
 	mu        sync.RWMutex
 	dir       string
@@ -107,6 +113,7 @@ type Manager struct {
 	cancel    map[string]context.CancelFunc
 	pause     map[string]context.CancelFunc
 	resume    map[string]func()
+	launcher  FileLauncher
 }
 
 func NewManager(dir string) *Manager {
@@ -129,6 +136,12 @@ func (m *Manager) SetDir(dir string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.dir = dir
+}
+
+func (m *Manager) SetLauncher(launcher FileLauncher) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.launcher = launcher
 }
 
 func (m *Manager) CreateItem(rawURL, filename string, totalBytes int64) *Item {
@@ -498,7 +511,9 @@ func (m *Manager) notify(item *Item) {
 	}
 }
 
-func ShowInFolder(path string) error {
+type systemFileLauncher struct{}
+
+func (systemFileLauncher) ShowInFolder(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		abs = path
@@ -514,7 +529,7 @@ func ShowInFolder(path string) error {
 	}
 }
 
-func OpenFile(path string) error {
+func (systemFileLauncher) OpenFile(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		abs = path
@@ -527,4 +542,74 @@ func OpenFile(path string) error {
 	default:
 		return exec.Command("xdg-open", abs).Start()
 	}
+}
+
+func resolveManagedFilePath(dir, path string) (string, error) {
+	if strings.TrimSpace(dir) == "" || strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("download path is not configured")
+	}
+	dirAbs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve download directory: %w", err)
+	}
+	dirResolved, err := filepath.EvalSymlinks(dirAbs)
+	if err != nil {
+		return "", fmt.Errorf("resolve download directory: %w", err)
+	}
+	dirInfo, err := os.Stat(dirResolved)
+	if err != nil {
+		return "", fmt.Errorf("inspect download directory: %w", err)
+	}
+	if !dirInfo.IsDir() {
+		return "", fmt.Errorf("download directory is not a directory")
+	}
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(dirAbs, candidate)
+	}
+	candidateAbs, err := filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve download path: %w", err)
+	}
+	candidateResolved, err := filepath.EvalSymlinks(candidateAbs)
+	if err != nil {
+		return "", fmt.Errorf("resolve download path: %w", err)
+	}
+	rel, err := filepath.Rel(dirResolved, candidateResolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("download path is outside the configured directory")
+	}
+	info, err := os.Stat(candidateResolved)
+	if err != nil {
+		return "", fmt.Errorf("inspect download path: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("download path is not a regular file")
+	}
+	return candidateResolved, nil
+}
+
+func (m *Manager) launchManagedFile(path string, reveal bool) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	resolved, err := resolveManagedFilePath(m.dir, path)
+	if err != nil {
+		return err
+	}
+	launcher := m.launcher
+	if launcher == nil {
+		launcher = systemFileLauncher{}
+	}
+	if reveal {
+		return launcher.ShowInFolder(resolved)
+	}
+	return launcher.OpenFile(resolved)
+}
+
+func (m *Manager) OpenFile(path string) error {
+	return m.launchManagedFile(path, false)
+}
+
+func (m *Manager) ShowInFolder(path string) error {
+	return m.launchManagedFile(path, true)
 }

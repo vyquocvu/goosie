@@ -50,10 +50,10 @@ func TestControlFontWideKeywordMovesTheControlsOwnLine(t *testing.T) {
 		why        string
 	}{
 		{"plain", 153, 21, true, "the UA control face alone: 13.3333px gives a 15px line and 6px of chrome"},
-		{"inh", 153, 24, true, "`font: inherit` gives the field the document's 16px, so the line is 18 and the box 24 - the reference's width is 174 because its field content tracks the character width, which is GOOSIE-CONTROLWIDTH-001"},
-		{"ini", 153, 24, true, "`font: initial` is 16px Times and sizes the same line"},
-		{"inhArea", 182, 42, false, "a textarea with the document font is two 18px lines plus 6px of chrome, which is the reference's 42"},
-		{"plainArea", 182, 36, false, "the UA monospace field is two 15px lines plus 6px"},
+		{"inh", 174, 24, true, "`font: inherit` gives the field the document's 16px; Chromium measures 174x24"},
+		{"ini", 168, 24, true, "`font: initial` is 16px Times; Chromium measures 168x24"},
+		{"inhArea", 182, 42, true, "a textarea with the document font is two 18px lines plus 6px of chrome and the 16px character gutter, which is the reference's 182x42"},
+		{"plainArea", 182, 36, true, "the UA monospace field is two 15px lines plus 6px of chrome and the 16px character gutter"},
 	} {
 		w, h := controlUABorderBox(t, arena, c.id)
 		if !almostEqual(h, c.h) {

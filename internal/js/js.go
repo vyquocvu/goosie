@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+	"github.com/vyquocvu/goosie/internal/css"
 	"github.com/vyquocvu/goosie/internal/dom"
 	"github.com/vyquocvu/goosie/internal/media"
 )
@@ -30,6 +31,10 @@ func (r *Runtime) timeout() time.Duration {
 }
 
 func (r *Runtime) callBounded(fn func() (goja.Value, error)) (goja.Value, error) {
+	previousScript := r.currentScript
+	r.currentScript = nil
+	defer func() { r.currentScript = previousScript }()
+
 	var fired atomic.Bool
 	t := time.AfterFunc(r.timeout(), func() {
 		fired.Store(true)
@@ -71,6 +76,10 @@ type Options struct {
 	Title             string
 	DOM               *dom.Document
 
+	HistoryURLs   []string
+	HistoryStates [][]byte
+	HistoryIndex  int
+
 	HTTPClient HTTPFetcher
 
 	Cookies                  CookieStore
@@ -107,9 +116,22 @@ type Options struct {
 
 	SessionID string
 
+	WindowHandle      WindowHandle
+	WindowName        string
+	WindowOrigin      string
+	WindowOpaqueID    string
+	OpenerHandle      WindowHandle
+	OpenerName        string
+	WindowMessageSink WindowMessageSink
+	WindowClosed      WindowClosed
+	WindowControlSink WindowControlSink
+	WindowNameSink    WindowNameSink
+
 	DarkMode bool
 
 	HighContrast bool
+
+	ReducedMotion bool
 
 	ImageLoader ImageLoader
 
@@ -182,6 +204,7 @@ type Runtime struct {
 	inDeferScript            bool
 	timerNesting             int
 	scriptExecutionDepth     int
+	currentScript            *dom.Node
 	timedOut                 atomic.Bool
 	consoleOut               io.Writer
 
@@ -191,6 +214,7 @@ type Runtime struct {
 	microtasks []func() error
 
 	domDoc                             *dom.Document
+	history                            *historyObj
 	selection                          *jsSelection
 	textControlSelections              map[*dom.Node]textControlSelection
 	documentSelections                 map[*dom.Document]*jsSelection
@@ -450,6 +474,19 @@ type Runtime struct {
 	dprMu            sync.Mutex
 	devicePixelRatio float64
 
+	viewportMu          sync.Mutex
+	viewportX           float32
+	viewportY           float32
+	viewportWidth       float32
+	viewportHeight      float32
+	canHover            bool
+	finePointer         bool
+	mediaQueries        map[*mediaQueryList]struct{}
+	mediaQueryQueue     []*mediaQueryList
+	mediaQueryQueued    map[*mediaQueryList]bool
+	mediaQueryNotify    bool
+	mediaQueryListeners int
+
 	winMu                 sync.Mutex
 	winListeners          []*windowListener
 	ready                 string
@@ -459,7 +496,21 @@ type Runtime struct {
 	locRaw                string
 	locURL                *url.URL
 	locObj                *goja.Object
+	navigationSink        func(NavigationRequest)
 	collectionProto       *goja.Object
+
+	windowHandle         WindowHandle
+	windowName           string
+	windowOriginOverride string
+	windowOpaqueID       string
+	openerHandle         WindowHandle
+	openerName           string
+	windowMessageSink    WindowMessageSink
+	windowClosed         WindowClosed
+	windowControlSink    WindowControlSink
+	windowNameSink       WindowNameSink
+	openWindowCount      int
+	hostWindowProxies    map[WindowHandle]*goja.Object
 
 	filePickerMu      sync.Mutex
 	filePickerRequest *dom.Node
@@ -525,6 +576,20 @@ func New(opts Options) (*Runtime, error) {
 		dataTransferItemLists:      make(map[*goja.Object]dataTransferItemListBinding),
 		dataTransferTypesCache:     make(map[*goja.Object]dataTransferTypesCacheEntry),
 		devicePixelRatio:           1.0,
+		canHover:                   true,
+		finePointer:                true,
+		windowHandle:               opts.WindowHandle,
+		windowName:                 opts.WindowName,
+		windowOriginOverride:       opts.WindowOrigin,
+		windowOpaqueID:             opts.WindowOpaqueID,
+		openerHandle:               opts.OpenerHandle,
+		openerName:                 opts.OpenerName,
+		windowMessageSink:          opts.WindowMessageSink,
+		windowClosed:               opts.WindowClosed,
+		windowControlSink:          opts.WindowControlSink,
+		windowNameSink:             opts.WindowNameSink,
+		mediaQueries:               make(map[*mediaQueryList]struct{}),
+		mediaQueryQueued:           make(map[*mediaQueryList]bool),
 	}
 
 	r.setupConsole(consoleWriter)
@@ -633,6 +698,12 @@ func (r *Runtime) setupDocument() {
 	_ = doc.Set("__title__", r.title)
 	_ = doc.Set("nodeType", NodeTypeDocument)
 	_ = doc.Set("nodeName", "#document")
+	_ = doc.DefineAccessorProperty("currentScript", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		if r.scriptExecutionDepth == 0 {
+			return goja.Null()
+		}
+		return r.wrapNode(r.currentScript)
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
 
 	_ = doc.DefineAccessorProperty("title", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		if titleNode := firstTitle(r.domDoc); titleNode != nil {
@@ -678,61 +749,7 @@ func (r *Runtime) setupWindow() {
 	r.setupScreen(win)
 
 	_ = win.Set("matchMedia", func(call goja.FunctionCall) goja.Value {
-		q := ""
-		if len(call.Arguments) > 0 {
-			q = call.Arguments[0].String()
-		}
-		mql := r.vm.NewObject()
-		_ = mql.Set("media", q)
-		matches := true
-		lq := strings.ToLower(q)
-		if strings.Contains(lq, "print") && !strings.Contains(lq, "not") {
-			matches = false
-		}
-		if strings.Contains(lq, "prefers-color-scheme") {
-			dark := strings.Contains(lq, "dark")
-			light := strings.Contains(lq, "light")
-			if r.opts.DarkMode {
-				if dark {
-					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-				if light {
-					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-			} else {
-				if dark {
-					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-				if light {
-					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-			}
-		}
-		if strings.Contains(lq, "prefers-contrast") {
-			more := strings.Contains(lq, "more")
-			noPref := strings.Contains(lq, "no-preference")
-			if r.opts.HighContrast {
-				if more {
-					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-				if noPref {
-					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-			} else {
-				if more {
-					matches = strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-				if noPref {
-					matches = !strings.HasPrefix(strings.TrimSpace(lq), "not ")
-				}
-			}
-		}
-		_ = mql.Set("matches", matches)
-		_ = mql.Set("addListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
-		_ = mql.Set("removeListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
-		_ = mql.Set("addEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
-		_ = mql.Set("removeEventListener", func(goja.FunctionCall) goja.Value { return goja.Undefined() })
-		return mql
+		return r.matchMedia(call)
 	})
 	r.setupWindowEvents()
 	if window, ok := r.vm.Get("window").(*goja.Object); ok {
@@ -753,11 +770,655 @@ func (r *Runtime) setupWindow() {
 	r.jsDefaultView()
 	_ = win.Set("top", win)
 	_ = win.Set("parent", win)
-	_ = win.Set("opener", goja.Null())
+	r.installWindowIdentity(win)
 	r.setupWindowOpen(win)
 	_ = win.Set("getComputedStyle", func(call goja.FunctionCall) goja.Value {
 		return r.jsGetComputedStyle(call)
 	})
+}
+
+const (
+	maxMediaQueries        = 256
+	maxMediaQueryListeners = 512
+	maxMediaQueryBytes     = 4096
+)
+
+type mediaQueryListener struct {
+	fn      goja.Callable
+	value   goja.Value
+	capture bool
+	once    bool
+}
+
+type mediaQueryList struct {
+	r         *Runtime
+	obj       *goja.Object
+	media     string
+	mu        sync.Mutex
+	matches   bool
+	listeners []*mediaQueryListener
+}
+
+func (r *Runtime) matchMedia(call goja.FunctionCall) goja.Value {
+	query := ""
+	if len(call.Arguments) > 0 && call.Arguments[0] != nil && !goja.IsUndefined(call.Arguments[0]) {
+		query = call.Arguments[0].String()
+	}
+	r.viewportMu.Lock()
+	if len(r.mediaQueries) >= maxMediaQueries {
+		r.viewportMu.Unlock()
+		panic(r.vm.NewTypeError("Media query limit exceeded"))
+	}
+	width, height := r.viewportWidth, r.viewportHeight
+	dpr := r.devicePixelRatioValue()
+	mql := &mediaQueryList{
+		r:       r,
+		obj:     r.vm.NewObject(),
+		media:   query,
+		matches: mediaQueryMatches(query, width, height, dpr, r.canHover, r.finePointer, r.opts),
+	}
+	r.mediaQueries[mql] = struct{}{}
+	r.viewportMu.Unlock()
+
+	_ = mql.obj.Set("media", query)
+	_ = mql.obj.DefineAccessorProperty("matches", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		mql.mu.Lock()
+		matches := mql.matches
+		mql.mu.Unlock()
+		return r.vm.ToValue(matches)
+	}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_FALSE)
+	_ = mql.obj.Set("addListener", func(call goja.FunctionCall) goja.Value {
+		r.addMediaQueryListener(mql, call.Arguments, false, false)
+		return goja.Undefined()
+	})
+	_ = mql.obj.Set("removeListener", func(call goja.FunctionCall) goja.Value {
+		r.removeMediaQueryListener(mql, call.Argument(1), false)
+		return goja.Undefined()
+	})
+	_ = mql.obj.Set("addEventListener", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 && call.Arguments[0].String() == "change" {
+			r.addMediaQueryListener(mql, call.Arguments[1:], true, false)
+		}
+		return goja.Undefined()
+	})
+	_ = mql.obj.Set("removeEventListener", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) > 0 && call.Arguments[0].String() == "change" {
+			capture, _, _, _ := windowListenerOptions(r.vm, call.Arguments[2:], false)
+			r.removeMediaQueryListener(mql, call.Argument(1), capture)
+		}
+		return goja.Undefined()
+	})
+	return mql.obj
+}
+
+func (r *Runtime) addMediaQueryListener(mql *mediaQueryList, args []goja.Value, options bool, once bool) {
+	if len(args) == 0 || args[0] == nil {
+		return
+	}
+	fn, ok := goja.AssertFunction(args[0])
+	if !ok {
+		return
+	}
+	capture := false
+	if options {
+		capture, once, _, _ = windowListenerOptions(r.vm, args[1:], false)
+	}
+	mql.mu.Lock()
+	for _, listener := range mql.listeners {
+		if listener.capture == capture && listener.value.StrictEquals(args[0]) {
+			mql.mu.Unlock()
+			return
+		}
+	}
+	mql.mu.Unlock()
+	r.viewportMu.Lock()
+	if r.mediaQueryListeners >= maxMediaQueryListeners {
+		r.viewportMu.Unlock()
+		panic(r.vm.NewTypeError("Media query listener limit exceeded"))
+	}
+	r.mediaQueryListeners++
+	mql.mu.Lock()
+	mql.listeners = append(mql.listeners, &mediaQueryListener{fn: fn, value: args[0], capture: capture, once: once})
+	mql.mu.Unlock()
+	r.viewportMu.Unlock()
+}
+
+func (r *Runtime) removeMediaQueryListener(mql *mediaQueryList, value goja.Value, capture bool) {
+	if mql == nil || value == nil {
+		return
+	}
+	mql.mu.Lock()
+	removed := false
+	for i, listener := range mql.listeners {
+		if listener.capture == capture && listener.value.StrictEquals(value) {
+			mql.listeners = append(mql.listeners[:i], mql.listeners[i+1:]...)
+			removed = true
+			break
+		}
+	}
+	mql.mu.Unlock()
+	if removed {
+		r.viewportMu.Lock()
+		r.mediaQueryListeners--
+		r.viewportMu.Unlock()
+	}
+}
+
+func (r *Runtime) devicePixelRatioValue() float64 {
+	r.dprMu.Lock()
+	dpr := r.devicePixelRatio
+	r.dprMu.Unlock()
+	return dpr
+}
+
+func (r *Runtime) refreshMediaQueries() {
+	r.viewportMu.Lock()
+	r.refreshMediaQueriesLocked()
+	r.viewportMu.Unlock()
+	r.scheduleMediaQueryNotify()
+}
+
+func (r *Runtime) refreshMediaQueriesLocked() {
+	dpr := r.devicePixelRatioValue()
+	for mql := range r.mediaQueries {
+		matches := mediaQueryMatches(mql.media, r.viewportWidth, r.viewportHeight, dpr, r.canHover, r.finePointer, r.opts)
+		mql.mu.Lock()
+		changed := matches != mql.matches
+		mql.matches = matches
+		mql.mu.Unlock()
+		if changed && !r.mediaQueryQueued[mql] {
+			r.mediaQueryQueued[mql] = true
+			r.mediaQueryQueue = append(r.mediaQueryQueue, mql)
+		}
+	}
+	if len(r.mediaQueryQueue) > 0 {
+		r.mediaQueryNotify = true
+	}
+}
+
+func (r *Runtime) scheduleMediaQueryNotify() {
+	r.viewportMu.Lock()
+	queued := r.mediaQueryNotify
+	if queued {
+		r.mediaQueryNotify = false
+	}
+	r.viewportMu.Unlock()
+	if !queued {
+		return
+	}
+	r.queueMicrotask(func() error {
+		r.flushMediaQueryChanges()
+		return nil
+	})
+}
+
+func (r *Runtime) flushMediaQueryChanges() {
+	r.viewportMu.Lock()
+	queued := r.mediaQueryQueue
+	r.mediaQueryQueue = nil
+	clear(r.mediaQueryQueued)
+	r.viewportMu.Unlock()
+	for _, mql := range queued {
+		mql.mu.Lock()
+		matches := mql.matches
+		listeners := append([]*mediaQueryListener(nil), mql.listeners...)
+		remaining := make([]*mediaQueryListener, 0, len(mql.listeners))
+		removed := 0
+		for _, listener := range mql.listeners {
+			if !listener.once {
+				remaining = append(remaining, listener)
+			} else {
+				removed++
+			}
+		}
+		mql.listeners = remaining
+		mql.mu.Unlock()
+		if removed > 0 {
+			r.viewportMu.Lock()
+			r.mediaQueryListeners -= removed
+			r.viewportMu.Unlock()
+		}
+		if len(listeners) == 0 {
+			continue
+		}
+		event := r.vm.NewObject()
+		_ = event.Set("type", "change")
+		_ = event.Set("media", mql.media)
+		_ = event.Set("matches", matches)
+		_ = event.Set("target", mql.obj)
+		_ = event.Set("currentTarget", mql.obj)
+		_ = event.Set("eventPhase", 2)
+		_ = event.Set("bubbles", false)
+		_ = event.Set("cancelable", false)
+		_ = event.Set("composed", false)
+		_ = event.Set("isTrusted", true)
+		for _, listener := range listeners {
+			if !listener.capture {
+				continue
+			}
+			r.invokeMediaQueryListener(mql, listener, event)
+		}
+		for _, listener := range listeners {
+			if listener.capture {
+				continue
+			}
+			r.invokeMediaQueryListener(mql, listener, event)
+		}
+	}
+}
+
+func (r *Runtime) invokeMediaQueryListener(mql *mediaQueryList, listener *mediaQueryListener, event *goja.Object) {
+	r.withCurrentEvent(event, func() {
+		if _, err := listener.fn(mql.obj, event); err != nil {
+			r.reportWindowException(err)
+		}
+	})
+}
+
+func (r *Runtime) SetPointerCapabilities(canHover, finePointer bool) {
+	if r == nil {
+		return
+	}
+	r.viewportMu.Lock()
+	r.canHover, r.finePointer = canHover, finePointer
+	r.refreshMediaQueriesLocked()
+	r.viewportMu.Unlock()
+	r.scheduleMediaQueryNotify()
+}
+
+func (r *Runtime) DispatchWindowResize() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return
+	}
+	r.fireWindowListeners(dom.NewTrustedEvent("resize", false, false), false)
+	r.flushMediaQueryChanges()
+}
+
+func mediaQueryMatches(query string, width, height float32, dpr float64, canHover, finePointer bool, opts Options) bool {
+	query = strings.ToLower(strings.TrimSpace(css.StripComments(query)))
+	if query == "" || query == "all" {
+		return true
+	}
+	if len(query) > maxMediaQueryBytes || !mediaParensBalanced(query) {
+		return false
+	}
+	for _, group := range css.SplitTopLevel(query, ',') {
+		if matches, valid := mediaGroupMatches(group, width, height, dpr, canHover, finePointer, opts); valid && matches {
+			return true
+		}
+	}
+	return false
+}
+
+func mediaGroupMatches(group string, width, height float32, dpr float64, canHover, finePointer bool, opts Options) (bool, bool) {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return false, false
+	}
+	if alternatives := css.SplitOutsideParens(group, " or "); len(alternatives) > 1 {
+		valid := false
+		for _, alternative := range alternatives {
+			matches, ok := mediaGroupMatches(alternative, width, height, dpr, canHover, finePointer, opts)
+			if ok && matches {
+				return true, true
+			}
+			valid = valid || ok
+		}
+		return false, valid
+	}
+	negate := false
+	if strings.HasPrefix(group, "not ") {
+		negate = true
+		group = strings.TrimSpace(strings.TrimPrefix(group, "not "))
+	} else if group == "not" {
+		return false, false
+	}
+	if strings.HasPrefix(group, "only ") {
+		group = strings.TrimSpace(strings.TrimPrefix(group, "only "))
+	} else if group == "only" {
+		return false, false
+	}
+	if group == "" {
+		return false, false
+	}
+	parts := css.SplitTopLevel(group, ' ')
+	result := true
+	sawType := false
+	sawTerm := false
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "and" {
+			continue
+		}
+		sawTerm = true
+		if strings.HasPrefix(part, "(") && strings.HasSuffix(part, ")") {
+			matches, valid := mediaFeatureMatches(part[1:len(part)-1], width, height, dpr, canHover, finePointer, opts)
+			if !valid {
+				return false, false
+			}
+			if !matches {
+				result = false
+			}
+			continue
+		}
+		if sawType {
+			return false, false
+		}
+		sawType = true
+		switch part {
+		case "all", "screen":
+		case "print", "speech":
+			result = false
+		default:
+			return false, false
+		}
+	}
+	if !sawTerm {
+		return false, false
+	}
+	if negate {
+		result = !result
+	}
+	return result, true
+}
+
+func mediaFeatureMatches(feature string, width, height float32, dpr float64, canHover, finePointer bool, opts Options) (bool, bool) {
+	feature = strings.TrimSpace(feature)
+	if feature == "" || !mediaParensBalanced(feature) {
+		return false, false
+	}
+	if strings.ContainsAny(feature, "<>=") {
+		axis := ""
+		value := float32(0)
+		for _, candidate := range []struct {
+			name string
+			size float32
+		}{{"width", width}, {"height", height}} {
+			if mediaRangeAxis(feature, candidate.name) {
+				axis, value = candidate.name, candidate.size
+				break
+			}
+		}
+		if axis == "" {
+			return false, false
+		}
+		matches, valid := mediaRangeMatches(feature, axis, value)
+		if !valid {
+			return false, false
+		}
+		if axis == "width" && width > 0 {
+			return css.MatchMediaWithOptions("("+feature+")", css.MediaOptions{ViewportWidth: width, DarkMode: opts.DarkMode, HighContrast: opts.HighContrast}), true
+		}
+		return matches, true
+	}
+	name, value := feature, ""
+	if colon := strings.IndexByte(feature, ':'); colon >= 0 {
+		name = strings.TrimSpace(feature[:colon])
+		value = strings.TrimSpace(feature[colon+1:])
+	}
+	switch name {
+	case "width", "min-width", "max-width", "min-device-width", "max-device-width":
+		px, valid := mediaLengthPx(value)
+		if !valid {
+			if width <= 0 || !cssMediaLengthValueValid(value, width, opts) {
+				return false, false
+			}
+			return css.MatchMediaWithOptions("("+name+":"+value+")", css.MediaOptions{ViewportWidth: width, DarkMode: opts.DarkMode, HighContrast: opts.HighContrast}), true
+		}
+		if width <= 0 {
+			return mediaLengthComparison(width, px, name), true
+		}
+		if name == "width" {
+			return width == px, true
+		}
+		return css.MatchMediaWithOptions("("+name+":"+value+")", css.MediaOptions{ViewportWidth: width, DarkMode: opts.DarkMode, HighContrast: opts.HighContrast}), true
+	case "height", "min-height", "max-height", "min-device-height", "max-device-height":
+		px, valid := mediaLengthPx(value)
+		if !valid {
+			return false, false
+		}
+		return mediaLengthComparison(height, px, name), true
+	case "orientation":
+		switch value {
+		case "landscape":
+			return width >= height, true
+		case "portrait":
+			return height > width, true
+		default:
+			return false, false
+		}
+	case "resolution", "min-resolution", "max-resolution":
+		resolution, valid := mediaResolutionDppx(value)
+		if !valid {
+			return false, false
+		}
+		switch name {
+		case "resolution":
+			return mediaFloatEqual(float64(dpr), resolution), true
+		case "min-resolution":
+			return float64(dpr) >= resolution, true
+		default:
+			return float64(dpr) <= resolution, true
+		}
+	case "min-device-pixel-ratio":
+		ratio, err := strconv.ParseFloat(value, 32)
+		if err != nil || ratio != ratio || ratio < 0 {
+			return false, false
+		}
+		return false, true
+	case "-webkit-min-device-pixel-ratio", "-webkit-max-device-pixel-ratio", "-webkit-device-pixel-ratio":
+		ratio, err := strconv.ParseFloat(value, 32)
+		if err != nil || ratio != ratio || ratio < 0 {
+			return false, false
+		}
+		switch name {
+		case "-webkit-min-device-pixel-ratio":
+			return float64(dpr) >= ratio, true
+		case "-webkit-max-device-pixel-ratio":
+			return float64(dpr) <= ratio, true
+		default:
+			return mediaFloatEqual(float64(dpr), ratio), true
+		}
+	case "prefers-color-scheme":
+		if value == "" {
+			return true, true
+		}
+		if value != "light" && value != "dark" {
+			return false, false
+		}
+		return (value == "dark") == opts.DarkMode, true
+	case "hover", "any-hover":
+		if value == "" {
+			return true, true
+		}
+		if value != "hover" && value != "none" {
+			return false, false
+		}
+		return (value == "hover") == canHover, true
+	case "pointer", "any-pointer":
+		if value == "" {
+			return true, true
+		}
+		if value != "fine" && value != "coarse" {
+			return false, false
+		}
+		return (value == "fine") == finePointer, true
+	case "prefers-reduced-motion":
+		if value == "" {
+			return true, true
+		}
+		if value != "reduce" && value != "no-preference" {
+			return false, false
+		}
+		return (value == "reduce") == opts.ReducedMotion, true
+	case "prefers-contrast":
+		if value == "" {
+			return true, true
+		}
+		switch value {
+		case "more", "custom":
+			return opts.HighContrast, true
+		case "no-preference":
+			return !opts.HighContrast, true
+		default:
+			return false, false
+		}
+	default:
+		return false, false
+	}
+}
+
+func cssMediaLengthValueValid(value string, width float32, options Options) bool {
+	opts := css.MediaOptions{ViewportWidth: width, DarkMode: options.DarkMode, HighContrast: options.HighContrast}
+	less := css.MatchMediaWithOptions("(width < "+value+")", opts)
+	greater := css.MatchMediaWithOptions("(width > "+value+")", opts)
+	return !less || !greater
+}
+
+func mediaLengthComparison(size, px float32, name string) bool {
+	switch name {
+	case "min-width", "min-device-width", "min-height", "min-device-height":
+		return size >= px
+	case "max-width", "max-device-width", "max-height", "max-device-height":
+		return size <= px
+	default:
+		return size == px
+	}
+}
+
+func mediaLengthPx(value string) (float32, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	scale := float64(1)
+	switch {
+	case strings.HasSuffix(value, "px"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "px"))
+	case strings.HasSuffix(value, "rem"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "rem"))
+		scale = 16
+	case strings.HasSuffix(value, "em"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "em"))
+		scale = 16
+	case value == "0":
+	default:
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(value, 32)
+	if err != nil || n < 0 || n != n || n > 1e12 {
+		return 0, false
+	}
+	return float32(n * scale), true
+}
+
+func mediaResolutionDppx(value string) (float64, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	scale := float64(1)
+	switch {
+	case strings.HasSuffix(value, "dppx"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "dppx"))
+	case strings.HasSuffix(value, "dpi"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "dpi"))
+		scale = 1.0 / 96.0
+	case strings.HasSuffix(value, "dpcm"):
+		value = strings.TrimSpace(strings.TrimSuffix(value, "dpcm"))
+		scale = 2.54 / 96.0
+	default:
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(value, 64)
+	if err != nil || n < 0 || n != n || n > 1e12 {
+		return 0, false
+	}
+	return n * scale, true
+}
+
+func mediaFloatEqual(a, b float64) bool {
+	delta := a - b
+	return delta >= -1e-6 && delta <= 1e-6
+}
+
+func mediaParensBalanced(value string) bool {
+	depth := 0
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth < 0 {
+				return false
+			}
+		}
+	}
+	return depth == 0
+}
+
+func mediaRangeAxis(feature, axis string) bool {
+	for _, token := range strings.Fields(feature) {
+		if token == axis {
+			return true
+		}
+	}
+	return false
+}
+
+func mediaRangeMatches(feature, axis string, size float32) (bool, bool) {
+	tokens := strings.Fields(feature)
+	if len(tokens) != 2 && len(tokens) != 3 {
+		return false, false
+	}
+	operands := make([]string, 0, len(tokens))
+	operators := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if token == "<" || token == "<=" || token == ">" || token == ">=" || token == "=" {
+			operators = append(operators, token)
+		} else {
+			operands = append(operands, token)
+		}
+	}
+	if len(operators) != len(operands)-1 {
+		return false, false
+	}
+	values := make([]float32, len(operands))
+	for i, operand := range operands {
+		if operand == axis {
+			values[i] = size
+			continue
+		}
+		px, valid := mediaLengthPx(operand)
+		if !valid {
+			return false, false
+		}
+		values[i] = px
+	}
+	for i, operator := range operators {
+		if !mediaRangeHolds(values[i], values[i+1], operator) {
+			return false, true
+		}
+	}
+	return true, true
+}
+
+func mediaRangeHolds(left, right float32, operator string) bool {
+	switch operator {
+	case "<":
+		return left < right
+	case "<=":
+		return left <= right
+	case ">":
+		return left > right
+	case ">=":
+		return left >= right
+	case "=":
+		return left == right
+	default:
+		return false
+	}
 }
 
 func (r *Runtime) SetTransientUserActivation(active bool) {
@@ -3331,6 +3992,13 @@ func (r *Runtime) tickIFrameChildren() bool {
 	return work
 }
 
+func (r *Runtime) runClassicScript(src, sourceURL string, node *dom.Node) error {
+	previous := r.currentScript
+	r.currentScript = node
+	defer func() { r.currentScript = previous }()
+	return r.Run(src, sourceURL)
+}
+
 func (r *Runtime) Run(src, sourceURL string) error {
 	r.mu.Lock()
 	if r.closed {
@@ -3367,7 +4035,10 @@ func (r *Runtime) Run(src, sourceURL string) error {
 
 	var drainErr error
 	if outermostScript {
+		previousScript := r.currentScript
+		r.currentScript = nil
 		drainErr = r.drainMicrotasks()
+		r.currentScript = previousScript
 	}
 	timer.Stop()
 	if runErr != nil {
@@ -3544,6 +4215,7 @@ func (r *Runtime) Close() error {
 		return nil
 	}
 	r.closed = true
+	r.navigationSink = nil
 	removeObservers := r.nodeRemovalObservers
 	r.nodeRemovalObservers = nil
 	r.mu.Unlock()
@@ -3757,6 +4429,10 @@ func (r *Runtime) jsAddEventListener(call goja.FunctionCall) goja.Value {
 }
 
 func (r *Runtime) withCurrentEvent(event goja.Value, run func()) {
+	previousScript := r.currentScript
+	r.currentScript = nil
+	defer func() { r.currentScript = previousScript }()
+
 	previous := r.legacyWindowEvent
 	if previous == nil {
 		previous = goja.Undefined()
@@ -4125,6 +4801,15 @@ func (r *Runtime) wrapEvent(e *dom.Event) goja.Value {
 	if hashChange := e.AsHashChange(); hashChange != nil {
 		_ = obj.Set("oldURL", hashChange.OldURL)
 		_ = obj.Set("newURL", hashChange.NewURL)
+	}
+	if popState := e.AsPopState(); popState != nil {
+		if value, ok := popState.State.(goja.Value); ok {
+			_ = obj.Set("state", value)
+		} else if popState.State == nil {
+			_ = obj.Set("state", goja.Null())
+		} else {
+			_ = obj.Set("state", r.vm.ToValue(popState.State))
+		}
 	}
 	if submitEvent := e.AsSubmit(); submitEvent != nil {
 		if submitEvent.Submitter == nil {
@@ -4974,7 +5659,7 @@ func (r *Runtime) jsSetAttribute(call goja.FunctionCall) goja.Value {
 	if strings.HasPrefix(strings.ToLower(name), "on") {
 		r.syncEventHandlerContentAttribute(node, name, value, true)
 	}
-	if node.Data == "input" && (strings.EqualFold(name, "src") || strings.EqualFold(name, "type")) && node.IsConnected() {
+	if dom.IsImageInput(node) && (strings.EqualFold(name, "src") || strings.EqualFold(name, "type")) && node.IsConnected() {
 		r.maybeLoadImageInput(node, true)
 	}
 	if strings.EqualFold(name, "id") && value != "" {

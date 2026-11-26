@@ -33,12 +33,16 @@ func (r *Runtime) setupLocationParts(win *goja.Object) {
 		}), goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
 	}
 
-	get("href", func(u *url.URL, raw string) string {
+	_ = loc.DefineAccessorProperty("href", r.vm.ToValue(func(goja.FunctionCall) goja.Value {
+		raw, u := r.locationState()
 		if u == nil {
-			return raw
+			return r.vm.ToValue(raw)
 		}
-		return u.String()
-	})
+		return r.vm.ToValue(u.String())
+	}), r.vm.ToValue(r.locationAssign), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	_ = loc.Set("assign", r.locationAssign)
+	_ = loc.Set("replace", r.locationReplace)
+	_ = loc.Set("reload", r.locationReload)
 	get("protocol", func(u *url.URL, _ string) string {
 		if u == nil || u.Scheme == "" {
 			return ""
@@ -109,7 +113,8 @@ func (r *Runtime) setupLocationParts(win *goja.Object) {
 
 	getter := r.vm.ToValue(func(goja.FunctionCall) goja.Value { return r.locObj })
 	_ = win.DefineAccessorProperty("location", getter, goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
-	_ = r.docObj().DefineAccessorProperty("location", getter, goja.Undefined(), goja.FLAG_TRUE, goja.FLAG_TRUE)
+	docLocation := r.docObj()
+	_ = docLocation.DefineAccessorProperty("location", getter, r.vm.ToValue(r.locationAssign), goja.FLAG_TRUE, goja.FLAG_TRUE)
 }
 
 func (r *Runtime) locationState() (string, *url.URL) {

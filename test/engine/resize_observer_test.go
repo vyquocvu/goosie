@@ -42,6 +42,7 @@ func TestResizeObserverFollowsLayoutChanges(t *testing.T) {
 
 	sizes := func() string {
 		t.Helper()
+		sess.PumpJS(800)
 		got, err := sess.EvaluateJS(`globalThis.sizes.join(',')`)
 		if err != nil {
 			t.Fatalf("read sizes: %v", err)

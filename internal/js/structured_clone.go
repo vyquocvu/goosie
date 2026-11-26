@@ -137,8 +137,17 @@ func (e *broadcastCloneEncoder) encodeObject(object *goja.Object, depth int) (*b
 			String: file.typeValue, Name: file.name, LastModified: file.lastModified,
 		}, nil
 	}
-	if tag, err := e.objectTag(object); err == nil && tag == "[object DataView]" {
-		return e.encodeDataView(object, id, depth)
+	if tag, err := e.objectTag(object); err == nil {
+		if tag == "[object DataView]" {
+			return e.encodeDataView(object, id, depth)
+		}
+		if tag == "[object Error]" {
+			name := object.Get("name").String()
+			if name == "" {
+				name = "Error"
+			}
+			return &broadcastCloneValue{Kind: "error", ID: id, Name: name, String: object.Get("message").String()}, nil
+		}
 	}
 	switch object.ExportType() {
 	case reflect.TypeOf([][2]interface{}{}):
@@ -395,6 +404,22 @@ func decodeBroadcastCloneValue(r *Runtime, cloned *broadcastCloneValue, objects 
 		}
 		objects[cloned.ID] = regexp
 		return regexp, nil
+	case "error":
+		constructor := r.vm.Get("Error")
+		if cloned.Name != "" && cloned.Name != "Error" {
+			if named := r.vm.Get(cloned.Name); named != nil && !goja.IsUndefined(named) && !goja.IsNull(named) {
+				constructor = named
+			}
+		}
+		object, err := r.vm.New(constructor, r.vm.ToValue(cloned.String))
+		if err != nil {
+			return nil, errBroadcastDataClone
+		}
+		if cloned.Name != "" {
+			_ = object.Set("name", cloned.Name)
+		}
+		objects[cloned.ID] = object
+		return object, nil
 	case "map":
 		m, err := r.vm.New(r.vm.Get("Map"))
 		if err != nil {

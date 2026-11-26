@@ -44,6 +44,82 @@ func (b *Builder) paintImage(obj *layout.Object, opacity float32, clip *frame.Re
 	})
 }
 
+func (b *Builder) paintImageInput(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	src, ok := obj.Image.(image.Image)
+	if ok && src != nil {
+		box := src.Bounds()
+		if box.Dx() > 0 && box.Dy() > 0 {
+			b.paintImage(obj, opacity, clip)
+			return
+		}
+	}
+	b.paintImageInputFallback(obj, opacity, clip)
+}
+
+func (b *Builder) paintImageInputFallback(obj *layout.Object, opacity float32, clip *frame.Rect) {
+	label := layout.ImageInputFallbackLabel(obj.Node)
+	if label == "" || obj.Style == nil {
+		return
+	}
+	x0, y0, x1, y1 := obj.ContentRect()
+	box := frame.RectF4(x0, y0, x1, y1).ToDevice(b.scale)
+	if box.Empty() {
+		return
+	}
+	vis := box
+	if clip != nil {
+		vis = box.Intersection(*clip)
+		if vis.Empty() {
+			return
+		}
+	}
+	iconSize := int32(math.Round(float64(16 * b.scale)))
+	if iconSize < 1 {
+		iconSize = 1
+	}
+	iconY := vis.Y0 + (vis.Y1-vis.Y0-iconSize)/2
+	icon := frame.Rect4(vis.X0, iconY, vis.X0+min(iconSize, vis.W()), iconY+iconSize).Intersection(vis)
+	if !icon.Empty() {
+		outline := frame.RGB(96, 96, 96)
+		broken := frame.RGB(176, 72, 64)
+		fill := func(ix0, iy0, ix1, iy1 int32, color frame.Color) {
+			rx0 := icon.X0 + int32(float64(ix0)*float64(iconSize)/16)
+			ry0 := icon.Y0 + int32(float64(iy0)*float64(iconSize)/16)
+			rx1 := icon.X0 + int32(float64(ix1)*float64(iconSize)/16)
+			ry1 := icon.Y0 + int32(float64(iy1)*float64(iconSize)/16)
+			if rx1 <= rx0 {
+				rx1 = rx0 + 1
+			}
+			if ry1 <= ry0 {
+				ry1 = ry0 + 1
+			}
+			rect := frame.Rect4(rx0, ry0, rx1, ry1).Intersection(vis)
+			if rect.Empty() {
+				return
+			}
+			b.list.Append(DisplayCmd{Kind: CmdFill, Rect: rect, Color: color, Opacity: opacity, Clip: vis})
+		}
+		fill(0, 0, 16, 1, outline)
+		fill(0, 15, 16, 16, outline)
+		fill(0, 0, 1, 16, outline)
+		fill(15, 0, 16, 16, outline)
+		fill(3, 3, 5, 5, outline)
+		fill(2, 12, 6, 13, outline)
+		fill(5, 9, 8, 10, outline)
+		fill(7, 7, 10, 9, outline)
+		fill(9, 5, 12, 8, outline)
+		fill(11, 10, 14, 13, outline)
+		fill(7, 2, 8, 14, broken)
+		fill(8, 8, 9, 15, broken)
+	}
+	textRect := vis
+	if textRect.W() <= iconSize {
+		return
+	}
+	textRect.X0 += iconSize
+	b.appendRun(label, textRect, obj.Style, convertColor(obj.Style.Color), opacity)
+}
+
 func (b *Builder) paintVideo(obj *layout.Object, opacity float32, clip *frame.Rect) {
 	s := obj.Style
 	if s == nil || obj.Node == nil {

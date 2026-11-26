@@ -57,7 +57,7 @@ func marginTopIn(row, kid *layout.Object) float32 {
 	return kid.Y - kid.MarginTop - row.Y
 }
 
-const atomicStrutHTML = `<html><head><style>
+const atomicStrutHTML = `<!doctype html><html><head><style>
 html, body { margin: 0; padding: 0; }
 body { font: 16px sans-serif; }
 .row { width: 400px; }

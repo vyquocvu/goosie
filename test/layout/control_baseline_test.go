@@ -14,11 +14,96 @@ import (
 type controlLineMetrics struct{}
 
 func (controlLineMetrics) GlyphAdvance(sizePx int32, r rune, slot frame.FontSlot) int32 {
-	return sizePx / 2
+	return controlLineMetrics{}.GlyphAdvanceFixed(sizePx, r, slot) / 64
 }
 
 func (controlLineMetrics) GlyphAdvanceFixed(sizePx int32, r rune, slot frame.FontSlot) int32 {
-	return sizePx * 32
+	if slot.Family == frame.FontCourier {
+		return (sizePx*384 + 5) / 10
+	}
+	if slot.Family == frame.FontTimes && r == 'W' {
+		return sizePx * 32
+	}
+	switch r {
+	case 'G':
+		switch sizePx {
+		case 13:
+			return 647
+		case 16:
+			return 796
+		case 20:
+			return 996
+		case 24:
+			return 1194
+		case 32:
+			return 1592
+		}
+	case 'o':
+		switch sizePx {
+		case 13:
+			return 463
+		case 16:
+			return 570
+		case 20:
+			return 712
+		case 24:
+			return 855
+		case 32:
+			return 1140
+		}
+	case 'x':
+		return sizePx * 32
+	case '0':
+		switch sizePx {
+		case 13:
+			return 437
+		case 16:
+			return 512
+		case 20:
+			return 640
+		case 24:
+			return 768
+		case 32:
+			return 1024
+		}
+	case 'W':
+		switch sizePx {
+		case 13:
+			return 749
+		case 16:
+			return 896
+		case 20:
+			return 1152
+		case 24:
+			return 1408
+		case 32:
+			return 1856
+		}
+	}
+	base := int32(463)
+	switch r {
+	case 'S', 'A':
+		base = 555
+	case 'G':
+		base = 648
+	case 'H', 'R':
+		base = 601
+	case 'm':
+		base = 693
+	case 'i', 'l':
+		base = 185
+	case 't':
+		base = 231
+	case ' ':
+		base = 230
+	case 'c':
+		base = 416
+	case 's':
+		base = 415
+	case 'r':
+		base = 277
+	}
+	return (base*sizePx + 6) / 13
 }
 
 func (controlLineMetrics) LineMetrics(sizePx int32, slot frame.FontSlot) (int32, int32, int32) {

@@ -50,6 +50,10 @@ type Selector struct {
 	Parts []SelectorPart
 }
 
+func (s Selector) String() string {
+	return formatSel(s)
+}
+
 type SelectorPart struct {
 	Combinator byte
 	Conditions []Condition

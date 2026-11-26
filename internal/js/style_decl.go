@@ -437,7 +437,11 @@ func (s *ruleStyleDeclaration) declarations() []css.Declaration {
 	if !ok {
 		return nil
 	}
-	return info.rule.Declarations
+	rule, ok := info.rule()
+	if !ok {
+		return nil
+	}
+	return rule.Declarations
 }
 
 func (s *ruleStyleDeclaration) store(decls []css.Declaration) {
@@ -448,8 +452,19 @@ func (s *ruleStyleDeclaration) store(decls []css.Declaration) {
 	if !ok {
 		return
 	}
-	info.rule.Declarations = decls
-	s.runtime.cssRuleWrappers[s.ruleWrapper] = info
+	rule, ok := info.rule()
+	if !ok {
+		return
+	}
+	replacement := cssRuleSelectorText(rule) + " { " + cssRuleDeclarationText(decls) + " }"
+	text, ok := mutateCSSOMRuleText(info.view.effective, info.index, replacement, false)
+	if !ok {
+		return
+	}
+	s.runtime.admitCSSOMText(text)
+	info.view.effective = text
+	info.view.parsed[info.index].Declarations = decls
+	s.runtime.notifyCSSOMChange(info.view)
 }
 
 func ruleDeclarationListFromText(text string) []css.Declaration {
@@ -473,7 +488,11 @@ func (s *ruleStyleDeclaration) mutateSet(rawName, value, priority string) {
 		return
 	}
 	value = strings.TrimSpace(value)
-	important := strings.EqualFold(priority, "important")
+	important := strings.EqualFold(strings.TrimSpace(priority), "important")
+	if i := strings.LastIndex(value, "!"); i >= 0 && strings.EqualFold(strings.TrimSpace(value[i:]), "!important") {
+		value = strings.TrimSpace(value[:i])
+		important = true
+	}
 	if value == "" {
 		s.mutateRemove(name)
 		return
@@ -482,9 +501,11 @@ func (s *ruleStyleDeclaration) mutateSet(rawName, value, priority string) {
 	out := make([]css.Declaration, 0, len(decls)+1)
 	replaced := false
 	for _, declaration := range decls {
-		if !replaced && sameInlineProperty(declaration.Property, name) {
-			out = append(out, css.Declaration{Property: name, Value: value, Important: important})
-			replaced = true
+		if sameInlineProperty(declaration.Property, name) {
+			if !replaced {
+				out = append(out, css.Declaration{Property: name, Value: value, Important: important})
+				replaced = true
+			}
 			continue
 		}
 		out = append(out, declaration)
@@ -505,7 +526,7 @@ func (s *ruleStyleDeclaration) mutateRemove(rawName string) string {
 	out := make([]css.Declaration, 0, len(decls))
 	removed := false
 	for _, declaration := range decls {
-		if !removed && sameInlineProperty(declaration.Property, name) {
+		if sameInlineProperty(declaration.Property, name) {
 			previous = serializeDeclarationValue(declaration.Property, declaration.Value)
 			removed = true
 			continue

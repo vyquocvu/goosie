@@ -701,6 +701,67 @@ func TestHandleDoneIgnoresAResultForAnOldVersion(t *testing.T) {
 	}
 }
 
+func TestHandleDoneRejectsResultForAnOldBackground(t *testing.T) {
+	c := frame.TileCoord{}
+	l, _ := schedDoc(t, 1, 1, 1)
+	gate := make(chan struct{})
+	var once sync.Once
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	draw := func(j raster.Job) error {
+		once.Do(func() { <-gate })
+		return schedRaster(j)
+	}
+	p := raster.New(1, 8, draw)
+	p.Start(context.Background())
+	t.Cleanup(func() { p.Close() })
+	s := raster.NewScheduler(l, p, frame.Viewport{Size: frame.Size{W: frame.TileSize, H: frame.TileSize}}, 1, raster.Pref{PrefetchRows: raster.PrefetchOff})
+	firstBG := frame.RGB(10, 20, 30)
+	s.SetPlan(frame.FramePlan{Serial: 1, Layers: []*frame.Layer{l}, Background: firstBG})
+	plan, needed := s.BeginFrame(vsync(0))
+	if plan == nil || len(needed) != 1 || needed[0] != c {
+		t.Fatalf("first frame plan=%v needed=%v, want the one tile", plan, needed)
+	}
+	s.Submit(needed)
+	if !l.Grid.InFlight(c) {
+		t.Fatal("setup: the gated tile was not in flight")
+	}
+	secondBG := frame.RGB(40, 50, 60)
+	s.SetPlan(frame.FramePlan{Serial: 2, Layers: []*frame.Layer{l}, Background: secondBG})
+	plan, needed = s.BeginFrame(vsync(0))
+	if plan == nil || plan.Background != secondBG {
+		t.Fatalf("second frame plan=%v, want background %v", plan, secondBG)
+	}
+	if len(needed) != 0 {
+		t.Fatalf("second frame needed=%v, want the in-flight tile left alone", needed)
+	}
+	release()
+	d := collect(t, p, 1)[0]
+	if d.BackgroundVersion >= l.Grid.BackgroundVersion() {
+		t.Fatalf("done background version=%d, current=%d; the test did not cross a generation", d.BackgroundVersion, l.Grid.BackgroundVersion())
+	}
+	if err := s.HandleDone(d); err != nil {
+		t.Fatalf("HandleDone: %v", err)
+	}
+	if got := s.Stats().Rasterized; got != 0 {
+		t.Fatalf("Rasterized=%d, want the old-background result refused", got)
+	}
+	if !l.Grid.Needs(c, 1) {
+		t.Fatal("the old-background tile became current")
+	}
+	if got := l.Grid.Stats().PaintingBytes; got != 0 {
+		t.Fatalf("PaintingBytes=%d after refusing the result", got)
+	}
+	if got := s.Stats().StaleNews; got == 0 {
+		t.Fatal("the refused background result was not counted")
+	}
+	_, needed = s.BeginFrame(vsync(0))
+	if !containsCoord(needed, c) {
+		t.Fatalf("the old-background tile %v was not requeued", c)
+	}
+}
+
 func TestSetPlanSupersedesAndKeepsTheScrollPosition(t *testing.T) {
 	const (
 		cols, rows = 2, 8

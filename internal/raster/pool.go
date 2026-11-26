@@ -21,22 +21,24 @@ var ErrTilePanic = errors.New("raster: tile rasterizer panicked")
 var ErrNoRasterizer = errors.New("raster: pool has no rasterizer")
 
 type Job struct {
-	Layer      *frame.Layer
-	Coord      frame.TileCoord
-	DL         *paint.LayerDL
-	Bounds     frame.Rect
-	Out        *frame.Bitmap
-	Background frame.Color
-	Scratch    *frame.BitmapPool
+	Layer             *frame.Layer
+	Coord             frame.TileCoord
+	DL                *paint.LayerDL
+	Bounds            frame.Rect
+	Out               *frame.Bitmap
+	Background        frame.Color
+	BackgroundVersion uint64
+	Scratch           *frame.BitmapPool
 }
 
 type Done struct {
-	Coord   frame.TileCoord
-	LayerID frame.LayerID
-	Layer   *frame.Layer
-	Out     *frame.Bitmap
-	Err     error
-	Version uint64
+	Coord             frame.TileCoord
+	LayerID           frame.LayerID
+	Layer             *frame.Layer
+	Out               *frame.Bitmap
+	Err               error
+	Version           uint64
+	BackgroundVersion uint64
 }
 
 type RasterFunc func(j Job) error
@@ -159,7 +161,7 @@ func (p *Pool) work(ctx context.Context) {
 }
 
 func (p *Pool) run(j Job) {
-	d := Done{Coord: j.Coord, Out: j.Out, Layer: j.Layer}
+	d := Done{Coord: j.Coord, Out: j.Out, Layer: j.Layer, BackgroundVersion: j.BackgroundVersion}
 	if j.Layer != nil {
 		d.LayerID = j.Layer.ID
 	}
@@ -269,10 +271,11 @@ func (p *Pool) Close() error {
 			select {
 			case j := <-p.jobs:
 				d := Done{
-					Coord: j.Coord,
-					Layer: j.Layer,
-					Out:   j.Out,
-					Err:   context.Canceled,
+					Coord:             j.Coord,
+					Layer:             j.Layer,
+					Out:               j.Out,
+					Err:               context.Canceled,
+					BackgroundVersion: j.BackgroundVersion,
 				}
 				if j.Layer != nil {
 					d.LayerID = j.Layer.ID

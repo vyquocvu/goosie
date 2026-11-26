@@ -35,9 +35,20 @@ func (k CmdKind) String() string {
 	return "unknown"
 }
 
+type BorderStyle uint8
+
+const (
+	BorderStyleSolid BorderStyle = iota
+	BorderStyleInset
+	BorderStyleOutset
+	BorderStyleRidge
+	BorderStyleGroove
+)
+
 type SideSpec struct {
 	Width int32
 	Color frame.Color
+	Style BorderStyle
 }
 
 type BorderSpec struct {

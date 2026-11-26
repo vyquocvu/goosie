@@ -52,6 +52,11 @@ type runeRange struct {
 
 type runeCoverage []runeRange
 
+type fallbackCandidate struct {
+	path       string
+	runeRanges runeCoverage
+}
+
 func (rc runeCoverage) contains(r rune) bool {
 	i := sort.Search(len(rc), func(i int) bool {
 		return rc[i].end >= r
@@ -201,7 +206,7 @@ type Fonts struct {
 	candidateCoverage     map[string]runeCoverage
 	rejectedFallbackPaths map[string]bool
 	retainedFallbackPaths map[string]bool
-	fallbackCandidates    []string
+	fallbackCandidates    []fallbackCandidate
 	fallbackBytes         int64
 	fallbackFilesRead     atomic.Int64
 	fallbackHook          func(path string)
@@ -221,6 +226,8 @@ const MaxFallbackFontBytes = 4 * 1024 * 1024
 const MaxParsedFallbackFonts = 2
 
 const systemFontDir = "/System/Library/Fonts/Supplemental"
+
+const hiraginoSansW0Path = "/System/Library/Fonts/ヒラギノ角ゴシック W0.ttc"
 
 var systemFontFiles = []struct {
 	slot frame.FontSlot
@@ -258,20 +265,40 @@ var systemFontCollections = []struct {
 	{frame.FontSlot{Family: frame.FontHelvetica, Light: true}, "/System/Library/Fonts/HelveticaNeue.ttc", 12},
 }
 
-var systemFallbackFiles = []string{
-	"/System/Library/Fonts/CJKSymbolsFallback.ttc",
-	"/System/Library/Fonts/Apple Symbols.ttf",
-	"/System/Library/Fonts/ZapfDingbats.ttf",
-	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-	"/usr/share/fonts/dejavu/DejaVuSans.ttf",
-	"/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
-	"/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
-	"/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
-	"/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
-	"/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf",
-	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-	"/Library/Fonts/Arial Unicode.ttf",
+var systemFallbackCandidates = []fallbackCandidate{
+	{path: "/System/Library/Fonts/CJKSymbolsFallback.ttc"},
+	{
+		path: hiraginoSansW0Path,
+		runeRanges: runeCoverage{
+			{start: 0x2E80, end: 0x2FDF},
+			{start: 0x3007, end: 0x3007},
+			{start: 0x3400, end: 0x4DBF},
+			{start: 0x4E00, end: 0x9FFF},
+			{start: 0xF900, end: 0xFAFF},
+			{start: 0x20000, end: 0x2A6DF},
+			{start: 0x2A700, end: 0x2B73F},
+			{start: 0x2B740, end: 0x2B81F},
+			{start: 0x2B820, end: 0x2CEAF},
+			{start: 0x2CEB0, end: 0x2EBEF},
+			{start: 0x2EBF0, end: 0x2EE5F},
+			{start: 0x2F800, end: 0x2FA1F},
+			{start: 0x30000, end: 0x3134F},
+			{start: 0x31350, end: 0x323AF},
+			{start: 0x323B0, end: 0x33479},
+		},
+	},
+	{path: "/System/Library/Fonts/Apple Symbols.ttf"},
+	{path: "/System/Library/Fonts/ZapfDingbats.ttf"},
+	{path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"},
+	{path: "/usr/share/fonts/dejavu/DejaVuSans.ttf"},
+	{path: "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf"},
+	{path: "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf"},
+	{path: "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf"},
+	{path: "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf"},
+	{path: "/usr/share/fonts/opentype/noto/NotoSansSymbols2-Regular.otf"},
+	{path: "/usr/share/fonts/truetype/freefont/FreeSans.ttf"},
+	{path: "/System/Library/Fonts/Supplemental/Arial Unicode.ttf"},
+	{path: "/Library/Fonts/Arial Unicode.ttf"},
 }
 
 func NewFonts() (*Fonts, error) {
@@ -456,10 +483,14 @@ func (f *Fonts) lazyFallbackForRuneLocked(r rune, size int32) *faceEntry {
 
 	candidates := f.fallbackCandidates
 	if len(candidates) == 0 {
-		candidates = systemFallbackFiles
+		candidates = systemFallbackCandidates
 	}
 
-	for _, path := range candidates {
+	for _, candidate := range candidates {
+		path := candidate.path
+		if len(candidate.runeRanges) > 0 && !candidate.runeRanges.contains(r) {
+			continue
+		}
 		if f.retainedFallbackPaths[path] {
 			continue
 		}
@@ -544,7 +575,10 @@ func (f *Fonts) SetFallbackCandidates(paths []string) {
 		f.fallbackCandidates = nil
 		return
 	}
-	f.fallbackCandidates = append([]string(nil), paths...)
+	f.fallbackCandidates = make([]fallbackCandidate, len(paths))
+	for i, path := range paths {
+		f.fallbackCandidates[i].path = path
+	}
 }
 
 func (f *Fonts) SetFallbackHook(fn func(path string)) {

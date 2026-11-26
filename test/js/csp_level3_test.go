@@ -105,3 +105,50 @@ func TestCSPDirectiveFallbackHierarchy(t *testing.T) {
 		t.Errorf("worker-src should reject other domains")
 	}
 }
+
+func TestCSPCompositionIntersectsEnforcingPolicies(t *testing.T) {
+	first := js.ParseCSP("default-src 'self'; script-src https://scripts.example; connect-src https://api.example")
+	second := js.ParseCSP("default-src 'none'; script-src https://scripts.example https://extra.example; connect-src https://api.example https://extra.example")
+	policy := js.ComposeCSP(first, second)
+
+	if !policy.AllowsScript("https://scripts.example/app.js", "https://document.example") {
+		t.Error("a source allowed by both enforcing policies was rejected")
+	}
+	if policy.AllowsScript("https://extra.example/app.js", "https://document.example") {
+		t.Error("a source allowed by only one enforcing policy was accepted")
+	}
+	if policy.AllowsScript("https://document.example/app.js", "https://document.example") {
+		t.Error("default-src from one policy overrode script-src from another")
+	}
+	if !policy.AllowsConnect("https://api.example/data", "https://document.example") {
+		t.Error("a connection allowed by both enforcing policies was rejected")
+	}
+	if policy.AllowsConnect("https://extra.example/data", "https://document.example") {
+		t.Error("a connection allowed by only one enforcing policy was accepted")
+	}
+	if policy.AllowsImage("https://document.example/image.png", "https://document.example") {
+		t.Error("default-src intersection did not apply to fetch directives")
+	}
+}
+
+func TestCSPCompositionIgnoresReportOnlyPolicies(t *testing.T) {
+	reportOnly := js.ParseCSP("default-src 'none'")
+	reportOnly.ReportOnly = true
+	policy := js.ComposeCSP(reportOnly, js.ParseCSP("img-src 'self'"))
+	if !policy.AllowsImage("https://document.example/image.png", "https://document.example") {
+		t.Error("report-only policy participated in enforcement")
+	}
+	if got := js.ComposeCSP(reportOnly); got != nil {
+		t.Error("a report-only-only header produced an enforcing policy")
+	}
+}
+
+func TestCSPSelfAllowsRelativeSources(t *testing.T) {
+	policy := js.ParseCSP("default-src 'self'")
+	if !policy.AllowsFrame("/frame.html", "https://document.example/page") {
+		t.Error("a relative same-origin frame source was rejected")
+	}
+	if policy.AllowsFrame("https://other.example/frame.html", "https://document.example/page") {
+		t.Error("a cross-origin frame source was accepted")
+	}
+}

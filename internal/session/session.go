@@ -8,22 +8,31 @@ import (
 )
 
 const (
-	MaxTabs          = 50
-	MaxHistoryPerTab = 100
+	MaxTabs              = 50
+	MaxHistoryPerTab     = 100
+	maxHistoryStateBytes = 256 << 10
 )
 
 type TabState struct {
-	URL          string   `json:"url"`
-	Title        string   `json:"title,omitempty"`
-	History      []string `json:"history,omitempty"`
-	HistoryIndex int      `json:"historyIndex,omitempty"`
-	ScrollX      int      `json:"scrollX,omitempty"`
-	ScrollY      int      `json:"scrollY,omitempty"`
+	URL                 string   `json:"url"`
+	Title               string   `json:"title,omitempty"`
+	History             []string `json:"history,omitempty"`
+	HistoryStates       [][]byte `json:"historyStates,omitempty"`
+	HistorySameDocument []bool   `json:"historySameDocument,omitempty"`
+	HistoryIndex        int      `json:"historyIndex,omitempty"`
+	ScrollX             int      `json:"scrollX,omitempty"`
+	ScrollY             int      `json:"scrollY,omitempty"`
+}
+
+type WindowState struct {
+	Tabs   []TabState `json:"tabs"`
+	Active int        `json:"active"`
 }
 
 type State struct {
-	Tabs   []TabState `json:"tabs"`
-	Active int        `json:"active"`
+	Tabs    []TabState    `json:"tabs"`
+	Active  int           `json:"active"`
+	Windows []WindowState `json:"windows,omitempty"`
 }
 
 func Save(path string, s State) error {
@@ -66,13 +75,42 @@ func Load(path string) (State, error) {
 }
 
 func clamp(s State) State {
-	if len(s.Tabs) > MaxTabs {
-		s.Tabs = s.Tabs[:MaxTabs]
+	s.Tabs, s.Active = clampTabs(s.Tabs, s.Active)
+	for i := range s.Windows {
+		s.Windows[i].Tabs, s.Windows[i].Active = clampTabs(s.Windows[i].Tabs, s.Windows[i].Active)
 	}
-	for i := range s.Tabs {
-		t := &s.Tabs[i]
+	if len(s.Windows) > 0 {
+		s.Tabs = s.Windows[0].Tabs
+		s.Active = s.Windows[0].Active
+	}
+	return s
+}
+
+func clampTabs(tabs []TabState, active int) ([]TabState, int) {
+	if len(tabs) > MaxTabs {
+		tabs = tabs[:MaxTabs]
+	}
+	for i := range tabs {
+		t := &tabs[i]
 		if len(t.History) > MaxHistoryPerTab {
 			t.History = t.History[:MaxHistoryPerTab]
+		}
+		if len(t.HistoryStates) > len(t.History) {
+			t.HistoryStates = t.HistoryStates[:len(t.History)]
+		}
+		for len(t.HistoryStates) < len(t.History) {
+			t.HistoryStates = append(t.HistoryStates, nil)
+		}
+		for i, state := range t.HistoryStates {
+			if len(state) > maxHistoryStateBytes {
+				t.HistoryStates[i] = nil
+			}
+		}
+		if len(t.HistorySameDocument) > len(t.History) {
+			t.HistorySameDocument = t.HistorySameDocument[:len(t.History)]
+		}
+		for len(t.HistorySameDocument) < len(t.History) {
+			t.HistorySameDocument = append(t.HistorySameDocument, false)
 		}
 		if t.HistoryIndex >= len(t.History) {
 			t.HistoryIndex = len(t.History) - 1
@@ -84,11 +122,11 @@ func clamp(s State) State {
 			t.URL = t.History[t.HistoryIndex]
 		}
 	}
-	if s.Active >= len(s.Tabs) {
-		s.Active = len(s.Tabs) - 1
+	if active >= len(tabs) {
+		active = len(tabs) - 1
 	}
-	if s.Active < 0 {
-		s.Active = 0
+	if active < 0 {
+		active = 0
 	}
-	return s
+	return tabs, active
 }

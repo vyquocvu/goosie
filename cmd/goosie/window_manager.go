@@ -22,6 +22,9 @@ type windowManager struct {
 	primary *framePath
 	errs    []<-chan error
 
+	stopping     bool
+	finalWindows []*framePath
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	sig    chan os.Signal
@@ -47,11 +50,16 @@ func newWindowManager(c config) (*windowManager, error) {
 }
 
 func (m *windowManager) spawn(initialURL string) (*framePath, error) {
+	return m.spawnWindow(initialURL, nil)
+}
+
+func (m *windowManager) spawnWindow(initialURL string, restored *session.WindowState) (*framePath, error) {
 	c := m.config
 	m.mu.Lock()
 	isFirst := len(m.windows) == 0
 	if !isFirst {
 		c.sessionActiveFile = ""
+		c.sessionFile = ""
 	}
 	m.mu.Unlock()
 
@@ -63,6 +71,9 @@ func (m *windowManager) spawn(initialURL string) (*framePath, error) {
 		if _, err := m.spawn(""); err != nil {
 			fmt.Fprintf(os.Stderr, "goosie: new window: %v\n", err)
 		}
+	}
+	if restored != nil {
+		f.applySessionState(session.State{Tabs: restored.Tabs, Active: restored.Active})
 	}
 	if err := f.openWindow(); err != nil {
 		_ = f.pool.Close()
@@ -134,6 +145,16 @@ func (m *windowManager) closeWindow(f *framePath) {
 	}
 }
 
+func (m *windowManager) stop() {
+	m.mu.Lock()
+	if !m.stopping {
+		m.stopping = true
+		m.finalWindows = append([]*framePath(nil), m.windows...)
+	}
+	m.mu.Unlock()
+	m.cancel()
+}
+
 func (m *windowManager) cleanup() {
 	m.cancel()
 	m.mu.Lock()
@@ -151,25 +172,22 @@ func (m *windowManager) cleanup() {
 func (m *windowManager) run() error {
 	signal.Notify(m.sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(m.sig)
-	defer m.cancel()
+	defer m.stop()
 
 	go func() {
 		select {
 		case <-m.sig:
-			m.cancel()
+			m.stop()
 		case <-m.done:
 		}
 	}()
 
-	if _, err := m.spawn(m.config.url); err != nil {
+	if err := m.start(); err != nil {
 		return err
 	}
 	m.mu.Lock()
 	primary := m.primary
 	m.mu.Unlock()
-	if m.config.url == "" && primary.restoredActiveURL != "" {
-		primary.navigateTabNoHistory(primary.restoredActiveURL)
-	}
 
 	if r, ok := primary.window.(platform.Runner); ok {
 		r.Run()
@@ -187,6 +205,41 @@ func (m *windowManager) run() error {
 	return primary.report(nil)
 }
 
+func (m *windowManager) start() error {
+	primary, err := m.spawn(m.config.url)
+	if err != nil {
+		return err
+	}
+	if m.config.url != "" {
+		return nil
+	}
+	navigateRestoredWindow(primary)
+	if m.config.private || primary.crashedSessionState() != nil || !shouldRestoreSession(m.config.private, m.profile.preferences.StartupMode) {
+		return nil
+	}
+	st, err := session.Load(m.config.sessionFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goosie: session: %v\n", err)
+		return nil
+	}
+	windows := sessionWindowStates(st)
+	if len(windows) <= 1 {
+		return nil
+	}
+	for i, ws := range windows[1:] {
+		if len(ws.Tabs) == 0 {
+			continue
+		}
+		windowState := ws
+		f, err := m.spawnWindow("", &windowState)
+		if err != nil {
+			return fmt.Errorf("goosie: restore window %d: %w", i+2, err)
+		}
+		navigateRestoredWindow(f)
+	}
+	return nil
+}
+
 func drainLoopErrs(errs []<-chan error) error {
 	var firstErr error
 	for _, ec := range errs {
@@ -200,17 +253,46 @@ func drainLoopErrs(errs []<-chan error) error {
 func (m *windowManager) save() {
 	m.mu.Lock()
 	primary := m.primary
+	windows := append([]*framePath(nil), m.windows...)
+	if m.stopping {
+		windows = append([]*framePath(nil), m.finalWindows...)
+	}
 	m.mu.Unlock()
 	if primary == nil {
 		return
 	}
+	if len(windows) == 0 {
+		windows = []*framePath{primary}
+	}
+
 	primary.sessionMu.Lock()
-	if !primary.sessionDisabled.Load() {
-		if err := session.Save(m.config.sessionFile, sessionState(primary)); err != nil {
+	sessionSuppressed := primary.sessionDisabled.Load()
+	primary.sessionMu.Unlock()
+	var st session.State
+	for _, f := range windows {
+		if f == nil || f.config.private {
+			continue
+		}
+		f.sessionMu.Lock()
+		if f.sessionDisabled.Load() {
+			sessionSuppressed = true
+			f.sessionMu.Unlock()
+			continue
+		}
+		ws := currentWindowSessionState(f)
+		f.sessionMu.Unlock()
+		if len(ws.Tabs) == 0 {
+			continue
+		}
+		st.Windows = append(st.Windows, session.WindowState{Tabs: ws.Tabs, Active: ws.Active})
+	}
+	if !sessionSuppressed && len(st.Windows) > 0 {
+		st.Tabs = st.Windows[0].Tabs
+		st.Active = st.Windows[0].Active
+		if err := session.Save(m.config.sessionFile, st); err != nil {
 			fmt.Fprintf(os.Stderr, "goosie: save session: %v\n", err)
 		}
 	}
-	primary.sessionMu.Unlock()
 	if m.profile.history != nil {
 		if err := m.profile.history.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "goosie: save history: %v\n", err)

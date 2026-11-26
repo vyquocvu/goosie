@@ -48,7 +48,7 @@ func TestNormalLineHeightFollowsTheElementsOwnFont(t *testing.T) {
 
 // qc:BR-271
 func TestNormalLineHeightDoesNotReachIntoAnExplicitLength(t *testing.T) {
-	const html = `<html><head><style>
+	const html = `<!doctype html><html><head><style>
 html, body { margin: 0; padding: 0; }
 body { font: 16px sans-serif; }
 .fixed { line-height: 50px; }
@@ -77,7 +77,7 @@ body { font: 16px sans-serif; }
 
 // qc:BR-271
 func TestStrutUnderANormalLineHeightStillHoldsAnAtomicRow(t *testing.T) {
-	const html = `<html><head><style>
+	const html = `<!doctype html><html><head><style>
 html, body { margin: 0; padding: 0; }
 body { font: 16px sans-serif; }
 .norm { line-height: normal; }

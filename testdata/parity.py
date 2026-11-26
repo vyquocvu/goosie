@@ -188,7 +188,13 @@ PASS_AT = 90.0
 # against 84.494% FAIL on the pre-fix binary (coverage ratio 1.0766 vs 0.6090, worst band IoU 0.9360
 # vs 0.6341); the tree scores 122/122 at 96.615 average, the pre-fix binary 120/122 at 96.435 because
 # on that binary 121 has no fix to score either.
-MIN_SCORED_FIXTURES = 122
+# 123: layout-features/11-flex-replaced-percent-height.html (GOOSIE-SCROLLRANGE-001) - a flex card
+# puts a height:100% image and an SVG with width="65px" height="65px" inside the same media box. The
+# flex intrinsic probe passes 10000px as a containing width; before the fix that width became the
+# image's percentage height and the unsized-SVG fallback height, pushing replaced boxes far past the
+# card. The image must take its height from the 320px card and its width from the 160x240 ratio, and
+# the spinner must stay 65x65 even when the flex cross axis stretches.
+MIN_SCORED_FIXTURES = 123
 FIXTURES = Path("testdata/render")
 GOOSIE = Path("/tmp/goosie-renders")
 CHROMIUM = Path("/tmp/playwright-renders")

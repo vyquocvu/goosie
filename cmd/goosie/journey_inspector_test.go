@@ -49,7 +49,7 @@ func layerHasInspectOverlay(lyr *frame.Layer) bool {
 	if lyr == nil {
 		return false
 	}
-	dl, ok := lyr.Content.(*paint.LayerDL)
+	dl, ok := lyr.ContentSnapshot().(*paint.LayerDL)
 	if !ok {
 		return false
 	}
@@ -124,6 +124,7 @@ func TestInspectorSelectDefersRepaintAndPaintsOverlay(t *testing.T) {
 		t.Fatalf("after clear InspectHighlight() = %v, want nil", got)
 	}
 	f.drainInspectRepaints()
+	f.sched.BeginFrame(surface.Event{})
 	if layerHasInspectOverlay(tab.Layer()) {
 		t.Error("after clear the tab's layer still carries a highlight overlay")
 	}

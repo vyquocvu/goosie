@@ -32,6 +32,15 @@ func (f *framePath) devSize() frame.Size {
 	return f.config.devSize()
 }
 
+func (f *framePath) documentViewport() frame.Size {
+	if f.sched != nil {
+		if size := f.sched.Viewport().Size; !size.Empty() {
+			return size
+		}
+	}
+	return f.devSize()
+}
+
 func (f *framePath) setContentSize(w, h int) {
 	f.sizeMu.Lock()
 	f.config.width = w
@@ -41,6 +50,11 @@ func (f *framePath) setContentSize(w, h int) {
 
 func (f *framePath) handleResize(contentW, contentH int) {
 	f.setContentSize(contentW, contentH)
+	if f.sched != nil {
+		vp := f.sched.Viewport()
+		vp.Size = f.devSize()
+		f.sched.SetViewport(vp)
+	}
 
 	tab := f.tabMgr.Active()
 	if tab == nil || tab.Session() == nil {
@@ -48,24 +62,74 @@ func (f *framePath) handleResize(contentW, contentH int) {
 	}
 
 	reflowW := float32(contentW)
+	reflowH := float32(contentH)
+	canHover, finePointer := true, true
 	if f.emulationPreset != nil {
 		reflowW = float32(f.emulationPreset.Width)
+		reflowH = float32(f.emulationPreset.Height)
+		canHover = !f.emulationPreset.Mobile
+		finePointer = !f.emulationPreset.Mobile
 	}
 
+	tab.Session().SetViewportSize(reflowW, reflowH)
 	if err := tab.Session().Reflow(reflowW); err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: reflow:", err)
 		return
 	}
 	tab.Session().SetDevicePixelRatio(f.effectiveScale())
+	tab.Session().SetPointerCapabilities(canHover, finePointer)
+	tab.Session().FireResizeEvent()
 
 	f.repaintTab(tab, frame.Rect{})
+}
+
+func (f *framePath) syncViewportScroll(tab *tabs.Tab) bool {
+	f.scrollMu.Lock()
+	defer f.scrollMu.Unlock()
+	return f.syncViewportScrollLocked(tab)
+}
+
+func (f *framePath) syncViewportScrollLocked(tab *tabs.Tab) bool {
+	if f.sched == nil || tab == nil || tab.Session() == nil || f.tabMgr == nil {
+		return false
+	}
+	if f.tabMgr.Active() != tab {
+		return false
+	}
+	vp := f.sched.Viewport()
+	tabY := tab.ScrollY()
+	if tabY == vp.Offset.Y {
+		f.lastSyncedScrollY = vp.Offset.Y
+		return false
+	}
+	if f.sched.ScrollOffset().Y == tabY {
+		return false
+	}
+	if vp.Offset.Y == f.lastSyncedScrollY {
+		vp.Offset.Y = tabY
+		f.sched.SetViewport(vp)
+		tab.Session().SyncViewportScroll(float64(vp.Offset.X), float64(tabY))
+		f.lastSyncedScrollY = tabY
+		return true
+	}
+	tab.SetScrollY(vp.Offset.Y)
+	f.sched.SetViewport(vp)
+	tab.Session().SyncViewportScroll(float64(vp.Offset.X), float64(vp.Offset.Y))
+	f.lastSyncedScrollY = vp.Offset.Y
+	return true
 }
 
 func (f *framePath) pumpJS() bool {
 	if f.tabMgr == nil {
 		return f.pumpPaced()
 	}
+	f.scrollMu.Lock()
 	tab := f.tabMgr.Active()
+	var changed bool
+	if tab != nil {
+		changed = f.syncViewportScrollLocked(tab)
+	}
+	f.scrollMu.Unlock()
 	if tab == nil {
 		return false
 	}
@@ -74,12 +138,16 @@ func (f *framePath) pumpJS() bool {
 		return false
 	}
 	focusedBefore := sess.Focused()
-	changed := sess.PumpJS(float32(f.contentWidth()))
+	if f.windowContexts != nil {
+		changed = f.windowContexts.flushAll() || changed
+	}
+	changed = sess.PumpJS(float32(f.contentWidth())) || changed
 	if sess.Focused() != focusedBefore {
 		f.syncContentFocus(tab)
 		changed = true
 	}
 	changed = f.serviceFilePicker(tab) || changed
+	changed = f.drainSessionNavigation(tab) || changed
 	if !changed {
 		return false
 	}
@@ -122,27 +190,25 @@ func (f *framePath) pumpPaced() bool {
 }
 
 func (f *framePath) repaintPaced(sess *engine.Session) bool {
-	list, err := sess.PaintChecked(f.effectiveScale())
+	scale := f.effectiveScale()
+	list, err := sess.PaintChecked(scale)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: paint:", err)
 		return false
 	}
 	dl := list.Build(1)
-	extent := dl.Extent()
+	extent, err := sess.DocumentLayerBounds(dl.Extent(), scale, f.documentViewport())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: bounds:", err)
+		return false
+	}
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: budget:", err)
 		return false
 	}
-	layerBounds := extent.Canon()
-	if layerBounds.X0 < 0 {
-		layerBounds.X0 = 0
-	}
-	if layerBounds.Y0 < 0 {
-		layerBounds.Y0 = 0
-	}
 	bg := sess.BackgroundColor()
-	if lyr := f.layer; lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Budget() == budgetBytes {
+	if lyr := f.layer; lyr != nil && lyr.Bounds == extent && lyr.Grid.Budget() == budgetBytes {
 		f.sched.UpdateLayer(lyr, dl, frame.Rect{})
 		if bg != f.pacedBG {
 			f.pacedBG = bg
@@ -215,26 +281,34 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 	}
 
 	dl := list.Build(1)
-	extent := dl.Extent()
+	extent, err := tab.Session().DocumentLayerBounds(dl.Extent(), effectiveDPR, f.documentViewport())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "goosie: bounds:", err)
+		return
+	}
 	budgetTiles, budgetBytes, err := engine.TileCacheBudget(extent)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "goosie: budget:", err)
 		return
 	}
-	layerBounds := extent.Canon()
-	if layerBounds.X0 < 0 {
-		layerBounds.X0 = 0
-	}
-	if layerBounds.Y0 < 0 {
-		layerBounds.Y0 = 0
-	}
 
-	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == layerBounds && lyr.Grid.Budget() == budgetBytes {
+	bg := tab.Session().BackgroundColor()
+	previousBG := tab.BGColor()
+	tab.SetBGColor(bg)
+
+	if lyr := tab.Layer(); lyr != nil && lyr.Bounds == extent && lyr.Grid.Budget() == budgetBytes {
 		if f.tabMgr.Active() == tab {
 			f.sched.UpdateLayer(lyr, dl, dirty)
+			if bg != previousBG {
+				f.sched.SetPlan(frame.FramePlan{
+					Serial:     tab.Nav.Serial,
+					Layers:     []*frame.Layer{lyr},
+					Background: bg,
+				})
+			}
 		} else {
 			if dirty.Empty() {
-				dirty = paint.ContentDamage(lyr.Content, dl)
+				dirty = paint.ContentDamage(lyr.ContentSnapshot(), dl)
 			}
 			lyr.SetContent(dl)
 			lyr.InvalidateRect(dirty)
@@ -252,7 +326,7 @@ func (f *framePath) repaintTab(tab *tabs.Tab, dirty frame.Rect) {
 		f.sched.SetPlan(frame.FramePlan{
 			Serial:     tab.Nav.Serial,
 			Layers:     []*frame.Layer{layer},
-			Background: tab.BGColor(),
+			Background: bg,
 		})
 	}
 	f.publishAccessibility()

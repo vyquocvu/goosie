@@ -118,6 +118,16 @@ const (
 	TextDecorationLineThrough
 )
 
+type TextDecorationStyle uint8
+
+const (
+	TextDecorationStyleSolid TextDecorationStyle = iota
+	TextDecorationStyleDouble
+	TextDecorationStyleDotted
+	TextDecorationStyleDashed
+	TextDecorationStyleWavy
+)
+
 type BgRepeat uint8
 
 const (
@@ -343,26 +353,31 @@ type ComputedStyle struct {
 	BackgroundPosX, BackgroundPosY         float32
 	BgPosXPct, BgPosYPct                   bool
 
-	FontFamily      frame.FontFamily
-	CustomFamily    string
-	CustomFontIdx   uint16
-	FontSize        float32
-	rootFontSize    float32
-	FontWeight      FontWeight
-	FontStyle       FontStyle
-	LineHeight      float32
-	LineHeightRatio float32
-	LineHeightEm    float32
-	inheritedFont   fontGroup
-	Direction       string
-	UnicodeBidi     string
-	TextAlign       TextAlign
-	TextIndent      float32
-	TextTransform   string
-	TextDecoration  TextDecoration
-	WhiteSpace      WhiteSpace
-	WordSpacing     float32
-	LetterSpacing   float32
+	FontFamily          frame.FontFamily
+	CustomFamily        string
+	CustomFontIdx       uint16
+	FontSize            float32
+	rootFontSize        float32
+	FontWeight          FontWeight
+	FontStyle           FontStyle
+	LineHeight          float32
+	LineHeightRatio     float32
+	LineHeightEm        float32
+	firstLineSpecified  uint8
+	inheritedFont       fontGroup
+	inheritedMargin     marginGroup
+	inheritedPadding    paddingGroup
+	inheritedInset      insetGroup
+	Direction           string
+	UnicodeBidi         string
+	TextAlign           TextAlign
+	TextIndent          float32
+	TextTransform       string
+	TextDecoration      TextDecoration
+	TextDecorationStyle TextDecorationStyle
+	WhiteSpace          WhiteSpace
+	WordSpacing         float32
+	LetterSpacing       float32
 
 	VerticalAlign string
 
@@ -1351,7 +1366,9 @@ func (r *Resolver) ResolveViewport(doc *dom.Document, vp Viewport, fonts *Custom
 	for c := doc.Node.FirstChild; c != nil; c = c.NextSibling {
 		resolveNode(c, r.index, result, vp, fonts, six)
 	}
-	r.snapshotInteractiveState(doc, vp)
+	if r.incrementalInteractiveSafe {
+		r.snapshotInteractiveState(doc, vp)
+	}
 	return result
 }
 
@@ -1503,6 +1520,7 @@ func inheritStyle(parent *ComputedStyle) *ComputedStyle {
 	}
 	cs := *parent
 	cs.Display = DisplayInline
+	cs.firstLineSpecified = 0
 	return &cs
 }
 
@@ -1662,7 +1680,7 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 		inlineDecls = parseInlineDeclarations(inline)
 	}
 
-	hintDecls := presentationalHints(n)
+	hintDecls := presentationalHints(n, vp.W)
 
 	if cap := ruleDecls - ruleImportant + len(inlineDecls) + len(hintDecls); cap > 0 {
 		normal = make([]cascadeEntry, 0, cap)
@@ -1748,6 +1766,10 @@ func computeStyle(n *dom.Node, index *ruleIndex, parent *ComputedStyle, vp Viewp
 		case DisplayInlineGrid:
 			cs.Display = DisplayGrid
 		}
+	}
+
+	if parent != nil && parent.Display == DisplayInline && cs.Display == DisplayInline {
+		cs.firstLineSpecified |= parent.firstLineSpecified
 	}
 
 	if cs.LineHeightRatio > 0 {
@@ -2253,7 +2275,7 @@ func resolveCustomFont(cs *ComputedStyle, fonts *CustomFonts) {
 	cs.CustomFontIdx = fonts.index(cs.CustomFamily, cs.FontWeight >= WeightBold, cs.FontStyle != FontStyleNormal, cs.FontWeight > 0 && cs.FontWeight < WeightNormal)
 }
 
-func presentationalHints(n *dom.Node) []css.Declaration {
+func presentationalHints(n *dom.Node, viewportW float32) []css.Declaration {
 	var out []css.Declaration
 	add := func(prop, v string) {
 		if v == "" {
@@ -2269,17 +2291,21 @@ func presentationalHints(n *dom.Node) []css.Declaration {
 		if v == "" {
 			return
 		}
-		if !strings.HasSuffix(v, "%") {
-			f, err := strconv.ParseFloat(v, 32)
-			if err != nil || f < 0 {
-				return
-			}
-			v = strconv.FormatFloat(f, 'f', -1, 32) + "px"
-		}
 		parsed := css.ParseValue(v)
-		if parsed.Type != css.ValueLength && parsed.Type != css.ValuePercentage {
+		if parsed.Type == css.ValueLength && parsed.Unit == "px" && parsed.Num >= 0 {
+			out = append(out, css.Declaration{Property: prop, Value: v, Parsed: parsed})
 			return
 		}
+		if parsed.Type == css.ValuePercentage && parsed.Num >= 0 {
+			out = append(out, css.Declaration{Property: prop, Value: v, Parsed: parsed})
+			return
+		}
+		f, err := strconv.ParseFloat(v, 32)
+		if err != nil || f < 0 {
+			return
+		}
+		v = strconv.FormatFloat(f, 'f', -1, 32) + "px"
+		parsed = css.ParseValue(v)
 		out = append(out, css.Declaration{Property: prop, Value: v, Parsed: parsed})
 	}
 	add("background-color", n.GetAttribute("bgcolor"))
@@ -2291,8 +2317,18 @@ func presentationalHints(n *dom.Node) []css.Declaration {
 	if dir == "ltr" || dir == "rtl" {
 		out = append(out, css.Declaration{Property: "direction", Value: dir, Parsed: css.ParseValue(dir)})
 	}
-	addLen("width", n.GetAttribute("width"))
-	addLen("height", n.GetAttribute("height"))
+	widthAttr, heightAttr := n.GetAttribute("width"), n.GetAttribute("height")
+	if (n.Data == "img" || dom.IsImageInput(n)) && viewportW > 0 && n.Parent != nil && n.Parent.Data == "picture" {
+		selected := SelectedImageSource(n, viewportW)
+		if selected.W > 0 {
+			widthAttr = strconv.FormatFloat(float64(selected.W), 'f', -1, 32)
+		}
+		if selected.H > 0 {
+			heightAttr = strconv.FormatFloat(float64(selected.H), 'f', -1, 32)
+		}
+	}
+	addLen("width", widthAttr)
+	addLen("height", heightAttr)
 	addLen("border-spacing", n.GetAttribute("cellspacing"))
 	switch n.Data {
 	case "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "tbody", "thead", "tfoot":
@@ -2402,7 +2438,7 @@ func applyCascadeEntry(cs *ComputedStyle, e cascadeEntry, parentFontSize float32
 		}
 		parsed = css.ParseValue(value)
 	}
-	applyProperty(cs, e.decl.Property, value, parsed, parentFontSize, fonts)
+	applyPropertySpecified(cs, e.decl.Property, value, parsed, parentFontSize, fonts, e.origin > 0)
 }
 
 const maxVarSubstitutions = 4096
@@ -2535,6 +2571,9 @@ func clampOpacity(f float64) float32 {
 }
 
 func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
+	cs.inheritedMargin = readMarginGroup(parent)
+	cs.inheritedPadding = readPaddingGroup(parent)
+	cs.inheritedInset = readInsetGroup(parent)
 	cs.Color = parent.Color
 	cs.FontSize = parent.FontSize
 	cs.rootFontSize = parent.rootFontSize
@@ -2557,6 +2596,7 @@ func inheritFromParent(cs *ComputedStyle, parent *ComputedStyle) {
 	cs.TextIndent = parent.TextIndent
 	cs.TextTransform = parent.TextTransform
 	cs.TextDecoration = parent.TextDecoration
+	cs.TextDecorationStyle = parent.TextDecorationStyle
 	cs.TextShadow = parent.TextShadow
 	cs.VerticalAlign = parent.VerticalAlign
 	cs.ListStyleType = parent.ListStyleType
@@ -2689,7 +2729,84 @@ func applyBorderImageShorthand(cs *ComputedStyle, value string) {
 	cs.BorderImage = bi
 }
 
+func acceptedFirstLineFontSize(v css.Value) bool {
+	switch v.Type {
+	case css.ValueKeyword:
+		switch v.Str {
+		case "xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large", "smaller", "larger":
+			return true
+		}
+	case css.ValueLength, css.ValuePercentage, css.ValueFunc:
+		return v.Num >= 0
+	case css.ValueNumber:
+		return v.Num == 0
+	}
+	return false
+}
+
+func acceptedFirstLineFontWeight(v css.Value) bool {
+	if v.Type == css.ValueNumber {
+		return v.Num >= 1 && v.Num <= 1000
+	}
+	if v.Type != css.ValueKeyword {
+		return false
+	}
+	switch v.Str {
+	case "normal", "bold", "bolder", "lighter":
+		return true
+	}
+	return false
+}
+
+func acceptedFirstLineFontStyle(v css.Value) bool {
+	if v.Type != css.ValueKeyword {
+		return false
+	}
+	switch v.Str {
+	case "normal", "italic", "oblique":
+		return true
+	}
+	return false
+}
+
+func acceptedFirstLineLineHeight(v css.Value) bool {
+	switch v.Type {
+	case css.ValueLength, css.ValuePercentage, css.ValueNumber, css.ValueFunc:
+		return true
+	case css.ValueKeyword:
+		return v.Str == "normal"
+	}
+	return false
+}
+
+func acceptedFirstLineSpacing(v css.Value) bool {
+	switch v.Type {
+	case css.ValueLength, css.ValuePercentage, css.ValueFunc:
+		return true
+	case css.ValueNumber:
+		return v.Num == 0
+	case css.ValueKeyword:
+		return v.Str == "normal"
+	}
+	return false
+}
+
 func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, parentFontSize float32, fonts *CustomFonts) {
+	applyPropertySpecified(cs, prop, value, parsed, parentFontSize, fonts, false)
+}
+
+func applyPropertySpecified(cs *ComputedStyle, prop, value string, parsed css.Value, parentFontSize float32, fonts *CustomFonts, author bool) {
+	if bit := firstLineLonghandMask(prop); bit != 0 {
+		if kw, ok := cssWideKeywordValue(parsed); ok {
+			if kw == "initial" {
+				applyFirstLineInitial(cs, prop)
+				if author {
+					cs.firstLineSpecified |= bit
+				}
+			}
+			return
+		}
+	}
 	switch prop {
 	case "display":
 		applyDisplay(cs, value)
@@ -3060,6 +3177,17 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		}
 
 	case "margin":
+		if kw, ok := cssWideKeywordValue(parsed); ok {
+			if kw == "inherit" {
+				cs.writeMarginGroup(cs.inheritedMargin)
+			} else {
+				cs.writeMarginGroup(marginGroup{})
+			}
+			break
+		}
+		if hasMixedCSSWideKeyword(parsed) {
+			break
+		}
 		t, r, b, l, lAuto, rAuto := parseMarginShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop = t
 		cs.MarginRight = r
@@ -3068,17 +3196,28 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.MarginLeftAuto = lAuto
 		cs.MarginRightAuto = rAuto
 	case "margin-top":
-		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.MarginTop = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-right":
 		cs.MarginRightAuto = valueIsAuto(parsed)
 		cs.MarginRight = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-bottom":
-		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.MarginBottom = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-left":
 		cs.MarginLeftAuto = valueIsAuto(parsed)
 		cs.MarginLeft = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 
 	case "padding":
+		if kw, ok := cssWideKeywordValue(parsed); ok {
+			if kw == "inherit" {
+				cs.writePaddingGroup(cs.inheritedPadding)
+			} else {
+				cs.writePaddingGroup(paddingGroup{})
+			}
+			break
+		}
+		if hasMixedCSSWideKeyword(parsed) {
+			break
+		}
 		t, r, b, l := parsePaddingShorthand(value, cs.FontSize, cs.rootFontSize)
 		cs.PaddingTop = t
 		cs.PaddingRight = r
@@ -3094,7 +3233,7 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		cs.PaddingLeft = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 
 	case "margin-block":
-		a, b := logicalPair(value, 0, cs.FontSize, cs.rootFontSize)
+		a, b := logicalPair(value, MarginAuto, cs.FontSize, cs.rootFontSize)
 		cs.MarginTop, cs.MarginBottom = a, b
 	case "margin-inline":
 		a, b := logicalPair(value, MarginAuto, cs.FontSize, cs.rootFontSize)
@@ -3106,9 +3245,9 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.MarginLeftAuto, cs.MarginRightAuto = strIsAuto(parts[0]), strIsAuto(parts[1])
 		}
 	case "margin-block-start":
-		cs.MarginTop = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.MarginTop = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-block-end":
-		cs.MarginBottom = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		cs.MarginBottom = resolveLengthEm(parsed, MarginAuto, cs.FontSize, cs.rootFontSize)
 	case "margin-inline-start":
 		if cs.Direction == "rtl" {
 			cs.MarginRightAuto = valueIsAuto(parsed)
@@ -3423,6 +3562,17 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.HasLeft = lengthSpecified(parsed)
 		}
 	case "inset":
+		if kw, ok := cssWideKeywordValue(parsed); ok {
+			if kw == "inherit" {
+				cs.writeInsetGroup(cs.inheritedInset)
+			} else {
+				cs.writeInsetGroup(insetGroup{})
+			}
+			break
+		}
+		if hasMixedCSSWideKeyword(parsed) {
+			break
+		}
 		parts := splitTopLevelSpace(value)
 		switch len(parts) {
 		case 1:
@@ -3555,22 +3705,40 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 
 	case "font-family":
 		cs.FontFamily, cs.CustomFamily = parseFontFamily(value, fonts)
+		if author && strings.TrimSpace(value) != "" && !hasMixedCSSWideKeyword(parsed) {
+			cs.firstLineSpecified |= firstLineFontFamily
+		}
 	case "font-size":
 		cs.FontSize = clampFontSize(resolveFontSize(parsed, parentFontSize, cs.rootFontSize))
+		if author && acceptedFirstLineFontSize(parsed) {
+			cs.firstLineSpecified |= firstLineFontSize
+		}
 	case "font-weight":
 		if parsed.Type == css.ValueNumber {
 			cs.FontWeight = FontWeight(parsed.Num)
 		} else {
 			cs.FontWeight = parseFontWeight(value)
 		}
+		if author && acceptedFirstLineFontWeight(parsed) {
+			cs.firstLineSpecified |= firstLineFontWeight
+		}
 	case "font-style":
 		cs.FontStyle = parseFontStyle(value)
+		if author && acceptedFirstLineFontStyle(parsed) {
+			cs.firstLineSpecified |= firstLineFontStyle
+		}
 	case "font":
-		parseFontShorthand(cs, value, parentFontSize, cs.rootFontSize, fonts)
+		mask, ok := parseFontShorthand(cs, value, parentFontSize, cs.rootFontSize, fonts)
+		if ok && author {
+			cs.firstLineSpecified |= mask
+		}
 	case "line-height":
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
 		cs.LineHeightRatio = lineHeightRatio(parsed)
 		cs.LineHeightEm = lineHeightEm(parsed)
+		if author && acceptedFirstLineLineHeight(parsed) {
+			cs.firstLineSpecified |= firstLineLineHeight
+		}
 	case "direction":
 		v := strings.ToLower(strings.TrimSpace(value))
 		if v == "rtl" || v == "ltr" {
@@ -3589,13 +3757,21 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 	case "text-transform":
 		cs.TextTransform = strings.ToLower(strings.TrimSpace(value))
 	case "text-decoration":
-		cs.TextDecoration = parseTextDecoration(value)
-		cs.TextDecorationColor = css.Color{}
-		cs.TextDecorationThickness = 0
-		for _, part := range splitTopLevelSpace(value) {
-			if c, ok := css.ParseColorWithScheme(part, cs.scheme()); ok {
-				cs.TextDecorationColor = c
-			}
+		line, decoStyle, colour, thickness, ok := parseTextDecoration(value, cs.scheme(), cs.FontSize, cs.rootFontSize)
+		if !ok {
+			break
+		}
+		cs.TextDecoration = line
+		cs.TextDecorationStyle = decoStyle
+		cs.TextDecorationColor = colour
+		cs.TextDecorationThickness = thickness
+	case "text-decoration-line":
+		if line, ok := parseTextDecorationLine(value); ok {
+			cs.TextDecoration = line
+		}
+	case "text-decoration-style":
+		if decoStyle, ok := parseTextDecorationStyle(value); ok {
+			cs.TextDecorationStyle = decoStyle
 		}
 	case "text-decoration-color":
 		v := strings.TrimSpace(strings.ToLower(value))
@@ -3611,11 +3787,8 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 			cs.TextUnderlineOffset = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
 	case "text-decoration-thickness":
-		vLower := strings.TrimSpace(strings.ToLower(value))
-		if vLower == "auto" || vLower == "from-font" {
-			cs.TextDecorationThickness = 0
-		} else {
-			cs.TextDecorationThickness = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		if thickness, ok := parseTextDecorationThickness(value, parsed, cs.FontSize, cs.rootFontSize); ok {
+			cs.TextDecorationThickness = thickness
 		}
 	case "white-space":
 		cs.WhiteSpace = parseWhiteSpace(value)
@@ -3625,11 +3798,17 @@ func applyProperty(cs *ComputedStyle, prop, value string, parsed css.Value, pare
 		} else {
 			cs.WordSpacing = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
 		}
+		if author && acceptedFirstLineSpacing(parsed) {
+			cs.firstLineSpecified |= firstLineWordSpacing
+		}
 	case "letter-spacing":
 		if strings.TrimSpace(strings.ToLower(value)) == "normal" {
 			cs.LetterSpacing = 0
 		} else {
 			cs.LetterSpacing = resolveLengthEm(parsed, 0, cs.FontSize, cs.rootFontSize)
+		}
+		if author && acceptedFirstLineSpacing(parsed) {
+			cs.firstLineSpecified |= firstLineLetterSpacing
 		}
 
 	case "pointer-events":
@@ -3999,6 +4178,47 @@ func parseQuotes(value string) []string {
 }
 
 const MarginAuto float32 = -1
+
+type marginGroup struct {
+	Top, Right, Bottom, Left float32
+	LeftAuto, RightAuto      bool
+}
+
+type paddingGroup struct {
+	Top, Right, Bottom, Left float32
+}
+
+type insetGroup struct {
+	Top, Right, Bottom, Left float32
+	HasTop, HasRight         bool
+	HasBottom, HasLeft       bool
+}
+
+func readMarginGroup(cs *ComputedStyle) marginGroup {
+	return marginGroup{cs.MarginTop, cs.MarginRight, cs.MarginBottom, cs.MarginLeft, cs.MarginLeftAuto, cs.MarginRightAuto}
+}
+
+func (cs *ComputedStyle) writeMarginGroup(g marginGroup) {
+	cs.MarginTop, cs.MarginRight, cs.MarginBottom, cs.MarginLeft = g.Top, g.Right, g.Bottom, g.Left
+	cs.MarginLeftAuto, cs.MarginRightAuto = g.LeftAuto, g.RightAuto
+}
+
+func readPaddingGroup(cs *ComputedStyle) paddingGroup {
+	return paddingGroup{cs.PaddingTop, cs.PaddingRight, cs.PaddingBottom, cs.PaddingLeft}
+}
+
+func (cs *ComputedStyle) writePaddingGroup(g paddingGroup) {
+	cs.PaddingTop, cs.PaddingRight, cs.PaddingBottom, cs.PaddingLeft = g.Top, g.Right, g.Bottom, g.Left
+}
+
+func readInsetGroup(cs *ComputedStyle) insetGroup {
+	return insetGroup{cs.Top, cs.Right, cs.Bottom, cs.Left, cs.HasTop, cs.HasRight, cs.HasBottom, cs.HasLeft}
+}
+
+func (cs *ComputedStyle) writeInsetGroup(g insetGroup) {
+	cs.Top, cs.Right, cs.Bottom, cs.Left = g.Top, g.Right, g.Bottom, g.Left
+	cs.HasTop, cs.HasRight, cs.HasBottom, cs.HasLeft = g.HasTop, g.HasRight, g.HasBottom, g.HasLeft
+}
 
 func valueIsAuto(v css.Value) bool {
 	return v.Type == css.ValueKeyword && (v.Str == "auto" || v.Str == "")
@@ -4490,21 +4710,149 @@ func normalizeFontName(v string) string {
 	return v
 }
 
-func parseTextDecoration(v string) TextDecoration {
-	var td TextDecoration
-	for _, part := range strings.Fields(v) {
+func parseTextDecorationLine(v string) (TextDecoration, bool) {
+	parts := strings.Fields(strings.ToLower(v))
+	if len(parts) == 0 {
+		return TextDecorationNone, false
+	}
+	if len(parts) == 1 && parts[0] == "none" {
+		return TextDecorationNone, true
+	}
+	var line TextDecoration
+	for _, part := range parts {
+		var bit TextDecoration
 		switch part {
 		case "underline":
-			td |= TextDecorationUnderline
+			bit = TextDecorationUnderline
 		case "overline":
-			td |= TextDecorationOverline
+			bit = TextDecorationOverline
 		case "line-through":
-			td |= TextDecorationLineThrough
-		case "none":
-			return TextDecorationNone
+			bit = TextDecorationLineThrough
+		default:
+			return TextDecorationNone, false
 		}
+		if line&bit != 0 {
+			return TextDecorationNone, false
+		}
+		line |= bit
 	}
-	return td
+	return line, true
+}
+
+func parseTextDecorationStyle(v string) (TextDecorationStyle, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "solid":
+		return TextDecorationStyleSolid, true
+	case "double":
+		return TextDecorationStyleDouble, true
+	case "dotted":
+		return TextDecorationStyleDotted, true
+	case "dashed":
+		return TextDecorationStyleDashed, true
+	case "wavy":
+		return TextDecorationStyleWavy, true
+	default:
+		return TextDecorationStyleSolid, false
+	}
+}
+
+func parseTextDecorationThickness(v string, parsed css.Value, fontSize, rootFontSize float32) (float32, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "auto", "from-font":
+		return 0, true
+	}
+	if !lengthSpecified(parsed) && parsed.Type != css.ValueFunc {
+		return 0, false
+	}
+	thickness := resolveLengthEm(parsed, 0, fontSize, rootFontSize)
+	if thickness < 0 || math.IsNaN(float64(thickness)) || math.IsInf(float64(thickness), 0) {
+		return 0, false
+	}
+	return thickness, true
+}
+
+func parseTextDecoration(v, scheme string, fontSize, rootFontSize float32) (TextDecoration, TextDecorationStyle, css.Color, float32, bool) {
+	parts := splitTopLevelSpace(v)
+	if len(parts) == 0 {
+		return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+	}
+	line := TextDecorationNone
+	decoStyle := TextDecorationStyleSolid
+	colour := css.Color{}
+	thickness := float32(0)
+	seenStyle, seenColour, seenThickness := false, false, false
+	components := 0
+	for _, part := range parts {
+		lower := strings.ToLower(part)
+		if lower == "none" {
+			if len(parts) != 1 {
+				return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+			}
+			line = TextDecorationNone
+			components++
+			continue
+		}
+		if bit, ok := textDecorationLineBit(lower); ok {
+			if line&bit != 0 {
+				return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+			}
+			line |= bit
+			components++
+			continue
+		}
+		if candidate, ok := parseTextDecorationStyle(part); ok {
+			if seenStyle {
+				return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+			}
+			decoStyle = candidate
+			seenStyle = true
+			components++
+			continue
+		}
+		if lower == "auto" {
+			if seenColour {
+				return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+			}
+			colour = css.Color{}
+			seenColour = true
+			components++
+			continue
+		}
+		if c, ok := css.ParseColorWithScheme(part, scheme); ok {
+			if seenColour {
+				return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+			}
+			colour = c
+			seenColour = true
+			components++
+			continue
+		}
+		parsed := css.ParseValue(part)
+		if candidate, ok := parseTextDecorationThickness(part, parsed, fontSize, rootFontSize); ok {
+			if seenThickness {
+				return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+			}
+			thickness = candidate
+			seenThickness = true
+			components++
+			continue
+		}
+		return TextDecorationNone, TextDecorationStyleSolid, css.Color{}, 0, false
+	}
+	return line, decoStyle, colour, thickness, components > 0
+}
+
+func textDecorationLineBit(v string) (TextDecoration, bool) {
+	switch v {
+	case "underline":
+		return TextDecorationUnderline, true
+	case "overline":
+		return TextDecorationOverline, true
+	case "line-through":
+		return TextDecorationLineThrough, true
+	default:
+		return TextDecorationNone, false
+	}
 }
 
 func parseListStyleType(v string) ListStyleType {
@@ -5299,6 +5647,30 @@ func fontGroupInitial() fontGroup {
 	return readFontGroup(&d)
 }
 
+func cssWideKeywordValue(v css.Value) (string, bool) {
+	switch v.Type {
+	case css.ValueInherit:
+		return "inherit", true
+	case css.ValueInitial:
+		return "initial", true
+	case css.ValueUnset:
+		return "unset", true
+	}
+	return "", false
+}
+
+func hasMixedCSSWideKeyword(v css.Value) bool {
+	if v.Type != css.ValueList {
+		return false
+	}
+	for _, part := range v.Parts {
+		if _, ok := cssWideKeywordValue(part); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func isBareCSSWideKeyword(tok string) bool {
 	switch strings.ToLower(tok) {
 	case "inherit", "initial", "unset":
@@ -5323,15 +5695,15 @@ func cssWideKeywordAheadOfTheSize(parts []string, sizeIdx int) bool {
 	return false
 }
 
-func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSize float32, fonts *CustomFonts) {
+func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSize float32, fonts *CustomFonts) (uint8, bool) {
 	parts := strings.Fields(v)
 	if kw, wide := cssWideKeyword(parts); wide {
 		if kw == "initial" {
 			cs.writeFontGroup(fontGroupInitial())
-		} else {
-			cs.writeFontGroup(cs.inheritedFont)
+			return firstLineFontShorthandMask, true
 		}
-		return
+		cs.writeFontGroup(cs.inheritedFont)
+		return 0, true
 	}
 	sizeIdx := -1
 	for i, p := range parts {
@@ -5341,7 +5713,7 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSiz
 		}
 	}
 	if sizeIdx < 0 || cssWideKeywordAheadOfTheSize(parts, sizeIdx) {
-		return
+		return 0, false
 	}
 	for _, p := range parts[:sizeIdx] {
 		switch strings.ToLower(p) {
@@ -5359,11 +5731,18 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSiz
 	}
 	sizeTok, line := parts[sizeIdx], ""
 	if j := strings.Index(sizeTok, "/"); j >= 0 {
-		sizeTok, line = sizeTok[:j], sizeTok[j+1:]
+		sizeTok, line = sizeTok[:j], line+sizeTok[j+1:]
 	}
-	cs.FontSize = clampFontSize(resolveFontSize(css.ParseValue(sizeTok), parentFontSize, rootFontSize))
+	sizeValue := css.ParseValue(sizeTok)
+	if !acceptedFirstLineFontSize(sizeValue) {
+		return 0, false
+	}
+	cs.FontSize = clampFontSize(resolveFontSize(sizeValue, parentFontSize, rootFontSize))
 	if line != "" {
 		parsed := css.ParseValue(line)
+		if !acceptedFirstLineLineHeight(parsed) {
+			return 0, false
+		}
 		cs.LineHeight = resolveLineHeight(parsed, cs.FontSize)
 		cs.LineHeightRatio = lineHeightRatio(parsed)
 		cs.LineHeightEm = lineHeightEm(parsed)
@@ -5373,6 +5752,7 @@ func parseFontShorthand(cs *ComputedStyle, v string, parentFontSize, rootFontSiz
 	if fam := strings.TrimSpace(strings.Join(parts[sizeIdx+1:], " ")); fam != "" {
 		cs.FontFamily, cs.CustomFamily = parseFontFamily(fam, fonts)
 	}
+	return firstLineFontShorthandMask, true
 }
 
 func isFontShorthandSize(tok string) bool {

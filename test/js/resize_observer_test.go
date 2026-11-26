@@ -40,6 +40,7 @@ func resizeObserverRuntime(t *testing.T) (*js.Runtime, *dom.Node) {
 
 func resizeDeliveries(t *testing.T, r *js.Runtime) string {
 	t.Helper()
+	r.Tick()
 	got, err := r.Evaluate(`JSON.stringify(globalThis.deliveries)`)
 	if err != nil {
 		t.Fatalf("read deliveries: %v", err)
@@ -105,6 +106,60 @@ func TestResizeObserverUnobserveAndDisconnectStopDelivery(t *testing.T) {
 	r.DrainResizeObservers()
 	if got, want := resizeDeliveries(t, r), `["120x40","200x60"]`; got != want {
 		t.Fatalf("disconnected observer was delivered: %s, want %s", got, want)
+	}
+}
+
+func TestResizeObserverReportsContentAndBorderBoxesSeparately(t *testing.T) {
+	doc := observerTestDocument()
+	target := doc.NewElement("div")
+	doc.Body.AppendChild(target)
+	r, err := js.New(js.Options{URL: "https://example.test/resize", DOM: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.Close() })
+	info := js.LayoutBoxInfo{
+		Width: 100, Height: 50,
+		BorderTop: 10, BorderRight: 10, BorderBottom: 10, BorderLeft: 10,
+		PaddingTop: 5, PaddingRight: 5, PaddingBottom: 5, PaddingLeft: 5,
+	}
+	r.SetLayoutGeometryProvider(func(node *dom.Node) (js.LayoutBoxInfo, bool) {
+		if node == target {
+			return info, true
+		}
+		return js.LayoutBoxInfo{}, false
+	})
+	if err := r.Run(`
+		globalThis.resizeShapes = [];
+		new ResizeObserver(function(entries) {
+			for (var i = 0; i < entries.length; i++) {
+				var entry = entries[i];
+				var border = entry.borderBoxSize[0];
+				var content = entry.contentBoxSize[0];
+				resizeShapes.push(JSON.stringify({
+					contentRect: [entry.contentRect.x, entry.contentRect.y, entry.contentRect.width, entry.contentRect.height],
+					borderBoxSize: [Array.isArray(entry.borderBoxSize), entry.borderBoxSize.length, border.inlineSize, border.blockSize, border.width === undefined],
+					contentBoxSize: [Array.isArray(entry.contentBoxSize), entry.contentBoxSize.length, content.inlineSize, content.blockSize, content.width === undefined],
+					deprecated: [typeof entry.inlineSize, typeof entry.blockSize]
+				}));
+			}
+		}).observe(document.querySelector('div'));
+	`, "resize-shapes.js"); err != nil {
+		t.Fatal(err)
+	}
+	r.DrainResizeObservers()
+	r.Tick()
+	info.Width, info.Height = 140, 70
+	r.DrainResizeObservers()
+	r.Tick()
+	got, err := r.Evaluate(`resizeShapes.join('|')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"contentRect":[5,5,70,20],"borderBoxSize":[true,1,100,50,true],"contentBoxSize":[true,1,70,20,true],"deprecated":["undefined","undefined"]}|` +
+		`{"contentRect":[5,5,110,40],"borderBoxSize":[true,1,140,70,true],"contentBoxSize":[true,1,110,40,true],"deprecated":["undefined","undefined"]}`
+	if got != want {
+		t.Fatalf("ResizeObserver box shapes = %q, want %q", got, want)
 	}
 }
 

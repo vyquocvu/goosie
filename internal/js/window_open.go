@@ -28,7 +28,7 @@ func (r *Runtime) openWindowCall(call goja.FunctionCall) goja.Value {
 	}
 	name := ""
 	if len(call.Arguments) > 1 && !goja.IsUndefined(call.Argument(1)) {
-		name = call.Argument(1).String()
+		name = clampWindowName(call.Argument(1).String())
 	}
 	features := ""
 	if len(call.Arguments) > 2 && !goja.IsUndefined(call.Argument(2)) {
@@ -40,7 +40,10 @@ func (r *Runtime) openWindowCall(call goja.FunctionCall) goja.Value {
 	}
 	noOpener := windowFeatureEnabled(features, "noopener") || windowFeatureEnabled(features, "noreferrer")
 	if noOpener {
-		name = ""
+		hostPath := r.navigationSinkAvailable() && r.iframeParent == nil && r.iframeParentFrame == nil
+		if !hostPath {
+			name = ""
+		}
 		opened := r.openBrowsingContext(url, name, goja.Null())
 		if goja.IsNull(opened) || goja.IsUndefined(opened) {
 			return opened
@@ -72,6 +75,13 @@ func (r *Runtime) openExistingBrowsingContext(target, url string) goja.Value {
 	}
 	if url != "about:blank" && frame != nil {
 		owner.navigateIFrameLocation(frame, url)
+	} else if url != "about:blank" && frame == nil && owner == r {
+		if resolved, base := r.locationState(); base != nil {
+			if target, ok := resolveLocationURL(base, url); ok && target != resolved {
+				r.setLocation(target)
+				r.enqueueNavigation(NavigationRequest{Kind: NavigationAssign, URL: target})
+			}
+		}
 	}
 	return r.windowProxyForContext(owner, frame)
 }
@@ -113,15 +123,17 @@ func (r *Runtime) windowProxyForContext(owner *Runtime, frame *dom.Node) goja.Va
 }
 
 func windowFeatureEnabled(features, name string) bool {
-	for _, token := range strings.Split(features, ",") {
-		parts := strings.SplitN(strings.TrimSpace(token), "=", 2)
-		if !strings.EqualFold(strings.TrimSpace(parts[0]), name) {
+	tokens := strings.FieldsFunc(features, func(r rune) bool {
+		return r == ',' || r == '=' || r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+	})
+	for i, token := range tokens {
+		if !strings.EqualFold(token, name) {
 			continue
 		}
-		if len(parts) == 1 {
+		if i+1 >= len(tokens) {
 			return true
 		}
-		switch strings.ToLower(strings.TrimSpace(parts[1])) {
+		switch strings.ToLower(tokens[i+1]) {
 		case "0", "no", "false", "off":
 			return false
 		default:
@@ -137,6 +149,21 @@ func (r *Runtime) openBrowsingContext(url, name string, opener goja.Value) goja.
 	}
 	if strings.EqualFold(name, "_blank") {
 		name = ""
+	}
+	if r.navigationSinkAvailable() && r.iframeParent == nil && r.iframeParentFrame == nil {
+		handle, ok := r.allocateWindowHandle()
+		if !ok {
+			return goja.Null()
+		}
+		noOpener := opener == nil || goja.IsNull(opener) || goja.IsUndefined(opener)
+		r.enqueueNavigation(NavigationRequest{
+			Kind:         NavigationOpenWindow,
+			URL:          url,
+			Target:       name,
+			NoOpener:     noOpener,
+			TargetHandle: handle,
+		})
+		return r.newHostWindowProxy(handle, name, opener)
 	}
 	frameValue := r.jsCreateElementInDocument(goja.FunctionCall{
 		Arguments: []goja.Value{r.vm.ToValue("iframe")},
@@ -240,6 +267,10 @@ func (r *Runtime) closeIFrameContext(frame *dom.Node) {
 }
 
 func (r *Runtime) recordIFrameHistory(frame *dom.Node, target string) {
+	r.recordIFrameHistoryMode(frame, target, false)
+}
+
+func (r *Runtime) recordIFrameHistoryMode(frame *dom.Node, target string, replace bool) {
 	if r.iframeHistoryEntries == nil {
 		r.iframeHistoryEntries = make(map[*dom.Node][]string)
 		r.iframeHistoryIndex = make(map[*dom.Node]int)
@@ -251,11 +282,23 @@ func (r *Runtime) recordIFrameHistory(frame *dom.Node, target string) {
 		return
 	}
 	index := r.iframeHistoryIndex[frame]
-	if index >= 0 && index < len(entries) && entries[index] == target {
-		return
-	}
 	if index < 0 || index >= len(entries) {
 		index = len(entries) - 1
+	}
+	if replace {
+		entries = append(entries[:index+1], target)
+		entries[index] = target
+		r.iframeHistoryEntries[frame] = entries
+		r.iframeHistoryIndex[frame] = index
+		for cachedIndex := range r.iframeHistoryDocs[frame] {
+			if cachedIndex >= index {
+				delete(r.iframeHistoryDocs[frame], cachedIndex)
+			}
+		}
+		return
+	}
+	if entries[index] == target {
+		return
 	}
 	entries = append(entries[:index+1], target)
 	r.iframeHistoryEntries[frame] = entries

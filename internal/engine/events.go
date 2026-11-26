@@ -22,8 +22,46 @@ func (s *Session) FireScrollEvent() {
 	dom.DispatchEvent(&s.Doc.Node, ev)
 }
 
+func (s *Session) SetViewportSize(width, height float32) {
+	if s == nil {
+		return
+	}
+	s.opMu.Lock()
+	if finite(float64(width)) && width > 0 && width <= MaxGeometry {
+		s.viewportW = width
+	}
+	if finite(float64(height)) && height > 0 && height <= MaxGeometry {
+		s.viewportH = height
+	}
+	rt := s.jsRT
+	viewportW, viewportH := s.viewportW, s.viewportH
+	s.opMu.Unlock()
+	if rt != nil {
+		rt.SetViewportRect(0, 0, viewportW, viewportH)
+	}
+}
+
+func (s *Session) SetPointerCapabilities(canHover, finePointer bool) {
+	if s == nil {
+		return
+	}
+	s.opMu.Lock()
+	rt := s.jsRT
+	s.opMu.Unlock()
+	if rt != nil {
+		rt.SetPointerCapabilities(canHover, finePointer)
+	}
+}
+
 func (s *Session) FireResizeEvent() {
-	if s.Doc == nil {
+	if s == nil || s.Doc == nil {
+		return
+	}
+	s.opMu.Lock()
+	rt := s.jsRT
+	s.opMu.Unlock()
+	if rt != nil {
+		rt.DispatchWindowResize()
 		return
 	}
 	ev := dom.NewTrustedEvent("resize", false, false)
